@@ -9,7 +9,7 @@ import { isRustAwaitExpr, type IrAwaitExpr } from "./model.js";
 import { rustAsyncExpressionOperands } from "./async-values.js";
 import { emitAsyncIf } from "./async-if.js";
 import { emitAsyncProtectedForOf } from "./async-protected-for-of.js";
-import { emitAsyncProtectedIf, emitAsyncProtectedWhile } from "./async-protected-loop.js";
+import { emitAsyncProtectedIf, emitAsyncProtectedWhile } from "./async-protected-loop.js"; import { emitAsyncProtectedTry } from "./async-protected-try.js";
 
 export interface RustAsyncHandlers {
   readonly fallthrough: () => void;
@@ -638,6 +638,13 @@ export class RustAsyncControlEmitter {
           terminal = "await";
           break;
         }
+        if (current.kind === "tryCatch" && this.containsAsyncSuspension(current)) {
+          emitAsyncProtectedTry(this.context, (...args) => this.emitAsyncProtectedSequence(...args),
+            (locals, emit) => this.withAsyncLocals(locals, emit), current, statements.slice(index + 1), exitLocals, handlers, loc);
+          this.context.line("return runtime::AsyncCompletion::Suspended;");
+          terminal = "await";
+          break;
+        }
         if (current.kind === "if" && this.containsAsyncSuspension(current)) {
           if (this.containsAsyncSuspension(current.cond)) {
             this.context.unsupported("async suspension in a protected if condition", current.loc);
@@ -729,7 +736,7 @@ export class RustAsyncControlEmitter {
         if (nested !== null && ((nested.kind === "unionWrap" || nested.kind === "bin" ||
           nested.kind === "toString" || nested.kind === "strConcat" ||
           nested.kind === "arrayGet" || nested.kind === "bytesNew" ||
-          nested.kind === "mapIntrinsic" || nested.kind === "recordClone") ||
+          nested.kind === "arrIntrinsic" || nested.kind === "mapIntrinsic" || nested.kind === "recordClone") ||
           rustAsyncExpressionOperands(nested) !== null) &&
           this.containsAsyncSuspension(nested)) {
           this.emitAsyncProtectedValue(nested, exitLocals, handlers, (value) => {
@@ -894,6 +901,11 @@ export class RustAsyncControlEmitter {
       this.emitAsyncProtectedContinuation(this.emitAwaitDependency(awaited), exitLocals, handlers, consume);
       return;
     }
+    if (expr.kind === "libCall" && expr.fn === "async.hop") {
+      // A resolved-promise hop (a sync disposer under `await using`): one microtask turn, then the unit value.
+      this.emitAsyncProtectedContinuation("runtime::promise_resolved(())", exitLocals, handlers, (value) => consume(`{ let _ = ${value}; }`));
+      return;
+    }
     if (expr.kind === "dynFrom" && expr.value.kind === "arrayLit" && this.containsAsyncSuspension(expr.value)) {
       emitAsyncNativeArrayLiteral(expr.value, this.context,
         (value, next) => this.emitAsyncProtectedValue(value, exitLocals, handlers, next), consume);
@@ -963,6 +975,15 @@ export class RustAsyncControlEmitter {
         handlers,
         (source) => consume(this.context.emitBytesNewValue(expr, source)),
       );
+      return;
+    }
+    if (expr.kind === "arrIntrinsic") {
+      // `trail.push(await tick())` inside a protected segment: receiver first, then each argument, JS order.
+      this.emitAsyncProtectedValue(expr.receiver, exitLocals, handlers, (receiver) => {
+        this.context.emitAsyncProtectedValues(expr.args, exitLocals, handlers, (args) => {
+          consume(this.context.emitArrayIntrinsicValues(expr, receiver, args));
+        });
+      });
       return;
     }
     if (expr.kind === "mapIntrinsic") {
