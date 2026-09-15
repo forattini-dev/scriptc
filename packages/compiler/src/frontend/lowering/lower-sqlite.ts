@@ -9,6 +9,7 @@ import { locOf } from "../program.js";
 import { DYN, SQLITE_DB_T, SQLITE_STMT_T, STRING, UNDEFINED_T, VOID, type IrExpr, type IrLibFn, type IrType, type SrcLoc } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 import { packDynamicRest } from "./dynamic-rest.js";
+import { isDeclaredInAmbientModule } from "../ambient-declarations.js";
 
 /** A spread source under its type-only wrappers: `...(params as any)` spreads `params`. */
 function unwrapTypeOnly(expr: ts.Expression): ts.Expression {
@@ -19,19 +20,11 @@ function unwrapTypeOnly(expr: ts.Expression): ts.Expression {
   return current;
 }
 
-/** True for a class declared inside `declare module "bun:sqlite"` (bun-types or a local shim). */
-function declaredInBunSqlite(node: ts.Node): boolean {
-  for (let parent: ts.Node | undefined = node.parent; parent !== undefined; parent = parent.parent) {
-    if (ts.isModuleDeclaration(parent) && ts.isStringLiteral(parent.name)) return parent.name.text === "bun:sqlite";
-  }
-  return false;
-}
-
 function isBunSqliteClass(lowerer: Lowerer, symbol: ts.Symbol | null | undefined, name: string): boolean {
   if (!symbol) return false;
   let target = symbol;
   if ((target.flags & ts.SymbolFlags.Alias) !== 0) target = lowerer.checker.getAliasedSymbol(target);
-  return target.name === name && lowerer.checker.declarationsOf(target).some((d) => ts.isClassDeclaration(d) && declaredInBunSqlite(d));
+  return target.name === name && lowerer.checker.declarationsOf(target).some((d) => ts.isClassDeclaration(d) && isDeclaredInAmbientModule(d, "bun:sqlite"));
 }
 
 function asDyn(lowerer: Lowerer, value: IrExpr, node: ts.Node, what: string): IrExpr {

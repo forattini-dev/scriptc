@@ -4,8 +4,7 @@
  * program functions whose module cannot reach the cycle's cluster. */
 import * as ts from "./ts7/adapter.js";
 import type { CycleEdge } from "./program.js";
-
-const KERNEL_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]/;
+import { isKernelTypeFile } from "./kernel.js";
 
 function aliased(checker: ts.TypeChecker, sym: ts.Symbol | undefined): ts.Symbol | undefined {
   return sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(sym) : sym;
@@ -53,7 +52,7 @@ export function isDtsMemberCall(checker: ts.TypeChecker, callee: ts.Expression, 
  * nothing runs until a fiber does — so function-literal arguments are admissible. `run*`/`unsafe*` members run. */
 export function kernelCallHoldsCallbacks(checker: ts.TypeChecker, callee: ts.Expression): boolean {
   const root = chainRootIdent(callee);
-  if (root === null || !allDeclarations(checker, checker.getSymbolAtLocation(root), (sf) => KERNEL_DIST.test(sf.fileName))) return false;
+  if (root === null || !allDeclarations(checker, checker.getSymbolAtLocation(root), (sf) => isKernelTypeFile(sf.fileName))) return false;
   for (let c: ts.Expression = callee; !ts.isIdentifier(c); ) {
     if (ts.isPropertyAccessExpression(c)) { if (/^(run|unsafe)/.test(c.name.text)) return false; c = c.expression; }
     else if (ts.isCallExpression(c) || ts.isNonNullExpression(c) || ts.isParenthesizedExpression(c)) c = c.expression;

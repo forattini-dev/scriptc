@@ -7,19 +7,15 @@
  * yet is a named refusal (the census in the plan file orders the work). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js"; import { numLit } from "../../ir/build.js";
-import { BOOL, DYN, EFFECT_T, IrExpr, canConvertToDyn, IrLibFn, IrLocal, IrStmt, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/ir.js"
+import { BOOL, DYN, EFFECT_T, IrExpr, canConvertToDyn, IrLibFn, IrLocal, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/ir.js"
 import { newFnCtx } from "./scope-env.js";
 import { locOf } from "../program.js";
-import { kernelServiceIdOfSymbol } from "../kernel.js";
+import { effectModuleOfFile, kernelServiceIdOfSymbol } from "../kernel.js";
 import { applyProgramPipeStep, applySchemaPipeStep, isSchemaLike, lowerSchemaClassMake, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest, unwrapSchema } from "./lower-schema.js";
 import { lowerConsoleInspectArg } from "./lower-inspect.js";
 import { lowerContextServiceUse } from "./lower-context-service.js";
 import { lowerSqlHandleCall, lowerSqlHandleProperty, lowerSqlNamespaceCall, lowerSqlNamespaceProperty, lowerSqlServiceKey } from "./lower-sql-client.js";
 
-const EFFECT_NAMESPACE_DTS = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
-/** `effect/unstable/<area>/<Name>` modules (SqlClient, Statement, Reactivity, …): named `<area>/<Name>` so they never
- * collide with the top-level namespaces. */
-const EFFECT_UNSTABLE_NAMESPACE_DTS = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]unstable[\\/]([a-z]+)[\\/]([A-Za-z]+)\.d\.ts$/;
 
 /** A named export of the effect package (`import { pipe } from "effect"`): the module it is declared in, by provenance. */
 function effectExportOf(L: Lowerer, node: ts.Expression): { module: string; name: string } | null {
@@ -28,8 +24,9 @@ function effectExportOf(L: Lowerer, node: ts.Expression): { module: string; name
   if (symbol === undefined) return null;
   if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = L.checker.getAliasedSymbol(symbol);
   for (const decl of L.checker.declarationsOf(symbol)) {
-    const match = EFFECT_NAMESPACE_DTS.exec(decl.getSourceFile().fileName);
-    if (match) return { module: match[1]!, name: symbol.name };
+    const module = effectModuleOfFile(decl.getSourceFile().fileName);
+    // Named exports come from effect's top-level modules only (`pipe` from Function.d.ts).
+    if (module !== null && !module.includes("/")) return { module, name: symbol.name };
   }
   return null;
 }
@@ -43,10 +40,8 @@ export function effectNamespaceOf(L: Lowerer, node: ts.Expression): string | nul
   if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = L.checker.getAliasedSymbol(symbol);
   for (const decl of L.checker.declarationsOf(symbol)) {
     if (!ts.isSourceFile(decl)) continue;
-    const match = EFFECT_NAMESPACE_DTS.exec(decl.fileName);
-    if (match) return match[1]!;
-    const unstable = EFFECT_UNSTABLE_NAMESPACE_DTS.exec(decl.fileName);
-    if (unstable) return `${unstable[1]!}/${unstable[2]!}`;
+    const module = effectModuleOfFile(decl.fileName);
+    if (module !== null) return module;
   }
   return null;
 }

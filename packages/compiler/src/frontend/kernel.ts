@@ -4,6 +4,16 @@ import * as ts from "./ts7/adapter.js";
 import { constituentTypes } from "./ts7/checker.js";
 
 const EFFECT_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
+const EFFECT_UNSTABLE_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]unstable[\\/]([a-z]+)[\\/]([A-Za-z]+)\.d\.ts$/;
+
+/** The effect module a declaration file is: `Effect`, `Layer`, … for effect's top-level modules, `<area>/<Name>` for
+ * its `unstable/<area>/<Name>` modules (`sql/SqlClient`, `reactivity/Reactivity`), so the two never collide. */
+export function effectModuleOfFile(fileName: string): string | null {
+  const match = EFFECT_DIST.exec(fileName);
+  if (match) return match[1]!;
+  const unstable = EFFECT_UNSTABLE_DIST.exec(fileName);
+  return unstable ? `${unstable[1]!}/${unstable[2]!}` : null;
+}
 
 /** Native Effect declarations also contain structural records and callables. */
 export function isKernelTypeFile(file: string): boolean {
@@ -18,8 +28,8 @@ export function effectNamespaceOfNode(checker: ts.TypeChecker, node: ts.Expressi
   if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
   for (const decl of checker.declarationsOf(symbol)) {
     if (!ts.isSourceFile(decl)) continue;
-    const match = EFFECT_DIST.exec(decl.fileName);
-    if (match) return match[1]!;
+    const module = effectModuleOfFile(decl.fileName);
+    if (module !== null) return module;
   }
   return null;
 }
@@ -109,7 +119,24 @@ export function withoutKernelBrands(checker: ts.TypeChecker, parts: readonly ts.
   });
 }
 
-const SQL_CLIENT_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]unstable[\\/]sql[\\/]SqlClient\.d\.ts$/;
+const EFFECT_DATA_DIST = /[\\/]effect[\\/]dist[\\/](Effect|Layer|Exit|Cause|Option)\.d\.ts$/;
+const EFFECT_DATA_NAMES = new Set(["Effect", "Layer", "Exit", "Success", "Failure", "Cause", "Option", "Some", "None"]);
+
+/** effect's core data types — Effect, Layer, Exit and its Success/Failure arms, Cause, Option and its Some/None arms —
+ * declared as interfaces or type aliases in their dist modules: the kernel's opaque handle. */
+export function isEffectDataHandleSymbol(symbol: ts.Symbol, decls: readonly ts.Node[]): boolean {
+  return EFFECT_DATA_NAMES.has(symbol.name) &&
+    decls.some((d) => (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d)) && EFFECT_DATA_DIST.test(d.getSourceFile().fileName));
+}
+
+/** `Effect<…>` itself, from effect's dist Effect.d.ts (an Effect.gen body's yield channel). */
+export function isEffectType(checker: ts.TypeChecker, type: ts.Type): boolean {
+  const symbol = type.getAliasSymbol() ?? type.getSymbol();
+  return symbol?.name === "Effect" &&
+    checker.declarationsOf(symbol).some((d) => ts.isInterfaceDeclaration(d) && /[\\/]effect[\\/]dist[\\/]Effect\.d\.ts$/.test(d.getSourceFile().fileName));
+}
+
+const SQL_CLIENT_DIST =/[\\/]node_modules[\\/]effect[\\/]dist[\\/]unstable[\\/]sql[\\/]SqlClient\.d\.ts$/;
 
 /** A native effect/unstable/sql client type: effect's `SqlClient` interface, a program interface extending it (Redcode's
  * `interface SqliteClient extends Client.SqlClient`), or an intersection with one (`Object.assign(client, extras)`). */

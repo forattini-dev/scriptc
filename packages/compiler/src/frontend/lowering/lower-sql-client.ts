@@ -6,11 +6,9 @@ import type { Lowerer } from "./lowerer.js";
 import { newFnCtx } from "./scope-env.js";
 import { DYN, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrStmt, IrType, STRING, SrcLoc } from "../../ir/ir.js";
 import { locOf } from "../program.js";
-import { isNativeSqlClientType } from "../kernel.js";
+import { isKernelTypeFile, isNativeSqlClientType } from "../kernel.js";
 import { constituentTypes } from "../ts7/checker.js";
 import { effectSuccessOf } from "./lower-effect.js";
-
-const SQL_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]/;
 
 /** A member a program added to a native client (`Object.assign(client, { config, export })`), not one effect declares. */
 function extraMemberOf(L: Lowerer, receiver: ts.Expression, name: string): ts.Symbol | null {
@@ -18,7 +16,7 @@ function extraMemberOf(L: Lowerer, receiver: ts.Expression, name: string): ts.Sy
   if (!isNativeSqlClientType(L.checker, type)) return null;
   const member = L.checker.getPropertyOfType(type, name);
   if (member === undefined) return null;
-  return L.checker.declarationsOf(member).some((decl) => SQL_DIST.test(decl.getSourceFile().fileName)) ? null : member;
+  return L.checker.declarationsOf(member).some((decl) => isKernelTypeFile(decl.getSourceFile().fileName)) ? null : member;
 }
 
 /** The declared type of a program-added member: the first constituent of the client's type that has it. An interface

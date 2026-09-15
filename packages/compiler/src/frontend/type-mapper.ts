@@ -8,11 +8,17 @@ import { regexCaptureArray } from "../ir/regex-captures.js";
 import { UnionRegistry } from "./union-registry.js";
 export { UnionRegistry } from "./union-registry.js";
 import { recordUnionDiscriminant } from "./union-discriminants.js";
-import { mapObjectIterationValueAlias } from "./object-iteration-types.js"; import { InternalCompilerError } from "../errors.js";
-import * as ts from "./ts7/adapter.js"; import { isKernelTypeFile, isKernelHandleSymbol, isKernelSchemaValueSymbol, isNativeSqlClientType, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord, isPhantomAnyMember } from "./kernel-types.js"; import { familyIdOf, isFamilySlotMember } from "./families.js";
+import { mapObjectIterationValueAlias } from "./object-iteration-types.js";
+import { InternalCompilerError } from "../errors.js";
+import * as ts from "./ts7/adapter.js";
+import { isEffectType, isKernelTypeFile } from "./kernel.js";
+import { mapKernelIntersection, mapKernelServiceKey, mapKernelType } from "./kernel-type-map.js";
+import { isDeclaredInAmbientModule, isDeclaredInAmbientNamespace } from "./ambient-declarations.js";
+import { SCHEMA_SLOT, isPhantomAnyMember } from "./kernel-types.js";
+import { familyIdOf, isFamilySlotMember } from "./families.js";
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType } from "../ir/ir.js";
-import { arrayOf, BIGINT, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, SQLITE_DB_T, SQLITE_STMT_T, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/ir.js";
+import { arrayOf, BIGINT, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/ir.js";
 import { isProjectTypeFile } from "./project-declarations.js";
 import { isNpmStaticTypeFile } from "./npm-static-types.js";
 import { isJsSourceFile, isNodeTypesPath } from "./program.js";
@@ -287,32 +293,6 @@ function esOwnKeyOrder(names: string[]): string[] {
   };
   const indices = names.filter(isArrayIndex).sort((a, b) => Number(a) - Number(b));
   return indices.length === 0 ? names : [...indices, ...names.filter((n) => !isArrayIndex(n))];
-}
-
-function isDeclaredInAmbientModule(d: ts.Declaration, name: string): boolean {
-  let node: ts.Node | undefined = d.parent;
-  while (node) {
-    if (ts.isModuleDeclaration(node) && ts.isStringLiteral(node.name)) {
-      const spec = node.name.text;
-      return spec === name || spec === `node:${name}`;
-    }
-    node = node.parent;
-  }
-  return false;
-}
-
-/** True when the declaration's nearest enclosing namespace is `name`
- * (`declare global { namespace NodeJS { ... } }` — the NodeJS-global
- * interfaces @types/node declares outside any ambient module). */
-function isDeclaredInAmbientNamespace(d: ts.Declaration, name: string): boolean {
-  let node: ts.Node | undefined = d.parent;
-  while (node) {
-    if (ts.isModuleDeclaration(node) && ts.isIdentifier(node.name)) {
-      return node.name.text === name;
-    }
-    node = node.parent;
-  }
-  return false;
 }
 
 /** True when a type contains a record anywhere (the trigger for the
@@ -790,7 +770,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // diagnostic for node_modules types and the generic story otherwise. A KERNEL package's types (effect) map STRUCTURALLY.
   const npmSym = widened.getAliasSymbol() ?? widened.getSymbol();
   const npmDecls = npmSym ? checker.declarationsOf(npmSym) : undefined;
-  if (!ctx.dynamic && npmSym !== undefined && ["Effect", "Layer", "Exit", "Success", "Failure", "Cause", "Option", "Some", "None"].includes(npmSym.name) && npmDecls?.some((d) => (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d)) && /[\\/]effect[\\/]dist[\\/](Effect|Layer|Exit|Cause|Option)\.d\.ts$/.test(d.getSourceFile().fileName))) return EFFECT_T; if (!ctx.dynamic && npmDecls !== undefined && (isKernelSchemaValueSymbol(npmDecls) || isKernelHandleSymbol(npmDecls))) return EFFECT_T; if (!ctx.dynamic && isNativeSqlClientType(checker, widened)) return EFFECT_T;if (!ctx.dynamic && npmSym !== undefined && npmDecls !== undefined && npmDecls.some((d) => isDeclaredInAmbientModule(d as ts.Declaration, "bun:sqlite"))) { if (npmSym.name === "Database") return SQLITE_DB_T; if (npmSym.name === "Statement") return SQLITE_STMT_T; if (npmSym.name === "Changes" || npmSym.name === "DatabaseOptions") return DYN; } // effects, layers, exits, causes, options, schema values, filters and SchemaError: the kernel's opaque handle; static bun:sqlite (--target bun): native Database/Statement handles, Changes/DatabaseOptions ride the checked-dynamic tree the runtime builds
+  // effect handles and schema values, native SqlClient values, bun:sqlite handles (kernel-type-map.ts).
+  const kernelType = mapKernelType(widened, ctx);
+  if (kernelType !== undefined) return kernelType;
   if (
     npmDecls &&
     npmDecls.length > 0 &&
@@ -813,7 +795,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // npmPackageOf intersection walk names the package). User-declared
   // intersections keep their existing story (a part declared in the
   // program or an external-type file fails the check).
-  if (widened.isIntersectionType()) { if (!ctx.dynamic) { const kept = withoutKernelBrands(checker, ts.constituentTypes(widened)); if (kept.length === 1 && kept[0] !== undefined) return mapType(kept[0], ctx); const decorated = decoratedSchemaRecord(kept, ctx); if (decorated !== null) return decorated; } // `string & Brand<"ID">` is a string; `Schema & { statics }` a record with the schema slot (kernel-types.ts)
+  if (widened.isIntersectionType()) {
+    // `string & Brand<"ID">` is a string; `Schema & { statics }` a record with the schema slot (kernel-type-map.ts).
+    const kernelIntersection = mapKernelIntersection(widened, ctx);
+    if (kernelIntersection !== undefined) return kernelIntersection;
     const partNpm = (part: ts.Type): boolean => {
       const partSym = part.getAliasSymbol() ?? part.getSymbol();
       if (partSym) {
@@ -1083,7 +1068,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // it maps to classval below.
   const widenedSym = widened.getSymbol();
   const classDecl = widenedSym ? checker.valueDeclarationOf(widenedSym) : undefined;
-  if (!ctx.dynamic && classDecl && ts.isClassDeclaration(classDecl) && kernelServiceIdOf(checker, classDecl) !== null) return EFFECT_T; // a service key class: instance and static sides are the key handle
+  // A service key class: instance and static sides are the key handle.
+  const serviceKey = mapKernelServiceKey(classDecl, ctx);
+  if (serviceKey !== undefined) return serviceKey;
   if (
     classDecl &&
     (ts.isClassDeclaration(classDecl) || ts.isClassExpression(classDecl)) &&
@@ -1947,8 +1934,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("Generator") || isStdlibInterface("AsyncGenerator") || isStdlibInterface("IterableIterator")) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
     // An Effect.gen/fn body (static builds): `Generator<Effect<…> | …, A, never>` (or a never-yielding body keeping the contextual `never` NEXT channel — a plain generator infers `unknown`) is resumed by the kernel with each yielded effect's value: both channels are the opaque handle; the return channel is A (void-like → VOID).
-    const isEffectRef = (t: ts.Type): boolean => { const sym = t.getAliasSymbol() ?? t.getSymbol(); return sym?.name === "Effect" && checker.declarationsOf(sym).some((d) => ts.isInterfaceDeclaration(d) && /[\\/]effect[\\/]dist[\\/]Effect\.d\.ts$/.test(d.getSourceFile().fileName)); };
-    if (!ctx.dynamic && args[0] !== undefined && args[1] !== undefined && (((args[0].flags & ts.TypeFlags.Never) !== 0 && args[2] !== undefined && (args[2].flags & ts.TypeFlags.Never) !== 0) || isEffectRef(args[0]) || (args[0].isUnionType() && ts.constituentTypes(args[0]).every(isEffectRef)))) {
+    if (!ctx.dynamic && args[0] !== undefined && args[1] !== undefined && (((args[0].flags & ts.TypeFlags.Never) !== 0 && args[2] !== undefined && (args[2].flags & ts.TypeFlags.Never) !== 0) || isEffectType(checker, args[0]) || (args[0].isUnionType() && ts.constituentTypes(args[0]).every((t) => isEffectType(checker, t))))) {
       const retT = (args[1].flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never)) !== 0 ? VOID : mapType(args[1], ctx);
       return retT === null ? null : { kind: "generator", yieldT: EFFECT_T, retT, nextT: EFFECT_T };
     }
