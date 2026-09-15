@@ -78,10 +78,13 @@ fn catch_effect_defect(operation: impl FnOnce() -> Outcome) -> Outcome {
 /// position, so finalizers and synchronized-ref permits still unwind. Rust
 /// implementation panics retain their original fatal behavior.
 fn fiber_drive(fiber: &FiberRef) {
+    // The running fiber is observable (`Fiber.getCurrent()`, `Effect.withFiber`); nested drives stack.
+    effect_fiber_enter(fiber);
     while let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fiber_drive_inner(fiber))) {
         let failure = scriptc_defect(payload);
         let mut state = fiber.borrow_mut();
         state.current = None;
         state.resumed = Some(Err(failure));
     }
+    effect_fiber_leave();
 }

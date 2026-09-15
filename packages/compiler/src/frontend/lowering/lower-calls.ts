@@ -32,7 +32,7 @@ import { ffiBindingDiag, ffiSignatureDiag, libCallbackDiag, requiresDynamicDiag 
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
-import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js"; import { lowerSqliteMethodCall } from "./lower-sqlite.js";
+import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js"; import { lowerSqliteMethodCall } from "./lower-sqlite.js"; import { effectParamOverride } from "./lower-effect.js";
 import { lowerEffectCall } from "./lower-effect.js"; import { lowerFamilyCall, lowerFamilyImpl, prepareFamilyInstanceCtx, recordFamilySlot } from "./lower-families.js";
 import { lowerStringConstructor } from "./lower-string-constructor.js";
 import { droppableStatic, lowerAbsenceProbe, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
@@ -219,7 +219,7 @@ export interface GenericInstance {
     // Island-handle params (a then-handler receiving a dynamic import's
     // namespace handle — markJsvalHandlerParams): jsval, whatever the
     // contextual type spelled.
-    if (ts.isIdentifier(param.name) && lowerer.jsvalParamOverrides.has(param)) {
+    const kernelOverride = effectParamOverride(param); if (kernelOverride !== undefined) return { type: kernelOverride, mode: "required" }; if (ts.isIdentifier(param.name) && lowerer.jsvalParamOverrides.has(param)) {
       return { type: JSVAL, mode: param.questionToken ? "omittable" : "required" };
     }
     if (!ts.isIdentifier(param.name)) {

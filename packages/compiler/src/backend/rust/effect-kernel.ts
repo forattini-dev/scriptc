@@ -262,6 +262,45 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const body = second.type.ret.kind === "effect" ? dispatch : `{ let _ = ${dispatch}; runtime::effect_succeed(runtime::effect_box(())) }`;
       return `{ let ${source} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::${expr.fn === "effect.tap" ? "effect_tap" : "effect_tap_error"}(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${body} }), ${traced(context, keep)}) }`;
     }
+    case "effect.referenceKey": {
+      if (first === undefined || second === undefined || second.type.kind !== "func") break;
+      const callback = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, second.type, [], expr.loc);
+      return `{ let ${callback} = ${context.emitExpr(second)}; runtime::effect_reference_key(&${context.emitExpr(first)}, std::rc::Rc::new(move || ${box(context, second.type.ret, dispatch, expr.loc)})) }`;
+    }
+    case "effect.withFiber": {
+      if (first === undefined || first.type.kind !== "func") break;
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, first.type, ["sc_fiber"], expr.loc);
+      return `{ let ${callback} = ${context.emitExpr(first)}; let ${keep} = ${callback}.clone(); runtime::effect_with_fiber(std::rc::Rc::new(move |sc_fiber: runtime::JsEffect| ${dispatch}), ${traced(context, keep)}) }`;
+    }
+    case "effect.fiberCurrent": return "runtime::effect_fiber_current()";
+    case "effect.contextGet":
+      if (first === undefined || second === undefined) break;
+      return unbox(context, expr.type, `&runtime::effect_context_get(&${context.emitExpr(first)}, &${context.emitExpr(second)})`, expr.loc);
+    case "effect.contextGetOption":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_context_get_option(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.serviceOption":
+      if (first === undefined) break;
+      return `runtime::effect_service_option(&${context.emitExpr(first)})`;
+    case "effect.scopeKey": return "runtime::effect_scope_key()";
+    case "effect.scopeAddFinalizer":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_scope_add_finalizer(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.semaphoreTake":
+    case "effect.semaphoreRelease":
+      if (first === undefined || second === undefined) break;
+      return `runtime::${expr.fn === "effect.semaphoreTake" ? "effect_semaphore_take_permits" : "effect_semaphore_release_permits"}(&${context.emitExpr(first)}, ${context.emitExpr(second)})`;
+    case "effect.uninterruptibleMask": {
+      if (first === undefined || second === undefined || first.type.kind !== "func") break;
+      const callback = context.nextTemporary();
+      const restore = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, first.type, ["sc_restore"], expr.loc);
+      return `{ let ${callback} = ${context.emitExpr(first)}; let ${restore} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::effect_suspend(std::rc::Rc::new(move || { let sc_restore = ${restore}.clone(); ${dispatch} }), ${traced(context, keep)}) }`;
+    }
     case "effect.suspend": {
       if (first === undefined || first.type.kind !== "func") break;
       const callback = context.nextTemporary();

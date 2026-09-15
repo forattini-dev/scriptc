@@ -7,6 +7,7 @@ include!("network_loop.rs");
 /// traced array/record object was released.
 pub fn finish() {
     ffi_foreign_finish();
+    effect_context_finish();
     terminal_finish();
     process_signals_finish();
     readline_finish();

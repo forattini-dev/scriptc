@@ -76,8 +76,11 @@ export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
   if (ns === "Layer" && expr.name.text === "empty") return lib("layer.empty", [], EFFECT_T, loc);
   if (ns === "Schema") return lowerSchemaProperty(L, expr, loc);
   if (ns === "Duration" && expr.name.text === "zero") return lib("effect.durationZero", [], EFFECT_T, loc);
+  if (ns === "Scope" && expr.name.text === "Scope") return lib("effect.scopeKey", [], EFFECT_T, loc);
   // Kernel DATA handles (an Exit): `_tag` and the success `value` read through the kernel, typed by the checker.
   if (ns === null && !expr.questionDotToken && L.mapTypeOf(L.typeOf(expr.expression))?.kind === "effect") {
+    // A fiber value IS its context snapshot: `fiber.context` reads the same handle.
+    if (expr.name.text === "context") return L.lowerExpr(expr.expression);
     if (expr.name.text === "_tag") return lib("effect.dataTag", [L.lowerExpr(expr.expression)], STRING, loc);
     if (expr.name.text === "message") return lib("effect.dataMessage", [L.lowerExpr(expr.expression)], STRING, loc);
     if (expr.name.text === "value") {
@@ -293,6 +296,15 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
       return lib("effect.semaphoreWithPermits", [semaphore, permits, body], EFFECT_T, loc);
     }
   }
+  // `semaphore.take(n)` / `semaphore.release(n)` on a Semaphore handle.
+  if (!L.dynamic && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && (callee.name.text === "take" || callee.name.text === "release") &&
+    expr.arguments.length === 1 && L.typeOf(callee.expression).getSymbol()?.name === "Semaphore") {
+    const semaphore = L.lowerExpr(callee.expression);
+    const permits = L.lowerExpr(expr.arguments[0]!);
+    if (semaphore.type.kind === "effect" && permits.type.kind === "f64") {
+      return lib(callee.name.text === "take" ? "effect.semaphoreTake" : "effect.semaphoreRelease", [semaphore, permits], EFFECT_T, loc);
+    }
+  }
   if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.name)) return null;
   if (!L.dynamic && !callee.questionDotToken && (callee.name.text === "make" || callee.name.text === "annotate" || callee.name.text === "check") && isSchemaLike(L, callee.expression)) {
     const method = lowerSchemaHandleMethod(L, callee.name.text, callee.expression, [...expr.arguments], expr, loc);
@@ -325,8 +337,67 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === "Queue") return lowerQueueMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "PubSub") return lowerPubSubMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Cause") return lowerCauseMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "Context") return lowerContextMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "Fiber" && callee.name.text === "getCurrent" && expr.arguments.length === 0) return asCallType(L, expr, lib("effect.fiberCurrent", [], EFFECT_T, loc));
+  if (ns === "Scope" && callee.name.text === "addFinalizer" && expr.arguments.length === 2) {
+    const scope = L.lowerExpr(expr.arguments[0]!);
+    const finalizer = L.lowerExpr(expr.arguments[1]!);
+    if (scope.type.kind === "effect" && finalizer.type.kind === "effect") return lib("effect.scopeAddFinalizer", [scope, finalizer], EFFECT_T, loc);
+  }
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
+}
+
+/** Parameters the kernel types itself: `restore` in `Effect.uninterruptibleMask((restore) => …)` is an effect → effect
+ * closure (the identity, since the kernel has no interruption) whatever its generic declared type says. */
+const EFFECT_PARAM_OVERRIDES = new WeakMap<ts.ParameterDeclaration, IrType>();
+
+export function effectParamOverride(param: ts.ParameterDeclaration): IrType | undefined {
+  return EFFECT_PARAM_OVERRIDES.get(param);
+}
+
+/** A kernel handle answered at a site typed `Handle | undefined` (`Fiber.getCurrent()`): wrapped into the union arm. */
+function asCallType(L: Lowerer, expr: ts.CallExpression, value: IrExpr): IrExpr {
+  const type = L.mapTypeOf(L.typeOf(expr));
+  if (type?.kind !== "union") return value;
+  return { kind: "unionWrap", unionId: type.unionId, tag: L.armTag(type.unionId, EFFECT_T), value, type, loc: value.loc };
+}
+
+/** `Context.Reference(id, { defaultValue })`, and `Context.get/getUnsafe/getOption(context, key)` over a fiber context. */
+function lowerContextMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.CallExpression, loc: SrcLoc): IrExpr {
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Context.${member} in this call shape yet`);
+  if (member === "Reference" && args.length === 2 && ts.isStringLiteral(args[0]!) && ts.isObjectLiteralExpression(args[1]!)) {
+    const fallback = args[1].properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "defaultValue");
+    if (fallback === undefined || args[1].properties.length !== 1) return refused();
+    const thunk = L.lowerExpr(fallback.initializer);
+    if (thunk.type.kind !== "func" || thunk.type.params.length !== 0) return refused();
+    return lib("effect.referenceKey", [{ kind: "strLit", value: args[0].text, type: STRING, loc }, thunk], EFFECT_T, loc);
+  }
+  if ((member === "get" || member === "getUnsafe" || member === "getOption") && args.length === 2) {
+    const context = L.lowerExpr(args[0]!);
+    const key = L.lowerExpr(args[1]!);
+    if (context.type.kind !== "effect" || key.type.kind !== "effect") return refused();
+    if (member === "getOption") return lib("effect.contextGetOption", [context, key], EFFECT_T, loc);
+    const type = L.mapTypeOf(L.typeOf(expr));
+    if (type === null) return L.badType(expr, L.typeOf(expr));
+    return lib("effect.contextGet", [context, key], type, loc);
+  }
+  return refused();
+}
+
+/** The identity closure `(effect) => effect` handed to an uninterruptibleMask callback as `restore`. */
+function liftedRestore(L: Lowerer, loc: SrcLoc): IrExpr {
+  const name = `%effect.restore.${L.liftedFns.length}`;
+  const funcType: IrType = { kind: "func", params: [EFFECT_T], ret: EFFECT_T };
+  L.fnStack.push(newFnCtx(false, null, null, EFFECT_T));
+  try {
+    const local: IrLocal = { id: "e.0", name: "e", type: EFFECT_T, mutable: false };
+    L.ctx.locals.push(local);
+    L.liftedFns.push({ name, params: [{ localId: local.id, name: local.name, type: EFFECT_T }], returnType: EFFECT_T, locals: L.ctx.locals, body: [{ kind: "return", value: { kind: "varRef", localId: local.id, type: EFFECT_T, loc }, loc }], loc });
+  } finally {
+    L.fnStack.pop();
+  }
+  return { kind: "closure", fnName: name, captures: [], type: funcType, loc };
 }
 
 /** Synchronized refs serialize every write across effect suspension. Ref keeps
@@ -899,6 +970,30 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
           if (effects.type.kind !== "array" || effects.type.elem.kind !== "effect") break;
         }
         return lib("effect.all", [collectionCarrier(L, success, discard, expr, loc), effects], EFFECT_T, loc);
+      }
+      case "withFiber": {
+        if (total !== 1) break;
+        const fn = at(0);
+        if (fn.type.kind !== "func" || fn.type.params.length !== 1 || fn.type.params[0]!.kind !== "effect" || fn.type.ret.kind !== "effect") break;
+        return lib("effect.withFiber", [fn], EFFECT_T, loc);
+      }
+      case "serviceOption":
+        if (total === 1 && at(0).type.kind === "effect") return lib("effect.serviceOption", [at(0)], EFFECT_T, loc);
+        break;
+      case "uninterruptibleMask": {
+        if (total !== 1 || pre.length !== 0) break;
+        const callback = args[0]!;
+        if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) break;
+        if (callback.parameters.length > 1) break;
+        const restore = callback.parameters[0];
+        if (restore !== undefined) {
+          if (!ts.isIdentifier(restore.name) || restore.dotDotDotToken || restore.initializer) break;
+          EFFECT_PARAM_OVERRIDES.set(restore, { kind: "func", params: [EFFECT_T], ret: EFFECT_T });
+        }
+        const fn = at(0);
+        if (fn.type.kind !== "func" || fn.type.ret.kind !== "effect") break;
+        if (restore === undefined) return lib("effect.suspend", [fn], EFFECT_T, loc);
+        return lib("effect.uninterruptibleMask", [fn, liftedRestore(L, loc)], EFFECT_T, loc);
       }
       case "provideService":
         if (total === 3 && at(0).type.kind === "effect" && at(1).type.kind === "effect") return lib("effect.provideService", [at(0), at(1), at(2)], EFFECT_T, loc);

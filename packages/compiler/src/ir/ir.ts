@@ -1,7 +1,7 @@
 import { BIGINT_MAY_THROW, type IrBigIntLibFn } from "./bigint-signatures.js"; import type { IrJsonReplacerFn } from "./json-replacer.js";
 export * from "./type-constants.js";
 import { F64, BYTES_U8, STRING, BOOL, VOID } from "./type-constants.js";
-import type { IrUrlLibFn } from "./url-signatures.js"; import { SQLITE_MAY_THROW_LIB_FNS, type IrSqliteLibFn } from "./sqlite-signatures.js";
+import type { IrUrlLibFn } from "./url-signatures.js"; import { SQLITE_MAY_THROW_LIB_FNS, type IrSqliteLibFn } from "./sqlite-signatures.js"; import type { IrEffectContextLibFn } from "./effect-context-signatures.js";
 import { THROWING_COERCION_FNS } from "./coercion-names.js";
 import type { IrNumericCoercionFn } from "./numeric-coercion.js";
 import { nativeArrayViewSupported, nativeRecordCheckSupported } from "./native-record.js";
@@ -1829,7 +1829,7 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
-  | IrBigIntLibFn | IrJsonReplacerFn | IrSqliteLibFn
+  | IrBigIntLibFn | IrJsonReplacerFn | IrSqliteLibFn | IrEffectContextLibFn
   /** Native local import: queued loader, fresh promise, cached evaluation. */
   | "module.import"
   | "module.namespace" | "promise.view"

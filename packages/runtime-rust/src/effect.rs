@@ -116,6 +116,8 @@ enum EffectNode {
     Tap(JsEffect, EffectFn, TraceFn),
     TapError(JsEffect, EffectFn, TraceFn),
     Suspend(Rc<dyn Fn() -> JsEffect>, TraceFn),
+    /// `Effect.withFiber(f)`: `f` reads the running fiber's context snapshot (effect_context.rs).
+    WithFiber(Rc<dyn Fn(JsEffect) -> JsEffect>, TraceFn),
     Sleep(f64),
     Scoped(JsEffect),
     AddFinalizer(FinalizerFn, TraceFn),
@@ -173,6 +175,9 @@ pub enum KernelData {
     /// waiter queue). Both are the kernel's Latch.
     Deferred(Rc<RefCell<Latch>>),
     Semaphore(Rc<RefCell<Latch>>),
+    /// A fiber's context snapshot (`fiber.context`) and an open scope (`Scope.Scope`) — effect_context.rs.
+    Context(Rc<EffectContextData>),
+    Scope(EffectScope),
     /// A `Queue` (and the per-subscriber queue a `PubSub` hands out): items with waiting takers and offerers.
     Queue(Rc<RefCell<QueueState>>),
     /// The failure `Effect.tryPromise(thunk)` builds from a rejection: effect's `UnknownError`, whose message is
@@ -204,7 +209,7 @@ impl Trace for EffectData {
                 tracer.edge(inner);
                 trace(tracer);
             }
-            EffectNode::Suspend(_, trace) | EffectNode::AddFinalizer(_, trace) | EffectNode::Try(_, _, trace) => trace(tracer),
+            EffectNode::Suspend(_, trace) | EffectNode::WithFiber(_, trace) | EffectNode::AddFinalizer(_, trace) | EffectNode::Try(_, _, trace) => trace(tracer),
             EffectNode::OrElseSucceed(inner, _, trace) | EffectNode::CatchIf(inner, _, _, trace) => {
                 tracer.edge(inner);
                 trace(tracer);
@@ -717,7 +722,7 @@ pub struct EffectFiber {
     /// The services in scope, innermost provide last.
     env: Vec<(JsString, EffectValue)>,
     /// Open scopes' finalizers, innermost last (each in registration order).
-    scopes: Vec<Vec<FinalizerFn>>,
+    scopes: Vec<EffectScope>,
     id: u64,
     on_exit: Option<Box<dyn FnOnce(Outcome)>>,
 }
@@ -764,6 +769,7 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::Tap(inner, f, _) => Step::Push(Frame::Tap(f.clone()), inner.clone()),
         EffectNode::TapError(inner, f, _) => Step::Push(Frame::TapError(f.clone()), inner.clone()),
         EffectNode::Suspend(thunk, _) => Step::Run(thunk()),
+        EffectNode::WithFiber(read, _) => Step::Run(read(effect_current_context())),
         EffectNode::Sleep(millis) => Step::Await(promise_to_handle(&promise_timeout(*millis)), None),
         EffectNode::Scoped(inner) => Step::OpenScope(inner.clone()),
         EffectNode::AddFinalizer(finalizer, _) => Step::Finalizer(finalizer.clone()),
@@ -814,7 +820,7 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                 }
                 Step::Done(outcome) => outcome,
                 Step::Lookup(key) => {
-                    let found = fiber.borrow().env.iter().rev().find(|(k, _)| *k == key).map(|(_, v)| v.clone());
+                    let found = context_lookup(&fiber.borrow().env, &key);
                     match found {
                         Some(value) => Ok(value),
                         None => throw_error(format!("Service not found: {key}")),
@@ -831,7 +837,7 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                 }
                 Step::OpenScope(inner) => {
                     let mut state = fiber.borrow_mut();
-                    state.scopes.push(Vec::new());
+                    state.scopes.push(Rc::new(RefCell::new(Vec::new())));
                     state.frames.push(Frame::CloseScope);
                     state.current = Some(inner);
                     continue;
@@ -841,7 +847,7 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     let finalizer = capture_finalizer_context(finalizer, &state.env);
                     match state.scopes.last_mut() {
                         Some(scope) => {
-                            scope.push(finalizer);
+                            scope.borrow_mut().push(finalizer);
                             drop(state);
                             Ok(Rc::new(()))
                         }
@@ -988,7 +994,7 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     None
                 }
                 (Frame::CloseScope, exit) => {
-                    let finalizers = fiber.borrow_mut().scopes.pop().unwrap_or_default();
+                    let finalizers = fiber.borrow_mut().scopes.pop().map(|scope| std::mem::take(&mut *scope.borrow_mut())).unwrap_or_default();
                     fiber.borrow_mut().frames.push(Frame::Finalize(finalizers, exit, None));
                     outcome = Some(Ok(Rc::new(())));
                     None
@@ -1019,7 +1025,7 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     let value = resource.clone();
                     let finalizer = capture_finalizer_context(Rc::new(move |exit| release(value.clone(), exit)), &state.env);
                     match state.scopes.last_mut() {
-                        Some(scope) => scope.push(finalizer),
+                        Some(scope) => scope.borrow_mut().push(finalizer),
                         None => throw_error("Effect.acquireRelease outside a scope (Effect.scoped is missing)".to_owned()),
                     }
                     outcome = Some(Ok(resource));

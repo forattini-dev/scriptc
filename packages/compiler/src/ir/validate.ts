@@ -1,4 +1,4 @@
-import { BIGINT_LIB_FN_SIGS } from "./bigint-signatures.js"; import { URL_LIB_FN_SIGS } from "./url-signatures.js"; import { SQLITE_LIB_FN_SIGS } from "./sqlite-signatures.js";
+import { BIGINT_LIB_FN_SIGS } from "./bigint-signatures.js"; import { URL_LIB_FN_SIGS } from "./url-signatures.js"; import { SQLITE_LIB_FN_SIGS } from "./sqlite-signatures.js"; import { EFFECT_CONTEXT_LIB_FN_SIGS } from "./effect-context-signatures.js";
 import { DATE_LIB_FN_SIGS } from "./date-signatures.js"; import { validatePromiseView } from "./promise-view.js";
 import { NUMERIC_COERCION_SIGS } from "./numeric-coercion.js"; import { JSON_REPLACER_SIGS } from "./json-replacer.js";
 import { isJsonStringifyType } from "./json-stringify.js";
@@ -263,7 +263,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "sym.keyFor": { argTypes: [SYMBOL_T], result: VOID },
   "sym.desc": { argTypes: [SYMBOL_T], result: VOID },
   "sym.toString": { argTypes: [SYMBOL_T], result: STRING },
-  ...URL_LIB_FN_SIGS, ...BIGINT_LIB_FN_SIGS, ...SQLITE_LIB_FN_SIGS,
+  ...URL_LIB_FN_SIGS, ...BIGINT_LIB_FN_SIGS, ...SQLITE_LIB_FN_SIGS, ...EFFECT_CONTEXT_LIB_FN_SIGS,
   "sp.new": { argTypes: [], result: SEARCH_PARAMS_T },
   "sp.parse": { argTypes: [STRING], result: SEARCH_PARAMS_T },
   "sp.copy": { argTypes: [SEARCH_PARAMS_T], result: SEARCH_PARAMS_T },
@@ -3763,7 +3763,7 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "effect.runSync" || e.fn === "effect.runPromise" || e.fn === "effect.fn" || e.fn === "effect.fnPipe" || e.fn === "effect.exitValue" || e.fn === "effect.causeSquash" || e.fn === "option.getOrUndefined" || e.fn === "option.getOrElse" || e.fn === "option.match" || e.fn.startsWith("schema.decode") || e.fn === "schema.is" || e.fn === "schema.encodeSync" || e.fn === "schema.make") { // site-typed: the success channel (runSync/runPromise), the function value (fn)
+        if (e.fn === "effect.contextGet" || e.fn === "effect.runSync" || e.fn === "effect.runPromise" || e.fn === "effect.fn" || e.fn === "effect.fnPipe" || e.fn === "effect.exitValue" || e.fn === "effect.causeSquash" || e.fn === "option.getOrUndefined" || e.fn === "option.getOrElse" || e.fn === "option.match" || e.fn.startsWith("schema.decode") || e.fn === "schema.is" || e.fn === "schema.encodeSync" || e.fn === "schema.make") { // site-typed: the success channel (runSync/runPromise), the function value (fn)
           if (e.fn === "effect.runPromise" && e.type.kind !== "promise") err("libCall effect.runPromise must be promise-typed", e.loc);
           if (e.fn === "effect.fn" && e.type.kind !== "func") err("libCall effect.fn must be function-typed", e.loc); break; }
         if (e.fn === "process.envGet") {
