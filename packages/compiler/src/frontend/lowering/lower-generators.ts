@@ -47,6 +47,24 @@ function isYieldableError(lowerer: Lowerer, type: IrType): boolean {
   return form === "error" || form === "taggedError";
 }
 
+/** `(yield* service) as Database` in an Effect.gen body: the effect's success is `unknown` (a
+ * `Context.Service<Native, unknown>`), but the cast names a native bun:sqlite handle a dynamic value
+ * cannot carry. The resumed value reads at the cast's type straight from the kernel's box, which checks
+ * its own type. Null for any other cast. */
+export function lowerYieldAsHandle(lowerer: Lowerer, expr: ts.AsExpression | ts.TypeAssertion): IrExpr | null {
+  let operand: ts.Expression = expr.expression;
+  while (ts.isParenthesizedExpression(operand)) operand = operand.expression;
+  if (!ts.isYieldExpression(operand) || !operand.asteriskToken || operand.expression === undefined) return null;
+  if (lowerer.ctx.generator?.yieldT.kind !== "effect") return null;
+  const target = lowerer.mapTypeOf(lowerer.checker.getTypeFromTypeNode(expr.type));
+  if (target === null || (target.kind !== "sqliteDb" && target.kind !== "sqliteStmt")) return null;
+  if (lowerer.mapTypeOf(lowerer.typeOf(operand))?.kind !== "dyn") return null;
+  const value = lowerer.lowerExpr(operand.expression);
+  if (value.type.kind !== "effect") return null;
+  const loc = locOf(expr);
+  return { kind: "libCall", fn: "effect.runSync", args: [{ kind: "yieldExpr", value, type: EFFECT_T, loc }], type: target, loc };
+}
+
 /** `yield e` / `yield;` — only inside a generator body the signature
  * collection accepted (lowerer.ctx.generator carries the channels). `yield*`
  * lowers in STATEMENT position only (lowerYieldStarStatement — the value

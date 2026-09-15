@@ -770,7 +770,10 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::WithContext(inner, bundle) => Step::ReplaceEnv(bundle.clone(), inner.clone()),
         EffectNode::ProvideLayer(inner, layer) => {
             let inner = inner.clone();
-            Step::Push(Frame::FlatMap(Rc::new(move |bundle| effect_new(EffectNode::ProvideBundle(inner.clone(), bundle_of(&bundle))))), layer_build(layer))
+            // As in effect, the layer builds in a scope that closes once the provided effect finishes: finalizers a
+            // build registers (`Effect.addFinalizer` in a `Layer.effect`) run then.
+            let provided = effect_flat_map(&layer_build(layer), Rc::new(move |bundle| effect_new(EffectNode::ProvideBundle(inner.clone(), bundle_of(&bundle)))), no_trace());
+            Step::OpenScope(provided)
         }
         EffectNode::Layer(_) => throw_error("scriptc: a layer is not an effect (Effect.provide it)".to_owned()),
         EffectNode::ForEach(items, f, collect, _) => Step::Collect(CollectSource::Items(items(), f.clone()), collect.clone()),

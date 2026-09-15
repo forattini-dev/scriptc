@@ -54,3 +54,32 @@ test("--target bun lowers bun:sqlite statically (rust)", async () => {
     ].join("\n"),
   );
 });
+
+/* Redcode's Sqlite.Native shape: a Database built by a Layer.effect (closing
+ * it in a finalizer), provided under a `Context.Service<Native, unknown>` and
+ * read back with `(yield* Native) as Database`. The golden is Bun 1.4.1's
+ * output for the same program. */
+test("--target bun reads a layer-provided bun:sqlite Database through the effect kernel (rust)", async () => {
+  const fixture = resolve("packages/compiler/test/fixtures/bun-sqlite-effect-layer/src/main.ts");
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-bun-sqlite-effect-layer-"));
+  const result = await compile(fixture, {
+    outDir: dir,
+    outPath: join(dir, "program"),
+    backend: "rust",
+    target: "bun",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : result.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+  const run = await new Promise<{ stdout: string; stderr: string; code: number }>((done) => {
+    execFile(result.binaryPath, { encoding: "utf8", env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" } }, (error, stdout, stderr) => {
+      done({ stdout, stderr, code: error && typeof error.code === "number" ? error.code : 0 });
+    });
+  });
+  expect(run.stderr).toBe("");
+  expect(run.code).toBe(0);
+  expect(run.stdout).toBe(['rows [{"n":7}]', "done", ""].join("\n"));
+});

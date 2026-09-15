@@ -58,7 +58,7 @@ import { lowerStaticFieldRead } from "./lower-classes.js";
 import { bindingNeverReassigned, implicitMonoFile, lowerTaggedTemplate, nullishGenericBindingUnitOf, omittedArgFor } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js"; import { familyFnNodeOf, familyFnOfValue, lowerFamilyImpl } from "./lower-families.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, isParseArgsDynTypeName, underConstAssertion, unitOnlyUnion } from "../type-mapper.js";
-import { lowerYield } from "./lower-generators.js";
+import { lowerYield, lowerYieldAsHandle } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
 import { boolLit, numLit, strLit, varRef } from "../../ir/build.js";
 import { lowerIslandCallableRecordCast } from "./lower-island-interface.js";
@@ -8292,7 +8292,7 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
           (narrowed.kind === "dyn" && isJsSourceFile(expr.getSourceFile())));
       if (!bridged) lowerer.unsupported("SC1063", expr);
     }
-    const inner = lowerer.lowerExpr(expr.expression);
+    const inner = lowerYieldAsHandle(lowerer, expr) ?? lowerer.lowerExpr(expr.expression); // `(yield* service) as Database`: the kernel box's own type (lower-generators.ts)
     const use = runtimeOptionalUseOf(expr);
     if (inner.type.kind === "union" && runtimeOptionalAssertionErases(lowerer, expr, inner, use)) return inner;
     if (inner.type.kind !== "dyn" && inner.type.kind !== "jsval") {
