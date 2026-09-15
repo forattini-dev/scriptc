@@ -13,6 +13,7 @@ import { kernelServiceIdOfSymbol } from "../kernel.js";
 import { applyProgramPipeStep, applySchemaPipeStep, isSchemaLike, lowerSchemaClassMake, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest, unwrapSchema } from "./lower-schema.js";
 import { lowerConsoleInspectArg } from "./lower-inspect.js";
 import { lowerContextServiceUse } from "./lower-context-service.js";
+import { lowerSqlHandleCall, lowerSqlHandleProperty, lowerSqlNamespaceCall, lowerSqlNamespaceProperty, lowerSqlServiceKey } from "./lower-sql-client.js";
 
 const EFFECT_NAMESPACE_DTS = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
 /** `effect/unstable/<area>/<Name>` modules (SqlClient, Statement, Reactivity, …): named `<area>/<Name>` so they never
@@ -58,9 +59,8 @@ function lib(fn: IrLibFn, args: IrExpr[], type: IrType, loc: SrcLoc): IrExpr {
 export function lowerServiceKeyRef(L: Lowerer, node: ts.Identifier | ts.PropertyAccessExpression): IrExpr | null {
   if (L.dynamic) return null;
   const loc = locOf(node);
-  if (distServiceConst(L, node, "sql/SqlClient", "SqlClient")) {
-    return lib("effect.serviceKeyIdentity", ["effect/sql/SqlClient", "effect/sql/SqlClient"].map(value => ({ kind: "strLit", value, type: STRING, loc })), EFFECT_T, loc);
-  }
+  const sqlKey = lowerSqlServiceKey(L, node);
+  if (sqlKey !== null) return sqlKey;
   const id = kernelServiceIdOfSymbol(L.checker, L.checker.getSymbolAtLocation(ts.isIdentifier(node) ? node : node.name));
   if (id === null) return null;
   let symbol = L.checker.getSymbolAtLocation(ts.isIdentifier(node) ? node : node.name);
@@ -70,16 +70,6 @@ export function lowerServiceKeyRef(L: Lowerer, node: ts.Identifier | ts.Property
   if (declaration === undefined) return null;
   const identity = `${declaration.getSourceFile().fileName}:${declaration.pos}`;
   return lib("effect.serviceKeyIdentity", [id, identity].map(value => ({ kind: "strLit", value, type: STRING, loc })), EFFECT_T, loc);
-}
-
-/** Whether `node` names the service const `name` that effect's `dist/unstable/<area>` module declares (e.g. `SqlClient`
- * from sql/SqlClient.d.ts, a `Context.Service` whose key is its module path). */
-function distServiceConst(L: Lowerer, node: ts.Identifier | ts.PropertyAccessExpression, module: string, name: string): boolean {
-  let symbol = L.checker.getSymbolAtLocation(ts.isIdentifier(node) ? node : node.name);
-  if (symbol === undefined) return false;
-  if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = L.checker.getAliasedSymbol(symbol);
-  return symbol.name === name && L.checker.declarationsOf(symbol).some((declaration) =>
-    ts.isVariableDeclaration(declaration) && declaration.getSourceFile().fileName.replace(/\\/g, "/").endsWith(`/node_modules/effect/dist/unstable/${module}.d.ts`));
 }
 
 /** `Effect.void`, `Layer.empty` and the other VALUE members of the namespaces (property reads), plus service key
@@ -96,24 +86,14 @@ export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
   if (ns === "Schema") return lowerSchemaProperty(L, expr, loc);
   if (ns === "Duration" && expr.name.text === "zero") return lib("effect.durationZero", [], EFFECT_T, loc);
   if (ns === "Scope" && expr.name.text === "Scope") return lib("effect.scopeKey", [], EFFECT_T, loc);
-  if (ns === "sql/SqlClient" && expr.name.text === "SafeIntegers") return lib("effect.sqlSafeIntegers", [], EFFECT_T, loc);
-  // Reactivity (query invalidation) is not observable natively: its layer provides nothing.
-  if (ns === "reactivity/Reactivity" && expr.name.text === "layer") return lib("layer.empty", [], EFFECT_T, loc);
+  const sqlValue = lowerSqlNamespaceProperty(ns, expr.name.text, loc);
+  if (sqlValue !== null) return sqlValue;
   // Kernel DATA handles (an Exit): `_tag` and the success `value` read through the kernel, typed by the checker.
   if (ns === null && !expr.questionDotToken && L.mapTypeOf(L.typeOf(expr.expression))?.kind === "effect") {
     // A fiber value IS its context snapshot: `fiber.context` reads the same handle.
     if (expr.name.text === "context") return L.lowerExpr(expr.expression);
-    const handleName = L.typeOf(expr.expression).getSymbol()?.name;
-    if (handleName === "SqlClient" && (expr.name.text === "transactionService" || expr.name.text === "reserve")) {
-      return lib(expr.name.text === "reserve" ? "effect.sqlReserve" : "effect.sqlTransactionKey", [L.lowerExpr(expr.expression)], EFFECT_T, loc);
-    }
-    if (handleName === "Statement" && ["withoutTransform", "values", "raw", "unprepared"].includes(expr.name.text)) {
-      // Connection results travel as checked-dynamic rows; the statement's declared row type is checked on the way out.
-      const run = lib("effect.sqlRun", [L.lowerExpr(expr.expression), { kind: "strLit", value: expr.name.text, type: STRING, loc }], EFFECT_T, loc);
-      const success = effectSuccessOf(L, L.typeOf(expr));      const target = success === null ? DYN : L.mapTypeOf(success);
-      if (target === null) return L.unsupported("SC1090", expr, `SQL rows of type '${L.checker.typeToString(success!)}'`);
-      return target.kind === "dyn" ? run : lib("effect.map", [run, liftedDynCheck(L, target, loc)], EFFECT_T, loc);
-    }
+    const sqlMember = lowerSqlHandleProperty(L, expr, loc);
+    if (sqlMember !== null) return sqlMember;
     if (expr.name.text === "_tag") return lib("effect.dataTag", [L.lowerExpr(expr.expression)], STRING, loc);
     if (expr.name.text === "message") return lib("effect.dataMessage", [L.lowerExpr(expr.expression)], STRING, loc);
     if (expr.name.text === "value") {
@@ -338,22 +318,8 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
       return lib(callee.name.text === "take" ? "effect.semaphoreTake" : "effect.semaphoreRelease", [semaphore, permits], EFFECT_T, loc);
     }
   }
-  // `client.unsafe(sql, params?)` / `client.withTransaction(effect)` on a native SqlClient handle.
-  if (!L.dynamic && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && !callee.questionDotToken &&
-    L.typeOf(callee.expression).getSymbol()?.name === "SqlClient" && L.mapTypeOf(L.typeOf(callee.expression))?.kind === "effect") {
-    const client = L.lowerExpr(callee.expression);
-    if (callee.name.text === "unsafe" && (expr.arguments.length === 1 || expr.arguments.length === 2)) {
-      const sql = L.lowerExprExpecting(expr.arguments[0]!, STRING);
-      const paramsNode = expr.arguments[1];
-      const params: IrExpr = paramsNode === undefined ? { kind: "dynArrLit", elems: [], type: DYN, loc } : sqlDyn(L, L.lowerExprExpecting(paramsNode, DYN), paramsNode);
-      return lib("effect.sqlUnsafe", [client, sql, params], EFFECT_T, loc);
-    }
-    if (callee.name.text === "withTransaction" && expr.arguments.length === 1) {
-      const body = L.lowerExpr(expr.arguments[0]!);
-      if (body.type.kind === "effect") return lib("effect.sqlWithTransaction", [client, body], EFFECT_T, loc);
-    }
-    L.unsupported("SC1090", expr, `the effect kernel does not cover SqlClient.${callee.name.text} in this call shape yet`);
-  }
+  const sqlCall = lowerSqlHandleCall(L, callee, expr, loc);
+  if (sqlCall !== null) return sqlCall;
   if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.name)) return null;
   if (!L.dynamic && !callee.questionDotToken && (callee.name.text === "make" || callee.name.text === "annotate" || callee.name.text === "check") && isSchemaLike(L, callee.expression)) {
     const method = lowerSchemaHandleMethod(L, callee.name.text, callee.expression, [...expr.arguments], expr, loc);
@@ -387,14 +353,8 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === "PubSub") return lowerPubSubMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Cause") return lowerCauseMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Context") return lowerContextMember(L, callee.name.text, [...expr.arguments], expr, loc);
-  if (ns === "sql/Statement" && callee.name.text === "makeCompilerSqlite" && expr.arguments.length <= 1) {
-    const evaluated = expr.arguments.map((arg): IrStmt => ({ kind: "exprStmt", expr: L.lowerExpr(arg), loc }));
-    const compiler = lib("effect.sqlCompiler", [], EFFECT_T, loc);
-    return evaluated.length === 0 ? compiler : { kind: "seqExpr", stmts: evaluated, result: compiler, type: EFFECT_T, loc };
-  }
-  if (ns === "sql/SqlClient" && callee.name.text === "make" && expr.arguments.length === 1 && ts.isObjectLiteralExpression(expr.arguments[0]!)) {
-    return lowerSqlClientMake(L, expr.arguments[0], expr, loc);
-  }
+  const sqlMade = lowerSqlNamespaceCall(L, ns, callee.name.text, expr, loc);
+  if (sqlMade !== null) return sqlMade;
   if (ns === "Fiber" && callee.name.text === "getCurrent" && expr.arguments.length === 0) return asCallType(L, expr, lib("effect.fiberCurrent", [], EFFECT_T, loc));
   if (ns === "Scope" && callee.name.text === "addFinalizer" && expr.arguments.length === 2) {
     const scope = L.lowerExpr(expr.arguments[0]!);
@@ -449,102 +409,6 @@ function lowerContextMember(L: Lowerer, member: string, args: ts.Expression[], e
     return lib("effect.contextGet", [context, key], type, loc);
   }
   return refused();
-}
-
-/** A checked-dynamic value for a SQL parameter list. */
-function sqlDyn(L: Lowerer, value: IrExpr, node: ts.Node): IrExpr {
-  if (value.type.kind === "dyn") return value;
-  if (L.dynConvertible(value.type)) return { kind: "dynFrom", value, type: DYN, loc: value.loc };
-  return L.unsupported("SC1090", node, `SQL parameters of type '${L.fmt(value.type)}'`);
-}
-
-/** `SqlClient.make({ acquirer, transactionAcquirer?, compiler, spanAttributes })`: the native client over the program's
- * Connection record (named by the acquirer's success type). Row transforms are not honored yet. */
-function lowerSqlClientMake(L: Lowerer, options: ts.ObjectLiteralExpression, expr: ts.CallExpression, loc: SrcLoc): IrExpr {
-  let acquirer: { node: ts.Expression; value: IrExpr } | undefined;
-  let transactionAcquirer: IrExpr | undefined;
-  const evaluated: IrStmt[] = [];
-  for (const property of options.properties) {
-    if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) {
-      return L.unsupported("SC1090", property, "SqlClient.make options that are not plain property assignments");
-    }
-    if (!ts.isIdentifier(property.name)) return L.unsupported("SC1090", property, "SqlClient.make options with computed keys");
-    const node = ts.isShorthandPropertyAssignment(property) ? property.name : property.initializer;
-    const name = property.name.text;
-    if (name === "transformRows") {
-      if (node.kind !== ts.SyntaxKind.UndefinedKeyword && !(ts.isIdentifier(node) && node.text === "undefined")) {
-        return L.unsupported("SC1090", property, "SqlClient.make row transforms (transformRows) are not supported yet");
-      }
-      continue;
-    }
-    const value = L.lowerExpr(node);
-    if (name === "acquirer") acquirer = { node, value };
-    else if (name === "transactionAcquirer") transactionAcquirer = value;
-    else if (name === "compiler" || name === "spanAttributes") evaluated.push({ kind: "exprStmt", expr: value, loc });
-    else return L.unsupported("SC1090", property, `the SqlClient.make option '${name}' is not supported yet`);
-  }
-  if (acquirer === undefined || acquirer.value.type.kind !== "effect") return L.unsupported("SC1090", expr, "SqlClient.make without an acquirer effect");
-  if (transactionAcquirer !== undefined && transactionAcquirer.type.kind !== "effect") return L.unsupported("SC1090", expr, "SqlClient.make with a non-effect transactionAcquirer");
-  const success = effectSuccessOf(L, L.typeOf(acquirer.node));
-  const acquired = success === null ? null : L.mapTypeOf(success);
-  if (acquired?.kind !== "record") {
-    return L.unsupported("SC1090", acquirer.node, `SqlClient.make over a connection of type '${success === null ? "unknown" : L.checker.typeToString(success)}' (a Connection record is required)`);
-  }
-  // The transaction service's `readonly [conn: Connection, depth: number]` names effect's own Connection record: the
-  // client runs every connection at that shape, so an acquired subtype (a SqliteConnection) narrows on acquisition.
-  const client = effectSuccessOf(L, L.typeOf(expr));
-  const serviceProp = client === null ? undefined : L.checker.getPropertyOfType(client, "transactionService");
-  const serviceType = serviceProp === undefined ? null : L.checker.getTypeOfSymbol(serviceProp);
-  const tupleTs = serviceType === null ? undefined : L.checker.getTypeArguments(serviceType as ts.TypeReference)[1];
-  const tuple = tupleTs === undefined ? null : L.mapTypeOf(tupleTs);
-  const tupleShape = tuple?.kind === "record" ? L.shapes.get(tuple.shapeId) : undefined;
-  const connection = tupleShape?.tuple === true ? tupleShape.fields.find((field) => field.name === "0")?.type : undefined;
-  const depth = tupleShape?.fields.find((field) => field.name === "1")?.type;
-  if (tuple === null || tupleShape === undefined || connection?.kind !== "record" || depth?.kind !== "f64") {
-    return L.unsupported("SC1090", expr, "SqlClient.make whose transaction service is not a [Connection, number] tuple");
-  }
-  const narrow = (source: IrExpr): IrExpr => acquired.shapeId === connection.shapeId ? source
-    : lib("effect.map", [source, liftedSqlFn(L, [acquired], connection, ([value]) => L.coerceInto(acquirer.node, value!, connection), loc)], EFFECT_T, loc);
-  const made = lib("effect.sqlClientMake", [
-    narrow(acquirer.value),
-    narrow(transactionAcquirer ?? acquirer.value),
-    { kind: "strLit", value: `record:${connection.shapeId}`, type: STRING, loc },
-    liftedSqlFn(L, [connection, depth], tuple, ([conn, level]) => ({ kind: "recordLit", fields: [{ name: "0", value: conn! }, { name: "1", value: level! }], type: tuple, loc }), loc),
-    liftedSqlFn(L, [tuple], connection, ([entry]) => ({ kind: "recordGet", obj: entry!, shapeId: tupleShape.id, field: "0", type: connection, loc }), loc),
-    liftedSqlFn(L, [tuple], depth, ([entry]) => ({ kind: "recordGet", obj: entry!, shapeId: tupleShape.id, field: "1", type: depth, loc }), loc),
-  ], EFFECT_T, loc);
-  return evaluated.length === 0 ? made : { kind: "seqExpr", stmts: evaluated, result: made, type: EFFECT_T, loc };
-}
-
-/** A capture-free lifted closure over `params` whose body returns `body(parameter refs)`. */
-function liftedSqlFn(L: Lowerer, params: IrType[], ret: IrType, body: (refs: IrExpr[]) => IrExpr, loc: SrcLoc): IrExpr {
-  const name = `%effect.sql.${L.liftedFns.length}`;
-  L.fnStack.push(newFnCtx(false, null, null, ret));
-  try {
-    const locals: IrLocal[] = params.map((type, index) => ({ id: `p${index}.0`, name: `p${index}`, type, mutable: false }));
-    L.ctx.locals.push(...locals);
-    const refs: IrExpr[] = locals.map((local) => ({ kind: "varRef", localId: local.id, type: local.type, loc }));
-    const result = body(refs);
-    L.liftedFns.push({ name, params: locals.map((local) => ({ localId: local.id, name: local.name, type: local.type })), returnType: ret, locals: L.ctx.locals, body: [{ kind: "return", value: result, loc }], loc });
-  } finally {
-    L.fnStack.pop();
-  }
-  return { kind: "closure", fnName: name, captures: [], type: { kind: "func", params, ret }, loc };
-}
-
-/** The closure `(rows: unknown) => rows as T`, checked. */
-function liftedDynCheck(L: Lowerer, target: IrType, loc: SrcLoc): IrExpr {
-  const name = `%effect.sqlRows.${L.liftedFns.length}`;
-  L.fnStack.push(newFnCtx(false, null, null, target));
-  try {
-    const local: IrLocal = { id: "rows.0", name: "rows", type: DYN, mutable: false };
-    L.ctx.locals.push(local);
-    const checked: IrExpr = { kind: "dynCheck", value: { kind: "varRef", localId: local.id, type: DYN, loc }, type: target, loc };
-    L.liftedFns.push({ name, params: [{ localId: local.id, name: local.name, type: DYN }], returnType: target, locals: L.ctx.locals, body: [{ kind: "return", value: checked, loc }], loc });
-  } finally {
-    L.fnStack.pop();
-  }
-  return { kind: "closure", fnName: name, captures: [], type: { kind: "func", params: [DYN], ret: target }, loc };
 }
 
 /** The identity closure `(effect) => effect` handed to an uninterruptibleMask callback as `restore`. */
@@ -739,7 +603,7 @@ function lowerCauseMember(L: Lowerer, member: string, args: ts.Expression[], exp
 }
 
 /** The SUCCESS type argument of an `Effect<A, E, R>` (or `Effect<…>[]`'s element's) TS type, or null. */
-function effectSuccessOf(L: Lowerer, type: ts.Type): ts.Type | null {
+export function effectSuccessOf(L: Lowerer, type: ts.Type): ts.Type | null {
   const sym = type.getAliasSymbol() ?? type.getSymbol();
   if (sym?.name !== "Effect") return null;
   return L.checker.getTypeArguments(type as ts.TypeReference)[0] ?? null;
