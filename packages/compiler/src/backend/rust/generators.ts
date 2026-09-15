@@ -593,9 +593,11 @@ function emitGeneratorSequence(
       emitGeneratorIf(fn, statement, statements.slice(index + 1), context, locals, flow, onComplete);
       return;
     }
+    // A discarded `yield*` runs its effect but never reads the success value (statements.ts applies the same rule).
+    const discardedRun = statement.kind === "exprStmt" && statement.expr.kind === "libCall" && statement.expr.fn === "effect.runSync" && statement.expr.args.length === 1;
     const nested = statement.kind === "assign" ? statement.value
       : statement.kind === "varDecl" ? statement.init
-      : statement.kind === "exprStmt" ? statement.expr
+      : statement.kind === "exprStmt" ? (discardedRun && statement.expr.kind === "libCall" ? statement.expr.args[0]! : statement.expr)
       : null;
     if (nested !== null && containsYield(nested)) {
       emitGeneratorValue(fn, nested, context, flow, (value) => {
@@ -607,7 +609,7 @@ function emitGeneratorSequence(
           context.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${context.rustType(local.type, statement.loc)}> = runtime::cell_new(${value});`);
           locals.add(local.id);
         } else {
-          context.line(`let _ = ${value};`);
+          context.line(discardedRun ? `let _ = runtime::effect_run_sync(&${value});` : `let _ = ${value};`);
         }
         emitGeneratorSequence(fn, statements.slice(index + 1), context, locals, flow, onComplete);
       });

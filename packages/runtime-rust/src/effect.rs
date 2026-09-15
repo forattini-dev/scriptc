@@ -178,6 +178,9 @@ pub enum KernelData {
     /// A fiber's context snapshot (`fiber.context`) and an open scope (`Scope.Scope`) — effect_context.rs.
     Context(Rc<EffectContextData>),
     Scope(EffectScope),
+    /// A native effect/unstable/sql client and statement (effect_sql.rs).
+    SqlClient(Rc<SqlClientData>),
+    SqlStatement(Rc<SqlStatementData>),
     /// A `Queue` (and the per-subscriber queue a `PubSub` hands out): items with waiting takers and offerers.
     Queue(Rc<RefCell<QueueState>>),
     /// The failure `Effect.tryPromise(thunk)` builds from a rejection: effect's `UnknownError`, whose message is

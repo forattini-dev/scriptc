@@ -1,4 +1,4 @@
-import { EFFECT_T, F64, STRING } from "./type-constants.js";
+import { DYN, EFFECT_T, F64, STRING } from "./type-constants.js";
 
 export type IrEffectContextLibFn =
   /** `Context.Reference(id, { defaultValue })`: a service key whose lookup answers the (lazily computed, then
@@ -23,7 +23,25 @@ export type IrEffectContextLibFn =
   | "effect.semaphoreRelease"
   /** `Effect.uninterruptibleMask((restore) => effect)`: the kernel has no interruption, so the callback runs lazily
    * with `restore` bound to the identity closure (the second argument). */
-  | "effect.uninterruptibleMask";
+  | "effect.uninterruptibleMask"
+  /** effect/unstable/sql, natively (effect_sql.rs). `Statement.makeCompilerSqlite(...)`: an inert compiler handle (the
+   * kernel runs SQL text as given). */
+  | "effect.sqlCompiler"
+  /** `SqlClient.SafeIntegers`: the reference key, default false. */
+  | "effect.sqlSafeIntegers"
+  /** `SqlClient.make({ acquirer, transactionAcquirer? })`: acquirer, transaction acquirer, and the `record:<shape>`
+   * carrier naming the program's Connection record (the generated adapter calls its methods). */
+  | "effect.sqlClientMake"
+  /** `client.unsafe(sql, params)`: a statement handle. */
+  | "effect.sqlUnsafe"
+  /** A statement's execution effect: `withoutTransform` / `values` / `raw` / `unprepared` (the string argument). */
+  | "effect.sqlRun"
+  /** `client.withTransaction(effect)`: BEGIN/SAVEPOINT, the body with the transaction connection, COMMIT/ROLLBACK. */
+  | "effect.sqlWithTransaction"
+  /** `client.transactionService`: the per-client transaction key. */
+  | "effect.sqlTransactionKey"
+  /** `client.reserve`: the transaction acquirer. */
+  | "effect.sqlReserve";
 
 export const EFFECT_CONTEXT_LIB_FN_SIGS = {
   "effect.referenceKey": { argTypes: [STRING, null], result: EFFECT_T },
@@ -37,4 +55,12 @@ export const EFFECT_CONTEXT_LIB_FN_SIGS = {
   "effect.semaphoreTake": { argTypes: [EFFECT_T, F64], result: EFFECT_T },
   "effect.semaphoreRelease": { argTypes: [EFFECT_T, F64], result: EFFECT_T },
   "effect.uninterruptibleMask": { argTypes: [null, null], result: EFFECT_T },
+  "effect.sqlCompiler": { argTypes: [], result: EFFECT_T },
+  "effect.sqlSafeIntegers": { argTypes: [], result: EFFECT_T },
+  "effect.sqlClientMake": { argTypes: [EFFECT_T, EFFECT_T, STRING], result: EFFECT_T },
+  "effect.sqlUnsafe": { argTypes: [EFFECT_T, STRING, DYN], result: EFFECT_T },
+  "effect.sqlRun": { argTypes: [EFFECT_T, STRING], result: EFFECT_T },
+  "effect.sqlWithTransaction": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T },
+  "effect.sqlTransactionKey": { argTypes: [EFFECT_T], result: EFFECT_T },
+  "effect.sqlReserve": { argTypes: [EFFECT_T], result: EFFECT_T },
 };

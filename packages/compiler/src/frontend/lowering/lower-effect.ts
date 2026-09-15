@@ -7,7 +7,7 @@
  * yet is a named refusal (the census in the plan file orders the work). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js"; import { numLit } from "../../ir/build.js";
-import { BOOL, DYN, EFFECT_T, IrExpr, canConvertToDyn, IrLibFn, IrLocal, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/ir.js"; import { newFnCtx } from "./lowerer.js";
+import { BOOL, DYN, EFFECT_T, IrExpr, canConvertToDyn, IrLibFn, IrLocal, IrStmt, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/ir.js"; import { newFnCtx } from "./lowerer.js";
 import { locOf } from "../program.js";
 import { kernelServiceIdOfSymbol } from "../kernel.js";
 import { applyProgramPipeStep, applySchemaPipeStep, isSchemaLike, lowerSchemaClassMake, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest, unwrapSchema } from "./lower-schema.js";
@@ -15,6 +15,9 @@ import { lowerConsoleInspectArg } from "./lower-inspect.js";
 import { lowerContextServiceUse } from "./lower-context-service.js";
 
 const EFFECT_NAMESPACE_DTS = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
+/** `effect/unstable/<area>/<Name>` modules (SqlClient, Statement, Reactivity, …): named `<area>/<Name>` so they never
+ * collide with the top-level namespaces. */
+const EFFECT_UNSTABLE_NAMESPACE_DTS = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]unstable[\\/]([a-z]+)[\\/]([A-Za-z]+)\.d\.ts$/;
 
 /** A named export of the effect package (`import { pipe } from "effect"`): the module it is declared in, by provenance. */
 function effectExportOf(L: Lowerer, node: ts.Expression): { module: string; name: string } | null {
@@ -40,6 +43,8 @@ export function effectNamespaceOf(L: Lowerer, node: ts.Expression): string | nul
     if (!ts.isSourceFile(decl)) continue;
     const match = EFFECT_NAMESPACE_DTS.exec(decl.fileName);
     if (match) return match[1]!;
+    const unstable = EFFECT_UNSTABLE_NAMESPACE_DTS.exec(decl.fileName);
+    if (unstable) return `${unstable[1]!}/${unstable[2]!}`;
   }
   return null;
 }
@@ -77,10 +82,24 @@ export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
   if (ns === "Schema") return lowerSchemaProperty(L, expr, loc);
   if (ns === "Duration" && expr.name.text === "zero") return lib("effect.durationZero", [], EFFECT_T, loc);
   if (ns === "Scope" && expr.name.text === "Scope") return lib("effect.scopeKey", [], EFFECT_T, loc);
+  if (ns === "sql/SqlClient" && expr.name.text === "SafeIntegers") return lib("effect.sqlSafeIntegers", [], EFFECT_T, loc);
+  // Reactivity (query invalidation) is not observable natively: its layer provides nothing.
+  if (ns === "reactivity/Reactivity" && expr.name.text === "layer") return lib("layer.empty", [], EFFECT_T, loc);
   // Kernel DATA handles (an Exit): `_tag` and the success `value` read through the kernel, typed by the checker.
   if (ns === null && !expr.questionDotToken && L.mapTypeOf(L.typeOf(expr.expression))?.kind === "effect") {
     // A fiber value IS its context snapshot: `fiber.context` reads the same handle.
     if (expr.name.text === "context") return L.lowerExpr(expr.expression);
+    const handleName = L.typeOf(expr.expression).getSymbol()?.name;
+    if (handleName === "SqlClient" && (expr.name.text === "transactionService" || expr.name.text === "reserve")) {
+      return lib(expr.name.text === "reserve" ? "effect.sqlReserve" : "effect.sqlTransactionKey", [L.lowerExpr(expr.expression)], EFFECT_T, loc);
+    }
+    if (handleName === "Statement" && ["withoutTransform", "values", "raw", "unprepared"].includes(expr.name.text)) {
+      // Connection results travel as checked-dynamic rows; the statement's declared row type is checked on the way out.
+      const run = lib("effect.sqlRun", [L.lowerExpr(expr.expression), { kind: "strLit", value: expr.name.text, type: STRING, loc }], EFFECT_T, loc);
+      const success = effectSuccessOf(L, L.typeOf(expr));      const target = success === null ? DYN : L.mapTypeOf(success);
+      if (target === null) return L.unsupported("SC1090", expr, `SQL rows of type '${L.checker.typeToString(success!)}'`);
+      return target.kind === "dyn" ? run : lib("effect.map", [run, liftedDynCheck(L, target, loc)], EFFECT_T, loc);
+    }
     if (expr.name.text === "_tag") return lib("effect.dataTag", [L.lowerExpr(expr.expression)], STRING, loc);
     if (expr.name.text === "message") return lib("effect.dataMessage", [L.lowerExpr(expr.expression)], STRING, loc);
     if (expr.name.text === "value") {
@@ -305,6 +324,22 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
       return lib(callee.name.text === "take" ? "effect.semaphoreTake" : "effect.semaphoreRelease", [semaphore, permits], EFFECT_T, loc);
     }
   }
+  // `client.unsafe(sql, params?)` / `client.withTransaction(effect)` on a native SqlClient handle.
+  if (!L.dynamic && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && !callee.questionDotToken &&
+    L.typeOf(callee.expression).getSymbol()?.name === "SqlClient" && L.mapTypeOf(L.typeOf(callee.expression))?.kind === "effect") {
+    const client = L.lowerExpr(callee.expression);
+    if (callee.name.text === "unsafe" && (expr.arguments.length === 1 || expr.arguments.length === 2)) {
+      const sql = L.lowerExprExpecting(expr.arguments[0]!, STRING);
+      const paramsNode = expr.arguments[1];
+      const params: IrExpr = paramsNode === undefined ? { kind: "dynArrLit", elems: [], type: DYN, loc } : sqlDyn(L, L.lowerExprExpecting(paramsNode, DYN), paramsNode);
+      return lib("effect.sqlUnsafe", [client, sql, params], EFFECT_T, loc);
+    }
+    if (callee.name.text === "withTransaction" && expr.arguments.length === 1) {
+      const body = L.lowerExpr(expr.arguments[0]!);
+      if (body.type.kind === "effect") return lib("effect.sqlWithTransaction", [client, body], EFFECT_T, loc);
+    }
+    L.unsupported("SC1090", expr, `the effect kernel does not cover SqlClient.${callee.name.text} in this call shape yet`);
+  }
   if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.name)) return null;
   if (!L.dynamic && !callee.questionDotToken && (callee.name.text === "make" || callee.name.text === "annotate" || callee.name.text === "check") && isSchemaLike(L, callee.expression)) {
     const method = lowerSchemaHandleMethod(L, callee.name.text, callee.expression, [...expr.arguments], expr, loc);
@@ -338,6 +373,14 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === "PubSub") return lowerPubSubMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Cause") return lowerCauseMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Context") return lowerContextMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "sql/Statement" && callee.name.text === "makeCompilerSqlite" && expr.arguments.length <= 1) {
+    const evaluated = expr.arguments.map((arg): IrStmt => ({ kind: "exprStmt", expr: L.lowerExpr(arg), loc }));
+    const compiler = lib("effect.sqlCompiler", [], EFFECT_T, loc);
+    return evaluated.length === 0 ? compiler : { kind: "seqExpr", stmts: evaluated, result: compiler, type: EFFECT_T, loc };
+  }
+  if (ns === "sql/SqlClient" && callee.name.text === "make" && expr.arguments.length === 1 && ts.isObjectLiteralExpression(expr.arguments[0]!)) {
+    return lowerSqlClientMake(L, expr.arguments[0], expr, loc);
+  }
   if (ns === "Fiber" && callee.name.text === "getCurrent" && expr.arguments.length === 0) return asCallType(L, expr, lib("effect.fiberCurrent", [], EFFECT_T, loc));
   if (ns === "Scope" && callee.name.text === "addFinalizer" && expr.arguments.length === 2) {
     const scope = L.lowerExpr(expr.arguments[0]!);
@@ -383,6 +426,64 @@ function lowerContextMember(L: Lowerer, member: string, args: ts.Expression[], e
     return lib("effect.contextGet", [context, key], type, loc);
   }
   return refused();
+}
+
+/** A checked-dynamic value for a SQL parameter list. */
+function sqlDyn(L: Lowerer, value: IrExpr, node: ts.Node): IrExpr {
+  if (value.type.kind === "dyn") return value;
+  if (L.dynConvertible(value.type)) return { kind: "dynFrom", value, type: DYN, loc: value.loc };
+  return L.unsupported("SC1090", node, `SQL parameters of type '${L.fmt(value.type)}'`);
+}
+
+/** `SqlClient.make({ acquirer, transactionAcquirer?, compiler, spanAttributes })`: the native client over the program's
+ * Connection record (named by the acquirer's success type). Row transforms are not honored yet. */
+function lowerSqlClientMake(L: Lowerer, options: ts.ObjectLiteralExpression, expr: ts.CallExpression, loc: SrcLoc): IrExpr {
+  let acquirer: { node: ts.Expression; value: IrExpr } | undefined;
+  let transactionAcquirer: IrExpr | undefined;
+  const evaluated: IrStmt[] = [];
+  for (const property of options.properties) {
+    if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) {
+      return L.unsupported("SC1090", property, "SqlClient.make options that are not plain property assignments");
+    }
+    if (!ts.isIdentifier(property.name)) return L.unsupported("SC1090", property, "SqlClient.make options with computed keys");
+    const node = ts.isShorthandPropertyAssignment(property) ? property.name : property.initializer;
+    const name = property.name.text;
+    if (name === "transformRows") {
+      if (node.kind !== ts.SyntaxKind.UndefinedKeyword && !(ts.isIdentifier(node) && node.text === "undefined")) {
+        return L.unsupported("SC1090", property, "SqlClient.make row transforms (transformRows) are not supported yet");
+      }
+      continue;
+    }
+    const value = L.lowerExpr(node);
+    if (name === "acquirer") acquirer = { node, value };
+    else if (name === "transactionAcquirer") transactionAcquirer = value;
+    else if (name === "compiler" || name === "spanAttributes") evaluated.push({ kind: "exprStmt", expr: value, loc });
+    else return L.unsupported("SC1090", property, `the SqlClient.make option '${name}' is not supported yet`);
+  }
+  if (acquirer === undefined || acquirer.value.type.kind !== "effect") return L.unsupported("SC1090", expr, "SqlClient.make without an acquirer effect");
+  if (transactionAcquirer !== undefined && transactionAcquirer.type.kind !== "effect") return L.unsupported("SC1090", expr, "SqlClient.make with a non-effect transactionAcquirer");
+  const success = effectSuccessOf(L, L.typeOf(acquirer.node));
+  const connection = success === null ? null : L.mapTypeOf(success);
+  if (connection?.kind !== "record") {
+    return L.unsupported("SC1090", acquirer.node, `SqlClient.make over a connection of type '${success === null ? "unknown" : L.checker.typeToString(success)}' (a Connection record is required)`);
+  }
+  const made = lib("effect.sqlClientMake", [acquirer.value, transactionAcquirer ?? acquirer.value, { kind: "strLit", value: `record:${connection.shapeId}`, type: STRING, loc }], EFFECT_T, loc);
+  return evaluated.length === 0 ? made : { kind: "seqExpr", stmts: evaluated, result: made, type: EFFECT_T, loc };
+}
+
+/** The closure `(rows: unknown) => rows as T`, checked. */
+function liftedDynCheck(L: Lowerer, target: IrType, loc: SrcLoc): IrExpr {
+  const name = `%effect.sqlRows.${L.liftedFns.length}`;
+  L.fnStack.push(newFnCtx(false, null, null, target));
+  try {
+    const local: IrLocal = { id: "rows.0", name: "rows", type: DYN, mutable: false };
+    L.ctx.locals.push(local);
+    const checked: IrExpr = { kind: "dynCheck", value: { kind: "varRef", localId: local.id, type: DYN, loc }, type: target, loc };
+    L.liftedFns.push({ name, params: [{ localId: local.id, name: local.name, type: DYN }], returnType: target, locals: L.ctx.locals, body: [{ kind: "return", value: checked, loc }], loc });
+  } finally {
+    L.fnStack.pop();
+  }
+  return { kind: "closure", fnName: name, captures: [], type: { kind: "func", params: [DYN], ret: target }, loc };
 }
 
 /** The identity closure `(effect) => effect` handed to an uninterruptibleMask callback as `restore`. */

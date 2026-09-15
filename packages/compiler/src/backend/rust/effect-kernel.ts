@@ -1,6 +1,6 @@
 import { effectTagPredicate } from "./effect-tag.js";
 import { rustJsString } from "./string-literals.js";
-import { recordNewName } from "./shared-records.js";
+import { isSharedRecord, recordNewName } from "./shared-records.js";
 /* The effect kernel's Rust emission: `effect.*` lib calls over
  * runtime/effect.rs. Values cross the kernel boxed (`EffectValue`, an
  * `Rc<dyn Any>`): a producer boxes its typed value, a consumer unboxes
@@ -9,7 +9,7 @@ import { recordNewName } from "./shared-records.js";
  * runtime's traced closures (the child-listener pattern). */
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
-import { typeEquals, type IrType, type SrcLoc } from "../../ir/ir.js";
+import { arrayOf, DYN, STRING, typeEquals, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { unboxEffectDynamic } from "./effect-dynamic.js";
 
 /** A typed value boxed for the kernel. UNION values travel as their ARM: a producer typed by one arm (`Effect.fail(new
@@ -72,6 +72,46 @@ function collector(carrier: RustLibCallExpr["args"][number], context: RustLibCal
     return `std::rc::Rc::new(|sc_values: Vec<runtime::EffectValue>| runtime::effect_box(${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} })))`;
   }
   return context.unsupported("effect collection carrier", loc);
+}
+
+/** The generated bridge from the kernel's SqlClient to the program's Connection record: unbox the connection, pick the
+ * method the operation names, and call it with (sql, params[, undefined transformRows]). */
+function sqlInvoke(context: RustLibCallContext, carrier: RustLibCallExpr["args"][number] | undefined, loc: SrcLoc): string {
+  if (carrier === undefined || carrier.kind !== "strLit" || !carrier.value.startsWith("record:")) return context.unsupported("SqlClient connection carrier", loc);
+  const shape = context.record(carrier.value.slice("record:".length), loc);
+  const recordType: IrType = { kind: "record", shapeId: shape.id };
+  const dyn = context.dynTypeName();
+  const method = (name: string): string => {
+    const field = shape.fields.find((candidate) => candidate.name === name);
+    if (field === undefined || field.type.kind !== "func") return `runtime::throw_type_error("connection.${name} is not a function".to_owned())`;
+    const fn = field.type;
+    const read = isSharedRecord(shape)
+      ? `sc_record.get_${mangleField(name)}()`
+      : `sc_record.with(|record| record.${mangleField(name)}${context.isEdgeValue(fn) ? `.as_ref().expect("scriptc: cleared live record field").clone()` : ".clone()"})`;
+    const args = fn.params.map((param, index): string => {
+      if (index === 0) return param.kind === "string" ? "sc_sql.clone()" : context.unsupported(`connection.${name} sql parameter of kind '${param.kind}'`, loc);
+      if (index === 1) return param.kind === "dyn" ? "sc_params.clone()" : context.unsupported(`connection.${name} params of kind '${param.kind}'`, loc);
+      if (param.kind === "union") {
+        const union = context.union(param.unionId, loc);
+        const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+        if (undefinedTag >= 0) return `${context.unionName(union.id)}::${context.unionVariant(undefinedTag)}`;
+      }
+      return context.unsupported(`connection.${name} parameter ${index} of kind '${param.kind}'`, loc);
+    });
+    return `{ let sc_method = ${read}; ${context.emitClosureDispatch("sc_method", fn, args, loc)} }`;
+  };
+  // Whatever row representation the connection answers (typed rows, value tuples, unknown), statements see it checked-dynamic.
+  // A `Record<string, unknown>` row is the dynamic object's own map, so it boxes by identity.
+  const objectRows = arrayOf({ kind: "map", key: STRING, value: DYN });
+  const rows = `if let Some(sc_native) = sc_boxed.downcast_ref::<${context.rustType(objectRows, loc)}>() { ` +
+    `let sc_rows: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); let mut sc_index = 0.0; ` +
+    `while sc_index < runtime::array_len(sc_native) { runtime::array_push(&sc_rows, ${dyn}::Object(runtime::array_get(sc_native, sc_index))); sc_index += 1.0; } return ${dyn}::Array(sc_rows); } ` +
+    `if let Some(sc_native) = sc_boxed.downcast_ref::<${context.rustType(arrayOf(arrayOf(DYN)), loc)}>() { return ${context.emitDynFromValue(arrayOf(arrayOf(DYN)), "sc_native.clone()", loc)}; }`;
+  return `std::rc::Rc::new(|sc_conn: &runtime::EffectValue, sc_op: runtime::SqlOp, sc_sql: &runtime::JsString, sc_params: Option<runtime::EffectValue>| -> runtime::JsEffect { ` +
+    `let sc_record: ${context.rustType(recordType, loc)} = ${unbox(context, recordType, "sc_conn", loc)}; ` +
+    `let sc_params: ${dyn} = match sc_params { Some(sc_value) => ${unbox(context, DYN, "&sc_value", loc)}, None => ${dyn}::Array(runtime::array_new(Vec::new())) }; ` +
+    `let sc_answer = match sc_op { runtime::SqlOp::Execute => ${method("execute")}, runtime::SqlOp::Raw => ${method("executeRaw")}, runtime::SqlOp::Values => ${method("executeValues")}, runtime::SqlOp::Unprepared => ${method("executeUnprepared")} }; ` +
+    `runtime::effect_map(&sc_answer, std::rc::Rc::new(|sc_value: runtime::EffectValue| runtime::effect_box(${unboxEffectDynamic(context, "&sc_value", rows)})), Box::new(|_: &mut runtime::Tracer<'_>| {})) })`;
 }
 
 function traced(context: RustLibCallContext, callback: string): string {
@@ -262,6 +302,29 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const body = second.type.ret.kind === "effect" ? dispatch : `{ let _ = ${dispatch}; runtime::effect_succeed(runtime::effect_box(())) }`;
       return `{ let ${source} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::${expr.fn === "effect.tap" ? "effect_tap" : "effect_tap_error"}(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${body} }), ${traced(context, keep)}) }`;
     }
+    case "effect.sqlCompiler": return "runtime::effect_void()";
+    case "effect.sqlSafeIntegers": return "runtime::effect_sql_safe_integers_key()";
+    case "effect.sqlClientMake":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_sql_client_make(${context.emitExpr(first)}, ${context.emitExpr(second)}, ${sqlInvoke(context, expr.args[2], expr.loc)})`;
+    case "effect.sqlUnsafe": {
+      const params = expr.args[2];
+      if (first === undefined || second === undefined || params === undefined) break;
+      return `runtime::effect_sql_client_unsafe(&${context.emitExpr(first)}, &${context.emitExpr(second)}, ${box(context, params.type, context.emitExpr(params), expr.loc)})`;
+    }
+    case "effect.sqlRun": {
+      if (first === undefined || second === undefined || second.kind !== "strLit") break;
+      const op = ({ withoutTransform: "Execute", values: "Values", raw: "Raw", unprepared: "Unprepared" } as Record<string, string | undefined>)[second.value];
+      if (op === undefined) break;
+      return `runtime::effect_sql_statement_run(&${context.emitExpr(first)}, runtime::SqlOp::${op})`;
+    }
+    case "effect.sqlWithTransaction":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_sql_client_with_transaction(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.sqlTransactionKey":
+    case "effect.sqlReserve":
+      if (first === undefined) break;
+      return `runtime::${expr.fn === "effect.sqlReserve" ? "effect_sql_client_reserve" : "effect_sql_client_transaction_key"}(&${context.emitExpr(first)})`;
     case "effect.referenceKey": {
       if (first === undefined || second === undefined || second.type.kind !== "func") break;
       const callback = context.nextTemporary();

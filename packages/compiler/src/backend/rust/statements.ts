@@ -203,6 +203,11 @@ class RustStatementEmitter {
         this.context.emitAssignment(stmt.localId, this.context.emitExpr(stmt.value), stmt.loc);
         return;
       case "exprStmt":
+        // A discarded `yield*` runs its effect but never reads the success value, so no representation check applies.
+        if (stmt.expr.kind === "libCall" && stmt.expr.fn === "effect.runSync" && stmt.expr.args.length === 1) {
+          this.context.line(`let _ = runtime::effect_run_sync(&${this.context.emitExpr(stmt.expr.args[0]!)});`);
+          return;
+        }
         this.context.line(`let _ = ${this.context.emitExpr(stmt.expr)};`);
         return;
       case "if":

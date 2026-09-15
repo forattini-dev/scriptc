@@ -127,6 +127,7 @@ include!("effect_latch.rs");
 include!("effect_refs.rs");
 include!("effect_state.rs");
 include!("effect_pubsub.rs");
+include!("effect_sql.rs");
 include!("windows_paths.rs");
 include!("json.rs");
 include!("number_format.rs");
