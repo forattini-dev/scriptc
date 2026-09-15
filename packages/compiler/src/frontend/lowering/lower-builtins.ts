@@ -368,7 +368,7 @@ function lowerBuiltinOptionalDefault(
     const importDecl = decl.parent.parent.parent;
     if (!ts.isImportDeclaration(importDecl) || !ts.isStringLiteral(importDecl.moduleSpecifier)) return null;
     const spec = importDecl.moduleSpecifier.text;
-    if (!isTrapRuntimeModule(spec)) return null;
+    if (!isTrapRuntimeModule(spec) || (spec === "bun" && BUN_MODULE_MEMBER_ALIASES[decl.propertyName?.text ?? decl.name.text] !== undefined)) return null; // the "bun" url re-exports lower natively
     return { module: spec, member: decl.propertyName?.text ?? decl.name.text };
   }
 

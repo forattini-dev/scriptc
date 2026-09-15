@@ -100,7 +100,7 @@ export function unsupportedModuleFeatureOf(spec: string): string {
   if (reason !== undefined) return `the '${spec}' module (${reason})`;
   // Target-qualified wording: the module exists in SOME runtime target.
   const target = activeRuntimeTarget();
-  if (spec.startsWith("bun:") && target.family !== "bun") {
+  if ((spec === "bun" || spec.startsWith("bun:")) && target.family !== "bun") {
     return `the '${spec}' module (a Bun runtime module — compile with --target bun, where its uses trap at runtime instead of failing the build)`;
   }
   if (bare === "ffi" && target.id === "node24") {
@@ -129,7 +129,7 @@ export function isKernelModule(spec: string): boolean {
 export function isTrapRuntimeModule(spec: string): boolean {
   const bare = spec.startsWith("node:") ? spec.slice(5) : spec;
   if (!TRAP_RUNTIME_MODULES.has(spec) && !TRAP_RUNTIME_MODULES.has(bare)) return false;
-  if (spec.startsWith("bun:")) return activeRuntimeTarget().family === "bun";
+  if (spec === "bun" || spec.startsWith("bun:")) return activeRuntimeTarget().family === "bun";
   return true;
 }
 
@@ -143,6 +143,7 @@ export function isTrapRuntimeModule(spec: string): boolean {
  * builds and runs everything that never touches these paths, and the
  * trapped paths fail loud at their own use site. */
 export const TRAP_RUNTIME_MODULES: ReadonlySet<string> = new Set([
+  "bun",
   "bun:sqlite",
   "bun:ffi",
   "v8",
@@ -154,7 +155,8 @@ export const TRAP_RUNTIME_MODULES: ReadonlySet<string> = new Set([
  * `module "bun"` re-exporting them — the redcode authoring imports
  * `pathToFileURL` from "bun"). Members in this table lower exactly like
  * their node:url originals; the "bun" module's other surface (the Bun
- * global, its APIs) keeps its fence. */
+ * global, its APIs — `plugin`, `serve`, …) traps at its use sites under
+ * --target bun, like bun:sqlite/bun:ffi, and keeps its fence elsewhere. */
 export const BUN_MODULE_MEMBER_ALIASES: Readonly<Record<string, string | undefined>> = {
   pathToFileURL: "url",
   fileURLToPath: "url",

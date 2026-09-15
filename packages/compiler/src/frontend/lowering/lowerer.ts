@@ -761,7 +761,7 @@ export function trapUseThrowExpr(
     loc,
   );
   lowerer.runtimeFences.push(d);
-  const runtime = tm.module.startsWith("bun:") ? "Bun" : "V8";
+  const runtime = tm.module === "bun" || tm.module.startsWith("bun:") ? "Bun" : "V8";
   return nodeThrowExpr(
     0,
     "",

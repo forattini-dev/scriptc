@@ -2010,7 +2010,7 @@ function preflight7(load: LoadResult): {
       // A Bun runtime module under a Node target: no runtime serves it,
       // so the import is the honest fence (naming the target that would
       // trap it at use instead).
-      if (spec.startsWith("bun:")) {
+      if (spec === "bun" || spec.startsWith("bun:")) {
         diags.push(unsupportedDiag("SC1010", locOf7(stmt), unsupportedModuleFeatureOf(spec)));
         continue;
       }
