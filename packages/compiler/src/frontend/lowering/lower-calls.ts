@@ -38,7 +38,7 @@ import { lowerStringConstructor } from "./lower-string-constructor.js";
 import { droppableStatic, lowerAbsenceProbe, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
 import { voidTernaryIfStmtOrExprStmt } from "./lower-stmts.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerCompatReqStreamOptionalCall, lowerHttpClientFnCall } from "./lower-server.js";
-import { EMITTER_API_MEMBERS, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js"; import { lowerObjectAssignSchema } from "./lower-schema.js";
+import { EMITTER_API_MEMBERS, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js"; import { lowerObjectAssignSchema } from "./lower-schema.js"; import { lowerSqlClientDecorate } from "./lower-sql-client.js";
 import { emitterRooted, lowerEmitterMethodCall } from "./lower-event-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
@@ -7914,7 +7914,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
     }
     // `Object.assign(fn, { props })` whose RESULT type maps to the hybrid
     // (function-with-properties) record: the chalk-shape CONSTRUCTOR.
-    if (member === "assign") { const decorated = lowerObjectAssignSchema(lowerer, call); if (decorated) return decorated; // a schema with statics (lower-schema.ts)
+    if (member === "assign") { const decorated = lowerObjectAssignSchema(lowerer, call); if (decorated) return decorated; const sqlClient = lowerSqlClientDecorate(lowerer, call); if (sqlClient) return sqlClient; // a schema with statics (lower-schema.ts); members added to a native SqlClient (lower-sql-client.ts)
       const hybrid = lowerObjectAssignHybrid(lowerer, call);
       if (hybrid) return hybrid;
       // `Object.assign({}, lit)` — an EMPTY fresh-literal target and one

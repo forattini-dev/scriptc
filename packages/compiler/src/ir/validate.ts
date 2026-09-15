@@ -3763,7 +3763,7 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "effect.contextGet" || e.fn === "effect.runSync" || e.fn === "effect.runPromise" || e.fn === "effect.fn" || e.fn === "effect.fnPipe" || e.fn === "effect.exitValue" || e.fn === "effect.causeSquash" || e.fn === "option.getOrUndefined" || e.fn === "option.getOrElse" || e.fn === "option.match" || e.fn.startsWith("schema.decode") || e.fn === "schema.is" || e.fn === "schema.encodeSync" || e.fn === "schema.make") { // site-typed: the success channel (runSync/runPromise), the function value (fn)
+        if (e.fn === "effect.contextGet" || e.fn === "effect.sqlExtra" ||e.fn === "effect.runSync" || e.fn === "effect.runPromise" || e.fn === "effect.fn" || e.fn === "effect.fnPipe" || e.fn === "effect.exitValue" || e.fn === "effect.causeSquash" || e.fn === "option.getOrUndefined" || e.fn === "option.getOrElse" || e.fn === "option.match" || e.fn.startsWith("schema.decode") || e.fn === "schema.is" || e.fn === "schema.encodeSync" || e.fn === "schema.make") { // site-typed: the success channel (runSync/runPromise), the function value (fn)
           if (e.fn === "effect.runPromise" && e.type.kind !== "promise") err("libCall effect.runPromise must be promise-typed", e.loc);
           if (e.fn === "effect.fn" && e.type.kind !== "func") err("libCall effect.fn must be function-typed", e.loc); break; }
         if (e.fn === "process.envGet") {

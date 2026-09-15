@@ -28,6 +28,8 @@ pub struct SqlClientData {
     invoke: SqlInvoke,
     transaction_read: SqlTransactionRead,
     transaction_write: SqlTransactionWrite,
+    /// Members the program added with `Object.assign(client, { … })`, by name.
+    extras: RefCell<Vec<(JsString, EffectValue)>>,
 }
 
 pub struct SqlStatementData {
@@ -67,6 +69,7 @@ pub fn effect_sql_client_make(
                 invoke: invoke.clone(),
                 transaction_read: transaction_read.clone(),
                 transaction_write: transaction_write.clone(),
+                extras: RefCell::new(Vec::new()),
             };
             effect_box(effect_new(EffectNode::Data(KernelData::SqlClient(Rc::new(data)))))
         }),
@@ -179,6 +182,26 @@ pub fn effect_sql_client_with_transaction(client: &JsEffect, body: &JsEffect) ->
         }),
         Box::new(move |tracer: &mut Tracer<'_>| tracer.edge(&keep)),
     )
+}
+
+/// `Object.assign(client, { key: value })`: stores the member on the client (a later assignment replaces it); the
+/// result is the same client.
+pub fn effect_sql_client_decorate(client: &JsEffect, key: &JsString, value: EffectValue) -> JsEffect {
+    let data = sql_client_of(client);
+    let mut extras = data.extras.borrow_mut();
+    match extras.iter_mut().find(|(name, _)| name == key) {
+        Some(entry) => entry.1 = value,
+        None => extras.push((key.clone(), value)),
+    }
+    drop(extras);
+    client.clone()
+}
+
+/// `client.<member>` for a member the program added; undefined when it never was.
+pub fn effect_sql_client_extra(client: &JsEffect, key: &JsString) -> EffectValue {
+    let data = sql_client_of(client);
+    let found = data.extras.borrow().iter().find(|(name, _)| name == key).map(|(_, value)| value.clone());
+    found.unwrap_or_else(|| effect_box(EffectUnit::Undefined))
 }
 
 /// `client.transactionService`.

@@ -43,6 +43,10 @@ export type IrEffectContextLibFn =
   | "effect.sqlRun"
   /** `client.withTransaction(effect)`: BEGIN/SAVEPOINT, the body with the transaction connection, COMMIT/ROLLBACK. */
   | "effect.sqlWithTransaction"
+  /** `Object.assign(client, { key: value })`: stores a program-added member on the client (client, key, value). */
+  | "effect.sqlDecorate"
+  /** `client.<member>` for a program-added member (client, key): site-typed, like contextGet. */
+  | "effect.sqlExtra"
   /** `client.transactionService`: the per-client transaction key. */
   | "effect.sqlTransactionKey"
   /** `client.reserve`: the transaction acquirer. */
@@ -63,6 +67,8 @@ export const EFFECT_CONTEXT_LIB_FN_SIGS = {
   "effect.scopeMake": { argTypes: [], result: EFFECT_T },
   "effect.scopeClose": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T },
   "effect.scopeProvide": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T },
+  "effect.sqlDecorate": { argTypes: [EFFECT_T, STRING, null], result: EFFECT_T },
+  "effect.sqlExtra": { argTypes: [EFFECT_T, STRING], result: EFFECT_T },
   "effect.sqlCompiler": { argTypes: [], result: EFFECT_T },
   "effect.sqlSafeIntegers": { argTypes: [], result: EFFECT_T },
   "effect.sqlClientMake": { argTypes: [EFFECT_T, EFFECT_T, STRING, null, null, null], result: EFFECT_T },

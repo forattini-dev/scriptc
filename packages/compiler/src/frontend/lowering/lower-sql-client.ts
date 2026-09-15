@@ -6,7 +6,74 @@ import type { Lowerer } from "./lowerer.js";
 import { newFnCtx } from "./lowerer.js";
 import { DYN, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrStmt, IrType, STRING, SrcLoc } from "../../ir/ir.js";
 import { locOf } from "../program.js";
+import { isNativeSqlClientType } from "../kernel.js";
+import { constituentTypes } from "../ts7/checker.js";
 import { effectSuccessOf } from "./lower-effect.js";
+
+const SQL_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]/;
+
+/** A member a program added to a native client (`Object.assign(client, { config, export })`), not one effect declares. */
+function extraMemberOf(L: Lowerer, receiver: ts.Expression, name: string): ts.Symbol | null {
+  const type = L.typeOf(receiver);
+  if (!isNativeSqlClientType(L.checker, type)) return null;
+  const member = L.checker.getPropertyOfType(type, name);
+  if (member === undefined) return null;
+  return L.checker.declarationsOf(member).some((decl) => SQL_DIST.test(decl.getSourceFile().fileName)) ? null : member;
+}
+
+/** The declared type of a program-added member: the first constituent of the client's type that has it. An interface
+ * member re-supplied by the Object.assign literal is an intersection of the two (`Effect<A, SqlError> & Effect<A>`);
+ * the interface's declaration is the one the program names. */
+function extraMemberType(L: Lowerer, receiver: ts.Expression, name: string): ts.Type | null {
+  const type = L.typeOf(receiver);
+  const parts = (type.flags & ts.TypeFlags.Intersection) !== 0 ? constituentTypes(type) : [type];
+  for (const part of parts) {
+    const member = L.checker.getPropertyOfType(part, name);
+    if (member !== undefined) return L.checker.getTypeOfSymbol(member);
+  }
+  return null;
+}
+
+/** `client.<extra>` read through the kernel, typed by the member's declaration. */
+function lowerSqlExtra(L: Lowerer, receiver: ts.Expression, name: string, site: ts.Node, loc: SrcLoc): IrExpr {
+  const declared = extraMemberType(L, receiver, name) ?? L.typeOf(site);
+  const type = L.mapTypeOf(declared);
+  if (type === null) return L.badType(site, declared);
+  return lib("effect.sqlExtra", [L.lowerExpr(receiver), { kind: "strLit", value: name, type: STRING, loc }], type, loc);
+}
+
+/** `Object.assign(client, { key: value, [TypeId]: TypeId, … })` whose target and result are native clients: each member
+ * is stored on the client, which is the result. Null for any other Object.assign. */
+export function lowerSqlClientDecorate(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  const [targetNode, sourceNode] = call.arguments;
+  if (L.dynamic || call.arguments.length !== 2 || targetNode === undefined || sourceNode === undefined) return null;
+  if (!isNativeSqlClientType(L.checker, L.typeOf(call)) || !isNativeSqlClientType(L.checker, L.typeOf(targetNode))) return null;
+  const loc = locOf(call);
+  let source: ts.Expression = sourceNode;
+  while (ts.isParenthesizedExpression(source)) source = source.expression;
+  if (!ts.isObjectLiteralExpression(source)) return L.unsupported("SC1090", sourceNode, "Object.assign onto a SqlClient from a value that is not an object literal");
+  let client = L.lowerExpr(targetNode);
+  for (const property of source.properties) {
+    let key: string | null = null;
+    let valueNode: ts.Expression | undefined;
+    if (ts.isShorthandPropertyAssignment(property)) {
+      if (ts.isIdentifier(property.name)) {
+        key = property.name.text;
+        valueNode = property.name;
+      }
+    } else if (ts.isPropertyAssignment(property)) {
+      valueNode = property.initializer;
+      if (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) key = property.name.text;
+      else if (ts.isComputedPropertyName(property.name)) {
+        const keyType = L.typeOf(property.name.expression);
+        if (keyType.isStringLiteralType()) key = keyType.value;
+      }
+    }
+    if (key === null || valueNode === undefined) return L.unsupported("SC1090", property, "Object.assign onto a SqlClient with a member that is not a named property or a string-literal computed key");
+    client = lib("effect.sqlDecorate", [client, { kind: "strLit", value: key, type: STRING, loc }, L.lowerExpr(valueNode)], EFFECT_T, loc);
+  }
+  return client;
+}
 
 function lib(fn: IrLibFn, args: IrExpr[], type: IrType, loc: SrcLoc): IrExpr {
   return { kind: "libCall", fn, args, type, loc };
@@ -40,8 +107,9 @@ export function lowerSqlNamespaceProperty(ns: string | null, name: string, loc: 
 /** Property reads on a native client or statement handle: `client.transactionService`, `client.reserve`, and a
  * statement's `withoutTransform` / `values` / `raw` / `unprepared` effects. */
 export function lowerSqlHandleProperty(L: Lowerer, expr: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
+  if (extraMemberOf(L, expr.expression, expr.name.text) !== null) return lowerSqlExtra(L, expr.expression, expr.name.text, expr, loc);
   const handleName = L.typeOf(expr.expression).getSymbol()?.name;
-  if (handleName === "SqlClient" && (expr.name.text === "transactionService" || expr.name.text === "reserve")) {
+  if (isNativeSqlClientType(L.checker, L.typeOf(expr.expression)) && (expr.name.text === "transactionService" || expr.name.text === "reserve")) {
     return lib(expr.name.text === "reserve" ? "effect.sqlReserve" : "effect.sqlTransactionKey", [L.lowerExpr(expr.expression)], EFFECT_T, loc);
   }
   if (handleName === "Statement" && ["withoutTransform", "values", "raw", "unprepared"].includes(expr.name.text)) {
@@ -58,7 +126,17 @@ export function lowerSqlHandleProperty(L: Lowerer, expr: ts.PropertyAccessExpres
 /** `client.unsafe(sql, params?)` / `client.withTransaction(effect)` on a native SqlClient handle. */
 export function lowerSqlHandleCall(L: Lowerer, callee: ts.Expression, expr: ts.CallExpression, loc: SrcLoc): IrExpr | null {
   if (L.dynamic || !ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.name) || callee.questionDotToken) return null;
-  if (L.typeOf(callee.expression).getSymbol()?.name !== "SqlClient" || L.mapTypeOf(L.typeOf(callee.expression))?.kind !== "effect") return null;
+  if (!isNativeSqlClientType(L.checker, L.typeOf(callee.expression)) || L.mapTypeOf(L.typeOf(callee.expression))?.kind !== "effect") return null;
+  if (extraMemberOf(L, callee.expression, callee.name.text) !== null) {
+    // A member the program added (`client.loadExtension(path)`): call the stored function value.
+    const fn = lowerSqlExtra(L, callee.expression, callee.name.text, callee, loc);
+    if (fn.type.kind !== "func" || fn.type.rest !== undefined || fn.type.params.length !== expr.arguments.length) {
+      return L.unsupported("SC1090", expr, `calls of the SqlClient member '${callee.name.text}' in this call shape`);
+    }
+    const params = fn.type.params;
+    const args = expr.arguments.map((arg, index) => L.lowerExprExpecting(arg, params[index]!));
+    return { kind: "callValue", callee: fn, args, type: fn.type.ret, loc };
+  }
   const client = L.lowerExpr(callee.expression);
   if (callee.name.text === "unsafe" && (expr.arguments.length === 1 || expr.arguments.length === 2)) {
     const sql = L.lowerExprExpecting(expr.arguments[0]!, STRING);

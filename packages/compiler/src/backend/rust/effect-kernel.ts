@@ -302,6 +302,14 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const body = second.type.ret.kind === "effect" ? dispatch : `{ let _ = ${dispatch}; runtime::effect_succeed(runtime::effect_box(())) }`;
       return `{ let ${source} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::${expr.fn === "effect.tap" ? "effect_tap" : "effect_tap_error"}(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${body} }), ${traced(context, keep)}) }`;
     }
+    case "effect.sqlDecorate": {
+      const value = expr.args[2];
+      if (first === undefined || second === undefined || value === undefined) break;
+      return `runtime::effect_sql_client_decorate(&${context.emitExpr(first)}, &${context.emitExpr(second)}, ${box(context, value.type, context.emitExpr(value), expr.loc)})`;
+    }
+    case "effect.sqlExtra":
+      if (first === undefined || second === undefined) break;
+      return unbox(context, expr.type, `&runtime::effect_sql_client_extra(&${context.emitExpr(first)}, &${context.emitExpr(second)})`, expr.loc);
     case "effect.scopeMake": return "runtime::effect_scope_make()";
     case "effect.scopeClose":
     case "effect.scopeProvide":

@@ -1,6 +1,7 @@
 /* Kernel package recognition shared by the type mapper and the lowering:
  * which program declarations the native kernels serve. */
 import * as ts from "./ts7/adapter.js";
+import { constituentTypes } from "./ts7/checker.js";
 
 const EFFECT_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
 
@@ -108,7 +109,33 @@ export function withoutKernelBrands(checker: ts.TypeChecker, parts: readonly ts.
   });
 }
 
-const HANDLE_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/](?:unstable[\\/][a-z]+[\\/])?(Effect|Layer|Exit|Cause|Option|Context|Scope|Fiber|Deferred|Ref|SynchronizedRef|Queue|PubSub|Stream|Sink|Channel|Duration|DateTime|Config|ConfigProvider|Schedule|Semaphore|Latch|ManagedRuntime|Clock|Random|Logger|Tracer|Metric|ScopedCache|Cache|RcMap|RcRef|LayerMap|FiberSet|FiberMap|FiberHandle|Mailbox|Result|Redacted|Encoding|Match|Runtime|Scheduler|Supervisor|TxRef|Micro|Console|Path|FileSystem|HttpClient|HttpClientRequest|HttpClientResponse|Socket|Terminal|Command|CommandExecutor|Worker|KeyValueStore|PlatformError|Url|UrlParams|Headers|Cookies|HttpApi[A-Za-z]*|Http[A-Za-z]*|Rpc[A-Za-z]*|SqlClient|Statement|Reactivity)\.d\.ts$/;
+const SQL_CLIENT_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]unstable[\\/]sql[\\/]SqlClient\.d\.ts$/;
+
+/** A native effect/unstable/sql client type: effect's `SqlClient` interface, a program interface extending it (Redcode's
+ * `interface SqliteClient extends Client.SqlClient`), or an intersection with one (`Object.assign(client, extras)`). */
+export function isNativeSqlClientType(checker: ts.TypeChecker, type: ts.Type, depth = 0): boolean {
+  if (depth > 8) return false;
+  if ((type.flags & ts.TypeFlags.Intersection) !== 0) return constituentTypes(type).some((part) => isNativeSqlClientType(checker, part, depth + 1));
+  const symbol = type.getAliasSymbol() ?? type.getSymbol();
+  return symbol !== undefined && isSqlClientSymbol(checker, symbol, depth);
+}
+
+function isSqlClientSymbol(checker: ts.TypeChecker, symbol: ts.Symbol, depth: number): boolean {
+  if (depth > 8) return false;
+  if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+  return checker.declarationsOf(symbol).some((decl) => {
+    if (!ts.isInterfaceDeclaration(decl)) return false;
+    if (decl.name.text === "SqlClient" && SQL_CLIENT_DIST.test(decl.getSourceFile().fileName)) return true;
+    return (decl.heritageClauses ?? []).some((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword && clause.types.some((heritage) => {
+      const expr = heritage.expression;
+      const name = ts.isIdentifier(expr) ? expr : ts.isPropertyAccessExpression(expr) ? expr.name : undefined;
+      const base = name === undefined ? undefined : checker.getSymbolAtLocation(name);
+      return base !== undefined && isSqlClientSymbol(checker, base, depth + 1);
+    }));
+  });
+}
+
+const HANDLE_DIST =/[\\/]node_modules[\\/]effect[\\/]dist[\\/](?:unstable[\\/][a-z]+[\\/])?(Effect|Layer|Exit|Cause|Option|Context|Scope|Fiber|Deferred|Ref|SynchronizedRef|Queue|PubSub|Stream|Sink|Channel|Duration|DateTime|Config|ConfigProvider|Schedule|Semaphore|Latch|ManagedRuntime|Clock|Random|Logger|Tracer|Metric|ScopedCache|Cache|RcMap|RcRef|LayerMap|FiberSet|FiberMap|FiberHandle|Mailbox|Result|Redacted|Encoding|Match|Runtime|Scheduler|Supervisor|TxRef|Micro|Console|Path|FileSystem|HttpClient|HttpClientRequest|HttpClientResponse|Socket|Terminal|Command|CommandExecutor|Worker|KeyValueStore|PlatformError|Url|UrlParams|Headers|Cookies|HttpApi[A-Za-z]*|Http[A-Za-z]*|Rpc[A-Za-z]*|SqlClient|Statement|Reactivity)\.d\.ts$/;
 
 /** An OPAQUE effect value type — the interfaces/classes of effect's runtime modules (Effect, Layer, Cause, Scope, Fiber,
  * Deferred, Queue, Stream, Duration, Config, …): the kernel's handle in a static build. Type utilities (Types, Brand,
