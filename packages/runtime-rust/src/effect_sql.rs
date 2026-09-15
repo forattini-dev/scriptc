@@ -16,23 +16,24 @@ pub enum SqlOp {
 /// `None` params are the empty parameter list.
 pub type SqlInvoke = Rc<dyn Fn(&EffectValue, SqlOp, &JsString, Option<EffectValue>) -> JsEffect>;
 
+/// The transaction service's value is the PROGRAM's `readonly [conn, depth]` tuple (drizzle's session provides its own):
+/// the generated reader answers its connection and depth when the value is that tuple, the writer builds one.
+pub type SqlTransactionRead = Rc<dyn Fn(&EffectValue) -> Option<(EffectValue, f64)>>;
+pub type SqlTransactionWrite = Rc<dyn Fn(EffectValue, f64) -> EffectValue>;
+
 pub struct SqlClientData {
     acquirer: JsEffect,
     transaction_acquirer: JsEffect,
     transaction_key: JsString,
     invoke: SqlInvoke,
+    transaction_read: SqlTransactionRead,
+    transaction_write: SqlTransactionWrite,
 }
 
 pub struct SqlStatementData {
     client: Rc<SqlClientData>,
     sql: JsString,
     params: EffectValue,
-}
-
-/// The value a transaction provides under the client's transaction key: the connection and the nesting depth.
-struct SqlTransaction {
-    connection: EffectValue,
-    depth: f64,
 }
 
 thread_local! {
@@ -44,7 +45,13 @@ fn sql_no_trace() -> TraceFn {
 }
 
 /// `SqlClient.make(options)`: an effect answering a fresh client (its own transaction key, as effect numbers them).
-pub fn effect_sql_client_make(acquirer: JsEffect, transaction_acquirer: JsEffect, invoke: SqlInvoke) -> JsEffect {
+pub fn effect_sql_client_make(
+    acquirer: JsEffect,
+    transaction_acquirer: JsEffect,
+    invoke: SqlInvoke,
+    transaction_read: SqlTransactionRead,
+    transaction_write: SqlTransactionWrite,
+) -> JsEffect {
     let keep = (acquirer.clone(), transaction_acquirer.clone());
     effect_sync(
         Rc::new(move || {
@@ -58,6 +65,8 @@ pub fn effect_sql_client_make(acquirer: JsEffect, transaction_acquirer: JsEffect
                 transaction_acquirer: transaction_acquirer.clone(),
                 transaction_key: string(&format!("effect/sql/SqlClient/TransactionConnection/{id}")),
                 invoke: invoke.clone(),
+                transaction_read: transaction_read.clone(),
+                transaction_write: transaction_write.clone(),
             };
             effect_box(effect_new(EffectNode::Data(KernelData::SqlClient(Rc::new(data)))))
         }),
@@ -82,9 +91,9 @@ fn sql_statement_of(handle: &JsEffect) -> Rc<SqlStatementData> {
     })
 }
 
-fn sql_transaction(context: &JsEffect, client: &SqlClientData) -> Option<Rc<SqlTransaction>> {
-    context_lookup(&effect_context_data(context).env, &client.transaction_key)
-        .and_then(|value| value.downcast_ref::<Rc<SqlTransaction>>().cloned())
+/// The transaction in context for this client: its connection and depth.
+fn sql_transaction(context: &JsEffect, client: &SqlClientData) -> Option<(EffectValue, f64)> {
+    context_lookup(&effect_context_data(context).env, &client.transaction_key).and_then(|value| (client.transaction_read)(&value))
 }
 
 /// The connection a statement uses: the transaction's, when one is in context, else a fresh acquisition.
@@ -93,7 +102,7 @@ fn sql_connection(client: &Rc<SqlClientData>) -> JsEffect {
     let client = client.clone();
     effect_with_fiber(
         Rc::new(move |context| match sql_transaction(&context, &client) {
-            Some(transaction) => effect_succeed(transaction.connection.clone()),
+            Some((connection, _)) => effect_succeed(connection),
             None => client.acquirer.clone(),
         }),
         Box::new(move |tracer: &mut Tracer<'_>| tracer.edge(&keep)),
@@ -121,7 +130,7 @@ fn sql_command(client: &SqlClientData, connection: &EffectValue, sql: &str) -> J
 /// The body with the transaction connection in context, then COMMIT (top level) / nothing (nested) on success and
 /// ROLLBACK / ROLLBACK TO SAVEPOINT on failure; the body's exit is the result.
 fn sql_in_transaction(client: &Rc<SqlClientData>, connection: EffectValue, depth: f64, body: &JsEffect) -> JsEffect {
-    let entry: EffectValue = effect_box(Rc::new(SqlTransaction { connection: connection.clone(), depth }));
+    let entry = (client.transaction_write)(connection.clone(), depth);
     let provided = effect_new(EffectNode::ProvideBundle(body.clone(), Rc::new(vec![(client.transaction_key.clone(), entry)])));
     let client = client.clone();
     effect_flat_map(
@@ -152,10 +161,10 @@ pub fn effect_sql_client_with_transaction(client: &JsEffect, body: &JsEffect) ->
     let keep = body.clone();
     effect_with_fiber(
         Rc::new(move |context| match sql_transaction(&context, &client) {
-            Some(transaction) => {
-                let depth = transaction.depth + 1.0;
-                let savepoint = sql_command(&client, &transaction.connection, &format!("SAVEPOINT effect_sql_{depth}"));
-                effect_zip_right(&savepoint, &sql_in_transaction(&client, transaction.connection.clone(), depth, &body))
+            Some((connection, depth)) => {
+                let depth = depth + 1.0;
+                let savepoint = sql_command(&client, &connection, &format!("SAVEPOINT effect_sql_{depth}"));
+                effect_zip_right(&savepoint, &sql_in_transaction(&client, connection, depth, &body))
             }
             None => {
                 let acquirer = client.transaction_acquirer.clone();

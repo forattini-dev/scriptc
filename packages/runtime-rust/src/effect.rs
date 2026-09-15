@@ -120,6 +120,8 @@ enum EffectNode {
     WithFiber(Rc<dyn Fn(JsEffect) -> JsEffect>, TraceFn),
     Sleep(f64),
     Scoped(JsEffect),
+    /// `Scope.provide(effect, scope)`: the inner effect runs with an existing scope innermost, left open afterwards.
+    UseScope(JsEffect, EffectScope),
     AddFinalizer(FinalizerFn, TraceFn),
     Ensuring(JsEffect, JsEffect),
     AcquireRelease(JsEffect, ReleaseFn, TraceFn),
@@ -207,7 +209,7 @@ impl Trace for EffectData {
             EffectNode::All(effects, _) => tracer.edge(effects),
             EffectNode::Log(_, parts) => tracer.edge(parts),
             EffectNode::Sleep(_) | EffectNode::Data(_) | EffectNode::Park(..) | EffectNode::Queue(_, _) => {}
-            EffectNode::Scoped(inner) | EffectNode::Exit(inner) => tracer.edge(inner),
+            EffectNode::Scoped(inner) | EffectNode::Exit(inner) | EffectNode::UseScope(inner, _) => tracer.edge(inner),
             EffectNode::Tap(inner, _, trace) | EffectNode::TapError(inner, _, trace) | EffectNode::AcquireRelease(inner, _, trace) | EffectNode::AcquireUseRelease(inner, _, _, trace) => {
                 tracer.edge(inner);
                 trace(tracer);
@@ -639,6 +641,8 @@ enum Frame {
     Restore(Outcome),
     /// Leave a scope: run its finalizers (LIFO) with the exit, then restore the outcome.
     CloseScope,
+    /// Leave a provided scope without closing it (`Scope.provide`).
+    PopScope,
     /// Remaining finalizers, the unchanged body exit each observes, and
     /// accumulated finalizer failures (which override the body on close).
     Finalize(Vec<FinalizerFn>, Outcome, Option<EffectFailure>),
@@ -688,6 +692,8 @@ enum Step {
     Run(JsEffect),
     /// Open a scope around the inner effect.
     OpenScope(JsEffect),
+    /// Run the inner effect inside an existing scope.
+    UseScope(JsEffect, EffectScope),
     /// Register a finalizer in the innermost scope.
     Finalizer(FinalizerFn),
     Resume(Box<dyn EffectGen>),
@@ -775,6 +781,7 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::WithFiber(read, _) => Step::Run(read(effect_current_context())),
         EffectNode::Sleep(millis) => Step::Await(promise_to_handle(&promise_timeout(*millis)), None),
         EffectNode::Scoped(inner) => Step::OpenScope(inner.clone()),
+        EffectNode::UseScope(inner, scope) => Step::UseScope(inner.clone(), scope.clone()),
         EffectNode::AddFinalizer(finalizer, _) => Step::Finalizer(finalizer.clone()),
         EffectNode::Ensuring(inner, finalizer) => Step::Push(Frame::Ensuring(finalizer.clone()), inner.clone()),
         EffectNode::AcquireRelease(acquire, release, _) => Step::Push(Frame::Acquired(release.clone()), acquire.clone()),
@@ -842,6 +849,13 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     let mut state = fiber.borrow_mut();
                     state.scopes.push(Rc::new(RefCell::new(Vec::new())));
                     state.frames.push(Frame::CloseScope);
+                    state.current = Some(inner);
+                    continue;
+                }
+                Step::UseScope(inner, scope) => {
+                    let mut state = fiber.borrow_mut();
+                    state.scopes.push(scope);
+                    state.frames.push(Frame::PopScope);
                     state.current = Some(inner);
                     continue;
                 }
@@ -994,6 +1008,11 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                 },
                 (Frame::Restore(stored), Ok(_)) => {
                     outcome = Some(stored);
+                    None
+                }
+                (Frame::PopScope, exit) => {
+                    fiber.borrow_mut().scopes.pop();
+                    outcome = Some(exit);
                     None
                 }
                 (Frame::CloseScope, exit) => {

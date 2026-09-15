@@ -302,11 +302,30 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const body = second.type.ret.kind === "effect" ? dispatch : `{ let _ = ${dispatch}; runtime::effect_succeed(runtime::effect_box(())) }`;
       return `{ let ${source} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::${expr.fn === "effect.tap" ? "effect_tap" : "effect_tap_error"}(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${body} }), ${traced(context, keep)}) }`;
     }
+    case "effect.scopeMake": return "runtime::effect_scope_make()";
+    case "effect.scopeClose":
+    case "effect.scopeProvide":
+      if (first === undefined || second === undefined) break;
+      return `runtime::${expr.fn === "effect.scopeClose" ? "effect_scope_close" : "effect_scope_provide"}(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
     case "effect.sqlCompiler": return "runtime::effect_void()";
     case "effect.sqlSafeIntegers": return "runtime::effect_sql_safe_integers_key()";
-    case "effect.sqlClientMake":
-      if (first === undefined || second === undefined) break;
-      return `runtime::effect_sql_client_make(${context.emitExpr(first)}, ${context.emitExpr(second)}, ${sqlInvoke(context, expr.args[2], expr.loc)})`;
+    case "effect.sqlClientMake": {
+      const [, , carrier, writer, readConnection, readDepth] = expr.args;
+      if (first === undefined || second === undefined || writer?.type.kind !== "func" || readConnection?.type.kind !== "func" || readDepth?.type.kind !== "func") break;
+      const tuple = writer.type.ret;
+      const connection = readConnection.type.ret;
+      // The transaction tuple crosses the kernel as the program's own boxed value, so a tuple the program provides
+      // (drizzle's session) and one the kernel builds read the same way.
+      const read = `std::rc::Rc::new(move |sc_entry: &runtime::EffectValue| -> Option<(runtime::EffectValue, f64)> { ` +
+        `sc_entry.downcast_ref::<${context.rustType(tuple, expr.loc)}>().map(|sc_tuple| (` +
+        `${box(context, connection, `{ let sc_method = sc_tx_connection.clone(); ${context.emitClosureDispatch("sc_method", readConnection.type, ["sc_tuple.clone()"], expr.loc)} }`, expr.loc)}, ` +
+        `{ let sc_method = sc_tx_depth.clone(); ${context.emitClosureDispatch("sc_method", readDepth.type, ["sc_tuple.clone()"], expr.loc)} })) })`;
+      const write = `std::rc::Rc::new(move |sc_conn: runtime::EffectValue, sc_depth: f64| -> runtime::EffectValue { ` +
+        `let sc_record = ${unbox(context, connection, "&sc_conn", expr.loc)}; ` +
+        `${box(context, tuple, `{ let sc_method = sc_tx_writer.clone(); ${context.emitClosureDispatch("sc_method", writer.type, ["sc_record", "sc_depth"], expr.loc)} }`, expr.loc)} })`;
+      return `{ let sc_tx_writer = ${context.emitExpr(writer)}; let sc_tx_connection = ${context.emitExpr(readConnection)}; let sc_tx_depth = ${context.emitExpr(readDepth)}; ` +
+        `runtime::effect_sql_client_make(${context.emitExpr(first)}, ${context.emitExpr(second)}, ${sqlInvoke(context, carrier, expr.loc)}, ${read}, ${write}) }`;
+    }
     case "effect.sqlUnsafe": {
       const params = expr.args[2];
       if (first === undefined || second === undefined || params === undefined) break;

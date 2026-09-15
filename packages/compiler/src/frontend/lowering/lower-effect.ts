@@ -91,6 +91,7 @@ export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
   const ns = effectNamespaceOf(L, expr.expression);
   const loc = locOf(expr);
   if (ns === "Effect" && expr.name.text === "void") return lib("effect.void", [], EFFECT_T, loc);
+  if (ns === "Exit" && expr.name.text === "void") return lib("effect.exitSucceed", [{ kind: "unitLit", unit: "undefined", type: { kind: "undefinedT" }, loc }], EFFECT_T, loc);
   if (ns === "Layer" && expr.name.text === "empty") return lib("layer.empty", [], EFFECT_T, loc);
   if (ns === "Schema") return lowerSchemaProperty(L, expr, loc);
   if (ns === "Duration" && expr.name.text === "zero") return lib("effect.durationZero", [], EFFECT_T, loc);
@@ -400,6 +401,15 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
     const finalizer = L.lowerExpr(expr.arguments[1]!);
     if (scope.type.kind === "effect" && finalizer.type.kind === "effect") return lib("effect.scopeAddFinalizer", [scope, finalizer], EFFECT_T, loc);
   }
+  if (ns === "Scope" && callee.name.text === "make" && expr.arguments.length === 0) return lib("effect.scopeMake", [], EFFECT_T, loc);
+  if (ns === "Scope" && (callee.name.text === "close" || callee.name.text === "provide") && expr.arguments.length === 2) {
+    const first = L.lowerExpr(expr.arguments[0]!);
+    const second = L.lowerExpr(expr.arguments[1]!);
+    if (first.type.kind === "effect" && second.type.kind === "effect") {
+      // close(scope, exit) and provide(effect, scope) both keep their argument order.
+      return lib(callee.name.text === "close" ? "effect.scopeClose" : "effect.scopeProvide", [first, second], EFFECT_T, loc);
+    }
+  }
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
 }
@@ -476,12 +486,50 @@ function lowerSqlClientMake(L: Lowerer, options: ts.ObjectLiteralExpression, exp
   if (acquirer === undefined || acquirer.value.type.kind !== "effect") return L.unsupported("SC1090", expr, "SqlClient.make without an acquirer effect");
   if (transactionAcquirer !== undefined && transactionAcquirer.type.kind !== "effect") return L.unsupported("SC1090", expr, "SqlClient.make with a non-effect transactionAcquirer");
   const success = effectSuccessOf(L, L.typeOf(acquirer.node));
-  const connection = success === null ? null : L.mapTypeOf(success);
-  if (connection?.kind !== "record") {
+  const acquired = success === null ? null : L.mapTypeOf(success);
+  if (acquired?.kind !== "record") {
     return L.unsupported("SC1090", acquirer.node, `SqlClient.make over a connection of type '${success === null ? "unknown" : L.checker.typeToString(success)}' (a Connection record is required)`);
   }
-  const made = lib("effect.sqlClientMake", [acquirer.value, transactionAcquirer ?? acquirer.value, { kind: "strLit", value: `record:${connection.shapeId}`, type: STRING, loc }], EFFECT_T, loc);
+  // The transaction service's `readonly [conn: Connection, depth: number]` names effect's own Connection record: the
+  // client runs every connection at that shape, so an acquired subtype (a SqliteConnection) narrows on acquisition.
+  const client = effectSuccessOf(L, L.typeOf(expr));
+  const serviceProp = client === null ? undefined : L.checker.getPropertyOfType(client, "transactionService");
+  const serviceType = serviceProp === undefined ? null : L.checker.getTypeOfSymbol(serviceProp);
+  const tupleTs = serviceType === null ? undefined : L.checker.getTypeArguments(serviceType as ts.TypeReference)[1];
+  const tuple = tupleTs === undefined ? null : L.mapTypeOf(tupleTs);
+  const tupleShape = tuple?.kind === "record" ? L.shapes.get(tuple.shapeId) : undefined;
+  const connection = tupleShape?.tuple === true ? tupleShape.fields.find((field) => field.name === "0")?.type : undefined;
+  const depth = tupleShape?.fields.find((field) => field.name === "1")?.type;
+  if (tuple === null || tupleShape === undefined || connection?.kind !== "record" || depth?.kind !== "f64") {
+    return L.unsupported("SC1090", expr, "SqlClient.make whose transaction service is not a [Connection, number] tuple");
+  }
+  const narrow = (source: IrExpr): IrExpr => acquired.shapeId === connection.shapeId ? source
+    : lib("effect.map", [source, liftedSqlFn(L, [acquired], connection, ([value]) => L.coerceInto(acquirer.node, value!, connection), loc)], EFFECT_T, loc);
+  const made = lib("effect.sqlClientMake", [
+    narrow(acquirer.value),
+    narrow(transactionAcquirer ?? acquirer.value),
+    { kind: "strLit", value: `record:${connection.shapeId}`, type: STRING, loc },
+    liftedSqlFn(L, [connection, depth], tuple, ([conn, level]) => ({ kind: "recordLit", fields: [{ name: "0", value: conn! }, { name: "1", value: level! }], type: tuple, loc }), loc),
+    liftedSqlFn(L, [tuple], connection, ([entry]) => ({ kind: "recordGet", obj: entry!, shapeId: tupleShape.id, field: "0", type: connection, loc }), loc),
+    liftedSqlFn(L, [tuple], depth, ([entry]) => ({ kind: "recordGet", obj: entry!, shapeId: tupleShape.id, field: "1", type: depth, loc }), loc),
+  ], EFFECT_T, loc);
   return evaluated.length === 0 ? made : { kind: "seqExpr", stmts: evaluated, result: made, type: EFFECT_T, loc };
+}
+
+/** A capture-free lifted closure over `params` whose body returns `body(parameter refs)`. */
+function liftedSqlFn(L: Lowerer, params: IrType[], ret: IrType, body: (refs: IrExpr[]) => IrExpr, loc: SrcLoc): IrExpr {
+  const name = `%effect.sql.${L.liftedFns.length}`;
+  L.fnStack.push(newFnCtx(false, null, null, ret));
+  try {
+    const locals: IrLocal[] = params.map((type, index) => ({ id: `p${index}.0`, name: `p${index}`, type, mutable: false }));
+    L.ctx.locals.push(...locals);
+    const refs: IrExpr[] = locals.map((local) => ({ kind: "varRef", localId: local.id, type: local.type, loc }));
+    const result = body(refs);
+    L.liftedFns.push({ name, params: locals.map((local) => ({ localId: local.id, name: local.name, type: local.type })), returnType: ret, locals: L.ctx.locals, body: [{ kind: "return", value: result, loc }], loc });
+  } finally {
+    L.fnStack.pop();
+  }
+  return { kind: "closure", fnName: name, captures: [], type: { kind: "func", params, ret }, loc };
 }
 
 /** The closure `(rows: unknown) => rows as T`, checked. */

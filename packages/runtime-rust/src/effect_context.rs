@@ -127,6 +127,40 @@ pub fn effect_scope_key() -> JsEffect {
     effect_service_key(&string(EFFECT_SCOPE_KEY))
 }
 
+fn effect_scope_of(handle: &JsEffect) -> EffectScope {
+    handle.with(|data| match &data.node {
+        EffectNode::Data(KernelData::Scope(scope)) => scope.clone(),
+        _ => throw_error("scriptc: a Scope handle was expected".to_owned()),
+    })
+}
+
+/// `Scope.make()`: an open scope nobody closes until `Scope.close`.
+pub fn effect_scope_make() -> JsEffect {
+    effect_sync(
+        Rc::new(|| effect_box(effect_new(EffectNode::Data(KernelData::Scope(Rc::new(RefCell::new(Vec::new()))))))),
+        Box::new(|_: &mut Tracer<'_>| {}),
+    )
+}
+
+/// `Scope.provide(effect, scope)`: the effect's finalizers register into `scope`, which stays open.
+pub fn effect_scope_provide(source: &JsEffect, scope: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::UseScope(source.clone(), effect_scope_of(scope)))
+}
+
+/// `Scope.close(scope, exit)`: its finalizers, last registered first, each observing `exit`.
+pub fn effect_scope_close(scope: &JsEffect, exit: &JsEffect) -> JsEffect {
+    let scope = effect_scope_of(scope);
+    let exit = exit.clone();
+    let keep = exit.clone();
+    effect_suspend(
+        Rc::new(move || {
+            let finalizers = std::mem::take(&mut *scope.borrow_mut());
+            finalizers.iter().rev().fold(effect_void(), |done, finalizer| effect_zip_right(&done, &finalizer(exit.clone())))
+        }),
+        Box::new(move |tracer: &mut Tracer<'_>| tracer.edge(&keep)),
+    )
+}
+
 /// `Scope.addFinalizer(scope, effect)`: registers into that scope with the registering fiber's services.
 pub fn effect_scope_add_finalizer(scope: &JsEffect, finalizer: &JsEffect) -> JsEffect {
     let target = scope.with(|data| match &data.node {

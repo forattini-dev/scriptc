@@ -24,13 +24,18 @@ export type IrEffectContextLibFn =
   /** `Effect.uninterruptibleMask((restore) => effect)`: the kernel has no interruption, so the callback runs lazily
    * with `restore` bound to the identity closure (the second argument). */
   | "effect.uninterruptibleMask"
+  /** `Scope.make()`, `Scope.close(scope, exit)`, `Scope.provide(effect, scope)` (args: effect, scope). */
+  | "effect.scopeMake"
+  | "effect.scopeClose"
+  | "effect.scopeProvide"
   /** effect/unstable/sql, natively (effect_sql.rs). `Statement.makeCompilerSqlite(...)`: an inert compiler handle (the
    * kernel runs SQL text as given). */
   | "effect.sqlCompiler"
   /** `SqlClient.SafeIntegers`: the reference key, default false. */
   | "effect.sqlSafeIntegers"
-  /** `SqlClient.make({ acquirer, transactionAcquirer? })`: acquirer, transaction acquirer, and the `record:<shape>`
-   * carrier naming the program's Connection record (the generated adapter calls its methods). */
+  /** `SqlClient.make({ acquirer, transactionAcquirer? })`: acquirer, transaction acquirer, the `record:<shape>`
+   * carrier naming the program's Connection record (the generated adapter calls its methods), then the transaction
+   * tuple's closures: `(conn, depth) => [conn, depth]`, `(tuple) => tuple[0]`, `(tuple) => tuple[1]`. */
   | "effect.sqlClientMake"
   /** `client.unsafe(sql, params)`: a statement handle. */
   | "effect.sqlUnsafe"
@@ -55,9 +60,12 @@ export const EFFECT_CONTEXT_LIB_FN_SIGS = {
   "effect.semaphoreTake": { argTypes: [EFFECT_T, F64], result: EFFECT_T },
   "effect.semaphoreRelease": { argTypes: [EFFECT_T, F64], result: EFFECT_T },
   "effect.uninterruptibleMask": { argTypes: [null, null], result: EFFECT_T },
+  "effect.scopeMake": { argTypes: [], result: EFFECT_T },
+  "effect.scopeClose": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T },
+  "effect.scopeProvide": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T },
   "effect.sqlCompiler": { argTypes: [], result: EFFECT_T },
   "effect.sqlSafeIntegers": { argTypes: [], result: EFFECT_T },
-  "effect.sqlClientMake": { argTypes: [EFFECT_T, EFFECT_T, STRING], result: EFFECT_T },
+  "effect.sqlClientMake": { argTypes: [EFFECT_T, EFFECT_T, STRING, null, null, null], result: EFFECT_T },
   "effect.sqlUnsafe": { argTypes: [EFFECT_T, STRING, DYN], result: EFFECT_T },
   "effect.sqlRun": { argTypes: [EFFECT_T, STRING], result: EFFECT_T },
   "effect.sqlWithTransaction": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T },

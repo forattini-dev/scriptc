@@ -68,7 +68,9 @@ export function lowerYield(lowerer: Lowerer, expr: ts.YieldExpression): IrExpr {
     if (value.type.kind !== "effect" && isYieldableError(lowerer, value.type)) value = { kind: "libCall", fn: "effect.fail", args: [value], type: EFFECT_T, loc };
     if (value.type.kind !== "effect") lowerer.unsupported("SC1071", expr, "yield* of a non-Effect value inside Effect.gen");
     const tsType = lowerer.typeOf(expr);
-    const result = (tsType.flags & ts.TypeFlags.Never) !== 0 ? VOID : lowerer.mapTypeOf(tsType);
+    // A `yield*` statement never reads its value, so the success type needs no static representation.
+    const discarded = ts.isExpressionStatement(expr.parent);
+    const result = discarded || (tsType.flags & ts.TypeFlags.Never) !== 0 ? VOID : lowerer.mapTypeOf(tsType);
     if (result === null) lowerer.badType(expr, tsType);
     const resumed: IrExpr = { kind: "yieldExpr", value, type: EFFECT_T, loc };
     return { kind: "libCall", fn: "effect.runSync", args: [resumed], type: result, loc };
