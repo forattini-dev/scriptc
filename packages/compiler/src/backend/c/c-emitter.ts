@@ -394,7 +394,7 @@ export class CEmitter {
     // iff no ancestor declares it (root-most) AND some strict descendant
     // redeclares it — never-overridden methods stay direct calls
     // everywhere (whole-program devirtualization).
-    for (const cls of mod.classes ?? []) {
+    for (const cls of mod.classes ?? []) { if (cls.methods?.includes("get:message")) { let root = cls; for (let i = 0; root.base !== undefined && i < 256; i++) { const next = mod.classes?.find((c) => c.name === root.base); if (next === undefined) break; root = next; } if (root.name === "%Error" || root.base === "%Error") throw new InternalCompilerError("emitter bug: Error message getters are Rust-only"); }
       const meta: ClassMeta = {
         def: cls,
         base: null,

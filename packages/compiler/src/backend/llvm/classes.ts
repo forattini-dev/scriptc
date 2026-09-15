@@ -70,7 +70,7 @@ export interface LlClassMeta {
  * Ported from the CEmitter constructor. */
 export function buildClassGraph(mod: IrModule, fnByName: Map<string, IrFunction>): Map<string, LlClassMeta> {
   const metaMap = new Map<string, LlClassMeta>();
-  for (const cls of mod.classes ?? []) {
+  for (const cls of mod.classes ?? []) { if (cls.methods?.includes("get:message")) { let root = cls; for (let i = 0; root.base !== undefined && i < 256; i++) { const next = mod.classes?.find((c) => c.name === root.base); if (next === undefined) break; root = next; } if (root.name === "%Error" || root.base === "%Error") throw new InternalCompilerError("emitter bug: Error message getters are Rust-only"); }
     metaMap.set(cls.name, {
       def: cls,
       base: null,

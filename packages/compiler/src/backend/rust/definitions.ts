@@ -22,14 +22,14 @@ import {
   mangleRecordStruct,
 } from "../mangle.js";
 import { emitRustGeneratorBody } from "./generators.js";
-import type { RustClassMeta, RustClosureShape } from "./model.js";
+import type { RustClassMeta, RustClosureShape } from "./model.js"; import { emitErrorMessageRead } from "./error-message-getters.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { emitRustSyncModuleBody } from "./native-module.js";
 import { emitSharedRecordDefinition, isSharedRecord } from "./shared-records.js";
 
 export interface RustDefinitionContext {
   families(): readonly IrFamily[];
-  readonly classMeta: ReadonlyMap<string, RustClassMeta>;
+  readonly classMeta: ReadonlyMap<string, RustClassMeta>; readonly functions: ReadonlyMap<string, IrFunction>;
   readonly closureShapes: ReadonlyMap<string, RustClosureShape>;
   readonly closureTargets: ReadonlyMap<string, RustClosureShape>;
   readonly dynAdapterShapes: ReadonlySet<string>;
@@ -826,8 +826,8 @@ export class RustDefinitionEmitter {
     this.context.line(`${name}::Builtin(error) => runtime::error_to_string(error),`);
     for (const root of roots) {
       const nameField = this.context.classFieldName(root.def.name, "name");
-      const messageField = this.context.classFieldName(root.def.name, "message");
-      this.context.line(`${name}::${this.context.errorValueVariant(root)}(value) => value.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), object.${messageField}.as_ref())),`);
+      const messageField = this.context.classFieldName(root.def.name, "message"); const getterRead = emitErrorMessageRead(this.context, root, root.def.name, "value.clone()");
+      this.context.line(`${name}::${this.context.errorValueVariant(root)}(value) => ${getterRead === null ? `value.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), object.${messageField}.as_ref()))` : `{ let sc_message: runtime::JsString = ${getterRead}; value.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), sc_message.as_ref())) }`},`);
     }
     this.context.popIndent();
     this.context.line("}");
@@ -880,8 +880,8 @@ export class RustDefinitionEmitter {
     this.context.pushIndent();
     this.context.line(`${name}::Builtin(error) => runtime::error_${field}(error),`);
     for (const root of roots) {
-      const fieldName = this.context.classFieldName(root.def.name, field);
-      this.context.line(`${name}::${this.context.errorValueVariant(root)}(value) => value.with(|object| object.${fieldName}.clone()),`);
+      const fieldName = this.context.classFieldName(root.def.name, field); const getterRead = field === "message" ? emitErrorMessageRead(this.context, root, root.def.name, "value.clone()") : null;
+      this.context.line(`${name}::${this.context.errorValueVariant(root)}(value) => ${getterRead ?? `value.with(|object| object.${fieldName}.clone())`},`);
     }
     this.context.popIndent();
     this.context.line("}");

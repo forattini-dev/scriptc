@@ -443,7 +443,7 @@ class RustEmitter {
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly definitionEmitter = new RustDefinitionEmitter({
-    classMeta: this.classMeta, families: () => this.mod.families ?? [],
+    classMeta: this.classMeta, functions: this.functions, families: () => this.mod.families ?? [],
     closureShapes: this.closureShapes,
     closureTargets: this.closureTargets,
     dynAdapterShapes: this.dynAdapterShapes,

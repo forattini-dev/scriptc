@@ -431,7 +431,8 @@ export type FieldTarget =
           : obj;
       };
       const fieldType = info.fields.get(access.name.text);
-      if (fieldType) {
+      // An Error `message` getter shadows the Error base's inherited slot.
+      if (fieldType && !(access.name.text === "message" && L.findMethodOn(info, "get:message") !== null)) {
         const obj = lowerReceiver();
         return { container: "class", obj, className: receiverIr.className, field: access.name.text, fieldType };
       }

@@ -7,7 +7,7 @@ import { emitNativeDynamicArrayLiteral } from "./native-array-values.js";
 import { isSharedRecord, recordNewName, sharedRecordName } from "./shared-records.js";
 import type { IrExpr, IrFunction } from "../../ir/ir.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeEquals, typeKey } from "../../ir/ir.js";
-import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
+import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js"; import { emitErrorMessageRead } from "./error-message-getters.js";
 import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustGeneratorResume } from "./generators.js";
 import { emitRustDataViewIntrinsic } from "./data-view.js";
@@ -755,6 +755,7 @@ export class RustExpressionEmitter {
           return `${helper}(&(${this.emitExpr(expr.obj)}))`;
         }
         {
+          const messageRead = expr.field === "message" && this.context.classMeta.has(expr.className) ? emitErrorMessageRead(this.context, this.context.classMetaOf(expr.className, expr.loc), expr.className, this.emitExpr(expr.obj)) : null; if (messageRead !== null) return messageRead;
           const cls = this.context.classDef(expr.className, expr.loc);
           const field = cls.fields.find((candidate) => candidate.name === expr.field);
           if (field === undefined) this.context.unsupported(`unknown class field '${expr.className}.${expr.field}'`, expr.loc);
@@ -993,7 +994,7 @@ export class RustExpressionEmitter {
           unionName: (id) => this.context.unionName(id),
           unionVariant: (tag) => this.context.unionVariant(tag),
           stripCasts: (value) => this.context.stripCasts(value),
-          hasClassMeta: (name) => this.context.classMeta.has(name),
+          hasClassMeta: (name) => this.context.classMeta.has(name), errorMessageRead: (className, receiver) => this.context.classMeta.has(className) ? emitErrorMessageRead(this.context, this.context.classMetaOf(className), className, receiver) : null,
           classFieldName: (className, fieldName, loc) => this.context.classFieldName(className, fieldName, loc),
           hasErrorClassRoots: () => this.context.errorClassRoots().length > 0,
           errorValueName: () => this.context.errorValueName(),

@@ -63,7 +63,7 @@ export interface RustLibCallContext {
   familyTargetOf(name: string): IrFamily | undefined;
   unionVariant(tag: number): string;
   stripCasts(expr: IrExpr): IrExpr;
-  hasClassMeta(name: string): boolean;
+  hasClassMeta(name: string): boolean; errorMessageRead(className: string, receiver: string): string | null;
   classFieldName(className: string, fieldName: string, loc?: SrcLoc): string;
   hasErrorClassRoots(): boolean;
   errorValueName(): string;
@@ -388,7 +388,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
       const receiver = context.nextTemporary();
       const nameField = context.classFieldName(receiverExpr.type.className, "name", expr.loc);
       const messageField = context.classFieldName(receiverExpr.type.className, "message", expr.loc);
-      return `{ let ${receiver} = ${context.emitExpr(receiverExpr)}; ${receiver}.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), object.${messageField}.as_ref())) }`;
+      const messageRead = context.errorMessageRead(receiverExpr.type.className, `${receiver}.clone()`);
+      return `{ let ${receiver} = ${context.emitExpr(receiverExpr)}; ${messageRead === null ? `${receiver}.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), object.${messageField}.as_ref()))` : `let sc_message: runtime::JsString = ${messageRead}; ${receiver}.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), sc_message.as_ref()))`} }`;
     }
     if (context.hasErrorClassRoots()) {
       return `sc_error_to_string(&(${context.emitExpr(arg)}))`;

@@ -1623,8 +1623,8 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
           if (!member.body && !abstractAccessor) lowerer.unsupported("SC1090", member, "bodyless accessors");
           const prop = member.name.text;
           const mName = `${isGet ? "get" : "set"}:${prop}`;
-          if (fields.has(prop)) {
-            // tsc rejects field/accessor mixing (TS2610/2611); defensive.
+          if (fields.has(prop) && !(isGet && prop === "message" && schema !== null && (schema.form === "error" || schema.form === "taggedError") && !schema.fields.properties.some((p) => (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) && p.name.text === "message") && !decl.members.some((m) => ts.isSetAccessor(m) && ts.isIdentifier(m.name) && m.name.text === "message"))) {
+            // tsc rejects field/accessor mixing (TS2610/2611); defensive. A schema error class without a `message` prop may shadow the Error base's slot with a getter (the kernel stamps no own message — Effect's semantics).
             lowerer.unsupported("SC1090", member.name, "accessors sharing a name with a field");
           }
           let sig: { params: ParamShape[]; ret: IrType };
