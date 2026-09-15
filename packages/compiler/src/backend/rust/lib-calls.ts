@@ -5,6 +5,7 @@ import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir
 import { RUNTIME_ERROR_CLASSES } from "../../ir/ir.js";
 import { emitRustDynamicLibCall } from "./lib-calls-dynamic.js";
 import { emitRustChildProcessCall } from "./child-process.js";
+import { emitRustSqliteCall } from "./sqlite.js";
 import { emitRustEffectCall } from "./effect-kernel.js";
 import { emitRustHttpCall } from "./http.js";
 import { emitRustNetCall } from "./net.js";
@@ -98,6 +99,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (dynamicCall !== null) return dynamicCall;
   const childProcessCall = emitRustChildProcessCall(expr, context);
   if (childProcessCall !== null) return childProcessCall;
+  const sqliteCall = emitRustSqliteCall(expr, context);
+  if (sqliteCall !== null) return sqliteCall;
   const effectCall = emitRustEffectCall(expr, context);
   if (effectCall !== null) return effectCall;
   const dgramCall = emitRustDgramCall(expr, context);

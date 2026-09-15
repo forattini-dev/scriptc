@@ -162,6 +162,8 @@ mod tests {
     include!("tests/target_config.rs");
     include!("tests/generators.rs");
     include!("tests/array_holes.rs");
+    #[cfg(feature = "sqlite")]
+    include!("tests/sqlite_handles.rs");
     include!("tests/web_and_platform.rs");
     include!("numeric_ops.test.rs");
     include!("regex.test.rs");

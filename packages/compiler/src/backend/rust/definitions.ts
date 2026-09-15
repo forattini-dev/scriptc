@@ -456,6 +456,7 @@ export class RustDefinitionEmitter {
         case "spawnRes":
         case "child":
         case "effect": case "genericFunc":
+        case "sqliteDb": case "sqliteStmt":
         case "childStream":
         case "fsWatcher":
         case "netServer":
@@ -953,6 +954,7 @@ export class RustDefinitionEmitter {
         case "spawnRes":
         case "child":
         case "effect": case "genericFunc":
+        case "sqliteDb": case "sqliteStmt":
         case "childStream":
         case "fsWatcher":
         case "netServer":

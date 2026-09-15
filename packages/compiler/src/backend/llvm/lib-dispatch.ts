@@ -260,7 +260,7 @@ export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
         return host.emitIoLibCall(e);
       case "asset":
       case "bigint":
-      case "effect":
+      case "effect": case "sqlite":
       case "layer":
       case "schema":
       case "option":

@@ -62,6 +62,8 @@ export function cType(t: IrType): string {
       return "ScrChild *";
     case "effect":
       throw new Error("the effect kernel needs --backend rust");
+    case "sqliteDb": case "sqliteStmt":
+      throw new Error("bun:sqlite handles need --backend rust");
     case "genericFunc":
       throw new Error("generic function values need --backend rust");
     case "netServer":

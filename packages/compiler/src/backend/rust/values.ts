@@ -98,6 +98,7 @@ export class RustValueEmitter {
       case "spawnRes": return "true";
       case "child": return "true";
       case "effect": case "genericFunc": return "true";
+      case "sqliteDb": case "sqliteStmt": return "true";
       case "childStream": return "true";
       case "fsWatcher": return "true";
       case "netServer": return "true";
@@ -214,6 +215,8 @@ export class RustValueEmitter {
       case "spawnRes": return "runtime::JsSpawnResult";
       case "child": return "runtime::JsChild";
       case "effect": return "runtime::JsEffect";
+      case "sqliteDb": return "runtime::JsSqliteDb";
+      case "sqliteStmt": return "runtime::JsSqliteStmt";
       case "genericFunc": return `runtime::Gc<${this.context.familyName(type.familyId, loc)}>`;
       case "childStream": return "runtime::JsChildStream";
       case "fsWatcher": return "runtime::JsFsWatcher";
@@ -423,7 +426,7 @@ export class RustValueEmitter {
 
   isTracedHandle(type: IrType): boolean {
     if (type.kind === "record" && isSharedRecord(this.context.records.get(type.shapeId))) return false;
-    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "effect" || type.kind === "genericFunc" || type.kind === "child" || type.kind === "childStream" || type.kind === "fsWatcher" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "effect" || type.kind === "genericFunc" || type.kind === "child" || type.kind === "sqliteDb" || type.kind === "sqliteStmt" || type.kind === "childStream" || type.kind === "fsWatcher" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && (this.context.classes.has(type.className) || RUNTIME_STREAM_CLASSES.has(type.className) ||
         (RUNTIME_ERROR_CLASSES.has(type.className) && this.context.errorClassRoots().length > 0))) || type.kind === "func";
   }
@@ -495,6 +498,7 @@ export class RustValueEmitter {
       case "promise":
       case "child":
       case "effect": case "genericFunc":
+      case "sqliteDb": case "sqliteStmt":
       case "childStream":
       case "fsWatcher":
       case "netServer":

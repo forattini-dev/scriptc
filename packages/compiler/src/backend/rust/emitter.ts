@@ -31,7 +31,7 @@ import { RustEventEmitterEmitter } from "./event-emitter.js";
 import { RustStreamModel } from "./stream-model.js";
 import { emitRustModuleEntry } from "./module-entry.js";
 import { emitRustEmbeddedModules, hasRustEmbeddedModules } from "./embedded-modules.js";
-import { rustRuntimeFeatures, featuresEmbedIsland } from "./runtime-features.js";
+import { rustRuntimeFeatures, featuresEmbedIsland } from "./runtime-features.js"; import { emitRustSqliteDefinitions, moduleUsesSqlite } from "./sqlite.js";
 import type { RustAsyncFrameExtra } from "./async-control.js";
 import { buildRustClassGraph } from "./class-graph.js";
 import { emitRustFfiDeclarations } from "./ffi.js";
@@ -562,7 +562,7 @@ class RustEmitter {
     this.emitUnionDefinitions(); for (const family of this.mod.families ?? []) for (const inst of family.instances) for (const target of inst.targets) this.familyTargets.set(target, family);
     this.emitRecordDefinitions();
     this.emitClassDefinitions();
-    this.emitErrorValueDefinition();
+    this.emitErrorValueDefinition(); if (moduleUsesSqlite(this.mod)) emitRustSqliteDefinitions((value) => this.line(value), this.dynTypeName());
     this.emitGlobals();
     // SCRIPTC_RUST_REFUSALS=all: a refusal drops the function's partial
     // output and emission continues, so one build of a large program

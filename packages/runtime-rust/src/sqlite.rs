@@ -315,3 +315,162 @@ pub fn sqlite_serialize(id: f64) -> Vec<u8> {
         Err(error) => sqlite_throw(error),
     })
 }
+
+// ── Static bun:sqlite handles ────────────────────────────────────────────
+// Statically compiled `bun:sqlite` code holds these handles directly (the
+// island facade holds the bare connection id). A database caches its
+// `query()` statements by SQL text and each statement points back at its
+// database, so both edges are traced and cleared for cycle collection.
+
+pub struct SqliteDbData {
+    id: f64,
+    safe_integers: bool,
+    statements: HashMap<String, JsSqliteStmt>,
+}
+
+impl Trace for SqliteDbData {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        for statement in self.statements.values() {
+            tracer.edge(statement);
+        }
+    }
+}
+
+impl ClearEdges for SqliteDbData {
+    fn clear_edges(&mut self) {
+        self.statements.clear();
+    }
+}
+
+pub type JsSqliteDb = Gc<SqliteDbData>;
+
+pub struct SqliteStmtData {
+    db: Option<JsSqliteDb>,
+    sql: String,
+    safe_integers: bool,
+}
+
+impl Trace for SqliteStmtData {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(db) = &self.db {
+            tracer.edge(db);
+        }
+    }
+}
+
+impl ClearEdges for SqliteStmtData {
+    fn clear_edges(&mut self) {
+        self.db = None;
+    }
+}
+
+pub type JsSqliteStmt = Gc<SqliteStmtData>;
+
+/// `new Database(filename, options)`. `readwrite`/`create` arrive already
+/// defaulted to true (Bun treats only an explicit `false` as off), and
+/// `readonly` wins over both, exactly as the island facade computes flags.
+pub fn sqlite_db_open(filename: &JsString, readonly: bool, readwrite: bool, create: bool, safe_integers: bool) -> JsSqliteDb {
+    let flags = if readonly { 1.0 } else { f64::from(u8::from(readwrite) * 2 + u8::from(create) * 4) };
+    let name: &str = filename.as_ref();
+    let id = sqlite_open(if name.is_empty() { ":memory:" } else { name }, flags);
+    Gc::new(SqliteDbData { id, safe_integers, statements: HashMap::new() })
+}
+
+fn sqlite_db_id(db: &JsSqliteDb) -> f64 {
+    db.with(|data| data.id)
+}
+
+/// `db.close()`: releases the connection once; later closes are no-ops and
+/// later uses report the closed database.
+pub fn sqlite_db_close(db: &JsSqliteDb) {
+    let id = db.with_mut(|data| {
+        let id = data.id;
+        data.id = -1.0;
+        data.statements.clear();
+        id
+    });
+    if id >= 0.0 {
+        sqlite_close(id);
+    }
+}
+
+/// `db.exec(sql)` with no bindings: every statement in the text.
+pub fn sqlite_db_exec(db: &JsSqliteDb, sql: &JsString) {
+    sqlite_exec(sqlite_db_id(db), sql.as_ref());
+}
+
+/// `db.run(sql, ...bindings)`: (changes, lastInsertRowid).
+pub fn sqlite_db_run(db: &JsSqliteDb, sql: &JsString, params: &SqliteParams) -> (f64, i64) {
+    sqlite_run(sqlite_db_id(db), sql.as_ref(), params)
+}
+
+fn sqlite_statement_new(db: &JsSqliteDb, sql: &str) -> JsSqliteStmt {
+    let safe_integers = db.with(|data| data.safe_integers);
+    Gc::new(SqliteStmtData { db: Some(db.clone()), sql: sql.to_owned(), safe_integers })
+}
+
+/// `db.query(sql)`: one statement per SQL text for the database's lifetime.
+pub fn sqlite_db_query(db: &JsSqliteDb, sql: &JsString) -> JsSqliteStmt {
+    let text: &str = sql.as_ref();
+    if let Some(statement) = db.with(|data| data.statements.get(text).cloned()) {
+        return statement;
+    }
+    // Validate eagerly, as Bun prepares the statement at query() time.
+    sqlite_columns(sqlite_db_id(db), text);
+    let statement = sqlite_statement_new(db, text);
+    db.with_mut(|data| data.statements.insert(text.to_owned(), statement.clone()));
+    statement
+}
+
+/// `db.prepare(sql)`: a fresh, uncached statement.
+pub fn sqlite_db_prepare(db: &JsSqliteDb, sql: &JsString) -> JsSqliteStmt {
+    let text: &str = sql.as_ref();
+    sqlite_columns(sqlite_db_id(db), text);
+    sqlite_statement_new(db, text)
+}
+
+/// `db.serialize()` as the Buffer bytes Bun answers.
+pub fn sqlite_db_serialize(db: &JsSqliteDb) -> JsBytes<u8> {
+    bytes_from_vec(sqlite_serialize(sqlite_db_id(db)))
+}
+
+/// A BLOB column value as the Uint8Array Bun answers.
+pub fn sqlite_blob_bytes(bytes: &[u8]) -> JsBytes<u8> {
+    bytes_from_vec(bytes.to_vec())
+}
+
+/// `db.loadExtension(path)`: native extensions cannot load into a compiled
+/// binary (the island facade's answer).
+pub fn sqlite_db_load_extension(_db: &JsSqliteDb, _path: &JsString) -> ! {
+    sqlite_throw_named("SQLITE_ERROR", "loadExtension is not available in a compiled binary".to_owned())
+}
+
+fn sqlite_statement_target(statement: &JsSqliteStmt) -> (f64, String) {
+    statement.with(|data| match &data.db {
+        Some(db) => (sqlite_db_id(db), data.sql.clone()),
+        None => (-1.0, data.sql.clone()),
+    })
+}
+
+/// `statement.all/get/values(...)`: column names and up to `limit` rows
+/// (0 = every row).
+pub fn sqlite_stmt_rows(statement: &JsSqliteStmt, params: &SqliteParams, limit: usize) -> (Vec<String>, Vec<Vec<SqliteValue>>) {
+    let (id, sql) = sqlite_statement_target(statement);
+    sqlite_rows(id, &sql, params, limit)
+}
+
+/// `statement.run(...)`: (changes, lastInsertRowid).
+pub fn sqlite_stmt_run(statement: &JsSqliteStmt, params: &SqliteParams) -> (f64, i64) {
+    let (id, sql) = sqlite_statement_target(statement);
+    sqlite_run(id, &sql, params)
+}
+
+/// Whether INTEGER columns read back as bigints for this statement.
+pub fn sqlite_stmt_safe_integers(statement: &JsSqliteStmt) -> bool {
+    statement.with(|data| data.safe_integers)
+}
+
+/// `statement.safeIntegers(toggle)`.
+pub fn sqlite_stmt_set_safe_integers(statement: &JsSqliteStmt, enabled: bool) {
+    statement.with_mut(|data| data.safe_integers = enabled);
+}

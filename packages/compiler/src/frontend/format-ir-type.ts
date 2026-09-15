@@ -110,6 +110,7 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
     case "spawnRes":
       return "SpawnSyncReturns";
     case "child": return "ChildProcess";
+    case "sqliteDb": return "Database"; case "sqliteStmt": return "Statement"; // bun:sqlite handles (--target bun)
     case "bigint": return "bigint"; case "effect": return "Effect"; case "genericFunc": return "generic function"; // opaque kernel handles (static builds): the effect handle's A/E are read at the boundaries, a family value's signature at its call sites
     case "netServer":
       return "Server";

@@ -55,6 +55,10 @@ pub fn bigint_from_number(value: f64) -> JsBigInt {
 }
 
 pub fn bigint_from_bool(value: bool) -> JsBigInt { JsBigInt::new(BigInt::from(u8::from(value))) }
+/// SQLite INTEGER columns under `safeIntegers` (always representable).
+pub fn bigint_from_i64(value: i64) -> JsBigInt { JsBigInt::new(BigInt::from(value)) }
+/// A bigint binding for SQLite: `None` when it does not fit a signed 64-bit INTEGER.
+pub fn bigint_to_i64(value: &JsBigInt) -> Option<i64> { value.0.to_i64() }
 pub fn bigint_to_number(value: &JsBigInt) -> f64 {
     value.0.to_f64().unwrap_or(if value.0.is_negative() { f64::NEG_INFINITY } else { f64::INFINITY })
 }

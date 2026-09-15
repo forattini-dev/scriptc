@@ -14,6 +14,7 @@ export const STATS_T: IrType = { kind: "stats" };
 export const FILEHANDLE_T: IrType = { kind: "fileHandle" };
 export const SPAWNRES_T: IrType = { kind: "spawnRes" };
 export const CHILD_T: IrType = { kind: "child" }; export const EFFECT_T: IrType = { kind: "effect" };
+export const SQLITE_DB_T: IrType = { kind: "sqliteDb" }; export const SQLITE_STMT_T: IrType = { kind: "sqliteStmt" };
 export const NETSERVER_T: IrType = { kind: "netServer" };
 export const NETSOCKET_T: IrType = { kind: "netSocket" };
 export const HTTP2SESSION_T: IrType = { kind: "http2Session" };

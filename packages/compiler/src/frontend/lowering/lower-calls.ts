@@ -32,7 +32,7 @@ import { ffiBindingDiag, ffiSignatureDiag, libCallbackDiag, requiresDynamicDiag 
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
-import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js";
+import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js"; import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerEffectCall } from "./lower-effect.js"; import { lowerFamilyCall, lowerFamilyImpl, prepareFamilyInstanceCtx, recordFamilySlot } from "./lower-families.js";
 import { lowerStringConstructor } from "./lower-string-constructor.js";
 import { droppableStatic, lowerAbsenceProbe, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
@@ -4259,7 +4259,7 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
         lowerer.lowerSearchParamsMethodCall(expr, expr.expression) ??
         lowerer.lowerStatsMethodCall(expr, expr.expression) ??
         lowerFileHandleMethodCall(lowerer, expr, expr.expression) ??
-        lowerer.lowerChildMethodCall(expr, expr.expression) ??
+        lowerer.lowerChildMethodCall(expr, expr.expression) ?? lowerSqliteMethodCall(lowerer, expr, expr.expression) ??
         // Piped child-output stream receivers — on/once("data" | "end").
         lowerChildStreamMethodCall(lowerer, expr, expr.expression) ??
         // First-class process-stream receivers — write(data).

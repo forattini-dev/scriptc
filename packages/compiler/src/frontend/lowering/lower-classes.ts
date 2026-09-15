@@ -1,6 +1,6 @@
 import { completeFunctionValueArgs, functionAbi } from "./function-abi.js";
 import { lowerSetNew } from "./lower-set-constructor.js";
-import { lowerUrlNew } from "./lower-url.js";
+import { lowerUrlNew } from "./lower-url.js"; import { lowerSqliteDatabaseNew } from "./lower-sqlite.js";
 import { lowerDateNew } from "./lower-date-constructor.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Class lowering: shape collection over the single-inheritance graph
@@ -4711,7 +4711,7 @@ export function lowerNew(lowerer: Lowerer, expr: ts.NewExpression): IrExpr {
         return { kind: "libCall", fn: "regex.new", args: [pattern, flags], type: { kind: "regex" }, loc };
       }
       const url = lowerUrlNew(lowerer, expr, symbol);
-      if (url) return url;
+      if (url) return url; const sqliteDb = lowerSqliteDatabaseNew(lowerer, expr, symbol); if (sqliteDb) return sqliteDb; // bun:sqlite's Database (static, --target bun)
       // `new URLSearchParams(init?)`: the WHATWG list (stdlib provenance —
       // see lowerSearchParamsNew for the lowered init shapes).
       if (symbol && symbol.name === "URLSearchParams" && lowerer.isStdlibSymbol(symbol)) {

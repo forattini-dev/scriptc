@@ -1,7 +1,7 @@
 import { BIGINT_MAY_THROW, type IrBigIntLibFn } from "./bigint-signatures.js"; import type { IrJsonReplacerFn } from "./json-replacer.js";
 export * from "./type-constants.js";
 import { F64, BYTES_U8, STRING, BOOL, VOID } from "./type-constants.js";
-import type { IrUrlLibFn } from "./url-signatures.js";
+import type { IrUrlLibFn } from "./url-signatures.js"; import { SQLITE_MAY_THROW_LIB_FNS, type IrSqliteLibFn } from "./sqlite-signatures.js";
 import { THROWING_COERCION_FNS } from "./coercion-names.js";
 import type { IrNumericCoercionFn } from "./numeric-coercion.js";
 import { nativeArrayViewSupported, nativeRecordCheckSupported } from "./native-record.js";
@@ -134,7 +134,7 @@ export type IrType =
    * reap — and every child IS reaped before loop exit, Node's keep-alive semantics). Lean allocation, no
    * trace: the pre-reap closure edges are guaranteed dropped. Same container rules as stats: union arms fine, arrays/maps/JSON fenced. */
   | { kind: "child" } | { kind: "genericFunc"; familyId: string } // a GENERIC function VALUE (static builds): a closure FAMILY — one capture layout per implementation, one native body per demanded instantiation (IrModule.families)
-  | { kind: "effect" } // the effect kernel's `Effect<A, E, R>` (static builds): an opaque refcounted description the native kernel runs; A/E are read from the checker at the boundaries
+  | { kind: "effect" } | { kind: "sqliteDb" } | { kind: "sqliteStmt" } // effect: the effect kernel's `Effect<A, E, R>` (static builds); sqliteDb/sqliteStmt: bun:sqlite Database/Statement handles (Rust, --target bun): an opaque refcounted description the native kernel runs; A/E are read from the checker at the boundaries
   /** A node:net server handle (scr_net.c — linked only when the IR uses
    * the net surface). Heap, refcounted, MUTABLE like child: the event
    * loop's net hook accepts connections and fires its listeners.
@@ -310,7 +310,7 @@ const POINTER_HANDLE_KINDS = [
   "stats",
   "fileHandle",
   "spawnRes",
-  "child", "effect",
+  "child", "effect", "sqliteDb", "sqliteStmt",
   "netServer",
   "netSocket",
   "http2Session",
@@ -390,7 +390,7 @@ export const RUNTIME_RC_STEMS: Record<IrType["kind"], string> = {
   stats: "scr_stats",
   fileHandle: "scr_file_handle",
   spawnRes: "scr_spawn_res",
-  child: "scr_child", effect: "scr_effect", genericFunc: "scr_family",
+  child: "scr_child", effect: "scr_effect", genericFunc: "scr_family", sqliteDb: "", sqliteStmt: "", // sqlite handles: Rust-only Gc values, no C runtime family
   netServer: "scr_net_server",
   netSocket: "scr_net_sock",
   http2Session: "scr_http2_session",
@@ -440,7 +440,7 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   // symbol is not a JS object, but every symbol is truthy — the same
   // constant-true answer.
   "symbol",
-  "date", "array", "map", "set", "regex", "url", "searchParams", "stats", "fileHandle", "spawnRes", "child", "effect", "genericFunc",
+  "date", "array", "map", "set", "regex", "url", "searchParams", "stats", "fileHandle", "spawnRes", "child", "effect", "sqliteDb", "sqliteStmt", "genericFunc",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
   "secureCtx", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
   // A generator object is a JS object: always truthy.
@@ -1829,7 +1829,7 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
-  | IrBigIntLibFn | IrJsonReplacerFn
+  | IrBigIntLibFn | IrJsonReplacerFn | IrSqliteLibFn
   /** Native local import: queued loader, fresh promise, cached evaluation. */
   | "module.import"
   | "module.namespace" | "promise.view"
@@ -7370,7 +7370,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.rmdirSync",
   "fs.readdirSync",
   "fs.readdirTypesSync",
-  "url.new",
+  "url.new", ...SQLITE_MAY_THROW_LIB_FNS,
   "url.newBase",
   "url.fileURLToPathUrl",
   "url.fileURLToPathStr",

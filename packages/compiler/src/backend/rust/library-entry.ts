@@ -26,6 +26,7 @@ function resetGlobal(global: IrGlobal, unsupported: (kind: string) => never): st
     case "spawnRes":
     case "child":
     case "effect": case "genericFunc":
+    case "sqliteDb": case "sqliteStmt":
     case "childStream":
     case "fsWatcher":
     case "netServer":

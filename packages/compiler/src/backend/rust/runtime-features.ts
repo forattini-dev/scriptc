@@ -1,6 +1,7 @@
 import type { IrExpr, IrModule, SrcLoc } from "../../ir/ir.js";
 import { nativeNumberPredicateInput } from "./island-builtins.js";
 import { hasRustEmbeddedModules } from "./embedded-modules.js";
+import { moduleUsesSqlite } from "./sqlite.js";
 
 export type RustRuntimeFeature = "island-eval" | "island-v8" | "sqlite";
 
@@ -72,10 +73,12 @@ export function rustEngineRequirement(mod: IrModule): { surface: string; loc: Sr
 
 /** Select heavyweight runtime facilities from the lowered IR, never source text. */
 export function rustRuntimeFeatures(mod: IrModule): RustRuntimeFeature[] {
-  if (rustEngineRequirement(mod) === null) return [];
+  // Statically lowered bun:sqlite (sqlite.* lib calls) needs the kernel with
+  // or without an island engine.
+  if (rustEngineRequirement(mod) === null) return moduleUsesSqlite(mod) ? ["sqlite"] : [];
   // The SQLite kernel compiles (bundled amalgamation) only for graphs that
   // reach `bun:sqlite`; every other island build keeps the trap.
-  const sqlite = mod.embedded?.bunRuntimeModules?.includes("bun:sqlite") === true;
+  const sqlite = mod.embedded?.bunRuntimeModules?.includes("bun:sqlite") === true || moduleUsesSqlite(mod);
   const engine = islandEngineFeature();
   return sqlite ? [engine, "sqlite"] : [engine];
 }

@@ -1,4 +1,4 @@
-import { BIGINT_LIB_FN_SIGS } from "./bigint-signatures.js"; import { URL_LIB_FN_SIGS } from "./url-signatures.js";
+import { BIGINT_LIB_FN_SIGS } from "./bigint-signatures.js"; import { URL_LIB_FN_SIGS } from "./url-signatures.js"; import { SQLITE_LIB_FN_SIGS } from "./sqlite-signatures.js";
 import { DATE_LIB_FN_SIGS } from "./date-signatures.js"; import { validatePromiseView } from "./promise-view.js";
 import { NUMERIC_COERCION_SIGS } from "./numeric-coercion.js"; import { JSON_REPLACER_SIGS } from "./json-replacer.js";
 import { isJsonStringifyType } from "./json-stringify.js";
@@ -263,7 +263,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "sym.keyFor": { argTypes: [SYMBOL_T], result: VOID },
   "sym.desc": { argTypes: [SYMBOL_T], result: VOID },
   "sym.toString": { argTypes: [SYMBOL_T], result: STRING },
-  ...URL_LIB_FN_SIGS, ...BIGINT_LIB_FN_SIGS,
+  ...URL_LIB_FN_SIGS, ...BIGINT_LIB_FN_SIGS, ...SQLITE_LIB_FN_SIGS,
   "sp.new": { argTypes: [], result: SEARCH_PARAMS_T },
   "sp.parse": { argTypes: [STRING], result: SEARCH_PARAMS_T },
   "sp.copy": { argTypes: [SEARCH_PARAMS_T], result: SEARCH_PARAMS_T },
