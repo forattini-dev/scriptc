@@ -10197,7 +10197,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
           );
         }
         const lhsInfo = lowerer.classes.get(left.type.className);
-        if (!lhsInfo) throw new InternalCompilerError(`lowerer bug: unknown class ${left.type.className}`);
+        if (!lhsInfo) { lowerer.flushDeferredClass(left.type.className); lowerer.unsupported("SC1090", expr, "'instanceof' on an instance whose class has no lowering (the class declaration itself was rejected — see its own diagnostic)"); }
         if (lowerer.inHierarchy(targetInfo) && lowerer.inHierarchy(lhsInfo)) {
           const classValue = lowerer.lowerExpr(expr.right);
           if (classValue.type.kind !== "classval") lowerer.badType(expr.right, lowerer.typeOf(expr.right));
@@ -10345,7 +10345,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
       return { kind: "boolLit", value: false, type: BOOL, loc };
     }
     const lhsInfo = lowerer.classes.get(left.type.className);
-    if (!lhsInfo) throw new InternalCompilerError(`lowerer bug: unknown class ${left.type.className}`);
+    if (!lhsInfo) { lowerer.flushDeferredClass(left.type.className); lowerer.unsupported("SC1090", expr, "'instanceof' on an instance whose class has no lowering (the class declaration itself was rejected — see its own diagnostic)"); }
     if (lowerer.inHierarchy(lhsInfo) && lowerer.inHierarchy(target)) {
       return { kind: "instanceOf", value: left, className: target.def.name, type: BOOL, loc };
     }
@@ -10507,7 +10507,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     }
     const lhsName = recv.type.className;
     const lhsInfo = lowerer.classes.get(lhsName);
-    if (!lhsInfo) throw new InternalCompilerError(`lowerer bug: unknown class ${lhsName}`);
+    if (!lhsInfo) { lowerer.flushDeferredClass(lhsName); lowerer.unsupported("SC1090", expr, `'${pname} in …' on an instance whose class has no lowering (the class declaration itself was rejected — see its own diagnostic)`); }
     if (lowerer.isSubclassOf(declName, lhsName)) {
       // The narrowing direction: the declarer strictly below the
       // receiver's static class — a strict subclass relation puts both in

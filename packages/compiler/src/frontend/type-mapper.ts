@@ -3657,7 +3657,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
     }
     for (const { p: part, mapped } of mappedArms) {
       if (!mapped) {
-        return `the union shape is supported, but its arm '${text(part)}' does not compile`;
+        return `the union shape is supported, but its arm '${text(part)}' does not compile${nestedBlocker(part, ctx)}`;
       }
       if (!armHasUnionHome(mapped, dataArms.length - 1)) {
         return `the union shape is supported, but '${text(part)}' arms have no home in a compiled union yet (no runtime narrowing test exists against sibling arms)`;
@@ -3692,19 +3692,19 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
       }
       const pTs = checker.getTypeOfSymbol(p);
       if (!mapType(pTs, ctx)) {
-        return `the function shape is supported, but its parameter '${p.name}' has type '${text(pTs)}', which does not compile`;
+        return `the function shape is supported, but its parameter '${p.name}' has type '${text(pTs)}', which does not compile${nestedBlocker(pTs, ctx)}`;
       }
     }
     const retTs = checker.getReturnTypeOfSignature(sig);
     if ((retTs.flags & ts.TypeFlags.Never) === 0 && !mapType(retTs, ctx)) {
-      return `the function shape is supported, but its return type '${text(retTs)}' does not compile`;
+      return `the function shape is supported, but its return type '${text(retTs)}' does not compile${nestedBlocker(retTs, ctx)}`;
     }
     return null;
   }
 
   return null;
 }
-
+const blockerStack = new Set<ts.Type>(); const nestedBlocker = (t: ts.Type, ctx: TypeMapperCtx): string => { if (blockerStack.size > 6 || blockerStack.has(t)) return ""; blockerStack.add(t); try { const sym = t.getAliasSymbol() ?? t.getSymbol(); const sourceDeclared = sym !== undefined && ctx.checker.declarationsOf(sym).some((d) => !d.getSourceFile().isDeclarationFile); const r = describeComponentBlocker(t, ctx) ?? (sourceDeclared ? describeRecordMemberBlocker(t, ctx) : null); return r === null || r.includes(`'${ctx.checker.typeToString(t)}'`) ? "" : ` (${r})`; } finally { blockerStack.delete(t); } }; // why a named component failed, down to a source-declared leaf (self-references and lib internals stop the chain)
 /** The record-member arm of the component fence: a USER record shape
  * blocked by ONE member's type. Runs AFTER badType's stdlib/npm/index-
  * signature routing, so what reaches it is a plain data shape; a null
@@ -3742,7 +3742,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     let pt = mapType(fieldTs, ctx); if (pt === null && !ctx.dynamic && (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)) pt = DYN; // a type-parameter member instantiated at `any` is the checked-dynamic value in a static build (effect's phantom `tag?: T`)
     if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
     if (!pt || pt.kind === "void") {
-      return `the record shape is supported, but its member '${p.name}' has type '${checker.typeToString(fieldTs)}', which does not compile`;
+      return `the record shape is supported, but its member '${p.name}' has type '${checker.typeToString(fieldTs)}', which does not compile${nestedBlocker(fieldTs, ctx)}`;
     }
   }
   return null;

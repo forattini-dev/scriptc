@@ -427,7 +427,7 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
     // included — Node returns the unchanged length); reduce/reduceRight
     // lower both declared forms (with and without an initial value).
     const arity = {
-      push: [0, Number.MAX_SAFE_INTEGER], unshift: [0, Number.MAX_SAFE_INTEGER], pop: [0, 0], indexOf: [1, 1], includes: [1, 1], join: [1, 1],
+      push: [0, Number.MAX_SAFE_INTEGER], unshift: [0, Number.MAX_SAFE_INTEGER], pop: [0, 0], indexOf: [1, 1], includes: [1, 1], join: [0, 1],
       concat: [0, Number.MAX_SAFE_INTEGER],
       slice: [0, 2], shift: [0, 0], splice: [1, 2], at: [1, 1],
       map: [1, 1], filter: [1, 1], forEach: [1, 1], find: [1, 1], findIndex: [1, 1], some: [1, 1],
@@ -681,7 +681,7 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
         );
       }
       const receiver = lowerer.lowerExpr(access.expression);
-      const sep = lowerer.lowerExpr(call.arguments[0]!);
+      const sep: IrExpr = call.arguments[0] === undefined ? { kind: "strLit", value: ",", type: STRING, loc } : lowerer.lowerExpr(call.arguments[0]);
       return { kind: "arrIntrinsic", method: "join", receiver, args: [sep], type: STRING, loc };
     }
     if (name === "map" || name === "filter" || name === "forEach") {

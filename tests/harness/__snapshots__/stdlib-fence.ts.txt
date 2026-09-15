@@ -184,22 +184,13 @@ stdlib-fence.ts:50:15 - error SC2020: '.indexOf with 2 arguments' is part of the
   49 | const nums = [1, 2, 3];
   50 | const found = nums.indexOf(2, 1);
      |               ^~~~~~~~~~~~~~~~~~
-  51 | const joined = nums.join();
+  51 | const joined = nums.join(); // the default "," separator lowers now
 
   hint: the fromIndex parameter has no lowering — slice first, or loop
 
-stdlib-fence.ts:51:16 - error SC2020: '.join with 0 arguments' is part of the standard library types but has no scriptc lowering yet
-
-  50 | const found = nums.indexOf(2, 1);
-  51 | const joined = nums.join();
-     |                ^~~~~~~~~~~
-  52 | nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
-
-  hint: pass the separator explicitly: join(",")
-
 stdlib-fence.ts:52:1 - error SC2020: '.forEach with 2 arguments' is part of the standard library types but has no scriptc lowering yet
 
-  51 | const joined = nums.join();
+  51 | const joined = nums.join(); // the default "," separator lowers now
   52 | nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   53 | const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
