@@ -5473,10 +5473,10 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
     let info = lowerer.classes.get(recvT.className) ?? null;
     while (info && info.base) info = info.base;
     if (!info || info.def.name !== "%Error") return null;
-    if (!lowerer.isStdlibMember(expr)) return null;
+    let causeOwner = lowerer.classes.get(recvT.className) ?? null; while (causeOwner && !causeOwner.schema?.causeProp) causeOwner = causeOwner.base; if (!lowerer.isStdlibMember(expr) && !(expr.name.text === "cause" && causeOwner !== null)) return null; // a schema error class's `cause` prop IS the Error cause slot
     const receiver = lowerer.lowerExpr(expr.expression);
     if (expr.name.text === "cause") {
-      return { kind: "libCall", fn: "error.cause", args: [receiver], type: DYN, loc: locOf(expr) };
+      return { kind: "libCall", fn: "error.cause", args: [lowerer.upcastTo(receiver, "%Error")], type: DYN, loc: locOf(expr) };
     }
     return {
       kind: "libCall",

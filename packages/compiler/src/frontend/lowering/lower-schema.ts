@@ -19,6 +19,9 @@ export interface SchemaClassInfo {
   props: { name: string; type: IrType }[];
   /** `message` is among the props: an Error-base slot, no own field. */
   messageProp: boolean;
+  /** `cause` is among an error form's props: the Error base's cause slot (Effect passes it as the Error `cause`
+   * option), no own field. */
+  causeProp: boolean;
   /** The constructor's props record (null for a propless class: `new X()` / `new X({})`). */
   propsType: IrType | null;
 }
@@ -37,6 +40,7 @@ export function collectSchemaClass(L: Lowerer, decl: ts.ClassLikeDeclaration, sc
   const props: { name: string; type: IrType }[] = [];
   const own: ClassInfo["fieldOrder"] = [];
   let messageProp = false;
+  let causeProp = false;
   for (const prop of schema.fields.properties) {
     const key = ts.isPropertyAssignment(prop) || ts.isShorthandPropertyAssignment(prop) ? prop.name : undefined;
     const name = key !== undefined && (ts.isIdentifier(key) || ts.isStringLiteral(key)) ? key.text : null;
@@ -46,9 +50,11 @@ export function collectSchemaClass(L: Lowerer, decl: ts.ClassLikeDeclaration, sc
     const tsType = L.checker.getTypeOfSymbolAtLocation(member, decl);
     const type = L.mapTypeOf(tsType);
     if (type === null) L.badType(prop, tsType);
-    if (type.kind === "dyn") L.unsupported("SC1090", prop, `the schema prop '${name}' typed unknown (a dynamic class field has no native slot yet)`);
-    if (isError && (name === "cause" || name === "name" || name === "stack")) L.unsupported("SC1090", prop, `the schema error field '${name}' (an Error slot the kernel does not carry)`);
-    if (isError && name === "message") {
+    if (isError && (name === "name" || name === "stack")) L.unsupported("SC1090", prop, `the schema error field '${name}' (an Error slot the kernel does not carry)`);
+    if (isError && name === "cause") {
+      if (type.kind !== "dyn") L.unsupported("SC1090", prop, "a 'cause' schema field typed other than unknown (Schema.Defect / Schema.Unknown carry the Error cause)");
+      causeProp = true;
+    } else if (isError && name === "message") {
       if (type.kind !== "string") L.unsupported("SC1090", prop, "a non-string 'message' schema field");
       messageProp = true;
     } else if (fields.has(name)) {
@@ -69,7 +75,7 @@ export function collectSchemaClass(L: Lowerer, decl: ts.ClassLikeDeclaration, sc
   const propsType: IrType | null = props.length > 0
     ? { kind: "record", shapeId: L.shapes.intern([...props].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).map((p) => ({ name: p.name, type: p.type })), false, undefined, props.map((p) => p.name)) }
     : null;
-  return { form: schema.form, tag: schema.tag, identifier: schema.identifier, props, messageProp, propsType };
+  return { form: schema.form, tag: schema.tag, identifier: schema.identifier, props, messageProp, causeProp, propsType };
 }
 
 /** The schema class constructor's body: `new X(props)` — error forms first run the Error base's constructor
@@ -96,9 +102,14 @@ export function schemaCtorBody(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, 
   if (isError) {
     out.push(L.superCallStmt(info, thisLocal, [schema.messageProp ? read("message", STRING) : lit("")], loc));
     out.push(set("name", lit(schema.tag ?? schema.identifier)));
+    if (schema.causeProp) {
+      // The Error cause option: stored in the base's cause slot, present only when the prop holds a value.
+      out.push(set("%cause", read("cause", DYN)));
+      out.push(set("%hasCause", { kind: "dynTest", test: "undefined", negated: true, value: read("cause", DYN), type: BOOL, loc }));
+    }
   }
   for (const prop of schema.props) {
-    if (isError && prop.name === "message") continue;
+    if (isError && (prop.name === "message" || prop.name === "cause")) continue;
     out.push(set(prop.name, read(prop.name, prop.type)));
   }
   if (schema.tag !== null) out.push(set("_tag", lit(schema.tag)));
