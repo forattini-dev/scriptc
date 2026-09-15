@@ -14,7 +14,8 @@ import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrPar
 import { MAX_GENERIC_INSTANCES, generatorMeta, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, typeKey } from "../type-mapper.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
-import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
+import { PoisonError, dynFallbackType, dynUndefinedExpr, own } from "./lowerer.js";
+import { newFnCtx } from "./scope-env.js";
 import { bufEncoding, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { lowerSearchParamsNew } from "./lower-builtins.js";
@@ -3459,82 +3460,82 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
     const thisType: IrType = { kind: "object", className };
     const prevClass = lowerer.currentClass;
     lowerer.currentClass = info;
-    lowerer.fnStack.push(newFnCtx(false, null, null, VOID));
     try {
-      const thisLocal = lowerer.declareThis(thisType);
-      const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
-      const body: IrStmt[] = [];
-      // The construction-relevant base: generic families are transparent
-      // (an instantiation of a base-less generic class IS a base class —
-      // its source has no super()).
-      const ctorBase = superBaseOf(info);
-      if (info.ctor && info.mixinInstance?.forwardingCtor) {
-        // The mixin FORWARDING constructor: the declared rest parameter
-        // never materializes — the ABI is the base's (synthetic params,
-        // the synthesized-ctor rule), `super(...args)` forwards them
-        // unchanged, and the remaining statements lower normally.
-        const loc = locOf(info.ctor);
-        const forward: IrExpr[] = info.ctorParams.map((shape, i) => {
-          const local: IrLocal = { id: `arg${i}.0`, name: `arg${i}`, type: shape.type, mutable: false };
-          lowerer.ctx.locals.push(local);
-          params.push({ localId: local.id, name: local.name, type: shape.type });
-          return { kind: "varRef", localId: local.id, type: shape.type, loc };
-        });
-        body.push(...lowerer.lowerDerivedCtorBody(info, thisLocal, forward));
-      } else if (info.ctor) {
-        // The default-param prologue runs FIRST — before field initializers
-        // and (in a derived class) before super(): JS evaluates parameter
-        // defaults on entry, ahead of everything the body does.
-        const declared = lowerer.declareParams(info.ctor.parameters, info.ctorParams);
-        params.push(...declared.params);
-        body.push(...declared.prologue);
-        if (!ctorBase) {
-          // Node's base-class order: field initializers run at the start
-          // of construction, the parameter-property assignments open the
-          // constructor body (probed — a field initializer reading a
-          // parameter property sees undefined).
-          body.push(...lowerer.fieldInitStmts(info, thisLocal));
-          body.push(...paramPropInitStmts(lowerer, info, thisLocal));
-          if (info.ctor.body) body.push(...lowerer.lowerStmts(info.ctor.body.statements));
-        } else if (info.ctor.body) {
-          body.push(...lowerer.lowerDerivedCtorBody(info, thisLocal));
-        }
-      } else if (info.schema !== undefined) {
-        body.push(...schemaCtorBody(lowerer, info, thisLocal, params));
-      } else {
-        if (ctorBase) {
-          // Synthetic forwarding params (the inherited ABI signature).
-          // Nothing references them by symbol — only the super call below,
-          // which forwards the already-completed values UNCHANGED (defaults
-          // apply in the base constructor's own prologue, never twice).
-          const loc = locOf(info.decl!);
-          const superArgs: IrExpr[] = info.ctorParams.map((shape, i) => {
+      return lowerer.env.inFunction(newFnCtx(false, null, null, VOID), () => {
+        const thisLocal = lowerer.declareThis(thisType);
+        const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
+        const body: IrStmt[] = [];
+        // The construction-relevant base: generic families are transparent
+        // (an instantiation of a base-less generic class IS a base class —
+        // its source has no super()).
+        const ctorBase = superBaseOf(info);
+        if (info.ctor && info.mixinInstance?.forwardingCtor) {
+          // The mixin FORWARDING constructor: the declared rest parameter
+          // never materializes — the ABI is the base's (synthetic params,
+          // the synthesized-ctor rule), `super(...args)` forwards them
+          // unchanged, and the remaining statements lower normally.
+          const loc = locOf(info.ctor);
+          const forward: IrExpr[] = info.ctorParams.map((shape, i) => {
             const local: IrLocal = { id: `arg${i}.0`, name: `arg${i}`, type: shape.type, mutable: false };
             lowerer.ctx.locals.push(local);
             params.push({ localId: local.id, name: local.name, type: shape.type });
             return { kind: "varRef", localId: local.id, type: shape.type, loc };
           });
-          try {
-            body.push(lowerer.superCallStmt(info, thisLocal, superArgs, loc));
-          } catch (e) {
-            // A synthesized super() can fence (a stream base whose
-            // underscore methods have no lowering): the diagnostic was
-            // pushed; the half-initialized ctor stays out of the body.
-            if (!(e instanceof PoisonError)) throw e;
+          body.push(...lowerer.lowerDerivedCtorBody(info, thisLocal, forward));
+        } else if (info.ctor) {
+          // The default-param prologue runs FIRST — before field initializers
+          // and (in a derived class) before super(): JS evaluates parameter
+          // defaults on entry, ahead of everything the body does.
+          const declared = lowerer.declareParams(info.ctor.parameters, info.ctorParams);
+          params.push(...declared.params);
+          body.push(...declared.prologue);
+          if (!ctorBase) {
+            // Node's base-class order: field initializers run at the start
+            // of construction, the parameter-property assignments open the
+            // constructor body (probed — a field initializer reading a
+            // parameter property sees undefined).
+            body.push(...lowerer.fieldInitStmts(info, thisLocal));
+            body.push(...paramPropInitStmts(lowerer, info, thisLocal));
+            if (info.ctor.body) body.push(...lowerer.lowerStmts(info.ctor.body.statements));
+          } else if (info.ctor.body) {
+            body.push(...lowerer.lowerDerivedCtorBody(info, thisLocal));
           }
+        } else if (info.schema !== undefined) {
+          body.push(...schemaCtorBody(lowerer, info, thisLocal, params));
+        } else {
+          if (ctorBase) {
+            // Synthetic forwarding params (the inherited ABI signature).
+            // Nothing references them by symbol — only the super call below,
+            // which forwards the already-completed values UNCHANGED (defaults
+            // apply in the base constructor's own prologue, never twice).
+            const loc = locOf(info.decl!);
+            const superArgs: IrExpr[] = info.ctorParams.map((shape, i) => {
+              const local: IrLocal = { id: `arg${i}.0`, name: `arg${i}`, type: shape.type, mutable: false };
+              lowerer.ctx.locals.push(local);
+              params.push({ localId: local.id, name: local.name, type: shape.type });
+              return { kind: "varRef", localId: local.id, type: shape.type, loc };
+            });
+            try {
+              body.push(lowerer.superCallStmt(info, thisLocal, superArgs, loc));
+            } catch (e) {
+              // A synthesized super() can fence (a stream base whose
+              // underscore methods have no lowering): the diagnostic was
+              // pushed; the half-initialized ctor stays out of the body.
+              if (!(e instanceof PoisonError)) throw e;
+            }
+          }
+          body.push(...lowerer.fieldInitStmts(info, thisLocal));
         }
-        body.push(...lowerer.fieldInitStmts(info, thisLocal));
-      }
-      return {
-        name: `%${className}.constructor`,
-        params,
-        returnType: VOID,
-        locals: lowerer.ctx.locals,
-        body,
-        loc: locOf(info.ctor ?? info.decl!),
-      };
+        return {
+          name: `%${className}.constructor`,
+          params,
+          returnType: VOID,
+          locals: lowerer.ctx.locals,
+          body,
+          loc: locOf(info.ctor ?? info.decl!),
+        };
+      });
     } finally {
-      lowerer.fnStack.pop();
       lowerer.currentClass = prevClass;
     }
   }
@@ -3819,28 +3820,29 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
     const fnCtx = newFnCtx(false, null, null, bodyReturn);
     fnCtx.isAsync = isAsync;
     if (genCh !== null) fnCtx.generator = genCh;
-    lowerer.fnStack.push(fnCtx);
+    const fnBody = fnLike.body;
     try {
-      const thisLocal = lowerer.declareThis(thisType);
-      const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
-      // `this` is declared first, so method parameter DEFAULTS may use it
-      // (JS allows this in method defaults; it is param 0 here).
-      const declared = lowerer.declareParams(fnLike.parameters, sig.params);
-      params.push(...declared.params);
-      const body = [...declared.prologue, ...lowerer.lowerStmts(fnLike.body.statements)];
-      const fn: IrFunction = {
-        name: `%${className}.${mName}`,
-        params,
-        returnType: bodyReturn,
-        locals: lowerer.ctx.locals,
-        body,
-        loc: locOf(fnLike),
-      };
-      if (isAsync) fn.async = true;
-      if (genCh !== null) fn.generator = genCh;
-      return fn;
+      return lowerer.env.inFunction(fnCtx, () => {
+        const thisLocal = lowerer.declareThis(thisType);
+        const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
+        // `this` is declared first, so method parameter DEFAULTS may use it
+        // (JS allows this in method defaults; it is param 0 here).
+        const declared = lowerer.declareParams(fnLike.parameters, sig.params);
+        params.push(...declared.params);
+        const body = [...declared.prologue, ...lowerer.lowerStmts(fnBody.statements)];
+        const fn: IrFunction = {
+          name: `%${className}.${mName}`,
+          params,
+          returnType: bodyReturn,
+          locals: lowerer.ctx.locals,
+          body,
+          loc: locOf(fnLike),
+        };
+        if (isAsync) fn.async = true;
+        if (genCh !== null) fn.generator = genCh;
+        return fn;
+      });
     } finally {
-      lowerer.fnStack.pop();
       lowerer.currentClass = prevClass;
     }
   }
@@ -3864,35 +3866,35 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
     const bodyReturn = isAsync && entry.ret.kind === "promise" ? entry.ret.inner : entry.ret;
     const fnCtx = newFnCtx(false, null, null, bodyReturn);
     fnCtx.isAsync = isAsync;
-    lowerer.fnStack.push(fnCtx);
-    try {
-      rejectStaticThis(
-        lowerer,
-        entry.member.body,
-        (keyword) => `'${keyword}' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead)`,
-      );
-      const declared = lowerer.declareParams(entry.member.parameters, entry.params);
-      const body = [...declared.prologue, ...lowerer.lowerStmts(entry.member.body.statements)];
-      const fn: IrFunction = {
-        name: `%${info.def.name}.static:${name}`,
-        params: declared.params,
-        returnType: bodyReturn,
-        locals: lowerer.ctx.locals,
-        body,
-        loc: locOf(entry.member),
-      };
-      if (isAsync) fn.async = true;
-      return fn;
-    } catch (e) {
-      // A poison OUTSIDE the per-statement catches (the this/super fence,
-      // a fenced parameter default): the diagnostic is recorded — the
-      // method skips like a signature-blocked function (lowerFunction's
-      // rule) instead of killing the whole analysis.
-      if (!(e instanceof PoisonError)) throw e;
-      return null;
-    } finally {
-      lowerer.fnStack.pop();
-    }
+    const memberBody = entry.member.body;
+    return lowerer.env.inFunction(fnCtx, () => {
+      try {
+        rejectStaticThis(
+          lowerer,
+          memberBody,
+          (keyword) => `'${keyword}' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead)`,
+        );
+        const declared = lowerer.declareParams(entry.member.parameters, entry.params);
+        const body = [...declared.prologue, ...lowerer.lowerStmts(memberBody.statements)];
+        const fn: IrFunction = {
+          name: `%${info.def.name}.static:${name}`,
+          params: declared.params,
+          returnType: bodyReturn,
+          locals: lowerer.ctx.locals,
+          body,
+          loc: locOf(entry.member),
+        };
+        if (isAsync) fn.async = true;
+        return fn;
+      } catch (e) {
+        // A poison OUTSIDE the per-statement catches (the this/super fence,
+        // a fenced parameter default): the diagnostic is recorded — the
+        // method skips like a signature-blocked function (lowerFunction's
+        // rule) instead of killing the whole analysis.
+        if (!(e instanceof PoisonError)) throw e;
+        return null;
+      }
+    });
   }
 
 /** A synthesized throwing setter: a getter-only override shadows the

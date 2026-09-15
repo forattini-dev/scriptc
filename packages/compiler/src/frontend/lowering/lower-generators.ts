@@ -319,8 +319,8 @@ export function lowerForOfGenerator(
   const recT = resultRecordOf(lowerer, genT);
   const shape = lowerer.shapes.get(recT.shapeId)!;
   const valueT = shape.fields.find((f) => f.name === "value")!.type;
-  lowerer.scopes.push(new Map());
-  try {
+  const declName = decl.name;
+  return lowerer.env.inScope(() => {
     const g = lowerer.declareHiddenLocal("%gof", genT);
     const done = lowerer.declareHiddenLocal("%gdone", BOOL);
     done.mutable = true;
@@ -341,7 +341,7 @@ export function lowerForOfGenerator(
     const varTarget = forOfVarTarget(lowerer, decl);
     const x = varTarget
       ? lowerer.declareHiddenLocal("%vof", genT.yieldT)
-      : lowerer.declareLocal(decl.name, decl.name.text, genT.yieldT, isLet);
+      : lowerer.declareLocal(declName, declName.text, genT.yieldT, isLet);
     const xRef: IrExpr = { kind: "varRef", localId: x.id, type: genT.yieldT, loc };
     const head: IrStmt[] = [
       {
@@ -409,9 +409,7 @@ export function lowerForOfGenerator(
       ],
       loc,
     };
-  } finally {
-    lowerer.scopes.pop();
-  }
+  });
 }
 
 /** `for await (const x of asyncGen)` — the async sibling of
@@ -462,8 +460,8 @@ export function lowerForAwaitGenerator(
   const promiseT: IrType = { kind: "promise", inner: recT };
   const shape = lowerer.shapes.get(recT.shapeId)!;
   const valueT = shape.fields.find((f) => f.name === "value")!.type;
-  lowerer.scopes.push(new Map());
-  try {
+  const declName = decl.name;
+  return lowerer.env.inScope(() => {
     const g = lowerer.declareHiddenLocal("%fag", genT);
     const done = lowerer.declareHiddenLocal("%fagdone", BOOL);
     done.mutable = true;
@@ -480,7 +478,7 @@ export function lowerForAwaitGenerator(
         `for-await over an async generator yielding '${lowerer.fmt(genT.yieldT)}' (no per-element extraction exists)`,
       );
     }
-    const x = lowerer.declareLocal(decl.name, decl.name.text, genT.yieldT, isLet);
+    const x = lowerer.declareLocal(declName, declName.text, genT.yieldT, isLet);
     const head: IrStmt[] = [
       {
         kind: "varDecl",
@@ -541,9 +539,7 @@ export function lowerForAwaitGenerator(
       ],
       loc,
     };
-  } finally {
-    lowerer.scopes.pop();
-  }
+  });
 }
 
 /** Statement-position `yield* e;` — the forwarding loop:
@@ -591,8 +587,7 @@ export function lowerYieldStarStatement(lowerer: Lowerer, expr: ts.Expression): 
   const recT = resultRecordOf(lowerer, dT);
   const shape = lowerer.shapes.get(recT.shapeId)!;
   const valueT = shape.fields.find((f) => f.name === "value")!.type;
-  lowerer.scopes.push(new Map());
-  try {
+  return lowerer.env.inScope(() => {
     const d = lowerer.declareHiddenLocal("%dele", dT);
     const r = lowerer.declareHiddenLocal("%dres", recT);
     r.mutable = true;
@@ -676,7 +671,5 @@ export function lowerYieldStarStatement(lowerer: Lowerer, expr: ts.Expression): 
       ],
       loc,
     };
-  } finally {
-    lowerer.scopes.pop();
-  }
+  });
 }

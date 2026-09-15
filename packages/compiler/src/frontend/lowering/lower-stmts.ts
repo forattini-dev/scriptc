@@ -511,20 +511,13 @@ export function provenanceElidedConstDecl(lowerer: Lowerer, decl: ts.VariableDec
       // captures thread from the right parents. Both stacks restore
       // afterwards; the reference that triggered this then resolves the
       // fresh local and threads its own captures normally.
-      const depth = lowerer.fnStack.indexOf(entry.ctx);
-      const frameIdx = entry.ctx.scopes.indexOf(entry.frame);
-      if (depth < 0 || frameIdx < 0) return false;
+      if (!lowerer.env.isOpen(entry.ctx, entry.frame)) return false;
       lowerer.hoistedFnDecls.add(decl);
-      const fnTail = lowerer.fnStack.splice(depth + 1);
-      const scopeTail = entry.ctx.scopes.splice(frameIdx + 1);
       try {
-        entry.out.push(lowerer.lowerNestedFunctionDecl(decl));
+        entry.out.push(lowerer.env.inOwnerEnvironment(entry.ctx, entry.frame, () => lowerer.lowerNestedFunctionDecl(decl)));
       } catch (e) {
         lowerer.hoistedFnDecls.delete(decl);
         throw e;
-      } finally {
-        entry.ctx.scopes.push(...scopeTail);
-        lowerer.fnStack.push(...fnTail);
       }
       return true;
     }
@@ -711,13 +704,10 @@ export function provenanceElidedConstDecl(lowerer: Lowerer, decl: ts.VariableDec
 
 /** Lowers a statement in a fresh lexical scope (if/while/for bodies). */
   export function lowerScopedBlock(lowerer: Lowerer, stmt: ts.Statement): IrStmt[] {
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const stmts = ts.isBlock(stmt) ? lowerer.lowerStmts(stmt.statements) : lowerer.lowerStmts([stmt]);
       return stmts;
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** `lbl: stmt` — labeled statements. A label chain collapses to one name
@@ -3999,8 +3989,7 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
     }
     // The whole case-body sequence is ONE lexical scope in JS: a bare `let`
     // in one case is visible in later cases.
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const cases: { test: IrExpr | null; body: IrStmt[] }[] = [];
       for (const clause of stmt.caseBlock.clauses) {
         let test: IrExpr | null = null;
@@ -4017,9 +4006,7 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
         cases.push({ test, body: lowerer.inCtl("switch", () => lowerer.lowerStmts(clause.statements), labels) });
       }
       return { kind: "switch", disc, cases, ...(labels && { labels }), loc: locOf(stmt) };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** Switch on a UNION-typed discriminant (`switch (m.type)` over
@@ -4107,8 +4094,7 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
     };
     // The whole case-body sequence is ONE lexical scope, like the real
     // switch lowering.
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       // Group clauses: consecutive test-only cases (empty statements) share
       // the next body, exactly JS's grouped-case idiom.
       const groups: { tests: IrExpr[]; body: IrStmt[]; isDefault: boolean }[] = [];
@@ -4193,9 +4179,7 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
         chain = [{ kind: "if", cond, then: g.body, else_: chain.length > 0 ? chain : null, loc }];
       }
       return { kind: "block", body: [...prefix, ...chain], loc };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** try/catch/finally:
@@ -4225,14 +4209,14 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
         lowerer.unsupported("SC1062", vd);
       }
       if (vd && ts.isIdentifier(vd.name)) {
-        lowerer.scopes.push(new Map());
-        try {
-          const local = lowerer.declareLocal(vd.name, vd.name.text, CAUGHT, false);
-          catchLocalId = local.id;
-          catchBody = lowerer.lowerScopedBlock(stmt.catchClause.block);
-        } finally {
-          lowerer.scopes.pop();
-        }
+        const name = vd.name;
+        const block = stmt.catchClause.block;
+        const caught = lowerer.env.inScope(() => {
+          const local = lowerer.declareLocal(name, name.text, CAUGHT, false);
+          return { localId: local.id, body: lowerer.lowerScopedBlock(block) };
+        });
+        catchLocalId = caught.localId;
+        catchBody = caught.body;
       } else {
         catchBody = lowerer.lowerScopedBlock(stmt.catchClause.block);
       }
@@ -6827,14 +6811,14 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     // `var` pattern names ride the same desugar: bindPatternTarget assigns
     // their hoisted function-scoped slots instead of declaring locals.
     if (ts.isArrayBindingPattern(decl.name) || ts.isObjectBindingPattern(decl.name)) {
-      lowerer.scopes.push(new Map());
-      try {
+      const pattern = decl.name;
+      return lowerer.env.inScope(() => {
         const elemType = elemValueT;
-        const loc = locOf(decl.name);
+        const loc = locOf(pattern);
         const tmp = lowerer.declareHiddenLocal("%destr", elemType);
         const binds: IrStmt[] = [];
         lowerer.lowerBindingPattern(
-          decl.name,
+          pattern,
           () => ({ kind: "varRef", localId: tmp.id, type: elemType, loc }),
           elemType,
           isLet,
@@ -6842,14 +6826,12 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         );
         const body = lowerer.inCtl("loop", () => lowerer.lowerScopedBlock(stmt.statement), labels);
         return forValues(tmp.id, [...binds, ...body]);
-      } finally {
-        lowerer.scopes.pop();
-      }
+      });
     }
     if (!ts.isIdentifier(decl.name)) lowerer.unsupported("SC1031", decl.name);
+    const declName = decl.name;
 
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       // `for (var x of xs)`: the element lands in a hidden per-iteration
       // local and the body opens by ASSIGNING it into the one hoisted
       // binding — closures capture the shared slot, and the value persists
@@ -6868,7 +6850,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         const body = lowerer.inCtl("loop", () => lowerer.lowerScopedBlock(stmt.statement), labels);
         return forValues(tmp.id, [write, ...body]);
       }
-      const local = lowerer.declareLocal(decl.name, decl.name.text, elemValueT, isLet);
+      const local = lowerer.declareLocal(declName, declName.text, elemValueT, isLet);
       if (!typeEquals(elemValueT, sourceT.elem)) {
         const root = lowerer.runtimeOptionalRootOf(local);
         lowerer.runtimeOptionalLocals.add(root);
@@ -6877,7 +6859,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       const body = lowerer.inCtl("loop", () => lowerer.lowerScopedBlock(stmt.statement), labels);
       if (!resourceLoop) return forValues(local.id, body);
       const resource = varRef(local.id, local.type, locOf(decl.name));
-      const cleanup = cleanupForValue(lowerer, decl.name, resource, isAwaitUsing(list));
+      const cleanup = cleanupForValue(lowerer, declName, resource, isAwaitUsing(list));
       return forValues(local.id, [{
         kind: "tryCatch",
         tryBody: body,
@@ -6887,9 +6869,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         suppressFinallyErrors: true,
         loc: locOf(decl),
       }]);
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** Direct for-of over a represented typed array. The implicit iterator is
@@ -7024,8 +7004,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         };
     const one: IrExpr = { kind: "numLit", value: 1, type: F64, loc };
 
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const varTarget = exprTarget ?? (decl ? forOfVarTarget(lowerer, decl) : null);
       const value = varTarget
         ? lowerer.declareHiddenLocal("%numiterValue", valueT)
@@ -7098,9 +7077,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         ...(labels && { labels }),
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** A DIRECT `s.matchAll(re)` call: a stdlib matchAll property call on a
@@ -7185,8 +7162,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       rowsInit = stored!.rows;
       idxsLocalId = stored!.idxsLocalId;
     }
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const rows = lowerer.declareHiddenLocal("%mrows", rowsT);
       const i = lowerer.declareHiddenLocal("%miter", F64);
       i.mutable = true; // the cursor reassigns (hidden locals default const)
@@ -7239,9 +7215,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         ],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** `for (const ch of s)` over a STRING: JS's string iterator, which walks
@@ -7305,8 +7279,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const decl = list ? list.declarations[0]! : null;
     if (decl && !ts.isIdentifier(decl.name)) lowerer.unsupported("SC1031", decl.name);
     const loc = locOf(stmt);
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const recv = lowerer.declareHiddenLocal("%cit", iterable.type);
       const it = lowerer.declareHiddenLocal("%cii", cit.iterT);
       const r = lowerer.declareHiddenLocal("%cir", cit.resultT);
@@ -7358,9 +7331,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         ],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
   /** for-of over an ISLAND value (see lowerForOf's jsval arm): the
@@ -7423,8 +7394,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const packRef = (): IrExpr => ({ kind: "varRef", localId: pack.id, type: DYN, loc });
     const iRef = (): IrExpr => ({ kind: "varRef", localId: idx.id, type: F64, loc });
     const elemInit = (): IrExpr => ({ kind: "libCall", fn: "dyn.arrAt", args: [packRef(), iRef()], type: DYN, loc });
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const binds: IrStmt[] = [];
       if (!ts.isVariableDeclarationList(stmt.initializer)) {
         // Pre-declared heads: identifier targets assign the existing
@@ -7532,9 +7502,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         ],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
   function lowerForOfIsland(lowerer: Lowerer, stmt: ts.ForOfStatement, iterable: IrExpr, labels?: string[]): IrStmt {
@@ -7557,8 +7525,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const itRef: IrExpr = { kind: "varRef", localId: itLocal.id, type: JSVAL, loc };
     const rRef: IrExpr = { kind: "varRef", localId: rLocal.id, type: JSVAL, loc };
     const valueOf: IrExpr = { kind: "jsOp", op: "getProp", name: "value", args: [rRef], type: JSVAL, loc };
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const binds: IrStmt[] = [];
       if (ts.isArrayBindingPattern(decl.name) || ts.isObjectBindingPattern(decl.name)) {
         const tmp = lowerer.declareHiddenLocal("%destr", JSVAL);
@@ -7605,9 +7572,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         ],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
   function lowerForOfString(lowerer: Lowerer, stmt: ts.ForOfStatement, iterable: IrExpr, labels?: string[]): IrStmt {
@@ -7643,8 +7608,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const isLet = list !== null && (list.flags & ts.NodeFlags.Let) !== 0;
     const decl = list ? list.declarations[0]! : null; // the grammar allows exactly one
     const loc = locOf(stmt);
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const s = lowerer.declareHiddenLocal("%strof", STRING);
       const i = lowerer.declareHiddenLocal("%iterof", F64);
       i.mutable = true; // the unit index reassigns (hidden locals default const)
@@ -7722,9 +7686,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         ],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** for-in loops. The key set is Node's own-enumerable-keys walk, lowered
@@ -7888,8 +7850,8 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const decl = list.declarations[0]!; // the grammar allows exactly one
     if (!ts.isIdentifier(decl.name)) lowerer.unsupported("SC1031", decl.name);
     const isLet = (list.flags & ts.NodeFlags.Let) !== 0 || (list.flags & ts.NodeFlags.BlockScoped) === 0;
-    lowerer.scopes.push(new Map());
-    try {
+    const declName = decl.name;
+    return lowerer.env.inScope(() => {
       // `for (var k in obj)`: the key lands in a hidden per-iteration
       // local and the body opens by assigning the one hoisted binding.
       const varTarget = forOfVarTarget(lowerer, decl);
@@ -7904,12 +7866,10 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         const body = lowerer.inCtl("loop", () => lowerer.lowerScopedBlock(stmt.statement), labels);
         return { kind: "forOf", localId: tmp.id, iterable: keys, body: visit(tmp.id, [write], body), ...(labels && { labels }), loc };
       }
-      const local = lowerer.declareLocal(decl.name, decl.name.text, STRING, isLet);
+      const local = lowerer.declareLocal(declName, declName.text, STRING, isLet);
       const body = lowerer.inCtl("loop", () => lowerer.lowerScopedBlock(stmt.statement), labels);
       return { kind: "forOf", localId: local.id, iterable: keys, body: visit(local.id, [], body), ...(labels && { labels }), loc };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** for-in over an ARRAY: Node's canonical ascending index strings.
@@ -7927,8 +7887,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const loc = locOf(stmt);
     const arrExpr = lowerer.lowerExpr(stmt.expression);
     if (arrExpr.type.kind !== "array") lowerer.badType(stmt.expression, lowerer.typeOf(stmt.expression));
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const arr = lowerer.declareHiddenLocal("%inarr", arrExpr.type);
       const len = lowerer.declareHiddenLocal("%inlen", F64);
       const i = lowerer.declareHiddenLocal("%ini", F64);
@@ -8031,9 +7990,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         ],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** `for await (const chunk of process.stdin)` — the ONE lowered async
@@ -8068,10 +8025,10 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     if (!ts.isIdentifier(decl.name)) lowerer.unsupported("SC1031", decl.name);
     const loc = locOf(stmt);
     const promiseT: IrType = { kind: "promise", inner: BYTES_U8 };
-    lowerer.scopes.push(new Map());
-    try {
+    const declName = decl.name;
+    return lowerer.env.inScope(() => {
       const p = lowerer.declareHiddenLocal("%stdinNext", promiseT);
-      const chunk = lowerer.declareLocal(decl.name, decl.name.text, BYTES_U8, isLet);
+      const chunk = lowerer.declareLocal(declName, declName.text, BYTES_U8, isLet);
       const body = lowerer.inCtl("loop", () => lowerer.lowerScopedBlock(stmt.statement));
       const chunkRef: IrExpr = { kind: "varRef", localId: chunk.id, type: BYTES_U8, loc };
       const head: IrStmt[] = [
@@ -8113,9 +8070,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         body: [...head, ...body],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** `for await (const line of readlineInterface)` — the native readline
@@ -8145,12 +8100,12 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const promiseT: IrType = { kind: "promise", inner: lineT };
     const stringTag = lowerer.armTag(lineT.unionId, STRING);
     const undefinedTag = lowerer.armTag(lineT.unionId, UNDEFINED_T);
-    lowerer.scopes.push(new Map());
-    try {
+    const declName = decl.name;
+    return lowerer.env.inScope(() => {
       const receiver = lowerer.declareHiddenLocal("%faReadline", F64);
       const next = lowerer.declareHiddenLocal("%readlineNext", promiseT);
       const raw = lowerer.declareHiddenLocal("%readlineLine", lineT);
-      const line = lowerer.declareLocal(decl.name, decl.name.text, STRING, isLet);
+      const line = lowerer.declareLocal(declName, declName.text, STRING, isLet);
       const body = lowerer.inCtl("loop", () => lowerer.lowerScopedBlock(stmt.statement));
       const receiverRef: IrExpr = { kind: "varRef", localId: receiver.id, type: F64, loc };
       const rawRef: IrExpr = { kind: "varRef", localId: raw.id, type: lineT, loc };
@@ -8214,9 +8169,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         ],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** `for await (const chunk of readable)` — the stream async iterator
@@ -8259,8 +8212,8 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const dynLane = true;
     const chunkT: IrType = DYN;
     const promiseT: IrType = { kind: "promise", inner: chunkT };
-    lowerer.scopes.push(new Map());
-    try {
+    const declName = decl.name;
+    return lowerer.env.inScope(() => {
       // The receiver evaluates ONCE, before the loop.
       const recvLocal = lowerer.declareHiddenLocal("%faStream", recvT);
       const recvDecl: IrStmt = {
@@ -8270,7 +8223,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         loc,
       };
       const p = lowerer.declareHiddenLocal("%streamNext", promiseT);
-      const chunk = lowerer.declareLocal(decl.name, decl.name.text, chunkT, isLet);
+      const chunk = lowerer.declareLocal(declName, declName.text, chunkT, isLet);
       const body = lowerer.inCtl("loop", () => lowerer.lowerScopedBlock(stmt.statement));
       const chunkRef: IrExpr = { kind: "varRef", localId: chunk.id, type: chunkT, loc };
       const eofCond: IrExpr = dynLane
@@ -8322,15 +8275,12 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         ],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 export function lowerForStatement(lowerer: Lowerer, stmt: ts.ForStatement): IrStmt {
     const labels = lowerer.takeLabels();
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       let init: IrStmt | null = null;
       if (stmt.initializer) {
         if (ts.isVariableDeclarationList(stmt.initializer)) {
@@ -8345,7 +8295,5 @@ export function lowerForStatement(lowerer: Lowerer, stmt: ts.ForStatement): IrSt
       const update = stmt.incrementor ? lowerer.lowerExprStatement(stmt.incrementor) : null;
       const body = lowerer.inCtl("loop", () => lowerer.lowerScopedBlock(stmt.statement), labels);
       return { kind: "for", init, cond, update, body, ...(labels && { labels }), loc: locOf(stmt) };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }

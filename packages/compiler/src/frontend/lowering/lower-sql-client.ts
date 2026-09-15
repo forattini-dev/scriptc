@@ -3,7 +3,7 @@
  * Every entry answers null for anything that is not its surface, so lower-effect keeps trying its own rules. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { newFnCtx } from "./lowerer.js";
+import { newFnCtx } from "./scope-env.js";
 import { DYN, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrStmt, IrType, STRING, SrcLoc } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import { isNativeSqlClientType } from "../kernel.js";
@@ -232,30 +232,24 @@ function lowerSqlClientMake(L: Lowerer, options: ts.ObjectLiteralExpression, exp
 /** A capture-free lifted closure over `params` whose body returns `body(parameter refs)`. */
 function liftedSqlFn(L: Lowerer, params: IrType[], ret: IrType, body: (refs: IrExpr[]) => IrExpr, loc: SrcLoc): IrExpr {
   const name = `%effect.sql.${L.liftedFns.length}`;
-  L.fnStack.push(newFnCtx(false, null, null, ret));
-  try {
+  L.env.inFunction(newFnCtx(false, null, null, ret), () => {
     const locals: IrLocal[] = params.map((type, index) => ({ id: `p${index}.0`, name: `p${index}`, type, mutable: false }));
     L.ctx.locals.push(...locals);
     const refs: IrExpr[] = locals.map((local) => ({ kind: "varRef", localId: local.id, type: local.type, loc }));
     const result = body(refs);
     L.liftedFns.push({ name, params: locals.map((local) => ({ localId: local.id, name: local.name, type: local.type })), returnType: ret, locals: L.ctx.locals, body: [{ kind: "return", value: result, loc }], loc });
-  } finally {
-    L.fnStack.pop();
-  }
+  });
   return { kind: "closure", fnName: name, captures: [], type: { kind: "func", params, ret }, loc };
 }
 
 /** The closure `(rows: unknown) => rows as T`, checked. */
 function liftedDynCheck(L: Lowerer, target: IrType, loc: SrcLoc): IrExpr {
   const name = `%effect.sqlRows.${L.liftedFns.length}`;
-  L.fnStack.push(newFnCtx(false, null, null, target));
-  try {
+  L.env.inFunction(newFnCtx(false, null, null, target), () => {
     const local: IrLocal = { id: "rows.0", name: "rows", type: DYN, mutable: false };
     L.ctx.locals.push(local);
     const checked: IrExpr = { kind: "dynCheck", value: { kind: "varRef", localId: local.id, type: DYN, loc }, type: target, loc };
     L.liftedFns.push({ name, params: [{ localId: local.id, name: local.name, type: DYN }], returnType: target, locals: L.ctx.locals, body: [{ kind: "return", value: checked, loc }], loc });
-  } finally {
-    L.fnStack.pop();
-  }
+  });
   return { kind: "closure", fnName: name, captures: [], type: { kind: "func", params: [DYN], ret: target }, loc };
 }

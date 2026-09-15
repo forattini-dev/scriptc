@@ -38,7 +38,8 @@
  * super.emit as the prototype chain). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { dynFallbackType, newFnCtx } from "./lowerer.js";
+import { dynFallbackType } from "./lowerer.js";
+import { newFnCtx } from "./scope-env.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/ir.js";
@@ -1150,39 +1151,40 @@ export function lowerEmitOverrideSpec(lowerer: Lowerer, req: EmitSpecRequest): I
   const prevSuppress = lowerer.suppressStats;
   lowerer.currentClass = info;
   lowerer.suppressStats = prevSuppress || ordinal > 0;
-  lowerer.fnStack.push(newFnCtx(false, null, null, BOOL));
+  const overrideBody = ov.decl.body;
   try {
-    const loc = locOf(ov.decl);
-    const thisLocal = lowerer.declareThis(thisType);
-    const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
-    const tupleParams: IrLocal[] = tuple.map((t, i) => {
-      const p = lowerer.declareHiddenLocal(`%ee${i}`, t);
-      params.push({ localId: p.id, name: `%ee${i}`, type: t });
-      return p;
+    return lowerer.env.inFunction(newFnCtx(false, null, null, BOOL), () => {
+      const loc = locOf(ov.decl);
+      const thisLocal = lowerer.declareThis(thisType);
+      const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
+      const tupleParams: IrLocal[] = tuple.map((t, i) => {
+        const p = lowerer.declareHiddenLocal(`%ee${i}`, t);
+        params.push({ localId: p.id, name: `%ee${i}`, type: t });
+        return p;
+      });
+      const eventDecl = ov.decl.parameters[0]!;
+      const eventLocal = lowerer.declareLocal(
+        eventDecl.name,
+        ts.isIdentifier(eventDecl.name) ? eventDecl.name.text : "event",
+        STRING,
+        true,
+      );
+      const prologue: IrStmt[] = [
+        { kind: "varDecl", localId: eventLocal.id, init: strLit(event, loc), loc },
+      ];
+      lowerer.emitSpecCtx = { info, event, tuple, eventSym: ov.eventSym, restSym: ov.restSym, tupleParams };
+      const body = [...prologue, ...lowerer.lowerStmts(overrideBody.statements)];
+      return {
+        name: `%${className}.emit:${event}`,
+        params,
+        returnType: BOOL,
+        locals: lowerer.ctx.locals,
+        body,
+        loc,
+      };
     });
-    const eventDecl = ov.decl.parameters[0]!;
-    const eventLocal = lowerer.declareLocal(
-      eventDecl.name,
-      ts.isIdentifier(eventDecl.name) ? eventDecl.name.text : "event",
-      STRING,
-      true,
-    );
-    const prologue: IrStmt[] = [
-      { kind: "varDecl", localId: eventLocal.id, init: strLit(event, loc), loc },
-    ];
-    lowerer.emitSpecCtx = { info, event, tuple, eventSym: ov.eventSym, restSym: ov.restSym, tupleParams };
-    const body = [...prologue, ...lowerer.lowerStmts(ov.decl.body.statements)];
-    return {
-      name: `%${className}.emit:${event}`,
-      params,
-      returnType: BOOL,
-      locals: lowerer.ctx.locals,
-      body,
-      loc,
-    };
   } finally {
     lowerer.emitSpecCtx = prevSpec;
-    lowerer.fnStack.pop();
     lowerer.currentClass = prevClass;
     lowerer.suppressStats = prevSuppress;
   }

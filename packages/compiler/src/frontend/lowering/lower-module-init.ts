@@ -1,7 +1,8 @@
 import * as ts from "../ts7/adapter.js";
 import { isNodeEsmFile, locOf, orderedImportsOf } from "../program.js";
 import { BOOL, VOID, arrayOf, type IrExpr, type IrFunction, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
-import { type Lowerer, dynUndefinedExpr, newFnCtx } from "./lowerer.js";
+import { type Lowerer, dynUndefinedExpr } from "./lowerer.js";
+import { newFnCtx } from "./scope-env.js";
 import type { FileParts } from "./lower-modules.js";
 import { nativeImportTargetOf } from "./lower-native-import-types.js";
 
@@ -170,8 +171,7 @@ export function prepareModuleInits(L: Lowerer, parts: FileParts[]): void {
     const isAsync = L.asyncInitFiles.has(sf);
     const ctx = newFnCtx(false, null, null, VOID);
     ctx.isAsync = isAsync;
-    L.fnStack.push(ctx);
-    try {
+    return L.env.inFunction(ctx, () => {
       const loc0: SrcLoc = { file: sf.fileName, start: 0, end: 0 };
       const header: IrStmt[] = [];
       const asyncDeps: { completionId: string; loc: SrcLoc; cycleInternal: boolean }[] = [];
@@ -376,9 +376,7 @@ export function prepareModuleInits(L: Lowerer, parts: FileParts[]): void {
           : {}),
         loc,
       };
-    } finally {
-      L.fnStack.pop();
-    }
+    });
   }
 
 

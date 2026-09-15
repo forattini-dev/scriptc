@@ -4147,8 +4147,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     const isVar = (list.flags & ts.NodeFlags.BlockScoped) === 0;
     const isLet = (list.flags & ts.NodeFlags.Let) !== 0 || isVar;
     const decl = list.declarations[0]!; // the grammar allows exactly one
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const sp = lowerer.declareHiddenLocal("%spof", SP);
       const i = lowerer.declareHiddenLocal("%iterof", F64);
       i.mutable = true;
@@ -4260,9 +4259,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         body: [{ kind: "varDecl", localId: sp.id, init: iterable, loc }, loop],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** for-of over an ARRAY/typed-array keys()/entries() projection consumed directly
@@ -4302,8 +4299,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     const isVar = (list.flags & ts.NodeFlags.BlockScoped) === 0;
     const isLet = (list.flags & ts.NodeFlags.Let) !== 0 || isVar;
     const decl = list.declarations[0]!; // the grammar allows exactly one
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const arr = lowerer.declareHiddenLocal("%arof", arrT);
       const i = lowerer.declareHiddenLocal("%iterof", F64);
       i.mutable = true;
@@ -4454,9 +4450,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         body: [{ kind: "varDecl", localId: arr.id, init: iterable, loc }, loop],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
   export function lowerForOfMap(lowerer: Lowerer, stmt: ts.ForOfStatement,
@@ -4503,8 +4497,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       isLet = (list.flags & ts.NodeFlags.Let) !== 0 || isVar;
       decl = list.declarations[0]!; // the grammar allows exactly one
     }
-    lowerer.scopes.push(new Map());
-    try {
+    return lowerer.env.inScope(() => {
       const m = lowerer.declareHiddenLocal(isMap ? "%mapof" : "%setof", contT);
       const i = lowerer.declareHiddenLocal("%iterof", F64);
       i.mutable = true; // the loop counter reassigns (hidden locals default const)
@@ -4673,9 +4666,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         ],
         loc,
       };
-    } finally {
-      lowerer.scopes.pop();
-    }
+    });
   }
 
 /** Rewrites a lowered for-of-over-Map/Set body so every `return` runs the

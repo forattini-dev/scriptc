@@ -11,7 +11,8 @@ import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, STATIC_MATH_PROPS, boun
 import { invalidJsonModuleDiag, requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { esmNamedImportLinkCrash, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, pathAliasesProgramModule, resolveImport } from "../program.js";
 import { foldedStringKeyOf, lowerDynObjectLiteral, pureReemittable } from "./lower-exprs.js";
-import { PoisonError, dynUndefinedExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
+import { PoisonError, dynUndefinedExpr, nodeThrowExpr, own } from "./lowerer.js";
+import { newFnCtx } from "./scope-env.js";
 import {
   NODE24_FETCH_COMPAT_PROFILE,
   STATIC_HEADERS_CALLS,
@@ -2855,8 +2856,7 @@ export { lowerDynamicImportCall } from "./lower-dynamic-import.js";
     const isAsync = lowerer.asyncInitFiles.has(dep);
     const fnCtx = newFnCtx(true, null, null, JSVAL);
     fnCtx.isAsync = isAsync;
-    lowerer.fnStack.push(fnCtx);
-    try {
+    lowerer.env.inFunction(fnCtx, () => {
       const body: IrStmt[] = [];
       const linkCrash = esmNamedImportLinkCrash(lowerer.program, dep);
       if (linkCrash !== null) {
@@ -2951,9 +2951,7 @@ export { lowerDynamicImportCall } from "./lower-dynamic-import.js";
         ...(isAsync ? { async: true as const } : {}),
         loc,
       });
-    } finally {
-      lowerer.fnStack.pop();
-    }
+    });
     return name;
   }
 

@@ -68,8 +68,7 @@ export function lowerDynamicSwitch(
   const loc = locOf(statement);
   const local = L.declareHiddenLocal("%switch.dynamic", DYN);
   const disc: IrExpr = { kind: "varRef", localId: local.id, type: DYN, loc: discriminant.loc };
-  L.scopes.push(new Map());
-  try {
+  return L.env.inScope(() => {
     const cases = statement.caseBlock.clauses.map(clause => ({
       test: ts.isCaseClause(clause) ? caseEquality(L, disc, clause.expression) : null,
       body: L.inCtl("switch", () => L.lowerStmts(clause.statements), labels),
@@ -85,5 +84,5 @@ export function lowerDynamicSwitch(
         ...(suspendingTests ? selectSuspendingCase(L, dispatch) : [dispatch]),
       ], loc,
     };
-  } finally { L.scopes.pop(); }
+  });
 }

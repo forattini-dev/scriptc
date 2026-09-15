@@ -1,7 +1,8 @@
 import * as ts from "../ts7/adapter.js";
 import { locOf } from "../program.js";
 import { BOOL, DYN, JSVAL, STRING, VOID, canMarshalTypedFuncIntoIsland, type IrExpr, type IrStmt, type IrType } from "../../ir/ir.js";
-import { type Lowerer, newFnCtx } from "./lowerer.js";
+import type { Lowerer } from "./lowerer.js";
+import { newFnCtx } from "./scope-env.js";
 import { nativeImportTargetOf } from "./lower-native-import-types.js";
 import { nativeModuleExports } from "./lower-native-import-exports.js";
 import { nativeRecordShapeSupported } from "../../ir/native-record.js";
@@ -37,8 +38,7 @@ function nativeNamespaceBuilder(L: Lowerer, dep: ts.SourceFile, site: ts.CallExp
   );
   const ctx = newFnCtx(true, null, null, JSVAL);
   ctx.isAsync = true;
-  L.fnStack.push(ctx);
-  try {
+  return L.env.inFunction(ctx, () => {
     const isAsync = L.asyncInitFiles.has(dep);
     const init: IrExpr = { kind: "call", callee: initName, args: [], type: isAsync ? { kind: "promise", inner: VOID } : VOID, loc };
     L.noteEdge(initName);
@@ -76,9 +76,7 @@ function nativeNamespaceBuilder(L: Lowerer, dep: ts.SourceFile, site: ts.CallExp
     L.liftedFns.push({ name, params: [], returnType: JSVAL, locals: ctx.locals, captures: [], body, async: true, loc });
     L.dynNsBuilders.set(dep, name);
     return name;
-  } finally {
-    L.fnStack.pop();
-  }
+  });
 }
 
 function identitySafe(L: Lowerer, type: IrType): boolean {

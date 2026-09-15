@@ -32,7 +32,8 @@ import type { Lowerer } from "./lowerer.js";
 import { dynFallbackType, nodeThrowExpr } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { newFnCtx, own } from "./lowerer.js";
+import { own } from "./lowerer.js";
+import { newFnCtx } from "./scope-env.js";
 import { appendImplicitUndefinedReturn } from "./lower-calls.js";
 import { bufEncoding, knownBufEncoding } from "./lower-containers.js";
 import { probeLower } from "./lower-exprs.js";
@@ -181,8 +182,7 @@ function lowerStreamCallback(
   }
   const fnName = `%fn${lowerer.lambdaCounter++}_${which}cb`;
   const fnCtx = newFnCtx(true, null, funcType, funcType.ret);
-  lowerer.fnStack.push(fnCtx);
-  try {
+  return lowerer.env.inFunction(fnCtx, () => {
     // Method shorthand and function expressions see the stream as `this`
     // (Node binds it); arrows keep lexical `this`, so their slot is a
     // hidden ABI local no body reference can resolve to.
@@ -227,9 +227,7 @@ function lowerStreamCallback(
       type: funcOf([thisType, ...funcType.params], funcType.ret),
       loc,
     };
-  } finally {
-    lowerer.fnStack.pop();
-  }
+  });
 }
 
 /* ── construction ─────────────────────────────────────────────────────── */
@@ -817,8 +815,7 @@ function streamMethodWrapper(lowerer: Lowerer, info: ClassInfo, which: string,
   const ret = found.sig.ret;
   const fnName = `%fn${lowerer.lambdaCounter++}_${which}vt`;
   const funcType = funcOf([thisType, ...paramTypes], ret);
-  lowerer.fnStack.push(newFnCtx(true, null, funcType, ret));
-  try {
+  return lowerer.env.inFunction(newFnCtx(true, null, funcType, ret), () => {
     const thisLocal = lowerer.declareThis(thisType);
     const params = [{ localId: thisLocal.id, name: "this", type: thisType }];
     const argRefs: IrExpr[] = [];
@@ -858,9 +855,7 @@ function streamMethodWrapper(lowerer: Lowerer, info: ClassInfo, which: string,
       loc,
     });
     return { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
-  } finally {
-    lowerer.fnStack.pop();
-  }
+  });
 }
 
 /** `super(options?)` in a class whose direct base chain lands on a

@@ -6,7 +6,7 @@
  * implementations arrive in any order: each new one instantiates against all of the other. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { newFnCtx, type FnCtx } from "./lowerer.js";
+import { newFnCtx, type FnCtx } from "./scope-env.js";
 import { IrExpr, IrFamily, IrLocal, IrParam, IrType, SrcLoc, typeKey } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import { familyIdOf } from "../families.js";
@@ -121,9 +121,8 @@ export function lowerFamilyImpl(L: Lowerer, node: FamilyFn, familyId: string | n
   const captureSymbols: ts.Symbol[] = [];
   const recorded = new Set<ts.Symbol>();
   const origins: IrLocal[] = [];
-  L.fnStack.push(scratch);
-  try {
-    const inside = (d: ts.Node): boolean => d.getSourceFile() === node.getSourceFile() && d.pos >= node.pos && d.end <= node.end;
+  L.env.inFunction(scratch, () => {
+    const inside =(d: ts.Node): boolean => d.getSourceFile() === node.getSourceFile() && d.pos >= node.pos && d.end <= node.end;
     const visit = (n: ts.Node): void => {
       if (ts.isTypeNode(n) && !ts.isExpressionWithTypeArguments(n)) return;
       if (ts.isIdentifier(n)) {
@@ -145,7 +144,8 @@ export function lowerFamilyImpl(L: Lowerer, node: FamilyFn, familyId: string | n
               recorded.add(captured);
               captureSymbols.push(captured);
               // The ORIGIN entry (the enclosing frame's local) carries mutability and TDZ for the instance's entries.
-              for (let depth = L.fnStack.length - 2; depth >= 0; depth--) { const origin = L.bindingIn(L.fnStack[depth]!, captured); if (origin) { origins.push(origin); break; } }
+              const origin = L.env.originOf(captured);
+              if (origin) origins.push(origin);
               void entry;
             }
           }
@@ -156,9 +156,7 @@ export function lowerFamilyImpl(L: Lowerer, node: FamilyFn, familyId: string | n
     };
     for (const p of node.parameters) visit(p);
     if (node.body) visit(node.body);
-  } finally {
-    L.fnStack.pop();
-  }
+  });
   if (origins.length !== captureSymbols.length) L.unsupported("SC1090", node, "a generic function value whose captures have no origin frame");
   // The instantiation's type parameters: the node's own when it declares them, otherwise the SLOT's (a plain arrow
   // cast into a generic signature borrows that signature's — `T` in the body's types is the interface's `T`).

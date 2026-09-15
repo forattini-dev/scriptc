@@ -23,7 +23,8 @@ import { BOOL, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, I
 import type { IrFfiCallbackParam, IrFfiCallbackParamClass, IrFfiImport, IrFfiReleaseParam } from "../../ir/ir.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { genResultRecord, isGenericCallableMemberType, typeKey } from "../type-mapper.js";
-import { PoisonError, dynFallbackType, dynUndefinedExpr, jsFuncNameOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
+import { PoisonError, dynFallbackType, dynUndefinedExpr, jsFuncNameOf, nodeThrowExpr } from "./lowerer.js";
+import { newFnCtx } from "./scope-env.js";
 import { islandPromiseStorageTypeOf, nativeImportHandleType } from "./lower-native-import-types.js";
 import { lowerNativeNamespaceObjectWalk } from "./lower-native-namespace.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
@@ -1564,81 +1565,81 @@ export function genericFnOf(lowerer: Lowerer, ident: ts.Identifier): GenericFnIn
     if (isGenerator && inst.returnType.kind === "generator") {
       fnCtx.generator = generatorMeta(lowerer, inst.returnType);
     }
-    lowerer.fnStack.push(fnCtx);
     try {
-      // STATIC generic methods: `this`/`super` name the RECEIVER class (a
-      // dynamic value) — the lowerStaticMethod fence, applied here because
-      // generic statics have no non-generic lowering pass. Arrow functions
-      // are transparent (they inherit the method's `this`); this-binding
-      // function forms are opaque.
-      if (info.member?.kind === "static" && decl.body) {
-        rejectStaticThis(
-          lowerer,
-          decl.body,
-          (keyword) => `'${keyword}' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead)`,
-        );
-      }
-      const params: IrParam[] = [];
-      if (cls && info.member!.kind === "method") {
-        // Instance methods take `this` as param 0, exactly like plain
-        // `%C.method` functions (lowerClassMethodMemberInner).
-        const thisType: IrType = { kind: "object", className: cls.def.name };
-        const thisLocal = lowerer.declareThis(thisType);
-        params.push({ localId: thisLocal.id, name: "this", type: thisType });
-      }
-      // Default-param initializers lower per instance, with the bindings
-      // threaded — a default mentioning T resolves like any body expression.
-      const declared = lowerer.declareParams(decl.parameters, inst.params);
-      params.push(...declared.params);
-      const body = [...declared.prologue];
-      const bodyBlock = blockBodyOf(decl);
-      if (bodyBlock) {
-        body.push(...lowerer.lowerStmts(bodyBlock.statements));
-        if (fnCtx.inferReturn) {
-          bodyReturn = resolveInferredReturn(lowerer, inst, fnCtx.inferReturn, body, decl);
+      return lowerer.env.inFunction(fnCtx, () => {
+        // STATIC generic methods: `this`/`super` name the RECEIVER class (a
+        // dynamic value) — the lowerStaticMethod fence, applied here because
+        // generic statics have no non-generic lowering pass. Arrow functions
+        // are transparent (they inherit the method's `this`); this-binding
+        // function forms are opaque.
+        if (info.member?.kind === "static" && decl.body) {
+          rejectStaticThis(
+            lowerer,
+            decl.body,
+            (keyword) => `'${keyword}' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead)`,
+          );
         }
-        appendImplicitUndefinedReturn(lowerer, body, bodyReturn, locOf(decl));
-      } else if (ts.isArrowFunction(decl) && decl.body !== undefined && !ts.isBlock(decl.body)) {
-        // A concise arrow body: the expression IS the return value —
-        // generic properties (`id: <T>(x: T) => x`), and implicit-any
-        // local arrows (`(cmd) => [cmd.name()].concat(cmd.aliases())`),
-        // whose inferred return is simply the expression's own type.
-        if (fnCtx.inferReturn) {
-          const value = lowerer.lowerExpr(decl.body);
-          if (value.type.kind === "void") {
-            body.push(voidTernaryIfStmtOrExprStmt(value, locOf(decl.body)));
+        const params: IrParam[] = [];
+        if (cls && info.member!.kind === "method") {
+          // Instance methods take `this` as param 0, exactly like plain
+          // `%C.method` functions (lowerClassMethodMemberInner).
+          const thisType: IrType = { kind: "object", className: cls.def.name };
+          const thisLocal = lowerer.declareThis(thisType);
+          params.push({ localId: thisLocal.id, name: "this", type: thisType });
+        }
+        // Default-param initializers lower per instance, with the bindings
+        // threaded — a default mentioning T resolves like any body expression.
+        const declared = lowerer.declareParams(decl.parameters, inst.params);
+        params.push(...declared.params);
+        const body = [...declared.prologue];
+        const bodyBlock = blockBodyOf(decl);
+        if (bodyBlock) {
+          body.push(...lowerer.lowerStmts(bodyBlock.statements));
+          if (fnCtx.inferReturn) {
             bodyReturn = resolveInferredReturn(lowerer, inst, fnCtx.inferReturn, body, decl);
-            appendImplicitUndefinedReturn(lowerer, body, bodyReturn, locOf(decl));
+          }
+          appendImplicitUndefinedReturn(lowerer, body, bodyReturn, locOf(decl));
+        } else if (ts.isArrowFunction(decl) && decl.body !== undefined && !ts.isBlock(decl.body)) {
+          // A concise arrow body: the expression IS the return value —
+          // generic properties (`id: <T>(x: T) => x`), and implicit-any
+          // local arrows (`(cmd) => [cmd.name()].concat(cmd.aliases())`),
+          // whose inferred return is simply the expression's own type.
+          if (fnCtx.inferReturn) {
+            const value = lowerer.lowerExpr(decl.body);
+            if (value.type.kind === "void") {
+              body.push(voidTernaryIfStmtOrExprStmt(value, locOf(decl.body)));
+              bodyReturn = resolveInferredReturn(lowerer, inst, fnCtx.inferReturn, body, decl);
+              appendImplicitUndefinedReturn(lowerer, body, bodyReturn, locOf(decl));
+            } else {
+              const stmt: IrStmt = { kind: "return", value, loc: locOf(decl.body) };
+              fnCtx.inferReturn.entries.push({ stmt, node: decl.body });
+              body.push(stmt);
+              bodyReturn = resolveInferredReturn(lowerer, inst, fnCtx.inferReturn, body, decl);
+            }
           } else {
-            const stmt: IrStmt = { kind: "return", value, loc: locOf(decl.body) };
-            fnCtx.inferReturn.entries.push({ stmt, node: decl.body });
-            body.push(stmt);
-            bodyReturn = resolveInferredReturn(lowerer, inst, fnCtx.inferReturn, body, decl);
+            const value = lowerer.lowerExprExpecting(decl.body, bodyReturn);
+            if (bodyReturn.kind === "void") {
+              body.push(voidTernaryIfStmtOrExprStmt(value, locOf(decl.body)));
+            } else {
+              body.push({ kind: "return", value, loc: locOf(decl.body) });
+            }
           }
         } else {
-          const value = lowerer.lowerExprExpecting(decl.body, bodyReturn);
-          if (bodyReturn.kind === "void") {
-            body.push(voidTernaryIfStmtOrExprStmt(value, locOf(decl.body)));
-          } else {
-            body.push({ kind: "return", value, loc: locOf(decl.body) });
-          }
+          lowerer.unsupported("SC1090", decl, "function declarations whose block body the frontend cannot locate");
         }
-      } else {
-        lowerer.unsupported("SC1090", decl, "function declarations whose block body the frontend cannot locate");
-      }
-      const fn: IrFunction = {
-        name: inst.name,
-        params,
-        returnType: bodyReturn,
-        locals: lowerer.ctx.locals,
-        body,
-        loc: locOf(decl),
-      };
-      if (isAsync) fn.async = true;
-      if (fnCtx.generator) fn.generator = fnCtx.generator; if (info.family) fn.captures = info.family.captures;
-      return fn;
+        const fn: IrFunction = {
+          name: inst.name,
+          params,
+          returnType: bodyReturn,
+          locals: lowerer.ctx.locals,
+          body,
+          loc: locOf(decl),
+        };
+        if (isAsync) fn.async = true;
+        if (fnCtx.generator) fn.generator = fnCtx.generator; if (info.family) fn.captures = info.family.captures;
+        return fn;
+      });
     } finally {
-      lowerer.fnStack.pop();
       lowerer.currentClass = prevClass;
       lowerer.typeParamBindings = prevBindings;
       lowerer.typeParamTsBindings = prevTsBindings;
@@ -1662,7 +1663,7 @@ export function genericFnOf(lowerer: Lowerer, ident: ts.Identifier): GenericFnIn
    * type mid-lowering (callers already hold it), so a pinned instance
    * keeps it and the wrap pass coerces every return to the pin. */
   function resolveInferredReturn(lowerer: Lowerer, inst: GenericInstance,
-    infer: NonNullable<import("./lowerer.js").FnCtx["inferReturn"]>,
+    infer: NonNullable<import("./scope-env.js").FnCtx["inferReturn"]>,
     body: IrStmt[],
     decl: ts.Node,): IrType {
     // The conservative completion test appendImplicitUndefinedReturn uses:
@@ -5250,12 +5251,10 @@ const inliningPredicates = new Set<ts.Symbol>();
       lowerer.unsupported("SC1090", call, `the self-recursive type-guard '${callee.text}' on a catch binding`);
     }
     inliningPredicates.add(symbol);
-    lowerer.scopes.push(new Map([[paramSymbol, caughtLocal]]));
+    const guardExpr = ret.expression;
     try {
-      const result = lowerer.lowerExpr(ret.expression);
-      return lowerer.ensureBool(result, ret.expression);
+      return lowerer.env.inScope(() => lowerer.ensureBool(lowerer.lowerExpr(guardExpr), guardExpr), [[paramSymbol, caughtLocal]]);
     } finally {
-      lowerer.scopes.pop();
       inliningPredicates.delete(symbol);
     }
   }
@@ -6228,125 +6227,124 @@ function loweredTemplateStrings(
       fnCtx.generator = generatorMeta(lowerer, funcType.ret);
     }
     const diagsBefore = lowerer.diags.length;
-    lowerer.fnStack.push(fnCtx);
-    try {
-      const { params, prologue } = lowerer.declareParams(node.parameters, shapes);
-      // The VARIADIC `arguments` form (rest-marked with no declared rest
-      // param): a synthetic trailing dyn-array param carries the call's
-      // arguments; `arguments` reads resolve to it (identifier lowering).
-      if (funcType.rest && funcType.restAbi === undefined && !shapes.some((s) => s.mode === "dynRest" || s.mode === "islandRest")) {
-        const argsLocal = lowerer.declareHiddenLocal("%arguments", DYN);
-        params.push({ localId: argsLocal.id, name: "%arguments", type: DYN });
-        fnCtx.argumentsLocal = argsLocal;
-      }
-
-      let body: IrStmt[];
-      if (ts.isBlock(node.body!)) {
-        body = lowerer.lowerStmts(node.body!.statements);
-      } else {
-        // Bare-expression arrow body: `x => e` is `x => { return e; }`
-        // (or an expression statement when the signature returns void — or
-        // when a union-returning signature wraps a void expression, whose
-        // value is the implicit undefined arm appended below).
-        const bodyExpr = node.body as ts.Expression;
-        if (bodyReturn.kind === "void") {
-          // `() => undefined` — the return type maps to void (standalone
-          // undefined IS void in the type mapping) and the body value is a
-          // bare unit literal: a pure no-op, dropped rather than tripping
-          // the validator's bare-unitLit rule (typeCheckReturnExpression).
-          // A `void e` body rides the statement lowering (the value is
-          // discarded here, so the operand evaluates for effect alone —
-          // `(name) => void doThing(name)`, the fire-and-forget arrow).
-          let stripped: ts.Expression = bodyExpr;
-          while (ts.isParenthesizedExpression(stripped)) stripped = stripped.expression;
-          if (ts.isVoidExpression(stripped)) {
-            body = [lowerer.lowerExprStatement(stripped)];
-          } else {
-            const value = lowerer.lowerExpr(bodyExpr);
-            body = value.kind === "unitLit"
-              ? []
-              : [voidTernaryIfStmtOrExprStmt(value, locOf(node.body!))];
-          }
-        } else {
-          let value = lowerer.lowerExpr(bodyExpr);
-          // An async concise body whose value is itself a promise
-          // (`async () => p`): the async machinery RESOLVES the returned
-          // thenable into the function's own promise — lowerReturnValue's
-          // await-through, applied to the implicit return.
-          if (isAsync && value.type.kind === "promise" && bodyReturn.kind !== "promise") {
-            value = { kind: "awaitExpr", value, type: value.type.inner, loc: value.loc };
-          }
-          body =
-            value.type.kind === "void" && lowerer.wrappedUndefined(bodyReturn, locOf(node.body!))
-              ? [voidTernaryIfStmtOrExprStmt(value, locOf(node.body!))]
-              : [
-                  {
-                    kind: "return",
-                    value: lowerer.coerceInto(bodyExpr, value, bodyReturn),
-                    loc: locOf(node.body!),
-                  },
-                ];
+    return lowerer.env.inFunction(fnCtx, () => {
+      try {
+        const { params, prologue } = lowerer.declareParams(node.parameters, shapes);
+        // The VARIADIC `arguments` form (rest-marked with no declared rest
+        // param): a synthetic trailing dyn-array param carries the call's
+        // arguments; `arguments` reads resolve to it (identifier lowering).
+        if (funcType.rest && funcType.restAbi === undefined && !shapes.some((s) => s.mode === "dynRest" || s.mode === "islandRest")) {
+          const argsLocal = lowerer.declareHiddenLocal("%arguments", DYN);
+          params.push({ localId: argsLocal.id, name: "%arguments", type: DYN });
+          fnCtx.argumentsLocal = argsLocal;
         }
-      }
-      body = [...prologue, ...body];
-      // Bare-expression bodies never pass through lowerStmts, so the
-      // lib-boundary chokepoint runs here (idempotent for block bodies,
-      // whose statements were already walked). A fence poisons the
-      // enclosing statement — the lambda IS part of it.
-      enforceLibBoundary(lowerer, body);
-      appendImplicitUndefinedReturn(lowerer, body, bodyReturn, loc);
 
-      const ctx = lowerer.ctx;
-      const lifted: IrFunction = {
-        name: fnName,
-        params,
-        returnType: bodyReturn,
-        locals: ctx.locals,
-        captures: ctx.captures!,
-        body,
-        loc,
-      };
-      if (isAsync) lifted.async = true;
-      if (fnCtx.generator) lifted.generator = fnCtx.generator;
-      lowerer.liftedFns.push(lifted);
-      return { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
-    } catch (e) {
-      // JS sources defer LAMBDA poisons like function declarations
-      // (lowerFunction's catch, lambda form — entry the function-level
-      // deferral): a fenced concise body (`(list) => new Intl.ListFormat
-      // (...).format(list)` — the error-message list-join idiom) would
-      // otherwise poison the ENCLOSING statement, stopping module init
-      // where Node only stops when the lambda is CALLED. The value
-      // compiles as a capture-free closure over a runtimeFence body —
-      // calling throws the first captured diagnostic at its source
-      // position. ICEs (SC9001) stay compile errors, exactly like
-      // lowerStmts; probe mode (diagSink) keeps the poison.
-      if (!(e instanceof PoisonError)) throw e;
-      if (!isJsSourceFile(node.getSourceFile())) throw e;
-      const params: IrParam[] = funcType.params.map((t, i) => ({ localId: `%pf${i}`, name: `%pf${i}`, type: t }));
-      // A REST-MARKED value type hides one synthetic trailing dyn-array
-      // param in the lifted function (the boxed call thunk fills it) —
-      // the fence lambda must spell that slot too or the validator's
-      // closure-signature check trips (SC9001). Island rest types SPELL
-      // their trailing engine-array param, so funcType.params already
-      // covers those.
-      if (funcType.rest === true && funcType.restAbi === undefined) {
-        params.push({ localId: "%pfrest", name: "%pfrest", type: DYN });
+        let body: IrStmt[];
+        if (ts.isBlock(node.body!)) {
+          body = lowerer.lowerStmts(node.body!.statements);
+        } else {
+          // Bare-expression arrow body: `x => e` is `x => { return e; }`
+          // (or an expression statement when the signature returns void — or
+          // when a union-returning signature wraps a void expression, whose
+          // value is the implicit undefined arm appended below).
+          const bodyExpr = node.body as ts.Expression;
+          if (bodyReturn.kind === "void") {
+            // `() => undefined` — the return type maps to void (standalone
+            // undefined IS void in the type mapping) and the body value is a
+            // bare unit literal: a pure no-op, dropped rather than tripping
+            // the validator's bare-unitLit rule (typeCheckReturnExpression).
+            // A `void e` body rides the statement lowering (the value is
+            // discarded here, so the operand evaluates for effect alone —
+            // `(name) => void doThing(name)`, the fire-and-forget arrow).
+            let stripped: ts.Expression = bodyExpr;
+            while (ts.isParenthesizedExpression(stripped)) stripped = stripped.expression;
+            if (ts.isVoidExpression(stripped)) {
+              body = [lowerer.lowerExprStatement(stripped)];
+            } else {
+              const value = lowerer.lowerExpr(bodyExpr);
+              body = value.kind === "unitLit"
+                ? []
+                : [voidTernaryIfStmtOrExprStmt(value, locOf(node.body!))];
+            }
+          } else {
+            let value = lowerer.lowerExpr(bodyExpr);
+            // An async concise body whose value is itself a promise
+            // (`async () => p`): the async machinery RESOLVES the returned
+            // thenable into the function's own promise — lowerReturnValue's
+            // await-through, applied to the implicit return.
+            if (isAsync && value.type.kind === "promise" && bodyReturn.kind !== "promise") {
+              value = { kind: "awaitExpr", value, type: value.type.inner, loc: value.loc };
+            }
+            body =
+              value.type.kind === "void" && lowerer.wrappedUndefined(bodyReturn, locOf(node.body!))
+                ? [voidTernaryIfStmtOrExprStmt(value, locOf(node.body!))]
+                : [
+                    {
+                      kind: "return",
+                      value: lowerer.coerceInto(bodyExpr, value, bodyReturn),
+                      loc: locOf(node.body!),
+                    },
+                  ];
+          }
+        }
+        body = [...prologue, ...body];
+        // Bare-expression bodies never pass through lowerStmts, so the
+        // lib-boundary chokepoint runs here (idempotent for block bodies,
+        // whose statements were already walked). A fence poisons the
+        // enclosing statement — the lambda IS part of it.
+        enforceLibBoundary(lowerer, body);
+        appendImplicitUndefinedReturn(lowerer, body, bodyReturn, loc);
+
+        const ctx = lowerer.ctx;
+        const lifted: IrFunction = {
+          name: fnName,
+          params,
+          returnType: bodyReturn,
+          locals: ctx.locals,
+          captures: ctx.captures!,
+          body,
+          loc,
+        };
+        if (isAsync) lifted.async = true;
+        if (fnCtx.generator) lifted.generator = fnCtx.generator;
+        lowerer.liftedFns.push(lifted);
+        return { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
+      } catch (e) {
+        // JS sources defer LAMBDA poisons like function declarations
+        // (lowerFunction's catch, lambda form — entry the function-level
+        // deferral): a fenced concise body (`(list) => new Intl.ListFormat
+        // (...).format(list)` — the error-message list-join idiom) would
+        // otherwise poison the ENCLOSING statement, stopping module init
+        // where Node only stops when the lambda is CALLED. The value
+        // compiles as a capture-free closure over a runtimeFence body —
+        // calling throws the first captured diagnostic at its source
+        // position. ICEs (SC9001) stay compile errors, exactly like
+        // lowerStmts; probe mode (diagSink) keeps the poison.
+        if (!(e instanceof PoisonError)) throw e;
+        if (!isJsSourceFile(node.getSourceFile())) throw e;
+        const params: IrParam[] = funcType.params.map((t, i) => ({ localId: `%pf${i}`, name: `%pf${i}`, type: t }));
+        // A REST-MARKED value type hides one synthetic trailing dyn-array
+        // param in the lifted function (the boxed call thunk fills it) —
+        // the fence lambda must spell that slot too or the validator's
+        // closure-signature check trips (SC9001). Island rest types SPELL
+        // their trailing engine-array param, so funcType.params already
+        // covers those.
+        if (funcType.rest === true && funcType.restAbi === undefined) {
+          params.push({ localId: "%pfrest", name: "%pfrest", type: DYN });
+        }
+        const fence = lowerer.deferToRuntimeFence(diagsBefore, node, {
+          kind: "closure",
+          name: fnName,
+          params,
+          returnType: bodyReturn,
+          type: funcType,
+          ...(isAsync ? { async: true as const } : {}),
+          ...(fnCtx.generator ? { generator: fnCtx.generator } : {}),
+        });
+        if (!fence) throw e;
+        return fence;
       }
-      const fence = lowerer.deferToRuntimeFence(diagsBefore, node, {
-        kind: "closure",
-        name: fnName,
-        params,
-        returnType: bodyReturn,
-        type: funcType,
-        ...(isAsync ? { async: true as const } : {}),
-        ...(fnCtx.generator ? { generator: fnCtx.generator } : {}),
-      });
-      if (!fence) throw e;
-      return fence;
-    } finally {
-      lowerer.fnStack.pop();
-    }
+    });
   }
 
 /** `p.then(f)` / `p.catch(handler)` / `p.finally(cb)` — fiber-level
@@ -6429,24 +6427,15 @@ function loweredTemplateStrings(
       );
     }
 
-    let catchLocalId: string | null = null;
-    let catchBody: IrStmt[];
-    lowerer.scopes.push(new Map());
-    try {
-      if (param && ts.isIdentifier(param.name)) {
-        catchLocalId = lowerer.declareLocal(param.name, param.name.text, CAUGHT, false).id;
-      }
+    const { catchLocalId, catchBody } = lowerer.env.inScope((): { catchLocalId: string | null; catchBody: IrStmt[] } => {
+      const localId = param && ts.isIdentifier(param.name)
+        ? lowerer.declareLocal(param.name, param.name.text, CAUGHT, false).id
+        : null;
       const body = handlerNode.body;
-      if (ts.isBlock(body)) {
-        catchBody = lowerer.lowerStmts(body.statements);
-      } else if (resultType.kind === "void") {
-        catchBody = [lowerer.lowerExprStatement(body)];
-      } else {
-        catchBody = [{ kind: "return", value: lowerer.lowerReturnValue(body), loc: locOf(body) }];
-      }
-    } finally {
-      lowerer.scopes.pop();
-    }
+      if (ts.isBlock(body)) return { catchLocalId: localId, catchBody: lowerer.lowerStmts(body.statements) };
+      if (resultType.kind === "void") return { catchLocalId: localId, catchBody: [lowerer.lowerExprStatement(body)] };
+      return { catchLocalId: localId, catchBody: [{ kind: "return", value: lowerer.lowerReturnValue(body), loc: locOf(body) }] };
+    });
     if (resultType.kind === "union") {
       const def = lowerer.unions.get(resultType.unionId);
       const undefTag = def ? def.arms.findIndex((arm) => arm.kind === "undefinedT") : -1;
@@ -6593,8 +6582,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
       const funcType: IrType & { kind: "func" } = { kind: "func", params: [promT], ret: promT };
       const fnCtx = newFnCtx(true, null, funcType, inner);
       fnCtx.isAsync = true;
-      lowerer.fnStack.push(fnCtx);
-      try {
+      return lowerer.env.inFunction(fnCtx, () => {
         const pLocal = lowerer.declareHiddenLocal("p", promT);
         const awaitE: IrExpr = {
           kind: "awaitExpr",
@@ -6620,9 +6608,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
         lowerer.liftedFns.push(lifted);
         const closure: IrExpr = { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
         return { kind: "callValue", callee: closure, args: [receiver], type: promT, loc };
-      } finally {
-        lowerer.fnStack.pop();
-      }
+      });
     }
 
     if (thenPair) {
@@ -6661,8 +6647,8 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
       };
       const fnCtx = newFnCtx(true, null, funcType, resultType);
       fnCtx.isAsync = true;
-      lowerer.fnStack.push(fnCtx);
-      try {
+      const fulfilledReturn = fulfilled.type.ret;
+      return lowerer.env.inFunction(fnCtx, () => {
         const promiseLocal = lowerer.declareHiddenLocal("p", promT);
         const fulfilledLocal = lowerer.declareHiddenLocal("onFulfilled", fulfilled.type);
         const awaitExpr: IrExpr = {
@@ -6724,7 +6710,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
             loc,
           },
           args: fulfilledArgs,
-          type: fulfilled.type.ret,
+          type: fulfilledReturn,
           loc,
         };
         // Kept outside the try: an exception or rejection from onFulfilled
@@ -6760,9 +6746,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
           type: resultT,
           loc,
         };
-      } finally {
-        lowerer.fnStack.pop();
-      }
+      });
     }
 
     if (member === "then") {
@@ -6812,8 +6796,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
         const funcType: IrType & { kind: "func" } = { kind: "func", params: [promT, DYN], ret: resultT };
         const fnCtx = newFnCtx(true, null, funcType, DYN);
         fnCtx.isAsync = true;
-        lowerer.fnStack.push(fnCtx);
-        try {
+        return lowerer.env.inFunction(fnCtx, () => {
           const pLocal = lowerer.declareHiddenLocal("p", promT);
           const cbLocal = lowerer.declareHiddenLocal("cb", DYN);
           const awaitE: IrExpr = {
@@ -6861,9 +6844,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
           lowerer.liftedFns.push(lifted);
           const closure: IrExpr = { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
           return { kind: "callValue", callee: closure, args: [receiver, cb], type: resultT, loc };
-        } finally {
-          lowerer.fnStack.pop();
-        }
+        });
       }
       if (cb.type.kind !== "func" || cb.type.params.length > 1) {
         lowerer.unsupported(
@@ -6893,8 +6874,8 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
       const funcType: IrType & { kind: "func" } = { kind: "func", params: [promT, cb.type], ret: resultT };
       const fnCtx = newFnCtx(true, null, funcType, R);
       fnCtx.isAsync = true;
-      lowerer.fnStack.push(fnCtx);
-      try {
+      const handlerReturn = cb.type.ret;
+      return lowerer.env.inFunction(fnCtx, () => {
         const pLocal = lowerer.declareHiddenLocal("p", promT);
         const cbLocal = lowerer.declareHiddenLocal("cb", cb.type);
         const awaitE: IrExpr = {
@@ -6919,7 +6900,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
           kind: "callValue",
           callee: { kind: "varRef", localId: cbLocal.id, type: cb.type, loc },
           args: handlerArgs,
-          type: cb.type.ret,
+          type: handlerReturn,
           loc,
         };
         // The handler's result: promise returns flatten exactly like
@@ -6943,9 +6924,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
         lowerer.liftedFns.push(lifted);
         const closure: IrExpr = { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
         return { kind: "callValue", callee: closure, args: [receiver, cb], type: resultT, loc };
-      } finally {
-        lowerer.fnStack.pop();
-      }
+      });
     }
 
     if (member === "finally") {
@@ -6961,8 +6940,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
       const funcType: IrType & { kind: "func" } = { kind: "func", params: [promT, cb.type], ret: promT };
       const fnCtx = newFnCtx(true, null, funcType, inner);
       fnCtx.isAsync = true;
-      lowerer.fnStack.push(fnCtx);
-      try {
+      return lowerer.env.inFunction(fnCtx, () => {
         const pLocal = lowerer.declareHiddenLocal("p", promT);
         const cbLocal = lowerer.declareHiddenLocal("cb", cb.type);
         const cbCall = (): IrStmt => ({
@@ -7018,9 +6996,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
         lowerer.liftedFns.push(lifted);
         const closure: IrExpr = { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
         return { kind: "callValue", callee: closure, args: [receiver, cb], type: promT, loc };
-      } finally {
-        lowerer.fnStack.pop();
-      }
+      });
     }
 
     // .catch on a DYN-SETTLING promise (the tracePromise result's
@@ -7043,8 +7019,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
         const funcType: IrType & { kind: "func" } = { kind: "func", params: [promT, DYN], ret: resultT };
         const fnCtx = newFnCtx(true, null, funcType, DYN);
         fnCtx.isAsync = true;
-        lowerer.fnStack.push(fnCtx);
-        try {
+        return lowerer.env.inFunction(fnCtx, () => {
           const pLocal = lowerer.declareHiddenLocal("p", promT);
           const cbLocal = lowerer.declareHiddenLocal("cb", DYN);
           const eLocal = lowerer.declareHiddenLocal("e", CAUGHT);
@@ -7104,9 +7079,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
           lowerer.liftedFns.push(lifted);
           const closure: IrExpr = { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
           return { kind: "callValue", callee: closure, args: [receiver, cb], type: resultT, loc };
-        } finally {
-          lowerer.fnStack.pop();
-        }
+        });
       }
     }
 
@@ -7125,8 +7098,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
     const funcType: IrType & { kind: "func" } = { kind: "func", params: [promT], ret: resultT };
     const fnCtx = newFnCtx(true, null, funcType, R);
     fnCtx.isAsync = true;
-    lowerer.fnStack.push(fnCtx);
-    try {
+    return lowerer.env.inFunction(fnCtx, () => {
       const pLocal = lowerer.declareHiddenLocal("p", promT);
       const awaitE: IrExpr = {
         kind: "awaitExpr",
@@ -7163,9 +7135,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
       lowerer.liftedFns.push(lifted);
       const closure: IrExpr = { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
       return { kind: "callValue", callee: closure, args: [receiver], type: resultT, loc };
-    } finally {
-      lowerer.fnStack.pop();
-    }
+    });
   }
 
 /** Narrowing filters re-tag only what the runtime predicate proves.
@@ -8262,71 +8232,70 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
     ctx.isAsync = sig.isAsync === true;
     if (sig.generator !== undefined) ctx.generator = sig.generator;
     const diagsBefore = lowerer.diags.length;
-    lowerer.fnStack.push(ctx);
-    try {
-      const { params, prologue } = lowerer.declareParams(decl.parameters, sig.params);
-      // The synthetic `arguments` slot (a dynRest shape BEYOND the declared
-      // parameters — collectSignatureInner appended it): one trailing
-      // dyn-array param, resolved by `arguments` reads.
-      if (sig.params.length > decl.parameters.length && sig.params[sig.params.length - 1]!.mode === "dynRest") {
-        const argsLocal = lowerer.declareHiddenLocal("%arguments", DYN);
-        params.push({ localId: argsLocal.id, name: "%arguments", type: DYN });
-        ctx.argumentsLocal = argsLocal;
-      }
-      const bodyBlock = blockBodyOf(decl);
-      if (!bodyBlock) {
-        lowerer.unsupported("SC1090", decl, "function declarations whose block body the frontend cannot locate");
-      }
-      const body = [...prologue, ...lowerer.lowerStmts(bodyBlock.statements)];
-      appendImplicitUndefinedReturn(lowerer, body, bodyReturn, locOf(decl));
-      const fn: IrFunction = {
-        name: sig.name,
-        params,
-        returnType: bodyReturn,
-        locals: lowerer.ctx.locals,
-        body,
-        loc: locOf(decl),
-      };
-      if (sig.isAsync) fn.async = true;
-      if (sig.generator !== undefined) fn.generator = sig.generator;
-      return fn;
-    } catch (e) {
-      // A poison OUTSIDE the per-statement catches (a parameter DEFAULT
-      // whose initializer is fenced, a parameter PATTERN over a class
-      // that never lowered): the diagnostic is already recorded — the
-      // function skips, like a signature-blocked one, instead of killing
-      // the whole analysis.
-      if (!(e instanceof PoisonError)) throw e;
-      // JS sources defer function-level poisons like statement fences
-      // (the sentence-walker idiom `({ parent: sentenceNode })` over the
-      // #private-fenced AstPath): the function compiles as its OWN
-      // runtimeFence — CALLING it throws the first captured diagnostic
-      // at the declaration's position — so a reachable-but-broken
-      // signature stops the RUN at its own site instead of the build.
-      // ICEs (SC9001) stay compile errors, exactly like lowerStmts.
-      if (isJsSourceFile(decl.getSourceFile())) {
-        // An ABI type naming a class that never REGISTERED (the sentence-
-        // walker idiom's path type — the #private fence) is fine to emit:
-        // callers CAN lower calls to this symbol (a same-typed param
-        // passes straight through — no construction needed), so the fence
-        // function must exist, and run()'s unregistered-class sweep
-        // rewrites every such slot to the inert f64 placeholder before
-        // emission — caller and fence stay ABI-consistent.
-        const params: IrParam[] = sig.params.map((p, i) => ({ localId: `%pf${i}`, name: `%pf${i}`, type: p.type }));
-        const fence = lowerer.deferToRuntimeFence(diagsBefore, decl, {
-          kind: "function",
+    return lowerer.env.inFunction(ctx, () => {
+      try {
+        const { params, prologue } = lowerer.declareParams(decl.parameters, sig.params);
+        // The synthetic `arguments` slot (a dynRest shape BEYOND the declared
+        // parameters — collectSignatureInner appended it): one trailing
+        // dyn-array param, resolved by `arguments` reads.
+        if (sig.params.length > decl.parameters.length && sig.params[sig.params.length - 1]!.mode === "dynRest") {
+          const argsLocal = lowerer.declareHiddenLocal("%arguments", DYN);
+          params.push({ localId: argsLocal.id, name: "%arguments", type: DYN });
+          ctx.argumentsLocal = argsLocal;
+        }
+        const bodyBlock = blockBodyOf(decl);
+        if (!bodyBlock) {
+          lowerer.unsupported("SC1090", decl, "function declarations whose block body the frontend cannot locate");
+        }
+        const body = [...prologue, ...lowerer.lowerStmts(bodyBlock.statements)];
+        appendImplicitUndefinedReturn(lowerer, body, bodyReturn, locOf(decl));
+        const fn: IrFunction = {
           name: sig.name,
           params,
           returnType: bodyReturn,
-          ...(sig.isAsync ? { async: true as const } : {}),
-          ...(sig.generator ? { generator: sig.generator } : {}),
-        });
-        if (fence) return fence;
+          locals: lowerer.ctx.locals,
+          body,
+          loc: locOf(decl),
+        };
+        if (sig.isAsync) fn.async = true;
+        if (sig.generator !== undefined) fn.generator = sig.generator;
+        return fn;
+      } catch (e) {
+        // A poison OUTSIDE the per-statement catches (a parameter DEFAULT
+        // whose initializer is fenced, a parameter PATTERN over a class
+        // that never lowered): the diagnostic is already recorded — the
+        // function skips, like a signature-blocked one, instead of killing
+        // the whole analysis.
+        if (!(e instanceof PoisonError)) throw e;
+        // JS sources defer function-level poisons like statement fences
+        // (the sentence-walker idiom `({ parent: sentenceNode })` over the
+        // #private-fenced AstPath): the function compiles as its OWN
+        // runtimeFence — CALLING it throws the first captured diagnostic
+        // at the declaration's position — so a reachable-but-broken
+        // signature stops the RUN at its own site instead of the build.
+        // ICEs (SC9001) stay compile errors, exactly like lowerStmts.
+        if (isJsSourceFile(decl.getSourceFile())) {
+          // An ABI type naming a class that never REGISTERED (the sentence-
+          // walker idiom's path type — the #private fence) is fine to emit:
+          // callers CAN lower calls to this symbol (a same-typed param
+          // passes straight through — no construction needed), so the fence
+          // function must exist, and run()'s unregistered-class sweep
+          // rewrites every such slot to the inert f64 placeholder before
+          // emission — caller and fence stay ABI-consistent.
+          const params: IrParam[] = sig.params.map((p, i) => ({ localId: `%pf${i}`, name: `%pf${i}`, type: p.type }));
+          const fence = lowerer.deferToRuntimeFence(diagsBefore, decl, {
+            kind: "function",
+            name: sig.name,
+            params,
+            returnType: bodyReturn,
+            ...(sig.isAsync ? { async: true as const } : {}),
+            ...(sig.generator ? { generator: sig.generator } : {}),
+          });
+          if (fence) return fence;
+        }
+        return null;
       }
-      return null;
-    } finally {
-      lowerer.fnStack.pop();
-    }
+    });
   }
 
 /** `Object.assign(fn, { bold, ... })` → a HYBRID record literal: the

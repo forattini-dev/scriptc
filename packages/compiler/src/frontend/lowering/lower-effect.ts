@@ -7,7 +7,8 @@
  * yet is a named refusal (the census in the plan file orders the work). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js"; import { numLit } from "../../ir/build.js";
-import { BOOL, DYN, EFFECT_T, IrExpr, canConvertToDyn, IrLibFn, IrLocal, IrStmt, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/ir.js"; import { newFnCtx } from "./lowerer.js";
+import { BOOL, DYN, EFFECT_T, IrExpr, canConvertToDyn, IrLibFn, IrLocal, IrStmt, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/ir.js"
+import { newFnCtx } from "./scope-env.js";
 import { locOf } from "../program.js";
 import { kernelServiceIdOfSymbol } from "../kernel.js";
 import { applyProgramPipeStep, applySchemaPipeStep, isSchemaLike, lowerSchemaClassMake, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest, unwrapSchema } from "./lower-schema.js";
@@ -239,16 +240,13 @@ function lowerEffectFn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr
 function liftedPipeline(L: Lowerer, steps: ts.Expression[], loc: SrcLoc): IrExpr {
   const name = `%effect.fnpost.${L.liftedFns.length}`;
   const funcType: IrType = { kind: "func", params: [EFFECT_T], ret: EFFECT_T };
-  L.fnStack.push(newFnCtx(false, null, null, EFFECT_T));
-  try {
+  L.env.inFunction(newFnCtx(false, null, null, EFFECT_T), () => {
     const local: IrLocal = { id: "e.0", name: "e", type: EFFECT_T, mutable: false };
     L.ctx.locals.push(local);
     let acc: IrExpr = { kind: "varRef", localId: local.id, type: EFFECT_T, loc };
     for (const step of steps) acc = applyPipeStep(L, acc, step, loc);
     L.liftedFns.push({ name, params: [{ localId: local.id, name: local.name, type: EFFECT_T }], returnType: EFFECT_T, locals: L.ctx.locals, body: [{ kind: "return", value: acc, loc }], loc });
-  } finally {
-    L.fnStack.pop();
-  }
+  });
   return { kind: "closure", fnName: name, captures: [], type: funcType, loc };
 }
 
@@ -415,14 +413,11 @@ function lowerContextMember(L: Lowerer, member: string, args: ts.Expression[], e
 function liftedRestore(L: Lowerer, loc: SrcLoc): IrExpr {
   const name = `%effect.restore.${L.liftedFns.length}`;
   const funcType: IrType = { kind: "func", params: [EFFECT_T], ret: EFFECT_T };
-  L.fnStack.push(newFnCtx(false, null, null, EFFECT_T));
-  try {
+  L.env.inFunction(newFnCtx(false, null, null, EFFECT_T), () => {
     const local: IrLocal = { id: "e.0", name: "e", type: EFFECT_T, mutable: false };
     L.ctx.locals.push(local);
     L.liftedFns.push({ name, params: [{ localId: local.id, name: local.name, type: EFFECT_T }], returnType: EFFECT_T, locals: L.ctx.locals, body: [{ kind: "return", value: { kind: "varRef", localId: local.id, type: EFFECT_T, loc }, loc }], loc });
-  } finally {
-    L.fnStack.pop();
-  }
+  });
   return { kind: "closure", fnName: name, captures: [], type: funcType, loc };
 }
 
