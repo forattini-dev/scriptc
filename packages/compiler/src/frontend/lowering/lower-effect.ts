@@ -57,9 +57,12 @@ function lib(fn: IrLibFn, args: IrExpr[], type: IrType, loc: SrcLoc): IrExpr {
  * the key value — an effect that looks the service up. Null for anything else. */
 export function lowerServiceKeyRef(L: Lowerer, node: ts.Identifier | ts.PropertyAccessExpression): IrExpr | null {
   if (L.dynamic) return null;
+  const loc = locOf(node);
+  if (distServiceConst(L, node, "sql/SqlClient", "SqlClient")) {
+    return lib("effect.serviceKeyIdentity", ["effect/sql/SqlClient", "effect/sql/SqlClient"].map(value => ({ kind: "strLit", value, type: STRING, loc })), EFFECT_T, loc);
+  }
   const id = kernelServiceIdOfSymbol(L.checker, L.checker.getSymbolAtLocation(ts.isIdentifier(node) ? node : node.name));
   if (id === null) return null;
-  const loc = locOf(node);
   let symbol = L.checker.getSymbolAtLocation(ts.isIdentifier(node) ? node : node.name);
   if (symbol === undefined) return null;
   if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = L.checker.getAliasedSymbol(symbol);
@@ -67,6 +70,16 @@ export function lowerServiceKeyRef(L: Lowerer, node: ts.Identifier | ts.Property
   if (declaration === undefined) return null;
   const identity = `${declaration.getSourceFile().fileName}:${declaration.pos}`;
   return lib("effect.serviceKeyIdentity", [id, identity].map(value => ({ kind: "strLit", value, type: STRING, loc })), EFFECT_T, loc);
+}
+
+/** Whether `node` names the service const `name` that effect's `dist/unstable/<area>` module declares (e.g. `SqlClient`
+ * from sql/SqlClient.d.ts, a `Context.Service` whose key is its module path). */
+function distServiceConst(L: Lowerer, node: ts.Identifier | ts.PropertyAccessExpression, module: string, name: string): boolean {
+  let symbol = L.checker.getSymbolAtLocation(ts.isIdentifier(node) ? node : node.name);
+  if (symbol === undefined) return false;
+  if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = L.checker.getAliasedSymbol(symbol);
+  return symbol.name === name && L.checker.declarationsOf(symbol).some((declaration) =>
+    ts.isVariableDeclaration(declaration) && declaration.getSourceFile().fileName.replace(/\\/g, "/").endsWith(`/node_modules/effect/dist/unstable/${module}.d.ts`));
 }
 
 /** `Effect.void`, `Layer.empty` and the other VALUE members of the namespaces (property reads), plus service key
