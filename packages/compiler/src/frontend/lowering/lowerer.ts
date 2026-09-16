@@ -1362,6 +1362,14 @@ export class Lowerer {
    * lets property consumers recognize an earlier checked extraction by
    * provenance instead of relying on its generated-name prefix. */
   readonly checkedNarrowHelpers = new Set<string>();
+
+  /** `<shapeId>:<field>` of object-literal methods lowered with the literal
+   * itself as `this` (lower-object-literal's %self binding). JavaScript binds
+   * a method's `this` at the CALL, so this lowering is exact only while the
+   * method is invoked on its own object: reading one as a VALUE would carry
+   * the defining literal into a receiver it never had, and fieldGetExpr
+   * refuses that read by name. */
+  readonly literalThisMethods = new Set<string>();
   /** Interned `%iter.drain.<n>` helpers (classIteratorDrainCall): one per
    * receiver class — the eager drain of a class iterable's protocol into
    * a fresh element array, behind array/call spreads. */

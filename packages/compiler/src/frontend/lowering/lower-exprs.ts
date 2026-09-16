@@ -5134,6 +5134,18 @@ export function fenceClosureProbe(
    * nested arrows, which inherit the method's `this` (nested function
    * expressions reset it, but their bare `this` is already a tsc error
    * under noImplicitThis, so over-rejecting them here changes nothing). */
+  /** Whether an object-literal method body mentions `this` — the predicate half of rejectThisInObjectMethod, for the
+   * sites that LOWER such a method (binding the literal as its receiver) instead of refusing it. Nested arrows count:
+   * they inherit the method's `this`. */
+  export function methodUsesThis(node: ts.Node): boolean {
+    if (node.kind === ts.SyntaxKind.ThisKeyword) return true;
+    let found = false;
+    ts.forEachChild(node, (child) => {
+      if (!found && methodUsesThis(child)) found = true;
+    });
+    return found;
+  }
+
   export function rejectThisInObjectMethod(lowerer: Lowerer, node: ts.Node): void {
     if (node.kind === ts.SyntaxKind.ThisKeyword) {
       lowerer.unsupported("SC1090", node, "references to 'this' in object literal methods");

@@ -651,6 +651,21 @@ export type FieldTarget =
    * tsc-clean (the property types as the setter's param), but Node yields
    * undefined, which these property types cannot represent. */
   export function fieldGetExpr(L: Lowerer, target: FieldTarget, loc: SrcLoc, blame: ts.Node): IrExpr {
+    // An object-literal method that names `this` carries its defining literal as the receiver (lower-object-literal's
+    // %self). JavaScript binds `this` at the CALL, so handing the closure out as a value would answer with a receiver
+    // the call never chose — the read is refused instead of quietly diverging.
+    if (
+      (target.container === "record" || target.container === "recordOvf") &&
+      target.obj.type.kind === "record" &&
+      L.literalThisMethods.has(`${target.obj.type.shapeId}:${target.field}`) &&
+      !(blame.parent !== undefined && ts.isCallExpression(blame.parent) && blame.parent.expression === blame)
+    ) {
+      L.unsupported(
+        "SC1090",
+        blame,
+        `reading the object-literal method '${target.field}' as a value (its body names 'this', which JavaScript binds at the call — call it on its object, or move the body to a function that takes the object as a parameter)`,
+      );
+    }
     // A record-shaped CHECKER target whose receiver VALUE lives in the checked-dynamic tree
     // (a JS file-scope object-literal global): the checked-dynamic keyed
     // read — dynKeyGet (a missing key answers the dyn undefined, exactly

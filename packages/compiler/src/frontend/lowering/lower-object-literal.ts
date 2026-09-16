@@ -10,6 +10,7 @@ import {
   DYN,
   IrExpr,
   IrLocal,
+  IrStmt,
   IrType,
   STRING,
   UNDEFINED_T,
@@ -31,6 +32,7 @@ import {
   fenceClosureProbe,
   literalComputedKey,
   lowerDynObjectLiteral,
+  methodUsesThis,
   pureCondExpr,
   pureReemittable,
 } from "./lower-exprs.js";
@@ -154,13 +156,20 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       ) {
         lowerer.unsupported("SC1090", prop, "non-identifier property names");
       }
-      // Shorthand methods are just closure-valued fields — but their `this`
-      // is dynamically bound (typed as the literal by tsc, so noImplicitThis
-      // lets it through) and records don't model it; the generic
-      // lexical-this walk would silently capture an ENCLOSING method's
-      // `this`, so any `this` in the body is rejected up front.
-      if (ts.isMethodDeclaration(prop)) lowerer.rejectThisInObjectMethod(prop.body ?? prop);
+      // Shorthand methods are closure-valued fields. Their `this` is the
+      // literal itself, bound below through a hidden %self local the methods
+      // capture (JS binds it at the CALL, so fieldGetExpr refuses reading
+      // such a method as a value). A JS literal keeps the old refusal: there
+      // `this` already lowers to the ambient receiver (libCall dyn.this).
+      if (ts.isMethodDeclaration(prop) && isJsSourceFile(expr.getSourceFile())) {
+        lowerer.rejectThisInObjectMethod(prop.body ?? prop);
+      }
     }
+    // The methods whose bodies name `this`: only these need the receiver.
+    const thisMethods = new Set(
+      expr.properties.filter((prop): prop is ts.MethodDeclaration =>
+        ts.isMethodDeclaration(prop) && prop.body !== undefined && methodUsesThis(prop.body)),
+    );
 
     const selected = objectLiteralRecordType(lowerer, expr, loc);
     if ("lowered" in selected) return selected.lowered;
@@ -212,6 +221,10 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
     if (!mapped || mapped.kind !== "record") lowerer.badType(expr, tsType);
     let type: IrType = mapped;
     let shape = lowerer.shapes.get(type.shapeId)!;
+    // The receiver for `this` methods, declared on first use: a mutable local the methods capture BEFORE the record
+    // exists (varDecl with no init, assigned once the fields are lowered — the forward-capture shape corpus 605 pins).
+    const selfSlot: { local: IrLocal | null } = { local: null };
+    const selfLocal = (): IrLocal => (selfSlot.local ??= lowerer.env.declare(undefined, "%self", type, true));
     // ACCESSOR properties, JS literals only (TS accessors fill the shape's
     // %get:/%set: closure slots below): no record storage exists for them,
     // so the literal's shape NARROWS to its plain fields (reads resolve
@@ -918,8 +931,17 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       } else if (ts.isShorthandPropertyAssignment(prop)) {
         value = fieldType?.kind === "genericFunc" && familyFnOfValue(lowerer, prop.name as ts.Identifier) !== null ? lowerFamilyImpl(lowerer, familyFnOfValue(lowerer, prop.name as ts.Identifier)!, fieldType.familyId) : lowerer.lowerShorthandValue(prop);
       } else if (ts.isMethodDeclaration(prop)) {
-        value = fieldType?.kind === "genericFunc" ? lowerFamilyImpl(lowerer, prop, fieldType.familyId) // a generic method filling a family slot
-          : fenceClosureProbe(lowerer, prop, fieldType, () => lowerer.lowerLambda(prop)) ?? lowerer.lowerLambda(prop);
+        // A method naming `this` lowers with the literal's own %self local as its receiver: the closure captures that
+        // box (the ordinary capture machinery, boxing it at the origin), and the record fills it right after.
+        const lowerMethod = (): IrExpr =>
+          fieldType?.kind === "genericFunc" ? lowerFamilyImpl(lowerer, prop, fieldType.familyId) // a generic method filling a family slot
+            : fenceClosureProbe(lowerer, prop, fieldType, () => lowerer.lowerLambda(prop)) ?? lowerer.lowerLambda(prop);
+        if (thisMethods.has(prop)) {
+          lowerer.literalThisMethods.add(`${type.kind === "record" ? type.shapeId : ""}:${name}`);
+          value = lowerer.env.withThis(selfLocal(), lowerMethod);
+        } else {
+          value = lowerMethod();
+        }
       } else {
         lowerer.unsupported("SC1090", prop, `syntax '${ts.SyntaxKind[(prop as ts.Node).kind]}'`);
       }
@@ -1015,19 +1037,18 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
     }
     const result: IrExpr = { kind: "recordLit", fields, type, loc };
     const computedSpread = selectedComputedSpread();
-    if (computedSpread === null) return result;
-    return {
-      kind: "seqExpr",
-      stmts: [{
-        kind: "varDecl",
-        localId: computedSpread.local.id,
-        init: computedSpread.init,
-        loc,
-      }],
-      result,
-      type,
-      loc,
-    };
+    const self = selfSlot.local;
+    if (computedSpread === null && self === null) return result;
+    const stmts: IrStmt[] = [];
+    if (computedSpread !== null) {
+      stmts.push({ kind: "varDecl", localId: computedSpread.local.id, init: computedSpread.init, loc });
+    }
+    if (self === null) return { kind: "seqExpr", stmts, result, type, loc };
+    // `this` methods captured %self before the record existed (the forward-capture shape): declare its box, build the
+    // record into it, and the literal's VALUE is that local. The record→closure→box→record cycle is collectable.
+    stmts.push({ kind: "varDecl", localId: self.id, init: null, loc });
+    stmts.push({ kind: "assign", localId: self.id, value: result, loc });
+    return { kind: "seqExpr", stmts, result: { kind: "varRef", localId: self.id, type, loc }, type, loc };
   }
 
 /** The accessor twin of rejectThisInObjectMethod: a get/set accessor body
