@@ -8,18 +8,9 @@ import { lowerDiscriminatedView } from "./lower-discriminated-view.js";
 import { nativeRecordCheckSupported } from "../../ir/native-record.js";
 import * as ts from "../ts7/adapter.js";
 import type {
-  IrClassDef,
   IrExpr,
-  IrFfiImport,
-  IrFunction,
-  IrGlobal,
-  IrLocal,
-  IrModule,
-  IrParam,
-  IrRecordShape,
   IrStmt,
   IrType,
-  IrUnionDef,
   SrcLoc,
 } from "../../ir/ir.js";
 import { canAdaptDynFuncTo, canConvertToDyn, canMarshalTypedFuncIntoIsland, DYN, isUnitType, JSVAL, typeEquals, UNDEFINED_T } from "../../ir/ir.js";
@@ -36,7 +27,6 @@ import { bindingNeverReassigned } from "./lower-calls.js";
 import { islandFuncValueFence, islandRegexpOf } from "./lower-island.js";
 import { voidTernaryIfStmtOrExprStmt } from "./lower-stmts.js";
 import { lowerDynObjectLiteral } from "./lower-exprs.js";
-import type { ExpandoMember } from "./lower-expando.js";
 import { familyFnOfValue, lowerFamilyImpl } from "./lower-families.js";
 import type { Lowerer } from "./lowerer.js";
 import { jsFuncNameOf } from "./lowerer.js";

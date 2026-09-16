@@ -2,25 +2,15 @@
  * through interned marshal helpers. */
 import { InternalCompilerError } from "../../errors.js";
 import type {
-  IrClassDef,
   IrExpr,
-  IrFfiImport,
-  IrFunction,
-  IrGlobal,
-  IrLocal,
-  IrModule,
-  IrParam,
-  IrRecordShape,
   IrStmt,
   IrType,
-  IrUnionDef,
   SrcLoc,
 } from "../../ir/ir.js";
 import { arrayOf, BOOL, canMarshalTypedFuncIntoIsland, isUnitType, JSVAL, STRING, VOID } from "../../ir/ir.js";
 import {
   typeKey,
 } from "../type-mapper.js";
-import type { ExpandoMember } from "./lower-expando.js";
 import { numLit, varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
 

@@ -11,7 +11,6 @@ import { BOOL, DYN, IrExpr, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, 
 import { isJsSourceFile, locOf } from "../program.js";
 import { lowerNativeNamespaceObjectWalk } from "./lower-native-namespace.js";
 import { NARROW_FIRST } from "./surfaces.js";
-import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { lowerObjectAssignIndexShape } from "./lower-containers.js";
 import { droppableStatic, probeLower } from "./lower-exprs.js";
 import { lowerObjectAssignSchema } from "./lower-schema.js";

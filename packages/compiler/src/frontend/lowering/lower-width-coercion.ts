@@ -4,18 +4,8 @@
 import { discriminatedViewSupported } from "./lower-discriminated-view.js";
 import { InternalCompilerError } from "../../errors.js";
 import type {
-  IrClassDef,
   IrExpr,
-  IrFfiImport,
-  IrFunction,
-  IrGlobal,
-  IrLocal,
-  IrModule,
-  IrParam,
-  IrRecordShape,
-  IrStmt,
   IrType,
-  IrUnionDef,
   SrcLoc,
 } from "../../ir/ir.js";
 import { BOOL, canDynCheckTo, DYN, F64, isUnitType, STRING, typeEquals, UNDEFINED_T } from "../../ir/ir.js";
@@ -24,7 +14,6 @@ import {
 } from "../type-mapper.js";
 import { ClassInfo, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn } from "./lower-classes.js";
 import { lowerRecordOvfCaptureHelper } from "./lower-containers.js";
-import type { ExpandoMember } from "./lower-expando.js";
 import { numLit, varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
 import { dynUndefinedExpr, type WidthLift } from "./lowerer.js";

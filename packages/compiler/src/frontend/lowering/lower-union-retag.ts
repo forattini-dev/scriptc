@@ -2,25 +2,15 @@
  * helpers, traps for stranded arms), checked single-arm narrowing, and deferred reads. */
 import * as ts from "../ts7/adapter.js";
 import type {
-  IrClassDef,
   IrExpr,
-  IrFfiImport,
-  IrFunction,
-  IrGlobal,
-  IrLocal,
-  IrModule,
-  IrParam,
-  IrRecordShape,
   IrStmt,
   IrType,
-  IrUnionDef,
   SrcLoc,
 } from "../../ir/ir.js";
 import { BOOL, F64, isUnitType, STRING } from "../../ir/ir.js";
 import {
   typeKey,
 } from "../type-mapper.js";
-import type { ExpandoMember } from "./lower-expando.js";
 import type { Lowerer } from "./lowerer.js";
 import { type WidthLift } from "./lowerer.js";
 

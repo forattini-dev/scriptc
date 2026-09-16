@@ -2,25 +2,16 @@
  * coercions, dynamic-rest island adapters, and child_process spawn result adapters. */
 import { InternalCompilerError } from "../../errors.js";
 import type {
-  IrClassDef,
   IrExpr,
-  IrFfiImport,
-  IrFunction,
-  IrGlobal,
-  IrLocal,
-  IrModule,
   IrParam,
-  IrRecordShape,
   IrStmt,
   IrType,
-  IrUnionDef,
   SrcLoc,
 } from "../../ir/ir.js";
 import { canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, DYN, F64, JSVAL, STRING, typeEquals, UNDEFINED_T } from "../../ir/ir.js";
 import {
   typeKey,
 } from "../type-mapper.js";
-import type { ExpandoMember } from "./lower-expando.js";
 import type { Lowerer } from "./lowerer.js";
 import { dynUndefinedExpr } from "./lowerer.js";
 
