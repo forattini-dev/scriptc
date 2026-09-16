@@ -102,6 +102,12 @@ export class RustFunctionValueEmitter {
     const args = expr.args.map(() => this.context.nextName("sc_rt"));
     const bindings = [`let ${callee} = ${this.context.emitExpr(expr.callee)};`, ...expr.args.map((arg, i) => `let ${args[i]} = ${this.context.emitExpr(arg)};`)].join(" ");
     const name = this.context.familyName(expr.familyId, expr.loc);
+    // A family with no implementation in the program has no dispatch: its enum is empty, and an empty `match` is not
+    // a legal Rust expression. This is a value the program never creates — a generic slot filled from outside (a
+    // callback a package will supply at runtime) — so name it here instead of emitting code rustc rejects.
+    if (family.impls.length === 0) {
+      this.context.unsupported("calling a generic function value no implementation in this program can fill (its family has no body to dispatch to)", expr.loc);
+    }
     const arms = family.impls.map((impl, index) => {
       const fields = impl.captures.map((_, i) => this.context.captureField(i));
       const pattern = fields.length === 0 ? `${name}::Impl${index}` : `${name}::Impl${index} { ${fields.join(", ")} }`;

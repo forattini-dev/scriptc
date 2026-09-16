@@ -250,7 +250,10 @@ function lowerSqlClientMake(L: Lowerer, options: ts.ObjectLiteralExpression, exp
     const name = property.name.text;
     if (name === "transformRows") {
       if (node.kind !== ts.SyntaxKind.UndefinedKeyword && !(ts.isIdentifier(node) && node.text === "undefined")) {
-        return L.unsupported("SC1090", property, "SqlClient.make row transforms (transformRows)");
+        // effect hands this value to the CONNECTION as `execute(sql, params, transformRows)` and the program applies
+        // it. Its type is a generic function the program never implements — effect supplies it — so no closure family
+        // in the program has a body to dispatch to, and the kernel cannot carry it as a callable value.
+        return L.unsupported("SC1090", property, "SqlClient.make row transforms (transformRows): effect passes the transform to the connection, and a generic function value no implementation in this program fills has no native dispatch");
       }
       continue;
     }
