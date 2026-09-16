@@ -382,7 +382,7 @@ export function lowerSchemaMember(L: Lowerer, member: string, args: ts.Expressio
   };
   const fn = decoders[member];
   if (fn !== undefined && first !== undefined && args.length <= 2) return decoder(L, fn, handleArg(L, first, `Schema.${member}`), first, expr, loc);
-  return L.unsupported("SC1090", expr, `the effect kernel does not cover Schema.${member} in this call shape yet`);
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Schema.${member} in this call shape`);
 }
 
 /** `Schema.is(S)(value)` called at once: one boolean, no predicate value (effect's predicate is a generic signature). */
@@ -398,7 +398,7 @@ export function applySchemaPipeStep(L: Lowerer, source: IrExpr, step: ts.Express
   if (ts.isPropertyAccessExpression(step) && ts.isIdentifier(step.name) && effectNamespaceOf(L, step.expression) === "Schema") {
     const kind = SCHEMA_WRAPS[step.name.text];
     if (kind !== undefined) return wrap(kind, source, loc);
-    return L.unsupported("SC1090", step, `the effect kernel does not cover Schema.${step.name.text} as a pipe step yet`);
+    return L.unsupported("SC1090", step, `the effect kernel does not cover Schema.${step.name.text} as a pipe step`);
   }
   if (!ts.isCallExpression(step) || !ts.isPropertyAccessExpression(step.expression) || !ts.isIdentifier(step.expression.name) || effectNamespaceOf(L, step.expression.expression) !== "Schema") return null;
   const name = step.expression.name.text;
@@ -422,7 +422,7 @@ export function applySchemaPipeStep(L: Lowerer, source: IrExpr, step: ts.Express
     }
     return lib("schema.decodeTo", [source, handleArg(L, step.arguments[0]!, "Schema.decodeTo"), transform], EFFECT_T, loc);
   }
-  return L.unsupported("SC1090", step, `the effect kernel does not cover Schema.${name} as a pipe step yet`);
+  return L.unsupported("SC1090", step, `the effect kernel does not cover Schema.${name} as a pipe step`);
 }
 
 /** Methods on a schema handle: `S.make(props)` (the identity over the checker's Type), `S.annotate(…)` (the handle),

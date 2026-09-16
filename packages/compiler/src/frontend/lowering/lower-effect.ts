@@ -116,7 +116,7 @@ function lowerDurationMember(L: Lowerer, member: string, args: ts.Expression[], 
     const millis = lib("effect.durationToMillis", [handle], { kind: "f64" }, loc);
     return member === "toMillis" ? millis : { kind: "bin", op: "/", left: millis, right: numLit(1000, loc), type: { kind: "f64" }, loc };
   }
-  return L.unsupported("SC1090", expr, `the effect kernel does not cover Duration.${member} in this call shape yet`);
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Duration.${member} in this call shape`);
 }
 
 /** `Exit.member(...)`: the opaque exit handle's constructors and tests. */
@@ -130,7 +130,7 @@ function lowerExitMember(L: Lowerer, member: string, args: ts.Expression[], expr
       if (exit.type.kind === "effect") return lib(member === "isSuccess" ? "effect.exitIsSuccess" : "effect.exitIsFailure", [exit], BOOL, loc);
     }
   }
-  return L.unsupported("SC1090", expr, `the effect kernel does not cover Exit.${member} in this call shape yet`);
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Exit.${member} in this call shape`);
 }
 
 /** `Option.member(...)`: the opaque option handle's constructors, tests and reads (site-typed by the checker). */
@@ -186,7 +186,7 @@ function lowerOptionMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
     default:
       break;
   }
-  return L.unsupported("SC1090", expr, `the effect kernel does not cover Option.${member} in this call shape yet`);
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Option.${member} in this call shape`);
 }
 
 /** A logger message argument as the text effect's default logger prints: strings as they are, numbers and booleans
@@ -256,7 +256,7 @@ function applyPipeStep(L: Lowerer, source: IrExpr, step: ts.Expression, loc: Src
     if (fn !== undefined) return lib(fn, [source], EFFECT_T, loc);
     // No interruption in the kernel: both wrappers are the identity, as a bare step too.
     if (step.name.text === "uninterruptible" || step.name.text === "interruptible") return source;
-    L.unsupported("SC1090", step, `the effect kernel does not cover Effect.${step.name.text} as a pipe step yet`);
+    L.unsupported("SC1090", step, `the effect kernel does not cover Effect.${step.name.text} as a pipe step`);
   }
   if (ts.isCallExpression(step) && ts.isPropertyAccessExpression(step.expression) && ts.isIdentifier(step.expression.name)) {
     const stepNs = effectNamespaceOf(L, step.expression.expression);
@@ -363,7 +363,7 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
       return lib(callee.name.text === "close" ? "effect.scopeClose" : "effect.scopeProvide", [first, second], EFFECT_T, loc);
     }
   }
-  if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
+  if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text}`);
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
 }
 
@@ -384,7 +384,7 @@ function asCallType(L: Lowerer, expr: ts.CallExpression, value: IrExpr): IrExpr 
 
 /** `Context.Reference(id, { defaultValue })`, and `Context.get/getUnsafe/getOption(context, key)` over a fiber context. */
 function lowerContextMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.CallExpression, loc: SrcLoc): IrExpr {
-  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Context.${member} in this call shape yet`);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Context.${member} in this call shape`);
   if (member === "Reference" && args.length === 2 && ts.isStringLiteral(args[0]!) && ts.isObjectLiteralExpression(args[1]!)) {
     const fallback = args[1].properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "defaultValue");
     if (fallback === undefined || args[1].properties.length !== 1) return refused();
@@ -421,7 +421,7 @@ function liftedRestore(L: Lowerer, loc: SrcLoc): IrExpr {
  * still need their own carrier and remain refused. */
 function lowerRefMember(L: Lowerer, ns: string, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
-  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${member} yet`);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${member}`);
   switch (member) {
     case "make":
     case "makeUnsafe":
@@ -460,7 +460,7 @@ function lowerRefMember(L: Lowerer, ns: string, member: string, args: ts.Express
  * waiter queue (the same machine `Effect.promise` suspends on), and the settling effect answers whether IT settled. */
 function lowerDeferredMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
-  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Deferred.${member} yet`);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Deferred.${member}`);
   switch (member) {
     case "make":
       if (args.length !== 0) refused();
@@ -485,7 +485,7 @@ function lowerDeferredMember(L: Lowerer, member: string, args: ts.Expression[], 
  * effect ends — a released permit hands straight to the longest-waiting fiber. */
 function lowerSemaphoreMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
-  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Semaphore.${member} yet`);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Semaphore.${member}`);
   if ((member === "make" || member === "makeUnsafe") && args.length === 1 && at(0).type.kind === "f64") {
     return lib(member === "make" ? "effect.semaphoreMake" : "effect.semaphoreMakeUnsafe", [at(0)], EFFECT_T, loc);
   }
@@ -496,7 +496,7 @@ function lowerSemaphoreMember(L: Lowerer, member: string, args: ts.Expression[],
  * `bounded(n)` parks the offering fiber when full, `dropping(n)` refuses the item, `sliding(n)` evicts the oldest. */
 function lowerQueueMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
-  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Queue.${member} yet`);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Queue.${member}`);
   const INF = Number.MAX_SAFE_INTEGER;
   switch (member) {
     case "unbounded":
@@ -525,7 +525,7 @@ function lowerQueueMember(L: Lowerer, member: string, args: ts.Expression[], exp
 /** `PubSub`: subscriptions use queue handles and are released by their acquiring scope or hub shutdown. */
 function lowerPubSubMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
-  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover PubSub.${member} yet`);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover PubSub.${member}`);
   const INF = Number.MAX_SAFE_INTEGER;
   switch (member) {
     case "unbounded":
@@ -557,7 +557,7 @@ function lowerPubSubMember(L: Lowerer, member: string, args: ts.Expression[], ex
 /** `Cause`: failures, defects and interruptions, including combined finalizer reasons. */
 function lowerCauseMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
-  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Cause.${member} yet`);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Cause.${member}`);
   switch (member) {
     case "fail":
       if (args.length !== 1) refused();
@@ -679,7 +679,7 @@ function lowerLayerMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.Ex
     default:
       break;
   }
-  return L.unsupported("SC1090", expr, `the effect kernel does not cover Layer.${member} in this call shape yet`);
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Layer.${member} in this call shape`);
 }
 
 /** One `Effect.member` call: `pre` are already-lowered leading arguments (a pipe's accumulated effect), `args` the
@@ -1035,5 +1035,5 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         break;
     }
   }
-  return L.unsupported("SC1090", expr, `the effect kernel does not cover Effect.${member} in this call shape yet`);
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Effect.${member} in this call shape`);
 }

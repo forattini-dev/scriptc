@@ -146,7 +146,7 @@ export function lowerSqlHandleCall(L: Lowerer, callee: ts.Expression, expr: ts.C
     const body = L.lowerExpr(expr.arguments[0]!);
     if (body.type.kind === "effect") return lib("effect.sqlWithTransaction", [client, body], EFFECT_T, loc);
   }
-  return L.unsupported("SC1090", expr, `the effect kernel does not cover SqlClient.${callee.name.text} in this call shape yet`);
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover SqlClient.${callee.name.text} in this call shape`);
 }
 
 /** Namespace calls: `Statement.makeCompilerSqlite(...)` and `SqlClient.make({ … })`. */
@@ -184,7 +184,7 @@ function lowerSqlClientMake(L: Lowerer, options: ts.ObjectLiteralExpression, exp
     const name = property.name.text;
     if (name === "transformRows") {
       if (node.kind !== ts.SyntaxKind.UndefinedKeyword && !(ts.isIdentifier(node) && node.text === "undefined")) {
-        return L.unsupported("SC1090", property, "SqlClient.make row transforms (transformRows) are not supported yet");
+        return L.unsupported("SC1090", property, "SqlClient.make row transforms (transformRows)");
       }
       continue;
     }
@@ -192,7 +192,7 @@ function lowerSqlClientMake(L: Lowerer, options: ts.ObjectLiteralExpression, exp
     if (name === "acquirer") acquirer = { node, value };
     else if (name === "transactionAcquirer") transactionAcquirer = value;
     else if (name === "compiler" || name === "spanAttributes") evaluated.push({ kind: "exprStmt", expr: value, loc });
-    else return L.unsupported("SC1090", property, `the SqlClient.make option '${name}' is not supported yet`);
+    else return L.unsupported("SC1090", property, `the SqlClient.make option '${name}'`);
   }
   if (acquirer === undefined || acquirer.value.type.kind !== "effect") return L.unsupported("SC1090", expr, "SqlClient.make without an acquirer effect");
   if (transactionAcquirer !== undefined && transactionAcquirer.type.kind !== "effect") return L.unsupported("SC1090", expr, "SqlClient.make with a non-effect transactionAcquirer");
