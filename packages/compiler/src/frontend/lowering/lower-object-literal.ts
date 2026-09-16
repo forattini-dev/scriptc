@@ -77,6 +77,12 @@ import { propNameText } from "./lower-exprs.js";
    * smuggle a wider/narrower literal past tsc's freshness check), which the
    * exact-shape checks below reject with SC2002. Fields lower IN SOURCE
    * ORDER: JS evaluates property values in source order. */
+/** A slot whose value can only be a closure family: the family type itself, or a union carrying one family arm
+ * (`transformRows: (<A>(rows) => …) | undefined`). lowerExprExpecting joins the family and wraps at the arm's tag. */
+function familyArmedUnion(lowerer: Lowerer, type: IrType | undefined): boolean {
+  return type?.kind === "union" && (lowerer.unions.get(type.unionId)?.arms.some((arm) => arm.kind === "genericFunc") ?? false);
+}
+
 export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
     const loc = locOf(expr);
     // The RUNTIME-KEYED literal (JS): a computed key that doesn't fold to a
@@ -925,7 +931,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         while (ts.isParenthesizedExpression(init)) init = init.expression;
         value =
           fenceClosureProbe(lowerer, prop.initializer, fieldType, () => lowerer.lowerExpr(prop.initializer)) ??
-          (fieldType !== undefined && (ts.isArrayLiteralExpression(init) || fieldType.kind === "genericFunc") // a family slot takes the value as an implementation
+          (fieldType !== undefined && (ts.isArrayLiteralExpression(init) || fieldType.kind === "genericFunc" || familyArmedUnion(lowerer, fieldType)) // a family slot — bare or behind a union — takes the value as an implementation
             ? lowerer.lowerExprExpecting(prop.initializer, fieldType)
             : lowerer.lowerExpr(prop.initializer));
       } else if (ts.isShorthandPropertyAssignment(prop)) {

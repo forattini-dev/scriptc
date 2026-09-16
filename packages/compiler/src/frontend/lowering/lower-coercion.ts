@@ -625,6 +625,26 @@ import { jsFuncNameOf } from "./lowerer.js";
    * API answers nothing (binding-element defaults: `{ json = [] }`) and
    * the literal's own never[] would build the f64 representation. */
   export function lowerExprExpecting(lowerer: Lowerer, node: ts.Expression, expected: IrType | undefined): IrExpr { if (expected?.kind === "genericFunc") { const fn = familyFnOfValue(lowerer, node); if (fn !== null) return lowerFamilyImpl(lowerer, fn, expected.familyId, lowerer.checker.getContextualType(node) ?? undefined); } // a function expression flowing into a generic slot joins THAT slot's family, whether or not it declares type parameters of its own
+    // The same slot behind a union (`transformRows: (<A>(rows) => …) | undefined`): the value can only inhabit the
+    // family arm, so join THAT family and wrap at its tag. Without this the reference falls to the non-family value
+    // path, which needs a pinned concrete signature a generic slot never supplies.
+    if (expected?.kind === "union") {
+      const familyArms = lowerer.unions.get(expected.unionId)?.arms.filter((arm) => arm.kind === "genericFunc") ?? [];
+      const familyArm = familyArms[0];
+      if (familyArms.length > 1 && familyFnOfValue(lowerer, node) !== null) {
+        // Two family arms cannot be told apart by the value: picking one would compile the body against the other
+        // family's argument types (the constraint rule familyIdOf keeps).
+        lowerer.unsupported("SC1090", node, "a generic function value flowing into a union with more than one generic arm (annotate the destination with the one signature it fills)");
+      }
+      if (familyArm?.kind === "genericFunc") {
+        const fn = familyFnOfValue(lowerer, node);
+        const tag = lowerer.armTag(expected.unionId, familyArm);
+        if (fn !== null && tag >= 0) {
+          const impl = lowerFamilyImpl(lowerer, fn, familyArm.familyId, lowerer.checker.getContextualType(node) ?? undefined);
+          return { kind: "unionWrap", unionId: expected.unionId, tag, value: impl, type: expected, loc: impl.loc };
+        }
+      }
+    }
     if (expected?.kind === "array") {
       let x: ts.Expression = node;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
