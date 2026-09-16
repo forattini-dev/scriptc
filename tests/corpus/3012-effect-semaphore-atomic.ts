@@ -32,3 +32,12 @@ console.log(await Effect.runPromise(Effect.catchCause(
   () => Effect.succeed("defect released"),
 )));
 console.log(Effect.runSync(permits.withPermits(2)(Effect.succeed("all free"))));
+
+// `withPermit(effect)` is the uncurried withPermits(1)(effect): one permit, released the same way.
+console.log(Effect.runSync(permits.withPermit(Effect.succeed("single permit"))));
+console.log(Effect.runSync(permits.withPermit(permits.withPermit(Effect.succeed("nested singles")))));
+console.log(await Effect.runPromise(Effect.catchCause(
+  permits.withPermit(Effect.die("single failure")),
+  () => Effect.succeed("single released"),
+)));
+console.log(Effect.runSync(permits.withPermits(2)(Effect.succeed("both free after singles"))));

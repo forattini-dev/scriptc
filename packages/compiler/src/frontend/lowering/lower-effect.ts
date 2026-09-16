@@ -302,6 +302,17 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
       return lib("effect.semaphoreWithPermits", [semaphore, permits, body], EFFECT_T, loc);
     }
   }
+  // `semaphore.withPermit(effect)`: the uncurried one-permit spelling of withPermits(1)(effect). Its type parameters
+  // only carry the effect's own channels, which the kernel holds opaquely, so the generic member needs no family.
+  if (!L.dynamic && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) &&
+    callee.name.text === "withPermit" && !callee.questionDotToken && expr.arguments.length === 1 &&
+    L.typeOf(callee.expression).getSymbol()?.name === "Semaphore") {
+    const semaphore = L.lowerExpr(callee.expression);
+    const body = L.lowerExpr(expr.arguments[0]!);
+    if (semaphore.type.kind === "effect" && body.type.kind === "effect") {
+      return lib("effect.semaphoreWithPermits", [semaphore, numLit(1, loc), body], EFFECT_T, loc);
+    }
+  }
   // `semaphore.take(n)` / `semaphore.release(n)` on a Semaphore handle.
   if (!L.dynamic && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && (callee.name.text === "take" || callee.name.text === "release") &&
     expr.arguments.length === 1 && L.typeOf(callee.expression).getSymbol()?.name === "Semaphore") {
