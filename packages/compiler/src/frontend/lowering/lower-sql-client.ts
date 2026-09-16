@@ -94,6 +94,72 @@ function distServiceConst(L: Lowerer, node: ts.Identifier | ts.PropertyAccessExp
     ts.isVariableDeclaration(declaration) && declaration.getSourceFile().fileName.replace(/\\/g, "/").endsWith(`/node_modules/effect/dist/unstable/${module}.d.ts`));
 }
 
+/** Whether `node` names `name` as effect's `dist/unstable/sql/SqlError` module declares it — the class `SqlError` or
+ * the function `classifySqliteError`. Unlike distServiceConst these are a class and a const function, so the
+ * declaration kind is not constrained; provenance is. */
+function distSqlErrorExport(L: Lowerer, node: ts.Expression, name: string): boolean {
+  if (!ts.isIdentifier(node) && !ts.isPropertyAccessExpression(node)) return false;
+  let symbol = L.checker.getSymbolAtLocation(ts.isIdentifier(node) ? node : node.name);
+  if (symbol === undefined) return false;
+  if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = L.checker.getAliasedSymbol(symbol);
+  return symbol.name === name && L.checker.declarationsOf(symbol).some((declaration) =>
+    declaration.getSourceFile().fileName.replace(/\\/g, "/").endsWith("/node_modules/effect/dist/unstable/sql/SqlError.d.ts"));
+}
+
+/** The MESSAGE a `classifySqliteError(cause, { message, operation })` call gives its reason: effect derives the
+ * SqlError's own `message` from it verbatim. The cause is evaluated for effect and then dropped — the kernel models
+ * the wrapper, not the eleven reason classes (nothing reads `reason`, `cause` or `isRetryable` natively). */
+function classifiedMessage(L: Lowerer, call: ts.CallExpression, loc: SrcLoc): IrExpr {
+  const [causeNode, optionsNode] = call.arguments;
+  if (causeNode === undefined || call.arguments.length > 2) {
+    return L.unsupported("SC1090", call, "classifySqliteError in this call shape");
+  }
+  const evaluated: IrStmt[] = [{ kind: "exprStmt", expr: L.lowerExpr(causeNode), loc }];
+  let message: IrExpr = { kind: "strLit", value: "", type: STRING, loc };
+  if (optionsNode !== undefined) {
+    let options: ts.Expression = optionsNode;
+    while (ts.isParenthesizedExpression(options)) options = options.expression;
+    if (!ts.isObjectLiteralExpression(options)) {
+      return L.unsupported("SC1090", optionsNode, "classifySqliteError options that are not an object literal");
+    }
+    for (const property of options.properties) {
+      if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) {
+        return L.unsupported("SC1090", property, "classifySqliteError options that are not plain property assignments");
+      }
+      const value = L.lowerExprExpecting(property.initializer, STRING);
+      if (property.name.text === "message") message = value;
+      else evaluated.push({ kind: "exprStmt", expr: value, loc }); // `operation` rides effect's reason, which nothing reads
+    }
+  }
+  return { kind: "seqExpr", stmts: evaluated, result: message, type: STRING, loc };
+}
+
+/** `new SqlError({ reason: classifySqliteError(cause, { message }) })`: the kernel's error handle, whose `_tag` is
+ * "SqlError" and whose `message` is the reason's. Null for any other construction. */
+export function lowerSqlErrorNew(L: Lowerer, expr: ts.NewExpression): IrExpr | null {
+  if (L.dynamic || !distSqlErrorExport(L, expr.expression, "SqlError")) return null;
+  const loc = locOf(expr);
+  const [argument] = expr.arguments ?? [];
+  if ((expr.arguments?.length ?? 0) !== 1 || argument === undefined) {
+    return L.unsupported("SC1090", expr, "new SqlError without its single props argument");
+  }
+  let props: ts.Expression = argument;
+  while (ts.isParenthesizedExpression(props)) props = props.expression;
+  if (!ts.isObjectLiteralExpression(props) || props.properties.length !== 1) {
+    return L.unsupported("SC1090", argument, "new SqlError from props other than a `{ reason }` object literal");
+  }
+  const [property] = props.properties;
+  if (property === undefined || !ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name) || property.name.text !== "reason") {
+    return L.unsupported("SC1090", props, "new SqlError props other than `reason`");
+  }
+  let reason: ts.Expression = property.initializer;
+  while (ts.isParenthesizedExpression(reason)) reason = reason.expression;
+  if (!ts.isCallExpression(reason) || !distSqlErrorExport(L, reason.expression, "classifySqliteError")) {
+    return L.unsupported("SC1090", property.initializer, "a SqlError reason other than classifySqliteError(cause, options)");
+  }
+  return lib("effect.sqlErrorNew", [classifiedMessage(L, reason, loc)], EFFECT_T, loc);
+}
+
 /** Namespace VALUE reads: `SqlClient.SafeIntegers` and `Reactivity.layer`. */
 export function lowerSqlNamespaceProperty(ns: string | null, name: string, loc: SrcLoc): IrExpr | null {
   if (ns === "sql/SqlClient" && name === "SafeIntegers") return lib("effect.sqlSafeIntegers", [], EFFECT_T, loc);

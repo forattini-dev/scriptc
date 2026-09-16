@@ -225,9 +225,17 @@ pub fn schema_error_handle(message: JsString) -> JsEffect {
 
 pub fn schema_error_message(handle: &JsEffect) -> JsString {
     handle.with(|data| match &data.node {
-        EffectNode::Data(KernelData::SchemaError(message)) | EffectNode::Data(KernelData::Unknown(message)) => message.clone(),
+        EffectNode::Data(KernelData::SchemaError(message))
+        | EffectNode::Data(KernelData::SqlError(message))
+        | EffectNode::Data(KernelData::Unknown(message)) => message.clone(),
         _ => throw_error("scriptc: a SchemaError handle was expected".to_owned()),
     })
+}
+
+/// `new SqlError({ reason: classifySqliteError(cause, { message }) })`: the wrapper effect's message is the reason's,
+/// which is the classify option verbatim (effect derives `message`, `cause` and `isRetryable` from the reason).
+pub fn effect_sql_error_handle(message: JsString) -> JsEffect {
+    effect_new(EffectNode::Data(KernelData::SqlError(message)))
 }
 
 /// JS `Number(text)` for NumberFromString: trimmed, empty is 0, otherwise a decimal literal or NaN.

@@ -35,6 +35,7 @@ import { errorWithCause } from "./lower-error-message.js";
 import { exactClassOfReceiver, exactInstanceClassOf } from "./lower-class-bindings.js";
 export { exactClassOfReceiver, exactInstanceClassOf, probeExactInstanceClassOf } from "./lower-class-bindings.js";
 import { rejectStaticThis } from "./static-this.js";
+import { lowerSqlErrorNew } from "./lower-sql-client.js";
 
 export interface ClassInfo {
   def: IrClassDef;
@@ -5316,6 +5317,9 @@ export function lowerNew(lowerer: Lowerer, expr: ts.NewExpression): IrExpr {
         }
       }
     }
+    // effect's own `new SqlError({ reason })`: a kernel error handle, not a program class.
+    const sqlError = lowerSqlErrorNew(lowerer, expr);
+    if (sqlError !== null) return sqlError;
     lowerer.unsupported("SC1090", expr, "constructing values other than classes declared in the program");
   }
 

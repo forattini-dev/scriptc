@@ -50,7 +50,10 @@ export type IrEffectContextLibFn =
   /** `client.transactionService`: the per-client transaction key. */
   | "effect.sqlTransactionKey"
   /** `client.reserve`: the transaction acquirer. */
-  | "effect.sqlReserve";
+  | "effect.sqlReserve"
+  /** `new SqlError({ reason: classifySqliteError(cause, { message }) })`: the error handle, carrying the message
+   * effect derives from the reason. Programs that read `reason` itself keep their own refusal. */
+  | "effect.sqlErrorNew";
 
 export const EFFECT_CONTEXT_LIB_FN_SIGS = {
   "effect.referenceKey": { argTypes: [STRING, null], result: EFFECT_T },
@@ -77,4 +80,5 @@ export const EFFECT_CONTEXT_LIB_FN_SIGS = {
   "effect.sqlWithTransaction": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T },
   "effect.sqlTransactionKey": { argTypes: [EFFECT_T], result: EFFECT_T },
   "effect.sqlReserve": { argTypes: [EFFECT_T], result: EFFECT_T },
+  "effect.sqlErrorNew": { argTypes: [STRING], result: EFFECT_T },
 };

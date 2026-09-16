@@ -24,6 +24,10 @@ export function effectTagPredicate(
   } else if (type.kind === "object" && context.hasClassMeta(type.className)) {
     const field = context.classFieldName(type.className, "_tag", loc);
     matches = `sc_error.with(|object| object.${field}.as_ref() == ${expected})`;
+  } else if (type.kind === "effect") {
+    // A kernel DATA handle (a SqlError, a SchemaError, an Exit): its tag is the node's, which the runtime answers —
+    // the same value `_tag` reads through effect.dataTag.
+    return `${value}.downcast_ref::<runtime::JsEffect>().is_some_and(|sc_error| runtime::effect_data_tag(sc_error).as_ref() == ${expected})`;
   } else {
     return context.unsupported("Effect.catchTag over an error without a native tag representation", loc);
   }

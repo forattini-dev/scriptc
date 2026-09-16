@@ -183,6 +183,9 @@ pub enum KernelData {
     /// A native effect/unstable/sql client and statement (effect_sql.rs).
     SqlClient(Rc<SqlClientData>),
     SqlStatement(Rc<SqlStatementData>),
+    /// `new SqlError({ reason })`: effect derives the wrapper's message from its reason, and programs that only
+    /// construct and propagate it (Redcode) read nothing else, so the handle carries that message alone.
+    SqlError(JsString),
     /// A `Queue` (and the per-subscriber queue a `PubSub` hands out): items with waiting takers and offerers.
     Queue(Rc<RefCell<QueueState>>),
     /// The failure `Effect.tryPromise(thunk)` builds from a rejection: effect's `UnknownError`, whose message is
@@ -511,6 +514,7 @@ pub fn effect_data_tag(handle: &JsEffect) -> JsString {
         EffectNode::Data(KernelData::Exit(outcome)) => string(if outcome.is_ok() { "Success" } else { "Failure" }),
         EffectNode::Data(KernelData::Option(value)) => string(if value.is_some() { "Some" } else { "None" }),
         EffectNode::Data(KernelData::SchemaError(_)) => string("SchemaError"),
+        EffectNode::Data(KernelData::SqlError(_)) => string("SqlError"),
         EffectNode::Data(KernelData::Unknown(_)) => string("UnknownError"),
         _ => throw_error("scriptc: a kernel data handle was expected".to_owned()),
     })

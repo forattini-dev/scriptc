@@ -315,6 +315,9 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.scopeProvide":
       if (first === undefined || second === undefined) break;
       return `runtime::${expr.fn === "effect.scopeClose" ? "effect_scope_close" : "effect_scope_provide"}(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.sqlErrorNew":
+      if (first === undefined) break;
+      return `runtime::effect_sql_error_handle(${context.emitExpr(first)})`;
     case "effect.sqlCompiler": return "runtime::effect_void()";
     case "effect.sqlSafeIntegers": return "runtime::effect_sql_safe_integers_key()";
     case "effect.sqlClientMake": {
