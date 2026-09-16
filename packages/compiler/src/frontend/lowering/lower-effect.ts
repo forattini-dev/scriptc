@@ -15,6 +15,7 @@ import { applyProgramPipeStep, applySchemaPipeStep, isSchemaLike, lowerSchemaCla
 import { lowerConsoleInspectArg } from "./lower-inspect.js";
 import { lowerContextServiceUse } from "./lower-context-service.js";
 import { lowerSqlHandleCall, lowerSqlHandleProperty, lowerSqlNamespaceCall, lowerSqlNamespaceProperty, lowerSqlServiceKey } from "./lower-sql-client.js";
+import { familyToFuncAdapter } from "./lower-function-adapters.js";
 
 
 /** A named export of the effect package (`import { pipe } from "effect"`): the module it is declared in, by provenance. */
@@ -695,6 +696,23 @@ function lowerLayerMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.Ex
 
 /** One `Effect.member` call: `pre` are already-lowered leading arguments (a pipe's accumulated effect), `args` the
  * call's own. Unknown members and shapes are named refusals. */
+/** A closure FAMILY value in a kernel slot that spells ONE concrete signature: the slot's own signature is the
+ * instantiation the family never got from a call site, so adapt the value to it. Null when the value is not a family,
+ * when the site has no node to read a contextual signature from, or when that signature is not one concrete
+ * function — those keep their existing refusals. */
+function familyAsConcrete(L: Lowerer, value: IrExpr, node: ts.Expression | undefined, loc: SrcLoc): IrExpr | null {
+  if (value.type.kind !== "genericFunc" || node === undefined) return null;
+  const contextual = L.checker.getContextualType(node);
+  if (contextual === undefined) return null;
+  const signatures = L.checker.getCallSignatures(contextual);
+  if (signatures.length !== 1 || signatures[0] === undefined) return null;
+  const target = L.mapTypeOf(contextual);
+  if (target === null || target.kind !== "func") return null;
+  const adapter = familyToFuncAdapter(L, value.type.familyId, target, node, signatures[0], loc);
+  if (adapter === null) return null;
+  return { kind: "call", callee: adapter, args: [value], type: target, loc };
+}
+
 function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const total = pre.length + args.length;
   const lowered = new Map<number, IrExpr>();
@@ -720,7 +738,9 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
       case "flatMap": {
         if (total !== 2) break;
         const source = at(0);
-        const fn = at(1);
+        // A closure FAMILY handed to the kernel (a narrowed `transformRows`): the kernel calls it later, with no call
+        // site to monomorphize against — but the slot spells one concrete signature, so adapt the value to it.
+        const fn = familyAsConcrete(L, at(1), args[1 - pre.length], loc) ?? at(1);
         if (source.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length > 1) break;
         if (member === "flatMap" && fn.type.ret.kind !== "effect") break;
         return lib(member === "map" ? "effect.map" : "effect.flatMap", [source, fn], EFFECT_T, loc);

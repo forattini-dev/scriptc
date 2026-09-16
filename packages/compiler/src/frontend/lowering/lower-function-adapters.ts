@@ -12,8 +12,69 @@ import { canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncI
 import {
   typeKey,
 } from "../type-mapper.js";
+import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { dynUndefinedExpr } from "./lowerer.js";
+import { demandFamilyInstance } from "./lower-families.js";
+
+/** Interned `%fn.family.<n>(f)` — a closure FAMILY value flowing into a slot that spells ONE concrete signature
+ * (`Effect.map(rows, transform)`, where the kernel calls the value later with no call site of its own to
+ * monomorphize against). The target signature IS the instantiation: demand it on the family, then wrap the family
+ * value in a closure whose body dispatches into it at that key. The family value is captured, so each adapted value
+ * keeps its own implementation — exactly what a family call at a real call site would have chosen. */
+export function familyToFuncAdapter(lowerer: Lowerer, familyId: string, toT: IrType & { kind: "func" }, blame: ts.Node, rsig: ts.Signature, loc: SrcLoc): string | null {
+  if (toT.rest !== undefined) return null; // the demand's ParamShapes have no rest spelling
+  const fromT: IrType = { kind: "genericFunc", familyId };
+  const params = toT.params.map((type) => ({ type, mode: "required" as const }));
+  const instKey = demandFamilyInstance(lowerer, familyId, params, toT.ret, blame, rsig);
+  const key = `family:${familyId}:${instKey}`;
+  const existing = lowerer.widthHelpers.get(key);
+  if (existing) return existing;
+  const name = `%fn.family.${lowerer.widthHelpers.size}`;
+  lowerer.widthHelpers.set(key, name);
+  lowerer.freshClosureAdapters.add(name); // wraps the family value in a new closure per call
+
+  const impl = `${name}.impl`;
+  const implParams: IrParam[] = toT.params.map((type, i) => ({ localId: `a${i}.0`, name: `a${i}`, type }));
+  lowerer.liftedFns.push({
+    name: impl,
+    params: implParams,
+    returnType: toT.ret,
+    captures: [{ localId: "f.0", name: "f", type: fromT }],
+    locals: [
+      { id: "f.0", name: "f", type: fromT, mutable: false, boxed: true },
+      ...implParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+    ],
+    body: [
+      {
+        kind: "return",
+        value: {
+          kind: "callFamily",
+          callee: { kind: "varRef", localId: "f.0", type: fromT, loc },
+          familyId,
+          instKey,
+          args: implParams.map((p): IrExpr => ({ kind: "varRef", localId: p.localId, type: p.type, loc })),
+          type: toT.ret,
+          loc,
+        },
+        loc,
+      },
+    ],
+    loc,
+  });
+  // The factory: box the incoming family value, mint the closure.
+  lowerer.liftedFns.push({
+    name,
+    params: [{ localId: "f.0", name: "f", type: fromT }],
+    returnType: toT,
+    locals: [{ id: "f.0", name: "f", type: fromT, mutable: false, boxed: true }],
+    body: [
+      { kind: "return", value: { kind: "closure", fnName: impl, captures: ["f.0"], type: toT, loc }, loc },
+    ],
+    loc,
+  });
+  return name;
+}
 
   /** Interned `%fn.width.<n>(f)` — the function-RETURN width adapter: a
    * zero-param `() => Wide[]` value flowing into a `() => Narrow[]` slot

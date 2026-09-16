@@ -1294,12 +1294,14 @@ export function genericFnOf(lowerer: Lowerer, ident: ts.Identifier): GenericFnIn
    * construction. A type parameter left unbound only matters if the body
    * mentions it, where mapType fails and badType names the shape
    * (carrying the instantiation context). */
-  export function inferTypeParamBindings(lowerer: Lowerer, expr: ts.CallExpression,
+  export function inferTypeParamBindings(lowerer: Lowerer, expr: ts.Node,
     info: GenericFnInfo,
     rsig: ts.Signature,
     tsBindings?: Map<ts.Symbol, ts.Type>,): Map<ts.Symbol, IrType> {
     const bindings = new Map<ts.Symbol, IrType>();
-    expr.typeArguments?.forEach((ta, i) => {
+    // Explicit type arguments exist only at a CALL. A demand raised somewhere else (a family value adapted to a
+    // concrete slot) has none, and binds entirely by unifying against the target signature below.
+    (ts.isCallExpression(expr) ? expr.typeArguments : undefined)?.forEach((ta, i) => {
       const tp = info.typeParams[i];
       if (!tp) return;
       const taT = lowerer.checker.getTypeFromTypeNode(ta);

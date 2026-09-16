@@ -12,7 +12,8 @@ import { locOf } from "../program.js";
 import { familyIdOf } from "../families.js";
 import { inferTypeParamBindings, internGenericInstance, type GenericFnInfo, type GenericInstance, type ParamShape } from "./lower-calls.js";
 
-export interface FamilyDemand { key: string; extraKey: string; params: ParamShape[]; ret: IrType; call: ts.CallExpression; rsig: ts.Signature }
+/** `call` is the BLAME node: a call at a family call site, or the node adapting a family value to a concrete slot. */
+export interface FamilyDemand { key: string; extraKey: string; params: ParamShape[]; ret: IrType; call: ts.Node; rsig: ts.Signature }
 export interface FamilyBuild { id: string; impls: GenericFnInfo[]; demands: Map<string, FamilyDemand> }
 interface FamilyRegistry { builds: Map<string, FamilyBuild>; implsByNode: Map<ts.Node, Map<FnCtx | undefined, GenericFnInfo>>; counter: number }
 
@@ -24,7 +25,7 @@ function genericInstanceKey(params: ParamShape[], ret: IrType, extraKey: string)
 /** A keyof or finite-literal constraint can select a concrete record field.
  * Preserve the resolved checker signature as well as explicit type arguments;
  * <K extends keyof Row>() can select a field without any value parameter. */
-function familyLiteralKey(L: Lowerer, call: ts.CallExpression, signature: ts.Signature): string {
+function familyLiteralKey(L: Lowerer, call: ts.Node, signature: ts.Signature): string {
   const declaration = L.checker.signatureDeclaration(signature);
   if (!declaration || !ts.isFunctionLike(declaration) || !declaration.typeParameters?.some((parameter) => {
     const constraint = parameter.constraint;
@@ -37,7 +38,7 @@ function familyLiteralKey(L: Lowerer, call: ts.CallExpression, signature: ts.Sig
   })) return "";
   const render = (type: ts.Type): string => L.checker.typeToString(L.typeParamTsResolver(type) ?? type);
   const parameters = signature.getParameters().map((parameter) => render(L.checker.getTypeOfSymbol(parameter)));
-  const explicit = (call.typeArguments ?? []).map((argument) => render(L.checker.getTypeFromTypeNode(argument)));
+  const explicit = ((ts.isCallExpression(call) ? call.typeArguments : undefined) ?? []).map((argument) => render(L.checker.getTypeFromTypeNode(argument)));
   return `@${JSON.stringify([parameters, explicit])}`;
 }
 
@@ -189,6 +190,22 @@ export function lowerFamilyImpl(L: Lowerer, node: FamilyFn, familyId: string | n
 }
 
 /** A call through a family value: the resolved signature is the instantiation; every implementation gets a body. */
+/** Registers ONE instantiation demand on a family and gives every implementation registered so far a body for it;
+ * later implementations back-fill it themselves (lowerFamilyImpl). The blame node need not be a call — only explicit
+ * type arguments come from one, and a demand raised elsewhere (a family value adapted to a concrete slot) has none.
+ * Answers the instantiation key, which is what a callFamily names. */
+export function demandFamilyInstance(L: Lowerer, familyId: string, params: ParamShape[], ret: IrType, blame: ts.Node, rsig: ts.Signature): string {
+  const extraKey = familyLiteralKey(L, blame, rsig);
+  const key = genericInstanceKey(params, ret, extraKey);
+  const build = buildOf(L, familyId);
+  if (!build.demands.has(key)) {
+    const demand: FamilyDemand = { key, extraKey, params, ret, call: blame, rsig };
+    build.demands.set(key, demand);
+    for (const impl of build.impls) familyInstance(L, impl, demand);
+  }
+  return key;
+}
+
 export function lowerFamilyCall(L: Lowerer, call: ts.CallExpression, callee: IrExpr): IrExpr {
   const loc = locOf(call);
   if (callee.type.kind !== "genericFunc") L.unsupported("SC1090", call, "a family call over a non-family value");
@@ -208,14 +225,7 @@ export function lowerFamilyCall(L: Lowerer, call: ts.CallExpression, callee: IrE
   const retTs = L.checker.getReturnTypeOfSignature(rsig);
   const ret = L.mapTypeOf(retTs);
   if (ret === null) L.badType(call, retTs);
-  const extraKey = familyLiteralKey(L, call, rsig);
-  const key = genericInstanceKey(params, ret, extraKey);
-  const build = buildOf(L, familyId);
-  if (!build.demands.has(key)) {
-    const demand: FamilyDemand = { key, extraKey, params, ret, call, rsig };
-    build.demands.set(key, demand);
-    for (const impl of build.impls) familyInstance(L, impl, demand);
-  }
+  const key = demandFamilyInstance(L, familyId, params, ret, call, rsig);
   const args = L.completeArgs(call.arguments, params, loc, call);
   return { kind: "callFamily", callee, familyId, instKey: key, args, type: ret, loc };
 }
