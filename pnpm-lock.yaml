@@ -23,6 +23,9 @@ importers:
       eslint:
         specifier: ^9.20.0
         version: 9.39.5(supports-color@7.2.0)
+      js-yaml:
+        specifier: 4.3.0
+        version: 4.3.0
       tsx:
         specifier: ^4.19.0
         version: 4.23.0
