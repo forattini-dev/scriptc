@@ -72,6 +72,19 @@ function lowerOptionalStringifyRoot(L: Lowerer, value: IrExpr, indent: string, l
       return { kind: "libCall", fn: "json.parse", args: [text], type: DYN, loc };
     }
     if (member === "stringify") {
+      if (call.arguments.length === 0) {
+        // `JSON.stringify()` is `JSON.stringify(undefined)`: Node answers the
+        // undefined VALUE, which the statically-`string` result cannot carry —
+        // the same deliberate fence as an explicit bare-undefined root. Before
+        // this guard the missing argument reached `lowerExpr`, whose
+        // `locOf(undefined)` crashed the compiler (Test262
+        // stringify-missing-arguments).
+        L.unsupported(
+          "SC1090",
+          call,
+          "JSON.stringify() with no arguments (Node answers undefined; pass a serializable value)",
+        );
+      }
       const replacerNode = call.arguments[1];
       const replacer = replacerNode && L.checker.getCallSignatures(L.checker.getTypeAtLocation(replacerNode)).length > 0
         ? L.lowerExpr(replacerNode) : null;

@@ -243,5 +243,10 @@
     "detail": "SC0004",
     "reason": "SC0004",
     "status": "runtime-refusal"
+  },
+  "test/staging/sm/JSON/stringify-missing-arguments.js#strict": {
+    "detail": "SC1090",
+    "reason": "SC1090",
+    "status": "runtime-refusal"
   }
 }
