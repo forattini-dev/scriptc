@@ -1,1 +1,247 @@
-{}
+{
+  "test/built-ins/Array/prototype/includes/no-arg.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-5-13.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-5-14.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-5-2.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-5-33.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-5-4.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-5-6.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-5-7.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-5-8.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-5-9.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-6-1.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-7-1.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-7-2.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-7-4.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-7-5.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-8-1.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-8-2.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-8-3.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/15.4.4.14-8-4.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/indexOf/fromindex-zero-conversion.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-5-1.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-5-2.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-5-3.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-5-4.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-5-5.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-5-6.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-5-7.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/Array/prototype/lastIndexOf/fromindex-zero-conversion.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/BigInt/prototype/toString/default-radix.js#strict": {
+    "detail": "SC1090",
+    "reason": "SC1090",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/RegExp/prototype/test/S15.10.6.3_A1_T16.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/String/prototype/charAt/S15.5.4.4_A1_T4.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/String/prototype/charAt/S15.5.4.4_A1_T7.js#strict": {
+    "detail": "SC1090",
+    "reason": "SC1090",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/String/prototype/charCodeAt/S15.5.4.5_A1_T4.js#strict": {
+    "detail": "SC2020",
+    "reason": "SC2020",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/String/prototype/charCodeAt/S15.5.4.5_A1_T7.js#strict": {
+    "detail": "SC1090",
+    "reason": "SC1090",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/String/prototype/slice/S15.5.4.13_A1_T4.js#strict": {
+    "detail": "SC1090",
+    "reason": "SC1090",
+    "status": "runtime-refusal"
+  },
+  "test/built-ins/String/prototype/substring/S15.5.4.15_A1_T4.js#strict": {
+    "detail": "SC1090",
+    "reason": "SC1090",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/const/dstr/ary-ptrn-elem-ary-elem-init.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/const/dstr/ary-ptrn-elem-id-init-exhausted.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/const/dstr/ary-ptrn-elem-obj-id-init.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/for/dstr/var-ary-ptrn-elem-ary-elem-init.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/for/dstr/var-ary-ptrn-elem-id-init-exhausted.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/for/dstr/var-ary-ptrn-elem-id-init-fn-name-arrow.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/for/dstr/var-ary-ptrn-elem-obj-id-init.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/let/dstr/ary-ptrn-elem-ary-elem-init.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/let/dstr/ary-ptrn-elem-id-init-exhausted.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/let/dstr/ary-ptrn-elem-obj-id-init.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/variable/dstr/ary-ptrn-elem-ary-elem-init.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/variable/dstr/ary-ptrn-elem-id-init-exhausted.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  },
+  "test/language/statements/variable/dstr/ary-ptrn-elem-obj-id-init.js#strict": {
+    "detail": "SC0004",
+    "reason": "SC0004",
+    "status": "runtime-refusal"
+  }
+}
