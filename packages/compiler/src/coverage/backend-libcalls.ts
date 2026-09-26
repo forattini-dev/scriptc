@@ -600,7 +600,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "https.createServerDyn": ["c", "rust"],
   "https.createServerDynCb": ["c", "rust"],
   "https.request": ["c", "llvm", "rust"],
-  "https.requestAgent": ["c"],
+  "https.requestAgent": ["c", "rust"],
   "https.requestAgentCb": ["c"],
   "https.requestCb": ["c", "llvm", "rust"],
   "https.requestFn": ["c", "rust"],

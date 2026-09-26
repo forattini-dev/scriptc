@@ -315,6 +315,35 @@ pub fn http_agent_client_request_callback(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn https_agent_client_request(
+    agent: &JsHttpAgent,
+    host: &JsString,
+    port: f64,
+    path: &JsString,
+    method: &JsString,
+    timeout: f64,
+    headers: &JsArray<JsString>,
+    auto_end: bool,
+    reject_unauthorized: bool,
+    ca: &JsString,
+) -> JsHttpClientRequest {
+    http_agent_client_request_impl(
+        agent,
+        host,
+        port,
+        path,
+        method,
+        timeout,
+        headers,
+        auto_end,
+        true,
+        reject_unauthorized,
+        ca,
+        None,
+    )
+}
+
 fn http_agent_client_done(agent: &JsHttpAgent, request: &JsHttpClientRequest) {
     let socket = agent.with_mut(|agent| {
         let name = agent
