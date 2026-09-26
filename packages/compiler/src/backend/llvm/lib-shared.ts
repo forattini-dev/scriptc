@@ -205,10 +205,12 @@ export const LIB_FN_SYMS: Record<string, string> = {
   // catchable AssertionError. The never-throwing members ride along.
   "assert.ok": "scr_assert_ok",
   "assert.eqF64": "scr_assert_eq_f64",
+  "assert.eqBigInt": "scr_assert_eq_bigint",
   "assert.eqStr": "scr_assert_eq_str",
   "assert.eqBool": "scr_assert_eq_bool",
   "assert.eqSym": "scr_assert_eq_sym",
   "assert.eqDyn": "scr_assert_eq_dyn",
+  "assert.looseResult": "scr_assert_loose_result",
   "assert.deepResult": "scr_assert_deep_result",
   "assert.sameValue": "scr_assert_same_value_f64",
   "assert.deqEnter": "scr_assert_deq_enter",

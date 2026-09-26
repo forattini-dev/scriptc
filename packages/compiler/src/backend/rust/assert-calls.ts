@@ -40,6 +40,12 @@ export function emitRustAssertCall(
     };
     return `runtime::${helper}(${value(0)}, ${value(1)}, ${value(2)}, ${value(3)}, &(${value(4)}), ${value(5)})`;
   }
+  if (expr.fn === "assert.eqBigInt" && expr.args.length === 6 &&
+    arg?.type.kind === "bigint" && secondArg?.type.kind === "bigint" &&
+    expr.args[2]?.type.kind === "bool" && expr.args[3]?.type.kind === "bool" &&
+    expr.args[4]?.type.kind === "string" && expr.args[5]?.type.kind === "bool") {
+    return `runtime::assert_eq_bigint(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}), ${context.emitExpr(expr.args[2])}, ${context.emitExpr(expr.args[3])}, &(${context.emitExpr(expr.args[4])}), ${context.emitExpr(expr.args[5])})`;
+  }
   if (expr.fn === "assert.eqSym" && expr.args.length === 6 &&
     arg?.type.kind === "symbol" && secondArg?.type.kind === "symbol" &&
     expr.args[2]?.type.kind === "bool" && expr.args[3]?.type.kind === "bool" &&
@@ -90,6 +96,12 @@ export function emitRustAssertCall(
     arg?.type.kind === "bool" && secondArg?.type.kind === "bool" &&
     expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "bool") {
     return `runtime::assert_deep_result(${context.emitExpr(arg)}, ${context.emitExpr(secondArg)}, &(${context.emitExpr(expr.args[2])}), ${context.emitExpr(expr.args[3])})`;
+  }
+  if (expr.fn === "assert.looseResult" && expr.args.length === 6 &&
+    arg?.type.kind === "bool" && secondArg?.type.kind === "bool" &&
+    expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "string" &&
+    expr.args[4]?.type.kind === "string" && expr.args[5]?.type.kind === "bool") {
+    return `runtime::assert_loose_result(${context.emitExpr(arg)}, ${context.emitExpr(secondArg)}, &(${context.emitExpr(expr.args[2])}), &(${context.emitExpr(expr.args[3])}), &(${context.emitExpr(expr.args[4])}), ${context.emitExpr(expr.args[5])})`;
   }
   if (expr.fn === "assert.ifErrorErr" && expr.args.length === 1 && arg?.type.kind === "object") {
     const value = context.nextTemporary();

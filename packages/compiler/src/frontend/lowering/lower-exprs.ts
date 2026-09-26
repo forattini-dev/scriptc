@@ -79,6 +79,7 @@ import { lowerDynamicRequestInstanceOf } from "./lower-instanceof-island.js";
 import { lowerBuiltinTypeof, lowerBuiltinTypeofTest } from "./lower-typeof.js";
 import { lowerDynamicGlobalIdentifier } from "../ambient-values.js";
 import { fenceNodeModuleMutation, isNodeModuleValue, lowerNodeModuleIdentifier, lowerNodeModuleProperty, lowerRequireCacheElement, lowerRequireCacheHas, lowerRequireMainProperty } from "./lower-node-module.js";
+import { lowerAbstractEquality } from "./abstract-equality.js";
 import { templateRawTextOf } from "./lower-templates.js";
 import { coerceStringSearchValue, defaultAfterUndefined, lowerStaticallyUndefinedArgument } from "./optional-arguments.js";
 export {
@@ -7108,33 +7109,20 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     if (op === ts.SyntaxKind.EqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken) {
       const nullTest = lowerLooseNullCompare(lowerer, expr, loc);
       if (nullTest) return nullTest;
-      // SAME-KIND loose equality IS strict equality (the spec's ==
-      // dispatches to === when both operands share a type): `typeof v ==
-      // 'object'`, `n != 0`, `flag == true` all lower exactly. Mixed
-      // kinds (where == coerces) keep the fence.
-      {
-        const negated = op === ts.SyntaxKind.ExclamationEqualsToken;
-        const left = lowerer.lowerExpr(expr.left);
-        const right = lowerer.lowerExpr(expr.right);
-        if (left.type.kind === "string" && right.type.kind === "string") {
-          if (left.kind === "strLit" && right.kind === "strLit") {
-            return {
-              kind: "boolLit",
-              value: negated ? left.value !== right.value : left.value === right.value,
-              type: BOOL,
-              loc,
-            };
-          }
-          return { kind: "strEq", negated, left, right, type: BOOL, loc };
-        }
-        if (
-          (left.type.kind === "f64" && right.type.kind === "f64") ||
-          (left.type.kind === "bool" && right.type.kind === "bool")
-        ) {
-          return { kind: "bin", op: negated ? "!==" : "===", left, right, type: BOOL, loc };
-        }
-      }
-      lowerer.unsupported("SC1040", expr);
+      const loose = lowerAbstractEquality(
+        lowerer,
+        lowerer.lowerExpr(expr.left),
+        lowerer.lowerExpr(expr.right),
+        op === ts.SyntaxKind.ExclamationEqualsToken,
+        loc,
+      );
+      if (loose) return loose;
+      lowerer.unsupported(
+        "SC1040",
+        expr,
+        undefined,
+        "object-to-primitive loose equality can call user-defined valueOf/toString methods — compare explicit primitive conversions instead",
+      );
     }
     if (op === ts.SyntaxKind.AmpersandAmpersandToken || op === ts.SyntaxKind.BarBarToken) {
       if (op === ts.SyntaxKind.BarBarToken) {

@@ -58,6 +58,9 @@ assert.equal(0, -0);
 assert.notEqual("2", 3);
 equal(true, 1);
 notEqual(2n, "3");
+assert.strictEqual(1n, 1n);
+assert.deepStrictEqual(2n, 2n);
+assert.notStrictEqual(1n, 2n);
 
 function unionAssert(a: Primitive, b: Primitive): void {
   assert.equal(a, b);

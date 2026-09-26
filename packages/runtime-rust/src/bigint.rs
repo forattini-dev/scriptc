@@ -72,6 +72,11 @@ pub fn bigint_to_string_radix(value: &JsBigInt, radix: f64) -> JsString {
     JsString::from(value.0.to_str_radix(radix as u32))
 }
 pub fn display_bigint(value: &JsBigInt) -> String { format!("{}n", value.0) }
+pub fn bigint_inspect(value: &JsBigInt) -> JsString { JsString::from(display_bigint(value)) }
+pub fn bigint_eq(left: &JsBigInt, right: &JsBigInt) -> bool { left == right }
+pub fn bigint_eq_string(left: &JsBigInt, right: &JsString) -> bool {
+    bigint_parse(right).is_some_and(|parsed| left == &parsed)
+}
 
 pub fn bigint_add(a: &JsBigInt, b: &JsBigInt) -> JsBigInt { JsBigInt::new(a.0.as_ref() + b.0.as_ref()) }
 pub fn bigint_sub(a: &JsBigInt, b: &JsBigInt) -> JsBigInt { JsBigInt::new(a.0.as_ref() - b.0.as_ref()) }

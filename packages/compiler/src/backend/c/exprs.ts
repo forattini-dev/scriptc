@@ -8075,6 +8075,8 @@ function emitAssertInspectLibCall(state: LibCallState): Temp {
             return finish(`scr_assert_ok(${arg(0)}, ${arg(1)})`);
           case "assert.eqF64":
             return finish(`scr_assert_eq_f64(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)})`);
+          case "assert.eqBigInt":
+            return finish(`scr_assert_eq_bigint(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)})`);
           case "assert.eqStr":
             return finish(`scr_assert_eq_str(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)})`);
           case "assert.eqBool":
@@ -8087,6 +8089,8 @@ function emitAssertInspectLibCall(state: LibCallState): Temp {
             // The quartet over checked-dynamic operands: SameValue /
             // dyn-walk deep equality, assertion_error.js messages.
             return finish(`scr_assert_eq_dyn(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)})`);
+          case "assert.looseResult":
+            return finish(`scr_assert_loose_result(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)})`);
           case "assert.deepResult":
             return finish(`scr_assert_deep_result(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "assert.deqEnter":

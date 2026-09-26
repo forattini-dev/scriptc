@@ -791,6 +791,33 @@ pub fn assert_eq_f64(
     )
 }
 
+pub fn assert_eq_bigint(
+    left: &JsBigInt,
+    right: &JsBigInt,
+    negated: bool,
+    deep: bool,
+    message: &JsString,
+    has_message: bool,
+) {
+    let same = left == right;
+    if (negated && !same) || (!negated && same) {
+        return;
+    }
+    let actual = display_bigint(left);
+    if negated {
+        assert_not_equal_message(&actual, deep, message, has_message);
+    }
+    assert_equal_message(
+        &actual,
+        &display_bigint(right),
+        0,
+        false,
+        deep,
+        message,
+        has_message,
+    )
+}
+
 pub fn assert_eq_string(
     left: &JsString,
     right: &JsString,
@@ -998,6 +1025,26 @@ pub fn assert_deep_result(equal: bool, negated: bool, message: &JsString, has_me
     } else {
         "Expected values to be strictly deep-equal:".to_owned()
     })
+}
+
+pub fn assert_loose_result(
+    equal: bool,
+    negated: bool,
+    actual: &JsString,
+    expected: &JsString,
+    message: &JsString,
+    has_message: bool,
+) {
+    if (negated && !equal) || (!negated && equal) {
+        return;
+    }
+    if has_message {
+        throw_assertion_error(message.to_string());
+    }
+    throw_assertion_error(format!(
+        "{actual} {} {expected}",
+        if negated { "!=" } else { "==" },
+    ))
 }
 
 pub fn assert_throws_none(
