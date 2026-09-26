@@ -2485,6 +2485,10 @@ typedef struct ScrPromise ScrPromise; /* full section further down */
 
 ScrStats *scr_fs_stat(ScrStr *path);  /* +1, or throws */
 ScrStats *scr_fs_lstat(ScrStr *path); /* +1, or throws; NO follow (lstat) */
+ScrStats *scr_fs_fstat(double fd); /* +1, or throws */
+void scr_fs_fchmod(double fd, double mode);
+void scr_fs_fsync(double fd);
+void scr_fs_link(ScrStr *source, ScrStr *dest);
 ScrStats *scr_stats_retain(ScrStats *s);
 void scr_stats_release(ScrStats *s);
 void *scr_stats_retain_v(void *p);
@@ -2492,11 +2496,14 @@ void scr_stats_release_v(void *p);
 bool scr_stats_is_file(ScrStats *s);
 bool scr_stats_is_dir(ScrStats *s);
 bool scr_stats_is_symlink(ScrStats *s); /* lstat snapshots only */
+double scr_stats_dev(ScrStats *s);
+double scr_stats_ino(ScrStats *s);
 double scr_stats_size(ScrStats *s);
 double scr_stats_blocks(ScrStats *s); /* allocated size in 512-byte units */
 double scr_stats_nlink(ScrStats *s);
 double scr_stats_atime_ms(ScrStats *s); /* ms with the sub-second fraction */
 double scr_stats_mtime_ms(ScrStats *s); /* ms with the ns fraction */
+double scr_stats_ctime_ms(ScrStats *s); /* ms with the ns fraction */
 
 /* fs/promises: the SAME sync operations, minting an already-settled
  * promise — success fulfills, failure REJECTS with the would-be thrown
@@ -2933,6 +2940,7 @@ ScrStr *scr_path_win32_to_namespaced_path(ScrStr *path);
  * (failure throws the path-less "EBADF: bad file descriptor, close").
  * The pair behind spawn's fd-stdio form. */
 double scr_fs_open(ScrStr *path, ScrStr *flags);
+double scr_fs_open_numeric(ScrStr *path, double flags, double mode);
 ScrFileHandle *scr_file_handle_open(ScrStr *path, ScrStr *flags, double mode);
 ScrFileHandle *scr_file_handle_retain(ScrFileHandle *h);
 void scr_file_handle_release(ScrFileHandle *h);

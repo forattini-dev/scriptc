@@ -4545,22 +4545,27 @@ function emitFilesystemLibCall(state: LibCallState): Temp {
             return finish(`scr_fs_rmdir(${arg(0)})`);
           case "fs.readdirSync":
             return finish(`scr_fs_readdir(${arg(0)})`);
-          case "fs.readdirTypesSync": {
+          case "fs.readdirTypesSync":
+          case "fsp.readdirTypes": {
             // Dirent rows assembled inline from one scandir snapshot
             // (scr_lib.c) — the os.networkInterfaces pattern, flat. The
             // frontend/validator pinned the shape ({%dtype, name,
-            // parentPath}); lookups here only guard emitter bugs. The
-            // snapshot call throws Node's scandir error (may-throw seed
-            // set) and answers NULL then, so the pending check runs
-            // before any allocation.
-            if (e.type.kind !== "array" || e.type.elem.kind !== "record") {
-              throw new InternalCompilerError("emitter bug: readdirTypesSync result is not a record array");
+            // parentPath}); lookups here only guard emitter bugs. The sync
+            // form checks the snapshot's scandir error immediately. The
+            // promise form lets NULL flow through the null-tolerant count/
+            // free accessors, builds an empty dummy array, and moves it to
+            // settled_ref: the pending exception becomes the rejection and
+            // settled_ref releases that dummy.
+            const promiseForm = e.fn === "fsp.readdirTypes";
+            const arrayT = promiseForm && e.type.kind === "promise" ? e.type.inner : e.type;
+            if (arrayT.kind !== "array" || arrayT.elem.kind !== "record") {
+              throw new InternalCompilerError(`emitter bug: ${e.fn} result is not a Dirent record array`);
             }
-            const recT = e.type.elem;
+            const recT = arrayT.elem;
             const snap = `sc_t${emitter.tempCounter++}`;
             emitter.line(`ScrScandir *${snap} = scr_fs_scandir(${arg(0)});${emitter.srcComment(e.loc)}`);
-            emitter.emitPendingCheck();
-            const out = emitter.newTemp(e.type, emitter.arrNewC(recT, `scr_fs_scandir_count(${snap})`));
+            if (!promiseForm) emitter.emitPendingCheck();
+            const out = emitter.newTemp(arrayT, emitter.arrNewC(recT, `scr_fs_scandir_count(${snap})`));
             const i = `sc_t${emitter.tempCounter++}`;
             const n = `sc_t${emitter.tempCounter++}`;
             emitter.line(`for (size_t ${i} = 0, ${n} = scr_fs_scandir_count(${snap}); ${i} < ${n}; ${i}++) {`);
@@ -4574,6 +4579,13 @@ function emitFilesystemLibCall(state: LibCallState): Temp {
             emitter.indent--;
             emitter.line(`}`);
             emitter.line(`scr_fs_scandir_free(${snap});`);
+            if (promiseForm) {
+              const rc = vAdapters(arrayT);
+              emitter.moveTemp(out);
+              return finish(
+                `scr_promise_settled_ref(${out.name}, &${rc.retain}, &${rc.release}, ${emitter.traceArgC(arrayT)})`,
+              );
+            }
             return out;
           }
           // Stats (scr_lib.c): statSync throws like the other sync fs
@@ -4582,6 +4594,16 @@ function emitFilesystemLibCall(state: LibCallState): Temp {
             // Throws Node-shaped fs errors (may-throw seed set); the fd
             // comes back as f64.
             return finish(`scr_fs_open(${arg(0)}, ${arg(1)})`);
+          case "fs.openNumericSync":
+            return finish(`scr_fs_open_numeric(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "fs.fstatSync":
+            return finish(`scr_fs_fstat(${arg(0)})`);
+          case "fs.fchmodSync":
+            return finish(`scr_fs_fchmod(${arg(0)}, ${arg(1)})`);
+          case "fs.fsyncSync":
+            return finish(`scr_fs_fsync(${arg(0)})`);
+          case "fs.linkSync":
+            return finish(`scr_fs_link(${arg(0)}, ${arg(1)})`);
           case "fs.readSync":
             return finish(`scr_fs_read_sync(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
           case "fs.writeSync":
@@ -4623,12 +4645,18 @@ function emitFilesystemLibCall(state: LibCallState): Temp {
             return finish(`scr_stats_atime_ms(${arg(0)})`);
           case "stats.mtimeMs":
             return finish(`scr_stats_mtime_ms(${arg(0)})`);
+          case "stats.ctimeMs":
+            return finish(`scr_stats_ctime_ms(${arg(0)})`);
           case "stats.isFile":
             return finish(`scr_stats_is_file(${arg(0)})`);
           case "stats.isDirectory":
             return finish(`scr_stats_is_dir(${arg(0)})`);
           case "stats.size":
             return finish(`scr_stats_size(${arg(0)})`);
+          case "stats.dev":
+            return finish(`scr_stats_dev(${arg(0)})`);
+          case "stats.ino":
+            return finish(`scr_stats_ino(${arg(0)})`);
           case "fs.toUnixTimestamp":
             return finish(`scr_fs_to_unix_timestamp(${arg(0)})`);
           // The fs argument-validation ladders: the always-throw Chk
@@ -4742,6 +4770,10 @@ function emitFilesystemLibCall(state: LibCallState): Temp {
             return finish(`scr_fsp_rm_opts(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fsp.stat":
             return finish(`scr_fsp_stat(${arg(0)})`);
+          case "fsp.realpath":
+            return finish(`scr_fsp_realpath(${arg(0)})`);
+          case "fsp.lstat":
+            return finish(`scr_fsp_lstat(${arg(0)})`);
           case "fsp.openNumeric": return finish(`scr_fsp_open_numeric(${arg(0)}, ${arg(1)}, ${arg(2)})`); case "fsp.open":
             return finish(`scr_fsp_open(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fileHandle.fd":

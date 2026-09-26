@@ -659,6 +659,10 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // statSync's no-follow sibling; stats.isSymbolicLink answers what the
     // follow-free snapshot saw.
     lstatSync: { fn: "fs.lstatSync", params: [STRING], result: STATS_T },
+    fstatSync: { fn: "fs.fstatSync", params: [F64], result: STATS_T },
+    fchmodSync: { fn: "fs.fchmodSync", params: [F64, F64], result: VOID },
+    fsyncSync: { fn: "fs.fsyncSync", params: [F64], result: VOID },
+    linkSync: { fn: "fs.linkSync", params: [STRING, STRING], result: VOID },
     // realpath(3) — Node's realpathSync (failures spell syscall "lstat",
     // Node's own message shape).
     realpathSync: { fn: "fs.realpathSync", params: [STRING], result: STRING },
@@ -695,6 +699,8 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     readdir: { fn: "fsp.readdir", params: [STRING], result: { kind: "promise", inner: arrayOf(STRING) } },
     rm: { fn: "fsp.rm", params: [STRING], result: { kind: "promise", inner: VOID } },
     stat: { fn: "fsp.stat", params: [STRING], result: { kind: "promise", inner: STATS_T } },
+    realpath: { fn: "fsp.realpath", params: [STRING], result: { kind: "promise", inner: STRING } },
+    lstat: { fn: "fsp.lstat", params: [STRING], result: { kind: "promise", inner: STATS_T } },
     unlink: { fn: "fsp.unlink", params: [STRING], result: { kind: "promise", inner: VOID } },
     chmod: { fn: "fsp.chmod", params: [STRING, F64], result: { kind: "promise", inner: VOID } },
     rename: { fn: "fsp.rename", params: [STRING, STRING], result: { kind: "promise", inner: VOID } },

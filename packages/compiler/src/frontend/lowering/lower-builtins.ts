@@ -1092,6 +1092,52 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     fn: BuiltinModuleFn,
     loc: SrcLoc,): IrExpr {
     const name = expr.expression.getText();
+    // Numeric open flags are interpreted symbolically at the call site. The
+    // O_* bit values differ between Darwin and Linux, so emit a stable mask
+    // and let the target runtime select its own native constants.
+    if (bi.module === "fs" && bi.member === "openSync" && expr.arguments.length >= 2 &&
+        lowerer.mapTypeOf(lowerer.typeOf(expr.arguments[1]!))?.kind === "f64") {
+      if (expr.arguments.length > 3 || expr.arguments.some(ts.isSpreadElement)) {
+        lowerer.noLowering("openSync with numeric flags and this argument shape", expr);
+      }
+      const bits: Record<string, number | undefined> = {
+        O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 4, O_EXCL: 8,
+        O_NOFOLLOW: 16, O_NONBLOCK: 32, O_TRUNC: 64, O_APPEND: 128,
+      };
+      const flagsOf = (input: ts.Expression): number | null => {
+        let node = input;
+        while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)) node = node.expression;
+        if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.BarToken) {
+          const left = flagsOf(node.left);
+          const right = flagsOf(node.right);
+          return left === null || right === null ? null : left | right;
+        }
+        if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
+          const imported = lowerer.builtinImportOf(node.expression);
+          if (imported?.module === "fs" && imported.member === "constants") {
+            return bits[node.name.text] ?? null;
+          }
+        }
+        if (ts.isPropertyAccessExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+          const imported = lowerer.builtinMemberOf(node.expression);
+          if (imported?.module === "fs" && imported.member === "constants") {
+            return bits[node.name.text] ?? null;
+          }
+        }
+        return null;
+      };
+      const mask = flagsOf(expr.arguments[1]!);
+      if (mask === null) {
+        lowerer.noLowering("openSync with computed numeric flags", expr.arguments[1]!,
+          "use an inline bitwise OR of fs.constants.O_RDONLY/O_WRONLY/O_RDWR/O_CREAT/O_EXCL/O_NOFOLLOW/O_NONBLOCK/O_TRUNC/O_APPEND");
+      }
+      const path = lowerer.lowerExprExpecting(expr.arguments[0]!, STRING);
+      const mode = expr.arguments[2]
+        ? lowerer.lowerExprExpecting(expr.arguments[2]!, F64)
+        : { kind: "numLit", value: 0o666, type: F64, loc } satisfies IrExpr;
+      return { kind: "libCall", fn: "fs.openNumericSync", args: [path,
+        { kind: "numLit", value: mask, type: F64, loc }, mode], type: F64, loc };
+    }
     if (bi.module === "child_process" && bi.member === "spawnSync") {
       return lowerer.lowerSpawnSyncCall(expr, loc);
     }
@@ -1351,8 +1397,10 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // accepted as the default it is; recursive and encoding:'buffer'
     // fence), and the call site's mapped type must be the interned Dirent
     // record array (type-mapper.ts) — the userInfo verification stance.
-    if (bi.module === "fs" && bi.member === "readdirSync" && expr.arguments.length === 2) {
-      return lowerFsReaddirTypesCall(lowerer, expr, loc);
+    const syncReaddirTypes = bi.module === "fs" && bi.member === "readdirSync";
+    const promiseReaddirTypes = bi.module === "fs/promises" && bi.member === "readdir";
+    if ((syncReaddirTypes || promiseReaddirTypes) && expr.arguments.length === 2) {
+      return lowerFsReaddirTypesCall(lowerer, expr, loc, promiseReaddirTypes);
     }
     if (bi.module === "os" && bi.member === "userInfo") {
       return lowerOsUserInfoCall(lowerer, expr, loc);
@@ -5064,14 +5112,18 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
     if (kind === "child") return null; // pid/exitCode/killed live in lowerIntrinsicProperty
     if (
       kind === "stats" &&
-      (name === "blocks" || name === "nlink" || name === "atimeMs" || name === "mtimeMs")
+      (name === "dev" || name === "ino" || name === "blocks" || name === "nlink" ||
+        name === "atimeMs" || name === "mtimeMs" || name === "ctimeMs")
     ) {
       const receiver = lowerer.lowerExpr(expr.expression);
       const fn = `stats.${name}` as
+        | "stats.dev"
+        | "stats.ino"
         | "stats.blocks"
         | "stats.nlink"
         | "stats.atimeMs"
-        | "stats.mtimeMs";
+        | "stats.mtimeMs"
+        | "stats.ctimeMs";
       return { kind: "libCall", fn, args: [receiver], type: F64, loc };
     }
     if (kind === "spawnRes" && name === "signal") {
@@ -5821,13 +5873,20 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
    * member-by-member; the result type must be the interned Dirent record
    * array from type-mapper.ts — anything else (encoding: 'buffer', a user alias
    * reshaping Dirent) fences honestly. */
-  function lowerFsReaddirTypesCall(lowerer: Lowerer, call: ts.CallExpression, loc: SrcLoc): IrExpr {
+  function lowerFsReaddirTypesCall(
+    lowerer: Lowerer,
+    call: ts.CallExpression,
+    loc: SrcLoc,
+    promiseForm: boolean,
+  ): IrExpr {
+    const operation = promiseForm ? "fs.promises.readdir" : "readdirSync";
+    const spelling = promiseForm ? "readdir" : "readdirSync";
     const optsNode = call.arguments[1]!;
     if (!ts.isObjectLiteralExpression(optsNode)) {
       lowerer.noLowering(
-        "readdirSync with a non-literal options argument",
+        `${operation} with a non-literal options argument`,
         optsNode,
-        "pass the options inline so each member can be checked: readdirSync(path, { withFileTypes: true })",
+        `pass the options inline so each member can be checked: ${spelling}(path, { withFileTypes: true })`,
       );
     }
     let sawWithFileTypes = false;
@@ -5835,7 +5894,7 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
       const m = optionMember(p);
       if (!m) {
         lowerer.noLowering(
-          "readdirSync with this options shape",
+          `${operation} with this options shape`,
           p,
           "spreads and computed keys have no lowering — write each member inline",
         );
@@ -5844,7 +5903,7 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
         const t = lowerer.typeOf(m.value);
         if (!(t.flags & ts.TypeFlags.BooleanLiteral) || lowerer.checker.typeToString(t) !== "true") {
           lowerer.noLowering(
-            "readdirSync with a non-literal-true withFileTypes",
+            `${operation} with a non-literal-true withFileTypes`,
             m.value,
             "withFileTypes: true is the Dirent form; omit the options for plain names",
           );
@@ -5854,7 +5913,7 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
         const t = lowerer.typeOf(m.value);
         if (!t.isStringLiteralType() || (t.value !== "utf8" && t.value !== "utf-8")) {
           lowerer.noLowering(
-            "readdirSync with a non-utf8 encoding",
+            `${operation} with a non-utf8 encoding`,
             m.value,
             "names decode as utf8 (the default); encoding: 'buffer' has no lowering",
           );
@@ -5863,25 +5922,29 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
         // The options-record stance: recursive (a documented knob with
         // no lowering) fences by name; undocumented keys drop like Node.
         fenceOrDropOptionKey(
-          lowerer, p, m.name, "readdirSync", FS_READDIR_DOCUMENTED_OPTIONS,
+          lowerer, p, m.name, operation, FS_READDIR_DOCUMENTED_OPTIONS,
           "withFileTypes: true (and the default encoding) is the supported options surface — recursive listings want an explicit walk",
         );
       }
     }
     if (!sawWithFileTypes) {
       lowerer.noLowering(
-        "readdirSync with 2 arguments",
+        `${operation} with 2 arguments`,
         call,
-        "readdirSync(path) lists names; readdirSync(path, { withFileTypes: true }) lists Dirents",
+        `${spelling}(path) lists names; ${spelling}(path, { withFileTypes: true }) lists Dirents`,
       );
     }
     const fence: () => never = () =>
       lowerer.noLowering(
-        "readdirSync(path, { withFileTypes: true }) where the result is not the Dirent array",
+        `${operation}(path, { withFileTypes: true }) where the result is not the Dirent array`,
         call,
         "{ name, parentPath, isFile(), isDirectory(), isSymbolicLink() } rows are the supported result shape",
       );
-    const result = lowerer.mapTypeOf(lowerer.typeOf(call));
+    const callType = lowerer.mapTypeOf(lowerer.typeOf(call));
+    if (!callType) fence();
+    const result = promiseForm
+      ? callType.kind === "promise" ? callType.inner : fence()
+      : callType;
     if (result?.kind !== "array" || result.elem.kind !== "record") fence();
     const shape = lowerer.shapes.get(result.elem.shapeId);
     if (
@@ -5894,7 +5957,13 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
       fence();
     }
     const path = lowerer.lowerExprExpecting(call.arguments[0]!, STRING);
-    return { kind: "libCall", fn: "fs.readdirTypesSync", args: [path], type: result, loc };
+    return {
+      kind: "libCall",
+      fn: promiseForm ? "fsp.readdirTypes" : "fs.readdirTypesSync",
+      args: [path],
+      type: callType,
+      loc,
+    };
   }
 
 /** `d.isFile()` / `d.isDirectory()` / `d.isSymbolicLink()` on a Dirent-
