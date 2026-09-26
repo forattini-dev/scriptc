@@ -1657,6 +1657,8 @@ bool scr_children_pending(void) {
   return scr_children != NULL || scr_child_streams_watching > 0;
 }
 
+bool scr_children_ready(void) { return false; }
+
 bool scr_children_failed_pending(void) {
   for (ScrChild *c = scr_children; c; c = c->next) {
     if (c->state == SCR_CHILD_SPAWN_FAILED && !c->settled) return true;
@@ -3553,6 +3555,8 @@ void scr_child_err_thunk_error(ScrClosure *cb, ScrStr *msg) {
 bool scr_children_pending(void) {
   return scr_children != NULL || scr_child_streams_watching > 0;
 }
+
+bool scr_children_ready(void) { return false; }
 
 /* True while an UNSETTLED spawn failure sits in the registry: its 'error'
  * is a next-tick-shaped event Node delivers regardless of ref state (an

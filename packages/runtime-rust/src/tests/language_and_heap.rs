@@ -41,6 +41,8 @@
         assert!(math_sign(f64::NAN).is_nan());
         assert!(math_pow(1.0, f64::INFINITY).is_nan());
         assert!(math_pow(-1.0, f64::NEG_INFINITY).is_nan());
+        assert!(math_pow(1.0, f64::NAN).is_nan());
+        assert_eq!(math_pow(f64::NAN, 0.0), 1.0);
         assert_eq!(math_pow(2.0, 10.0), 1024.0);
         assert!(math_pow(-0.0, -3.0).is_infinite());
         assert!(math_pow(-0.0, -3.0).is_sign_negative());

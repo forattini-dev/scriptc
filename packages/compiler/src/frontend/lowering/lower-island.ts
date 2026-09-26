@@ -3236,7 +3236,7 @@ export { lowerDynamicImportCall } from "./lower-dynamic-import.js";
         : lowerer.lowerExprExpecting(a, F64));
       const spreads = call.arguments.flatMap((a, i) => ts.isSpreadElement(a) ? [i] : []);
       const packed: IrExpr = { kind: "arrayLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: arrayOf(F64), loc };
-      return { kind: "libCall", fn: staticMath.fn, args: [packed], type: F64, loc };
+      return { kind: "libCall", fn: "math.hypotArr", args: [packed], type: F64, loc };
     }
     if (
       staticMath &&

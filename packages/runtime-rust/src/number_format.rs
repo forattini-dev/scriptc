@@ -102,6 +102,40 @@ pub fn math_min_array(values: &JsArray<f64>) -> f64 {
     })
 }
 
+pub fn math_hypot_array(values: &JsArray<f64>) -> f64 {
+    values.with(|values| {
+        let elements = values.elements();
+        let mut scale = 0.0_f64;
+        let mut has_nan = false;
+        for value in elements.iter().copied().map(f64::abs) {
+            if value.is_infinite() {
+                return f64::INFINITY;
+            }
+            if value.is_nan() {
+                has_nan = true;
+            } else if value > scale {
+                scale = value;
+            }
+        }
+        if has_nan {
+            return f64::NAN;
+        }
+        if scale == 0.0 {
+            return 0.0;
+        }
+        let mut sum = 0.0;
+        let mut correction = 0.0;
+        for value in elements.iter().copied() {
+            let scaled = value / scale;
+            let term = scaled * scaled - correction;
+            let next = sum + term;
+            correction = (next - sum) - term;
+            sum = next;
+        }
+        scale * sum.sqrt()
+    })
+}
+
 pub fn math_round(value: f64) -> f64 {
     if value.is_nan() || value.is_infinite() || value == 0.0 {
         return value;
@@ -130,7 +164,7 @@ pub fn math_sign(value: f64) -> f64 {
 pub fn math_pow(base: f64, exponent: f64) -> f64 {
     // Rust/libm follows C for this special case, while ECMAScript's
     // Number::exponentiate returns NaN for either ±1 raised to ±Infinity.
-    if exponent.is_infinite() && base.abs() == 1.0 {
+    if exponent.is_nan() || exponent.is_infinite() && base.abs() == 1.0 {
         f64::NAN
     } else {
         base.powf(exponent)
@@ -527,7 +561,11 @@ pub fn intl_number_format_en_us(value: f64) -> JsString {
     let integer_digits = exponent.max(1) as usize;
     let grouping = integer_digits.saturating_sub(1) / 3;
     let mut output = String::with_capacity(
-        usize::from(negative) + integer_digits + grouping + usize::from(fraction_len > 0) + fraction_len,
+        usize::from(negative)
+            + integer_digits
+            + grouping
+            + usize::from(fraction_len > 0)
+            + fraction_len,
     );
     if negative {
         output.push('-');

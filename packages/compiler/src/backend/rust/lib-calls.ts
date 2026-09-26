@@ -271,6 +271,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if ((expr.fn === "math.maxArr" || expr.fn === "math.minArr") && expr.args.length === 1 && arg?.type.kind === "array" && arg.type.elem.kind === "f64") {
     return `runtime::${expr.fn === "math.maxArr" ? "math_max_array" : "math_min_array"}(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "math.hypotArr" && expr.args.length === 1 && arg?.type.kind === "array" && arg.type.elem.kind === "f64") {
+    return `runtime::math_hypot_array(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "math.random" && expr.args.length === 0) return "runtime::math_random()";
   if (expr.fn === "math.sign" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::math_sign(${context.emitExpr(arg)})`;
@@ -343,7 +346,10 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "num.parseFloat" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::number_parse_float(&(${context.emitExpr(arg)}))`;
   }
-  if (expr.fn === "string.lastIndexOf" && expr.args.length === 3 && arg !== undefined && secondArg !== undefined && thirdArg !== undefined) {
+  if (expr.fn === "string.lastIndexOf" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+    return `runtime::string_last_index_of(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}), f64::INFINITY)`;
+  }
+  if (expr.fn === "string.lastIndexOfFrom" && expr.args.length === 3 && arg !== undefined && secondArg !== undefined && thirdArg !== undefined) {
     return `runtime::string_last_index_of(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}), ${context.emitExpr(thirdArg)})`;
   }
   if (expr.fn === "string.fromCharCode" && expr.args.length === 1 && arg !== undefined) {

@@ -1069,7 +1069,7 @@ double scr_str_last_index_of_from(ScrStr *s, ScrStr *needle, double position) {
   for (size_t i = max_start + 1; i-- > 0;) {
     if (memcmp(s->data + i, needle->data, needle->len) == 0) {
       double index = (double)scr_byte_to_u16_c(s, e, i);
-      if (index <= position) return index;
+      if (index <= (double)start16) return index;
     }
   }
   return -1.0;
