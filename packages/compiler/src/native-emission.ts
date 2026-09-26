@@ -12,7 +12,7 @@ import { createNativeLinkPlan } from "./backend/link-plan.js";
 import { linkNativeExecutable, platformLinkerSupportsPersistentCache } from "./backend/linker.js";
 import { splitLlvmProgram } from "./backend/llvm/split.js";
 import { nativeCodegenDiag, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
-import { moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAssert, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesLegacyTextDecoder, moduleUsesNet, moduleUsesNodeTest, moduleUsesParseArgs, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesZlib, type IrModule } from "./ir/ir.js";
+import { moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAssert, moduleUsesBigInt, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesLegacyTextDecoder, moduleUsesNet, moduleUsesNodeTest, moduleUsesParseArgs, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesZlib, type IrModule } from "./ir/ir.js";
 import { type FfiProfile } from "./ffi/ffi-manifest.js";
 import { hasForeignFfiCallback } from "./backend/ffi-callbacks.js";
 import { type EarlyExecutableNativeFeatures } from "./executable/executable-cache.js";
@@ -26,6 +26,7 @@ export function executableNativeFeatures(
 ): EarlyExecutableNativeFeatures {
   return {
     backend,
+    bigint: moduleUsesBigInt(mod),
     ...(optimization === "dev" ? { optimization: "dev" as const } : {}),
     ...(llvmRefusal === undefined ? {} : { llvmRefusal }),
     dynamic,

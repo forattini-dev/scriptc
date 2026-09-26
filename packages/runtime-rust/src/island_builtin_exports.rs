@@ -9,7 +9,7 @@
 
 /// Named exports per shimmed builtin, mirroring the C island's
 /// `isl_builtins`.
-static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 53] = [
+static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 54] = [
     ("node:events", "EventEmitter,EventEmitterAsyncResource,addAbortListener,captureRejectionSymbol,captureRejections,defaultMaxListeners,errorMonitor,getEventListeners,getMaxListeners,init,listenerCount,on,once,setMaxListeners,usingDomains"),
     ("node:path", "_makeLong,basename,delimiter,dirname,extname,format,isAbsolute,join,matchesGlob,normalize,parse,posix,relative,resolve,sep,toNamespacedPath,win32"),
     ("node:path/posix", "_makeLong,basename,delimiter,dirname,extname,format,isAbsolute,join,matchesGlob,normalize,parse,posix,relative,resolve,sep,toNamespacedPath,win32"),
@@ -39,6 +39,7 @@ static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 53] = [
     ("node:perf_hooks", "Performance,PerformanceEntry,PerformanceMark,PerformanceMeasure,PerformanceObserver,PerformanceObserverEntryList,PerformanceResourceTiming,constants,createHistogram,eventLoopUtilization,monitorEventLoopDelay,performance,timerify"),
     ("node:v8", "DefaultDeserializer,DefaultSerializer,Deserializer,GCProfiler,Serializer,cachedDataVersionTag,deserialize,getCppHeapStatistics,getHeapCodeStatistics,getHeapSnapshot,getHeapSpaceStatistics,getHeapStatistics,isStringOneByteRepresentation,promiseHooks,queryObjects,serialize,setFlagsFromString,setHeapSnapshotNearHeapLimit,startCpuProfile,startupSnapshot,stopCoverage,takeCoverage,writeHeapSnapshot"),
     ("node:dns", "ADDRCONFIG,ADDRGETNETWORKPARAMS,ALL,BADFAMILY,BADFLAGS,BADHINTS,BADNAME,BADQUERY,BADRESP,BADSTR,CANCELLED,CONNREFUSED,DESTRUCTION,EOF,FILE,FORMERR,LOADIPHLPAPI,NODATA,NOMEM,NONAME,NOTFOUND,NOTIMP,NOTINITIALIZED,REFUSED,Resolver,SERVFAIL,TIMEOUT,V4MAPPED,getDefaultResultOrder,getServers,lookup,lookupService,promises,resolve,resolve4,resolve6,resolveAny,resolveCaa,resolveCname,resolveMx,resolveNaptr,resolveNs,resolvePtr,resolveSoa,resolveSrv,resolveTlsa,resolveTxt,reverse,setDefaultResultOrder,setServers"),
+    ("node:dns/promises", "ADDRGETNETWORKPARAMS,BADFAMILY,BADFLAGS,BADHINTS,BADNAME,BADQUERY,BADRESP,BADSTR,CANCELLED,CONNREFUSED,DESTRUCTION,EOF,FILE,FORMERR,LOADIPHLPAPI,NODATA,NOMEM,NONAME,NOTFOUND,NOTIMP,NOTINITIALIZED,REFUSED,Resolver,SERVFAIL,TIMEOUT,getDefaultResultOrder,getServers,lookup,lookupService,resolve,resolve4,resolve6,resolveAny,resolveCaa,resolveCname,resolveMx,resolveNaptr,resolveNs,resolvePtr,resolveSoa,resolveSrv,resolveTlsa,resolveTxt,reverse,setDefaultResultOrder,setServers"),
     ("node:readline", "Interface,clearLine,clearScreenDown,createInterface,cursorTo,emitKeypressEvents,moveCursor,promises"),
     ("node:punycode", "decode,encode,toASCII,toUnicode,ucs2,version"),
     ("node:querystring", "decode,encode,escape,parse,stringify,unescape,unescapeBuffer"),

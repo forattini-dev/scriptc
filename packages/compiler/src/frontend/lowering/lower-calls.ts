@@ -119,7 +119,7 @@ export function funcTypeFromParamShapes(
     ...(typedRest || dynRest || islandRest || argumentsAll ? { rest: true as const } : {}),
     ...(argumentsAll ? { argumentsAll: true as const } : {}),
     ...(typedRest
-      ? { restAbi: "typed" as const }
+      ? { restAbi: "array" as const }
       : islandRest
         ? { restAbi: "jsval" as const }
         : {}),
@@ -9188,4 +9188,62 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
       type: found.sig.ret,
       loc: locOf(call),
     });
+  }
+
+
+
+  /** Interned `%obj.hasOwn.<n>(r, k)` — Object.hasOwn's membership walk
+   * over a signature-free record shape: the key compares against each
+   * declared field name, undefined-armed fields answering by their tag
+   * (a key is own exactly when Object.keys would list it — the two share
+   * the guard), everything else true, no match false. */
+  function recordHasOwnHelper(lowerer: Lowerer, shapeId: string, loc: SrcLoc): string {
+    const key = `obj.hasOwn:${shapeId}`;
+    const existing = lowerer.arrHofHelpers.get(key);
+    if (existing) return existing;
+    const helper = `%obj.hasOwn.${lowerer.arrHofHelpers.size}`;
+    lowerer.arrHofHelpers.set(key, helper);
+    const shape = lowerer.shapes.get(shapeId)!;
+    const recT: IrType = { kind: "record", shapeId };
+    const rRef: IrExpr = { kind: "varRef", localId: "r.0", type: recT, loc };
+    const kRef: IrExpr = { kind: "varRef", localId: "k.0", type: STRING, loc };
+    const body: IrStmt[] = [];
+    for (const f of shape.fields) {
+      const utag = f.type.kind === "union" ? lowerer.armTag(f.type.unionId, UNDEFINED_T) : -1;
+      const answer: IrExpr =
+        utag >= 0 && f.type.kind === "union"
+          ? {
+              kind: "unionIsTag",
+              unionId: f.type.unionId,
+              tag: utag,
+              negated: true,
+              value: { kind: "recordGet", obj: rRef, shapeId, field: f.name, type: f.type, loc },
+              type: BOOL,
+              loc,
+            }
+          : { kind: "boolLit", value: true, type: BOOL, loc };
+      body.push({
+        kind: "if",
+        cond: { kind: "strEq", negated: false, left: kRef, right: { kind: "strLit", value: f.name, type: STRING, loc }, type: BOOL, loc },
+        then: [{ kind: "return", value: answer, loc }],
+        else_: null,
+        loc,
+      });
+    }
+    body.push({ kind: "return", value: { kind: "boolLit", value: false, type: BOOL, loc }, loc });
+    lowerer.liftedFns.push({
+      name: helper,
+      params: [
+        { localId: "r.0", name: "r", type: recT },
+        { localId: "k.0", name: "k", type: STRING },
+      ],
+      returnType: BOOL,
+      locals: [
+        { id: "r.0", name: "r", type: recT, mutable: true },
+        { id: "k.0", name: "k", type: STRING, mutable: false },
+      ],
+      body,
+      loc,
+    });
+    return helper;
   }

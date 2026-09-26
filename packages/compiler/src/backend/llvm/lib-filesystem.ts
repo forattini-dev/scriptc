@@ -568,3 +568,51 @@ export function emitPrimitiveLibCall(host: LlvmEmitterContext, e: LibCallExpr): 
       const t = B.tmp();
       B.line(`${t} = select i1 ${positive}, double ${f64Lit(1)}, double ${nonPositive}`);
       return { name: t, type: e.type };
+    }
+    if (e.fn === "num.isNaN") {
+      const v = host.emitExpr(e.args[0]!);
+      const t = B.tmp();
+      B.line(`${t} = fcmp uno double ${v.name}, ${f64Lit(0)}`);
+      return { name: t, type: e.type };
+    }
+    if (e.fn === "sym.newAnon") {
+      host.declare(`declare ptr @scr_sym_new(ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_sym_new(ptr null)`);
+      return host.own({ name: t, type: e.type });
+    }
+    if (e.fn === "sym.desc" || e.fn === "sym.keyFor") {
+      // `string | undefined` — the runtime answers a +1 string or NULL;
+      // the union construction is type-directed here (envGet convention).
+      if (e.type.kind !== "union") throw new InternalCompilerError(`llvm emitter bug: ${e.fn} result is not a union`);
+      const def = host.unionsById.get(e.type.unionId);
+      const strTag = def ? def.arms.findIndex((a) => a.kind === "string") : -1;
+      const undefTag = undefinedArmTag(e.type, host.unionsById);
+      if (strTag < 0 || undefTag < 0) throw new InternalCompilerError(`llvm emitter bug: ${e.fn} union lacks its arms`);
+      const v = host.emitExpr(e.args[0]!);
+      const sym = e.fn === "sym.desc" ? "scr_sym_desc" : "scr_sym_key_for";
+      host.declare(`declare ptr @${sym}(ptr)`);
+      const raw = B.tmp();
+      B.line(`${raw} = call ptr @${sym}(ptr ${v.name})`);
+      return host.wrapNullable(raw, raw, STRING, strTag, e.type, undefTag);
+    }
+    if (e.fn === "string.fromCharCode") {
+      const packed = e.args[0]!;
+      if (packed.kind === "arrayLit" && packed.elems.length === 1 && !packed.spreads?.length) {
+        const code = host.emitExpr(packed.elems[0]!);
+        host.declare(`declare ptr @scr_str_from_char_code_one(double)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_str_from_char_code_one(double ${code.name})`);
+        return host.own({ name: t, type: e.type });
+      }
+      // One packed f64[] (the frontend built it) or one bytes value (the
+      // spread-typed-array form); +1 string.
+      const sym = e.args[0]!.type.kind === "bytes" ? "scr_str_from_char_code_bytes" : "scr_str_from_char_code";
+      const v = host.emitExpr(e.args[0]!);
+      host.declare(`declare ptr @${sym}(ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @${sym}(ptr ${v.name})`);
+      return host.own({ name: t, type: e.type });
+    }
+    return host.emitGenericLibCall(e);
+  }

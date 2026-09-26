@@ -778,7 +778,7 @@ export function resolveProjectModule(fromFile: string, specifier: string): strin
  * fails does a second identical walk run admitting the JavaScript files
  * themselves. An untyped package with an @types twin therefore answers the
  * @types files; an untyped package without one answers its own .js. */
-type ResolutionPass = "types" | "js";
+type ResolutionPass = "types" | "source" | "js";
 
 function extensionsFor(pass: ResolutionPass, flavor: "plain" | "x" | "m" | "c"): string[] {
   if (pass === "types") {
@@ -787,6 +787,14 @@ function extensionsFor(pass: ResolutionPass, flavor: "plain" | "x" | "m" | "c"):
       case "c": return [".cts", ".d.cts"];
       case "x": return [".tsx", ".ts", ".d.ts"];
       default: return [".ts", ".tsx", ".d.ts"];
+    }
+  }
+  if (pass === "source") {
+    switch (flavor) {
+      case "m": return [".mts"];
+      case "c": return [".cts"];
+      case "x": return [".tsx", ".ts"];
+      default: return [".ts", ".tsx"];
     }
   }
   switch (flavor) {
@@ -919,7 +927,7 @@ export function resolveBareModule(
   specifier: string,
   /** "js-only" forces the runtime-JS resolution regardless of the active
    * --npm-static set (the auto-detection probe); default follows the set. */
-  mode?: "js-only",
+  mode?: "js-only" | "runtime-source" | "runtime-js",
 ): BareResolution | null {
   const pkgName = packageNameOfSpecifier(specifier);
   const rest = specifier.slice(pkgName.length).replace(/^\//, "");
@@ -927,7 +935,7 @@ export function resolveBareModule(
   // An opted-in --npm-static package resolves to its RUNTIME SOURCE: the js
   // pass only, the "types" export condition dropped, the @types mangling
   // never consulted — mirroring the shadowed world the tsgo host serves.
-  const npmStatic = mode === "js-only" || isNpmStaticPackage(pkgName);
+  const npmStatic = mode === "js-only" || mode === "runtime-js" || isNpmStaticPackage(pkgName);
   const conditions = npmStatic ? npmStaticExportConditions() : exportConditions();
 
   const inPackage = (nmPkgDir: string, name: string, pass: ResolutionPass): BareResolution | null => {
@@ -1010,6 +1018,8 @@ export function resolveBareModule(
     }
   };
 
+  if (mode === "runtime-source") return passOnce("source");
+  if (mode === "runtime-js" || mode === "js-only") return passOnce("js");
   return npmStatic ? passOnce("js") : (acquiredResolution(fromFile, specifier) ?? passOnce("types") ?? passOnce("js"));
 }
 
@@ -1059,4 +1069,24 @@ export function clearResolveCaches(): void {
  * isExternalLibraryImport test 5.9.3 answers on resolutions). */
 export function isNodeModulesPath(path: string): boolean {
   return isAbsolute(path) && normalizeResolvedPath(path).split("/").includes("node_modules");
+}
+
+/** Resolve a source-only workspace package that belongs to the compiled program. */
+export function resolveWorkspaceSourceModule(
+  fromFile: string,
+  specifier: string,
+): BareResolution | null {
+  if (
+    isRelativeSpecifier(specifier) ||
+    isAbsolute(specifier) ||
+    specifier.startsWith("node:") ||
+    specifier.startsWith("#")
+  ) return null;
+  const source = resolveBareModule(fromFile, specifier, "runtime-source");
+  if (
+    source?.workspaceDir === undefined ||
+    !/\.(?:ts|tsx|mts|cts)$/.test(source.typesFile) ||
+    /\.d\.(?:ts|mts|cts)$/.test(source.typesFile)
+  ) return null;
+  return resolveBareModule(fromFile, specifier, "runtime-js") === null ? source : null;
 }

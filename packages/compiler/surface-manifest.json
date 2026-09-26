@@ -103,7 +103,7 @@
       "status": "unsupported",
       "backends": "unknown",
       "code": "SC1040",
-      "note": "use === / !== ('x == null' / 'x != null' — the null-or-undefined test — is supported; other loose comparisons need dynamic coercion semantics)"
+      "note": "primitive and primitive-union coercions plus the x == null / x != null idiom compile statically; object-to-primitive comparisons can execute valueOf/toString — convert the object explicitly first"
     },
     {
       "id": "diagnostic.sc1042",
@@ -213,7 +213,7 @@
       "status": "unsupported",
       "backends": "unknown",
       "code": "SC1101",
-      "note": "numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value never aliases the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet"
+      "note": "numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy), functions, program class instances, and supported native handles convert into 'unknown' slots; functions, exact-class round trips, and handles preserve identity, while this value's type has no dynamic representation yet"
     },
     {
       "id": "diagnostic.sc1120",
@@ -236,7 +236,7 @@
     {
       "id": "diagnostic.sc2001",
       "kind": "diagnostic-fence",
-      "name": "values of types outside the compilable set (bigint and symbol primitives, constructor objects, and library-derived or unresolved generic shapes)",
+      "name": "values of types outside the compilable set (constructor objects and library-derived or unresolved generic shapes)",
       "status": "unsupported",
       "backends": "unknown",
       "code": "SC2001"
@@ -1446,6 +1446,14 @@
       "status": "static",
       "backends": "unknown",
       "note": "recognized module (bare and node:-prefixed specifiers)"
+    },
+    {
+      "id": "node-builtin.http.maxHeaderSize",
+      "kind": "node-builtin",
+      "name": "http.maxHeaderSize",
+      "status": "static",
+      "backends": "unknown",
+      "note": "constant value read"
     },
     {
       "id": "node-builtin.http2",
@@ -2859,9 +2867,23 @@
       "backends": "unknown"
     },
     {
+      "id": "stdlib.array.copyWithin",
+      "kind": "stdlib",
+      "name": "Array.prototype.copyWithin",
+      "status": "static",
+      "backends": "unknown"
+    },
+    {
       "id": "stdlib.array.every",
       "kind": "stdlib",
       "name": "Array.prototype.every",
+      "status": "static",
+      "backends": "unknown"
+    },
+    {
+      "id": "stdlib.array.fill",
+      "kind": "stdlib",
+      "name": "Array.prototype.fill",
       "status": "static",
       "backends": "unknown"
     },
@@ -2939,6 +2961,13 @@
       "id": "stdlib.array.join",
       "kind": "stdlib",
       "name": "Array.prototype.join",
+      "status": "static",
+      "backends": "unknown"
+    },
+    {
+      "id": "stdlib.array.lastIndexOf",
+      "kind": "stdlib",
+      "name": "Array.prototype.lastIndexOf",
       "status": "static",
       "backends": "unknown"
     },
@@ -4065,7 +4094,7 @@
         "llvm",
         "rust"
       ],
-      "note": "compiles statically at arity 2; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic)"
+      "note": "compiles statically at any arity, including number[] spreads"
     },
     {
       "id": "stdlib.math.log",
@@ -4406,7 +4435,7 @@
       "status": "unsupported",
       "backends": "unknown",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; symbol-keyed async iterator handles have no compiler lowering in either tier; use values() with --dynamic"
+      "note": "Node 24.15.0 / Undici 7.24.4; direct for-await consumption compiles statically; explicit symbol access and stored iterator handles have no compiler lowering in either tier"
     },
     {
       "id": "stdlib.readable-stream.tee",
@@ -4424,7 +4453,7 @@
       "status": "dynamic-only",
       "backends": "unknown",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; the wider Web Streams graph is outside the native readable-stream slice"
+      "note": "Node 24.15.0 / Undici 7.24.4; direct for-await consumption compiles statically; storing or driving the first-class iterator handle requires --dynamic"
     },
     {
       "id": "stdlib.request.arrayBuffer",
@@ -4976,7 +5005,7 @@
       "name": "string.prototype.at",
       "status": "static",
       "backends": "unknown",
-      "note": "the lowered call form takes exactly 1 argument"
+      "note": "the lowered call form takes 0 to 1 arguments"
     },
     {
       "id": "stdlib.string.charAt",
@@ -5000,7 +5029,7 @@
       "name": "string.prototype.codePointAt",
       "status": "static",
       "backends": "unknown",
-      "note": "the lowered call form takes exactly 1 argument"
+      "note": "the lowered call form takes 0 to 1 arguments"
     },
     {
       "id": "stdlib.string.endsWith",
@@ -5104,7 +5133,7 @@
       "name": "string.prototype.substring",
       "status": "static",
       "backends": "unknown",
-      "note": "the lowered call form takes 1 to 2 arguments"
+      "note": "the lowered call form takes 0 to 2 arguments"
     },
     {
       "id": "stdlib.string.toLowerCase",

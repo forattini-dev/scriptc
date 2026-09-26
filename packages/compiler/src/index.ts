@@ -3,19 +3,22 @@ import { withAcquiredTypes } from "./type-acquisition/api.js";
 import type { TypeAcquisitionOptions } from "./type-acquisition/acquire.js";
 export { analyzeAsync, type AsyncAnalyzeOptions } from "./type-acquisition/api.js";
 export type { TypeAcquisitionOptions } from "./type-acquisition/acquire.js";
-import { executableNativeFeatures, compileExecutableNative, emitNativeProgramObject, usesPrecompiledRuntimePack, runtimePackDiagnostic } from "./native-emission.js";
 import { resolveLibrarySection, libraryIntSlotConfig, mergeSidecarIntSlots } from "./library/section-resolution.js";
 import { llvmRefusalDiag, rustRefusalDiags, backendRefusalDiag, targetRefusalDiag } from "./backend/refusal-diagnostics.js";
 import { InternalCompilerError } from "./errors.js";
 import { ffiNativeBuildDetail } from "./ffi/native-build-detail.js";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { clearCcCaches, configuredTargetPlatform, type NativeArtifactDependency } from "./backend/native-toolchain.js";
-import { buildCacheRoot, prepareBuildCacheRoot, pruneBuildCache } from "./backend/build-cache.js";
+import { buildCacheRoot, prepareBuildCacheRoot, privateSiblingPath, pruneBuildCache } from "./backend/build-cache.js";
 import {
   CcCompileError,
+  assertLegacyCExecutablePipelineEnabled,
+  compileExternalC,
   compileExternalCLibrary,
   executableNativeEnvironmentFingerprint,
+  legacyCExecutablePathRequested,
   mobileLibraryTarget,
   mobileTargetRefusal,
   resolveCc,
@@ -32,12 +35,16 @@ import { executionProfile, noEngineDiagnostics, type ExecutionProfile } from "./
 export type { ExecutionProfile } from "./backend/execution-profile.js";
 import { emitNativeArtifact, NativeCodegenError } from "./backend/native-codegen.js";
 import { nativeCodegenTarget, nativeCodegenTargetRefusal } from "./backend/targets.js";
+import { type WindowsSubsystem } from "./backend/targets.js";
 import { createNativeLinkInfo, type NativeLinkInfo } from "./backend/native-link-info.js";
 import { RuntimePackError } from "./backend/runtime-pack.js";
 import {
   executableLinkerEnvironmentFingerprint,
+  linkNativeExecutable,
+  platformLinkerSupportsPersistentCache,
   resolvePlatformLinker,
 } from "./backend/linker.js";
+import { createNativeLinkPlan } from "./backend/link-plan.js";
 import { splitLlvmLibraryProgram, splitLlvmProgram } from "./backend/llvm/split.js";
 import { rebaseLibrarySourceComments, replaceLibraryIdentity, stripLibraryIdentity, stripLibrarySourceComments } from "./backend/library-identity-markers.js";
 import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncSurfaceDiag, libIntBoundaryDiag, libNpmIneligibleDiag, iceDiag, isCheckerPanic, nativeCodegenDiag, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
@@ -56,7 +63,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleUsesAssert, moduleUsesCopying, moduleUsesEmitter, moduleUsesInspect, moduleUsesLegacyTextDecoder, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSymbol, moduleUsesZlib, type IrFfiImport, type IrModule, type SrcLoc } from "./ir/ir.js";
+import { moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleUsesAssert, moduleUsesBigInt, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesLegacyTextDecoder, moduleUsesNet, moduleUsesNodeTest, moduleUsesParseArgs, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesZlib, type IrFfiImport, type IrModule, type SrcLoc } from "./ir/ir.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
 import { checkPreflight, loadProgram } from "./frontend/program.js";
@@ -74,6 +81,8 @@ import { libraryFrontendImplementationFingerprint, publishEarlyLibraryCache, rea
 import { createSourceLineRebaser } from "./library/semantic-source.js";
 import { publishEarlyExecutableCache, publishEarlyExecutableRoute, readEarlyExecutableCache, type EarlyExecutableCacheOptions } from "./executable/executable-cache.js";
 import { compilerImplementationIdentity } from "./library/compiler-self-identity.js";
+import { hasForeignFfiCallback } from "./backend/ffi-callbacks.js";
+import type { EarlyExecutableNativeFeatures } from "./executable/executable-cache.js";
 
 export const VERSION = "0.0.1";
 
@@ -933,6 +942,7 @@ function executableNativeFeatures(
 ): EarlyExecutableNativeFeatures {
   return {
     backend,
+    bigint: moduleUsesBigInt(mod),
     ...(optimization === "dev" ? { optimization: "dev" as const } : {}),
     ...(llvmRefusal === undefined ? {} : { llvmRefusal }),
     dynamic,
@@ -955,7 +965,6 @@ function executableNativeFeatures(
     events: moduleUsesProcessEvents(mod),
     emitter: moduleUsesEmitter(mod),
     symbol: moduleUsesSymbol(mod),
-    bigint: moduleUsesBigInt(mod),
     searchParams: moduleUsesSearchParams(mod),
     qs: moduleUsesQs(mod),
     parseArgs: moduleUsesParseArgs(mod),
@@ -1059,7 +1068,6 @@ async function compileExecutableNative(
       events: features.events,
       emitter: features.emitter,
       symbol: features.symbol,
-      bigint: features.bigint,
       searchParams: features.searchParams,
       qs: features.qs,
       parseArgs: features.parseArgs,
@@ -1131,7 +1139,7 @@ function usesPrecompiledRuntimePack(
 }
 
 function runtimePackDiagnostic(error: RuntimePackError, entryPath: string): ScrDiagnostic {
-  return nativeCodegenDiag(error.code === "unsupported" ? "SC3002" : "SC3003", error.message, entryPath);
+  return nativeCodegenDiag(error.code === "unsupported" ? "SC3002" : "SC3005", error.message, entryPath);
 }
 
 async function compileTracked(
@@ -1882,6 +1890,7 @@ function libraryNativeFeatures(
 ): EarlyLibraryNativeFeatures {
   return {
     backend,
+    bigint: moduleUsesBigInt(mod),
     regex: moduleUsesRegex(mod),
     assert: moduleUsesAssert(mod),
     inspect: moduleUsesInspect(mod),

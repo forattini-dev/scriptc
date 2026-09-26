@@ -23,7 +23,8 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./ir.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canDynCheckTo, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, shapeHasAccessorSlots, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./ir.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canDynCheckTo, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, CHILDWRITER_T, CRYPTOHASH_T, CRYPTOHMAC_T, DATE_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isDynTypedRefType, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isJsonStringifySafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, shapeHasAccessorSlots, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./ir.js";
+import { BIGINT_T } from "./ir.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -86,23 +87,6 @@ export const REGEX_INTRINSIC_SIGS: Record<
  * surface has no optionals. readFileSync's second argument is the (always-"utf8") encoding: evaluated for JS-exact side-effect
  * order and ignored by the runtime. A `null` slot is program-dependent (a builtin-error receiver) — the libCall case checks it specially, like process.envGet's result. Exported for lib-boundary.ts. */
 export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result: IrType }> = {
-  "dyn.objectTag": { argTypes: [DYN], result: STRING },
-  "module.registryInit": { argTypes: [F64], result: VOID },
-  "module.define": { argTypes: [F64, STRING, STRING, STRING, arrayOf(STRING), BOOL], result: VOID },
-  "module.enter": { argTypes: [F64], result: VOID },
-  "module.link": { argTypes: [F64, F64], result: VOID },
-  "module.finish": { argTypes: [F64], result: VOID },
-  "module.fail": { argTypes: [F64], result: VOID },
-  "module.filename": { argTypes: [F64], result: STRING },
-  "module.id": { argTypes: [F64], result: STRING },
-  "module.path": { argTypes: [F64], result: STRING },
-  "module.paths": { argTypes: [F64], result: arrayOf(STRING) },
-  "module.children": { argTypes: [F64], result: arrayOf(F64) },
-  "module.parent": { argTypes: [F64], result: F64 },
-  "module.loaded": { argTypes: [F64], result: BOOL },
-  "module.cacheGet": { argTypes: [STRING], result: F64 },
-  "module.cacheHas": { argTypes: [STRING], result: BOOL },
-  "module.cacheKeys": { argTypes: [], result: arrayOf(STRING) },
   ...NUMERIC_COERCION_SIGS, ...JSON_REPLACER_SIGS,
   ...FS_WRITE_LIB_SIGS,
   "fetch.start": { argTypes: [STRING, DYN], result: { kind: "promise", inner: DYN } },
@@ -137,6 +121,23 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.defineProps": { argTypes: [DYN, DYN], result: DYN },
   "dyn.proxyNew": { argTypes: [DYN, DYN], result: DYN },
   "dyn.typeof": { argTypes: [DYN], result: STRING },
+  "dyn.objectTag": { argTypes: [DYN], result: STRING },
+  "module.registryInit": { argTypes: [F64], result: VOID },
+  "module.define": { argTypes: [F64, STRING, STRING, STRING, arrayOf(STRING), BOOL], result: VOID },
+  "module.enter": { argTypes: [F64], result: VOID },
+  "module.link": { argTypes: [F64, F64], result: VOID },
+  "module.finish": { argTypes: [F64], result: VOID },
+  "module.fail": { argTypes: [F64], result: VOID },
+  "module.filename": { argTypes: [F64], result: STRING },
+  "module.id": { argTypes: [F64], result: STRING },
+  "module.path": { argTypes: [F64], result: STRING },
+  "module.paths": { argTypes: [F64], result: arrayOf(STRING) },
+  "module.children": { argTypes: [F64], result: arrayOf(F64) },
+  "module.parent": { argTypes: [F64], result: F64 },
+  "module.loaded": { argTypes: [F64], result: BOOL },
+  "module.cacheGet": { argTypes: [STRING], result: F64 },
+  "module.cacheHas": { argTypes: [STRING], result: BOOL },
+  "module.cacheKeys": { argTypes: [], result: arrayOf(STRING) },
   "timers.setTimeout": { argTypes: [{ kind: "func", params: [], ret: VOID }, F64], result: VOID },
   "timers.setInterval": { argTypes: [{ kind: "func", params: [], ret: VOID }, F64], result: F64 },
   "timers.clearInterval": { argTypes: [F64], result: VOID },
@@ -291,6 +292,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "sp.with": { argTypes: [SEARCH_PARAMS_T, STRING, STRING], result: SEARCH_PARAMS_T },
   "url.searchParams": { argTypes: [URL_T], result: SEARCH_PARAMS_T },
   "url.search": { argTypes: [URL_T], result: STRING },
+  "url.hash": { argTypes: [URL_T], result: STRING },
   // Result is the interned `string | null` union — the libCall case
   // checks the arms (the spawnRes.signal pattern).
   "sp.get": { argTypes: [SEARCH_PARAMS_T, STRING], result: VOID },
@@ -317,7 +319,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "util.parseArgs": { argTypes: [DYN], result: DYN },
   "fs.statSync": { argTypes: [STRING], result: STATS_T },
   "fs.lstatSync": { argTypes: [STRING], result: STATS_T },
+  "fs.fstatSync": { argTypes: [F64], result: STATS_T },
+  "fs.fchmodSync": { argTypes: [F64, F64], result: VOID },
+  "fs.fsyncSync": { argTypes: [F64], result: VOID },
+  "fs.linkSync": { argTypes: [STRING, STRING], result: VOID },
   "fs.openSync": { argTypes: [STRING, STRING], result: F64 },
+  "fs.openNumericSync": { argTypes: [STRING, F64, F64], result: F64 },
   "fs.readSync": { argTypes: [F64, BYTES_U8, F64, F64, F64], result: F64 },
   "fs.writeSync": { argTypes: [F64, BYTES_U8, F64, F64, F64], result: F64 },
   "fs.writeStrSync": { argTypes: [F64, STRING, F64, STRING], result: F64 },
@@ -337,10 +344,13 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "stats.isDirectory": { argTypes: [STATS_T], result: BOOL },
   "stats.isSymbolicLink": { argTypes: [STATS_T], result: BOOL },
   "stats.size": { argTypes: [STATS_T], result: F64 },
+  "stats.dev": { argTypes: [STATS_T], result: F64 },
+  "stats.ino": { argTypes: [STATS_T], result: F64 },
   "stats.blocks": { argTypes: [STATS_T], result: F64 },
   "stats.nlink": { argTypes: [STATS_T], result: F64 },
   "stats.atimeMs": { argTypes: [STATS_T], result: F64 },
   "stats.mtimeMs": { argTypes: [STATS_T], result: F64 },
+  "stats.ctimeMs": { argTypes: [STATS_T], result: F64 },
   // The wider sync fs slice (unlink/chmod/chown/copyfile and the
   // mode-carrying write/mkdir forms).
   "fs.unlinkSync": { argTypes: [STRING], result: VOID },
@@ -465,6 +475,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.validateHeaderValue": { argTypes: [STRING, DYN], result: VOID },
   "http.serverJoinDupHeaders": { argTypes: [NETSERVER_T], result: VOID },
   "http.serverMaxHeaderSizeSet": { argTypes: [NETSERVER_T, DYN], result: VOID },
+  "http.serverAllowMissingHostHeader": { argTypes: [NETSERVER_T], result: VOID },
   "http.serverTimeoutGet": { argTypes: [NETSERVER_T, F64], result: F64 },
   "http.serverSetTimeout": { argTypes: [NETSERVER_T, F64], result: VOID },
   "http.serverSetTimeoutCb": { argTypes: [NETSERVER_T, F64, null], result: VOID },
@@ -487,12 +498,6 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.resStrictContentLengthSet": { argTypes: [HTTPRES_T, BOOL], result: VOID },
   "http.resSetTimeout": { argTypes: [HTTPRES_T, F64], result: VOID },
   "http.resSetTimeoutCb": { argTypes: [HTTPRES_T, F64, { kind: "func", params: [], ret: VOID }], result: VOID },
-  "http.resWritableEnded": { argTypes: [HTTPRES_T], result: BOOL },
-  "http.resFlushHeaders": { argTypes: [HTTPRES_T], result: VOID },
-  "http.resAddTrailers": { argTypes: [HTTPRES_T, arrayOf(STRING)], result: VOID },
-  "http.resCork": { argTypes: [HTTPRES_T], result: VOID },
-  "http.resUncork": { argTypes: [HTTPRES_T], result: VOID },
-  "http.resWritableCorked": { argTypes: [HTTPRES_T], result: F64 },
   // resGetHeader answers the interned `string | undefined` union — the
   // reqHeader/envGet sentinel pattern (VOID here, checked specially).
   "http.resGetHeader": { argTypes: [HTTPRES_T, STRING], result: VOID },
@@ -505,6 +510,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.reqUrl": { argTypes: [HTTPREQ_T], result: STRING },
   "http.reqMethod": { argTypes: [HTTPREQ_T], result: STRING },
   "http.reqHeader": { argTypes: [HTTPREQ_T, STRING], result: VOID },
+  "http.reqTrailer": { argTypes: [HTTPREQ_T, STRING], result: VOID },
+  "http.reqHeaderValues": { argTypes: [HTTPREQ_T, STRING], result: VOID },
+  "http.reqTrailerValues": { argTypes: [HTTPREQ_T, STRING], result: VOID },
   "http.reqOnData": { argTypes: [HTTPREQ_T, null, BOOL], result: VOID },
   "http.reqOnEnd": { argTypes: [HTTPREQ_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "http.resSetHeader": { argTypes: [HTTPRES_T, STRING, STRING], result: VOID },
@@ -521,6 +529,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.resWriteDyn": { argTypes: [HTTPRES_T, DYN], result: VOID },
   "http.resEndDyn": { argTypes: [HTTPRES_T, DYN], result: VOID },
   "http.resHeadersSent": { argTypes: [HTTPRES_T], result: BOOL },
+  "http.resWritableEnded": { argTypes: [HTTPRES_T], result: BOOL },
+  "http.resFlushHeaders": { argTypes: [HTTPRES_T], result: VOID },
+  "http.resAddTrailers": { argTypes: [HTTPRES_T, arrayOf(STRING)], result: VOID },
+  "http.resCork": { argTypes: [HTTPRES_T], result: VOID },
+  "http.resUncork": { argTypes: [HTTPRES_T], result: VOID },
+  "http.resWritableCorked": { argTypes: [HTTPRES_T], result: F64 },
   // The member follow-ups: reqStatusCode's `number | undefined` and
   // sockRemoteAddress's `string | undefined` results are shape-checked in
   // the special cases below (like reqHeader/columns).
@@ -530,6 +544,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.reqStatusMessage": { argTypes: [HTTPREQ_T], result: VOID },
   "http.reqRawHeaders": { argTypes: [HTTPREQ_T], result: arrayOf(STRING) },
   "http.reqHeaderPairs": { argTypes: [HTTPREQ_T], result: arrayOf(STRING) },
+  "http.reqRawTrailers": { argTypes: [HTTPREQ_T], result: arrayOf(STRING) },
+  "http.reqTrailerPairs": { argTypes: [HTTPREQ_T], result: arrayOf(STRING) },
   "net.sockDestroyed": { argTypes: [NETSOCKET_T], result: BOOL },
   "net.sockWritable": { argTypes: [NETSOCKET_T], result: BOOL },
   // The 'upgrade' registrations: the callback shapes are program-typed
@@ -562,8 +578,6 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "net.sockSetTimeout": { argTypes: [NETSOCKET_T, F64], result: VOID },
   "net.sockSetEncoding": { argTypes: [NETSOCKET_T, STRING], result: VOID },
   "http.reqSetEncoding": { argTypes: [HTTPREQ_T, STRING], result: VOID },
-  "http.reqSetTimeout": { argTypes: [HTTPREQ_T, F64], result: VOID },
-  "http.reqSetTimeoutCb": { argTypes: [HTTPREQ_T, F64, { kind: "func", params: [], ret: VOID }], result: VOID },
   "net.sockOnTimeout": { argTypes: [NETSOCKET_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "net.sockRemoteAddress": { argTypes: [NETSOCKET_T], result: VOID },
   "net.sockEncrypted": { argTypes: [NETSOCKET_T], result: VOID },
@@ -727,6 +741,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.clientGetHeaderNames": { argTypes: [HTTPCLIENTREQ_T], result: arrayOf(STRING) },
   "http.clientGetRawHeaderNames": { argTypes: [HTTPCLIENTREQ_T], result: arrayOf(STRING) },
   "http.clientGetHeaders": { argTypes: [HTTPCLIENTREQ_T], result: DYN },
+  "http.clientWriteBytes": { argTypes: [HTTPCLIENTREQ_T, BYTES_U8], result: VOID },
+  "http.clientEnd": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
+  "http.clientEndStr": { argTypes: [HTTPCLIENTREQ_T, STRING], result: VOID },
+  "http.clientEndBytes": { argTypes: [HTTPCLIENTREQ_T, BYTES_U8], result: VOID },
+  "http.clientWriteDyn": { argTypes: [HTTPCLIENTREQ_T, DYN], result: VOID },
+  "http.clientEndDyn": { argTypes: [HTTPCLIENTREQ_T, DYN], result: VOID },
   "http.clientFlushHeaders": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
   "http.clientAddTrailers": { argTypes: [HTTPCLIENTREQ_T, arrayOf(STRING)], result: VOID },
   "http.clientCork": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
@@ -747,12 +767,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.clientSetTimeoutCb": { argTypes: [HTTPCLIENTREQ_T, F64, { kind: "func", params: [], ret: VOID }], result: VOID },
   "http.statusCodes": { argTypes: [], result: DYN },
   "http.methods": { argTypes: [], result: arrayOf(STRING) },
-  "http.clientWriteBytes": { argTypes: [HTTPCLIENTREQ_T, BYTES_U8], result: VOID },
-  "http.clientEnd": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
-  "http.clientEndStr": { argTypes: [HTTPCLIENTREQ_T, STRING], result: VOID },
-  "http.clientEndBytes": { argTypes: [HTTPCLIENTREQ_T, BYTES_U8], result: VOID },
-  "http.clientWriteDyn": { argTypes: [HTTPCLIENTREQ_T, DYN], result: VOID },
-  "http.clientEndDyn": { argTypes: [HTTPCLIENTREQ_T, DYN], result: VOID },
+  "http.reqSetTimeout": { argTypes: [HTTPREQ_T, F64], result: VOID },
+  "http.reqSetTimeoutCb": { argTypes: [HTTPREQ_T, F64, { kind: "func", params: [], ret: VOID }], result: VOID },
   "http.clientDestroy": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
   "http.clientAbort": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
   "http.clientAborted": { argTypes: [HTTPCLIENTREQ_T], result: BOOL },
@@ -773,11 +789,29 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
     result: SPAWNRES_T,
   },
   "cp.spawn": { argTypes: [STRING, arrayOf(STRING)], result: CHILD_T },
+  "process.forkTarget": { argTypes: [F64], result: F64 },
+  "cp.fork": {
+    argTypes: [F64, arrayOf(STRING), F64, F64, F64, BOOL, arrayOf(STRING), STRING],
+    result: CHILD_T,
+  },
+  "child.connected": { argTypes: [CHILD_T], result: BOOL },
+  "child.send": { argTypes: [CHILD_T, STRING], result: BOOL },
+  "child.sendCb": { argTypes: [CHILD_T, STRING, null], result: BOOL },
+  "child.disconnect": { argTypes: [CHILD_T], result: VOID },
+  "child.onMessage": { argTypes: [CHILD_T, null, BOOL], result: VOID },
+  "child.onDisconnect": { argTypes: [CHILD_T, null, BOOL], result: VOID },
+  "process.connected": { argTypes: [], result: BOOL },
+  "process.send": { argTypes: [STRING], result: BOOL },
+  "process.sendCb": { argTypes: [STRING, null], result: BOOL },
+  "process.disconnect": { argTypes: [], result: VOID },
+  "process.onMessage": { argTypes: [null, BOOL], result: VOID },
+  "process.onDisconnect": { argTypes: [null, BOOL], result: VOID },
+  "cp.execFile": { argTypes: [STRING, arrayOf(STRING), null], result: CHILD_T },
   // spawn's options form: per-slot stdio modes (0 ignore / 1 inherit /
   // 2 fd) with the out/err fds for mode 2, detached, env replacement
   // pairs, cwd ("" = inherit).
   "cp.spawnOpts": {
-    argTypes: [STRING, arrayOf(STRING), F64, F64, F64, F64, F64, BOOL, BOOL, arrayOf(STRING), STRING],
+    argTypes: [STRING, arrayOf(STRING), F64, F64, F64, F64, F64, BOOL, BOOL, BOOL, arrayOf(STRING), STRING],
     result: CHILD_T,
   },
   // The callback's func type is program-dependent (zero params, or the
@@ -811,11 +845,22 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // case checks the arms — the child.pid pattern with a ref arm).
   "child.stdout": { argTypes: [CHILD_T], result: VOID },
   "child.stderr": { argTypes: [CHILD_T], result: VOID },
+  "child.stdin": { argTypes: [CHILD_T], result: VOID },
   // Listener registrations: callback func shapes are program-dependent
   // (zero-param / Buffer / Buffer-armed union) — the slots pin arity,
   // the stream receiver, and the once-flag.
   "stream.onData": { argTypes: [CHILDSTREAM_T, null, BOOL], result: VOID },
+  "stream.onDataStr": { argTypes: [CHILDSTREAM_T, null, BOOL], result: VOID },
   "stream.onEnd": { argTypes: [CHILDSTREAM_T, null, BOOL], result: VOID },
+  "stream.childSetEncoding": { argTypes: [CHILDSTREAM_T, STRING], result: CHILDSTREAM_T },
+  "writer.writeString": { argTypes: [CHILDWRITER_T, STRING], result: BOOL },
+  "writer.writeBytes": { argTypes: [CHILDWRITER_T, BYTES_U8], result: BOOL },
+  "writer.end": { argTypes: [CHILDWRITER_T], result: VOID },
+  "writer.destroy": { argTypes: [CHILDWRITER_T], result: VOID },
+  "writer.writable": { argTypes: [CHILDWRITER_T], result: BOOL },
+  "writer.onDrain": { argTypes: [CHILDWRITER_T, null, BOOL], result: VOID },
+  "writer.onFinish": { argTypes: [CHILDWRITER_T, null, BOOL], result: VOID },
+  "writer.onError": { argTypes: [CHILDWRITER_T, null, BOOL], result: VOID },
   "procStream.write": { argTypes: [PROCSTREAM_T, STRING], result: BOOL },
   "child.killed": { argTypes: [CHILD_T], result: BOOL },
   "child.kill": { argTypes: [CHILD_T, STRING], result: BOOL },
@@ -830,7 +875,25 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "crypto.hashDigestBytes": { argTypes: [STRING, BYTES_U8, STRING], result: STRING },
   "crypto.hmacDigestStr": { argTypes: [STRING, BYTES_U8, STRING, STRING], result: STRING },
   "crypto.hmacDigestBytes": { argTypes: [STRING, BYTES_U8, BYTES_U8, STRING], result: STRING },
+  "crypto.hashNew": { argTypes: [STRING], result: CRYPTOHASH_T },
+  "crypto.hmacNewStr": { argTypes: [STRING, STRING], result: CRYPTOHMAC_T },
+  "crypto.hmacNewBytes": { argTypes: [STRING, BYTES_U8], result: CRYPTOHMAC_T },
+  "crypto.hashUpdateStr": { argTypes: [CRYPTOHASH_T, STRING], result: CRYPTOHASH_T },
+  "crypto.hashUpdateBytes": { argTypes: [CRYPTOHASH_T, BYTES_U8], result: CRYPTOHASH_T },
+  "crypto.hmacUpdateStr": { argTypes: [CRYPTOHMAC_T, STRING], result: CRYPTOHMAC_T },
+  "crypto.hmacUpdateBytes": { argTypes: [CRYPTOHMAC_T, BYTES_U8], result: CRYPTOHMAC_T },
+  "crypto.hashCopy": { argTypes: [CRYPTOHASH_T], result: CRYPTOHASH_T },
+  "crypto.hashDigestString": { argTypes: [CRYPTOHASH_T, STRING], result: STRING },
+  "crypto.hashDigestBuffer": { argTypes: [CRYPTOHASH_T], result: BYTES_U8 },
+  "crypto.hmacDigestString": { argTypes: [CRYPTOHMAC_T, STRING], result: STRING },
+  "crypto.hmacDigestBuffer": { argTypes: [CRYPTOHMAC_T], result: BYTES_U8 },
   "crypto.timingSafeEqual": { argTypes: [BYTES_U8, BYTES_U8], result: BOOL },
+  "crypto.randomFill": { argTypes: [BYTES_U8, F64, F64], result: BYTES_U8 },
+  "crypto.randomFillRest": { argTypes: [BYTES_U8, F64], result: BYTES_U8 },
+  "crypto.randomInt": { argTypes: [F64, F64], result: F64 },
+  "crypto.pbkdf2": { argTypes: [BYTES_U8, BYTES_U8, F64, F64, STRING], result: BYTES_U8 },
+  "crypto.randomBytesCb": { argTypes: [F64, null], result: VOID },
+  "crypto.pbkdf2Cb": { argTypes: [BYTES_U8, BYTES_U8, F64, F64, STRING, null], result: VOID },
   // The Buffer statics and the fs/zlib Buffer forms: fixed always-u8
   // signatures (Buffer IS a Uint8Array — one bytes kind).
   "buffer.fromStr": { argTypes: [STRING, STRING], result: BYTES_U8 },
@@ -865,11 +928,19 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "zlib.deflateSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.deflateSyncLevel": { argTypes: [BYTES_U8, F64], result: BYTES_U8 },
   "zlib.inflateSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "zlib.deflateRawSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "zlib.inflateRawSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.gzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.gunzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.unzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
-  "zlib.deflateRawSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
-  "zlib.inflateRawSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "zlib.deflateCb": { argTypes: [BYTES_U8, null], result: VOID },
+  "zlib.inflateCb": { argTypes: [BYTES_U8, null], result: VOID },
+  "zlib.deflateRawCb": { argTypes: [BYTES_U8, null], result: VOID },
+  "zlib.inflateRawCb": { argTypes: [BYTES_U8, null], result: VOID },
+  "zlib.gzipCb": { argTypes: [BYTES_U8, null], result: VOID },
+  "zlib.gunzipCb": { argTypes: [BYTES_U8, null], result: VOID },
+  "zlib.unzipCb": { argTypes: [BYTES_U8, null], result: VOID },
+  "zlib.crc32": { argTypes: [BYTES_U8, F64], result: F64 },
   "process.stdoutWriteBytes": { argTypes: [BYTES_U8, STRING], result: BOOL },
   "process.stderrWriteBytes": { argTypes: [BYTES_U8, STRING], result: BOOL },
   // Completion callback is program-dependent: zero params, checked-dynamic,
@@ -886,10 +957,15 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fsp.chmod": { argTypes: [STRING, F64], result: { kind: "promise", inner: VOID } },
   "fsp.rename": { argTypes: [STRING, STRING], result: { kind: "promise", inner: VOID } },
   "fsp.readdir": { argTypes: [STRING], result: { kind: "promise", inner: arrayOf(STRING) } },
+  // Result is promise<call-site Dirent record array>; the libCall case
+  // validates the program-dependent record shape below.
+  "fsp.readdirTypes": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },
   "fsp.rm": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },
   "fsp.rmOpts": { argTypes: [STRING, BOOL, BOOL], result: { kind: "promise", inner: VOID } },
   "fsp.stat": { argTypes: [STRING], result: { kind: "promise", inner: STATS_T } },
   "fsp.open": { argTypes: [STRING, STRING, F64], result: { kind: "promise", inner: FILEHANDLE_T } }, "fsp.openNumeric": { argTypes: [STRING, F64, F64], result: { kind: "promise", inner: FILEHANDLE_T } },
+  "fsp.realpath": { argTypes: [STRING], result: { kind: "promise", inner: STRING } },
+  "fsp.lstat": { argTypes: [STRING], result: { kind: "promise", inner: STATS_T } },
   "fileHandle.fd": { argTypes: [FILEHANDLE_T], result: F64 },
   "fileHandle.close": { argTypes: [FILEHANDLE_T], result: { kind: "promise", inner: VOID } },
   // read/write carry call-site result record shapes; the validator checks
@@ -914,6 +990,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.envPairs": { argTypes: [], result: arrayOf(STRING) },
   "process.exit": { argTypes: [F64], result: VOID },
   "process.exitCodeSet": { argTypes: [F64], result: VOID },
+  "process.setExitCode": { argTypes: [F64], result: VOID },
+  "process.currentExitCode": { argTypes: [], result: F64 },
   "process.cwd": { argTypes: [], result: STRING },
   "process.pid": { argTypes: [], result: F64 },
   "dyn.this": { argTypes: [], result: DYN },
@@ -986,9 +1064,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // once, prepend), offDyn (recv, name, cb dyn).
   "emitter.checkListener": { argTypes: [DYN], result: VOID },
   "emitter.onDyn": { argTypes: [null, STRING, DYN, null, BOOL, BOOL], result: VOID },
+  "emitter.onFlex": { argTypes: [null, STRING, DYN, BOOL, BOOL], result: VOID },
   "emitter.offDyn": { argTypes: [null, STRING, DYN], result: VOID },
   "emitter.removeAll": { argTypes: [null, STRING, BOOL], result: VOID },
   "emitter.emit": { argTypes: [null, STRING], result: BOOL },
+  "emitter.emitFlex": { argTypes: [null, STRING], result: BOOL },
   "emitter.emitError": { argTypes: [null, STRING, null], result: BOOL },
   "emitter.count": { argTypes: [null, STRING], result: F64 },
   "emitter.countFn": { argTypes: [null, STRING, null], result: F64 },
@@ -1075,12 +1155,14 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "writable.uncork": { argTypes: [null], result: VOID },
   "stream.destroy": { argTypes: [null], result: VOID },
   "stream.destroyErr": { argTypes: [null, null], result: VOID },
+  "stream.iteratorClose": { argTypes: [null], result: VOID },
   "stream.prop": { argTypes: [null, STRING], result: VOID },
   "stream.errored": { argTypes: [null], result: VOID },
   // node:assert: pass/negated/deep/hasMsg are frontend-computed bools; the
   // message slot always carries a string ("" when hasMsg is false).
   "assert.ok": { argTypes: [BOOL, STRING], result: VOID },
   "assert.eqF64": { argTypes: [F64, F64, BOOL, BOOL, STRING, BOOL], result: VOID },
+  "assert.eqBigInt": { argTypes: [BIGINT_T, BIGINT_T, BOOL, BOOL, STRING, BOOL], result: VOID },
   "assert.eqStr": { argTypes: [STRING, STRING, BOOL, BOOL, STRING, BOOL], result: VOID },
   "assert.eqBool": { argTypes: [BOOL, BOOL, BOOL, BOOL, STRING, BOOL], result: VOID },
   "assert.deepResult": { argTypes: [BOOL, BOOL, STRING, BOOL], result: VOID },
@@ -1098,6 +1180,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The equality quartet over checked-dynamic operands (the frontend
   // boxes a static side into the checked-dynamic tree first).
   "assert.eqDyn": { argTypes: [DYN, DYN, BOOL, BOOL, STRING, BOOL], result: VOID },
+  "assert.looseResult": { argTypes: [BOOL, BOOL, STRING, STRING, STRING, BOOL], result: VOID },
   // The throws(fn, {shape}) accumulator: begin/slot calls never throw;
   // shapeEnd throws the Comparison diff. The error slot is the
   // %Error-narrowed caught value.
@@ -1224,7 +1307,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // Arg 0 is a packed f64[] OR a bytes value (the spread-typed-array
   // form) — checked in the libCall case.
   "string.fromCharCode": { argTypes: [null], result: STRING },
-  "string.lastIndexOf": { argTypes: [STRING, STRING], result: F64 },
+  "string.lastIndexOf": { argTypes: [STRING, STRING, F64], result: F64 },
   "string.lastIndexOfFrom": { argTypes: [STRING, STRING, F64], result: F64 },
   "string.raw": { argTypes: [arrayOf(STRING), arrayOf(STRING)], result: STRING },
 };
@@ -1847,7 +1930,8 @@ function validateFunction(
     if (
       type.kind === "record" ||
       type.kind === "array" ||
-      type.kind === "bytes"
+      type.kind === "bytes" ||
+      isDynTypedRefType(type)
     ) {
       return true;
     }
@@ -1875,6 +1959,11 @@ function validateFunction(
         break;
       case "strLit":
         if (e.type.kind !== "string") err("strLit must be string", e.loc);
+        break;
+      case "moduleNsRef":
+        if (e.type.kind !== "moduleNs" || e.type.moduleId !== e.moduleId) {
+          err("moduleNsRef must match its moduleNs type", e.loc);
+        }
         break;
       case "boolLit":
         if (e.type.kind !== "bool") err("boolLit must be bool", e.loc);
@@ -1909,6 +1998,10 @@ function validateFunction(
           // class, one pointer compare (tsc gates the overlap).
           if (e.right.type.kind !== "classval") {
             err(`bin ${e.op} on class values: right operand is ${e.right.type.kind}`, e.loc);
+          }
+        } else if (isEq && e.left.type.kind === "moduleNs") {
+          if (e.right.type.kind !== "moduleNs") {
+            err(`bin ${e.op} on module namespaces: right operand is ${e.right.type.kind}`, e.loc);
           }
         } else if (
           isEq &&
@@ -2052,10 +2145,11 @@ function validateFunction(
         if (
           e.operand.type.kind !== "f64" &&
           e.operand.type.kind !== "string" &&
+          e.operand.type.kind !== "dyn" &&
           e.operand.type.kind !== "union" &&
           !REF_TRUTHY_KINDS.has(e.operand.type.kind)
         ) {
-          err(`toBool operand must be f64|string|union|ref, got ${e.operand.type.kind}`, e.loc);
+          err(`toBool operand must be f64|string|dyn|union|ref, got ${e.operand.type.kind}`, e.loc);
         }
         if (e.operand.type.kind === "union") checkTruthyUnion(e.operand.type.unionId, e.loc);
         if (e.type.kind !== "bool") err("toBool must be bool", e.loc);
@@ -3765,7 +3859,7 @@ function validateFunction(
         // (the optional chunk/cb tail), and unpipe (the optional
         // destination) admit a longer list the same way.
         const variadic =
-          e.fn === "emitter.emit" ||
+          e.fn === "emitter.emit" || e.fn === "emitter.emitFlex" ||
           e.fn === "readable.new" || e.fn === "writable.new" ||
           e.fn === "duplex.new" || e.fn === "transform.new" ||
           e.fn === "passthrough.new" ||
@@ -4165,6 +4259,14 @@ function validateFunction(
           }
           break;
         }
+        if (e.fn === "http.reqHeaderValues" || e.fn === "http.reqTrailerValues") {
+          const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
+          const ok = def && def.arms.length === 2 &&
+            def.arms[0]!.kind === "array" && def.arms[0]!.elem.kind === "string" &&
+            def.arms[1]!.kind === "undefinedT";
+          if (!ok) err(`libCall ${e.fn} must return the 'string[] | undefined' union`, e.loc);
+          break;
+        }
         if (e.fn === "net.createServerCb" || e.fn === "net.serverOnConnection" ||
             e.fn === "net.serverOnSecureConnection" ||
             e.fn === "http.serverSetTimeoutCb" || e.fn === "http.serverOnTimeout" ||
@@ -4260,6 +4362,32 @@ function validateFunction(
           break;
         }
         if (
+          e.fn === "zlib.deflateCb" || e.fn === "zlib.inflateCb" ||
+          e.fn === "zlib.deflateRawCb" || e.fn === "zlib.inflateRawCb" ||
+          e.fn === "zlib.gzipCb" || e.fn === "zlib.gunzipCb" || e.fn === "zlib.unzipCb"
+        ) {
+          const cbT = e.args[1]?.type;
+          let ok = cbT?.kind === "func" && cbT.ret.kind === "void" && cbT.params.length <= 2;
+          if (ok && cbT?.kind === "func" && cbT.params.length >= 1) {
+            const error = cbT.params[0]!;
+            if (error.kind !== "dyn") {
+              const def = error.kind === "union" ? unions.get(error.unionId) : undefined;
+              ok = def !== undefined &&
+                def.arms.some((arm) => arm.kind === "nullT") &&
+                def.arms.some((arm) => arm.kind === "object" && arm.className === "%Error") &&
+                def.arms.every((arm) =>
+                  arm.kind === "nullT" || arm.kind === "undefinedT" ||
+                  (arm.kind === "object" && arm.className === "%Error"));
+            }
+          }
+          if (ok && cbT?.kind === "func" && cbT.params.length === 2) {
+            const value = cbT.params[1]!;
+            ok = value.kind === "dyn" || (value.kind === "bytes" && value.elem === "u8");
+          }
+          if (!ok) err(`libCall ${e.fn} callback shape (frontend must fence)`, e.loc);
+          break;
+        }
+        if (
           e.fn === "fs.renameCb" ||
           e.fn === "process.stdoutWriteBytesCb" ||
           e.fn === "process.stderrWriteBytesCb"
@@ -4318,13 +4446,16 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "fs.readdirTypesSync") {
+        if (e.fn === "fs.readdirTypesSync" || e.fn === "fsp.readdirTypes") {
           // Result: the interned Dirent record array — {%dtype: f64,
           // name: string, parentPath: string} rows (canonical field
           // order; the structure lowerFsReaddirTypesCall pinned).
+          const result = e.fn === "fsp.readdirTypes"
+            ? e.type.kind === "promise" ? e.type.inner : undefined
+            : e.type;
           const shape =
-            e.type.kind === "array" && e.type.elem.kind === "record"
-              ? records.get(e.type.elem.shapeId)
+            result?.kind === "array" && result.elem.kind === "record"
+              ? records.get(result.elem.shapeId)
               : undefined;
           const ok =
             shape !== undefined &&
@@ -4335,7 +4466,7 @@ function validateFunction(
             shape.fields[1]!.name === "name" && shape.fields[1]!.type.kind === "string" &&
             shape.fields[2]!.name === "parentPath" && shape.fields[2]!.type.kind === "string";
           if (!ok) {
-            err(`libCall fs.readdirTypesSync must return the Dirent record array`, e.loc);
+            err(`libCall ${e.fn} must return ${e.fn === "fsp.readdirTypes" ? "a promise of " : ""}the Dirent record array`, e.loc);
           }
           break;
         }
@@ -4375,6 +4506,30 @@ function validateFunction(
           }
           break;
         }
+        if (e.fn === "cp.execFile") {
+          const cb = e.args[2]?.type;
+          if (cb?.kind !== "func" || cb.rest === true || cb.params.length > 3 || cb.ret.kind !== "void") {
+            err(`libCall cp.execFile callback must be a non-rest void function with at most three parameters`, e.loc);
+          } else {
+            const error = cb.params[0];
+            if (error !== undefined) {
+              const def = error.kind === "union" ? unions.get(error.unionId) : undefined;
+              if (!def || def.arms.length !== 2 ||
+                  !def.arms.some((arm) => arm.kind === "nullT") ||
+                  !def.arms.some((arm) => arm.kind === "object" && arm.className === "%Error")) {
+                err(`libCall cp.execFile callback error parameter must be Error | null`, e.loc);
+              }
+            }
+            const stdout = cb.params[1];
+            if (stdout !== undefined && stdout.kind !== "string") {
+              err(`libCall cp.execFile callback stdout parameter must be string`, e.loc);
+            }
+            const stderr = cb.params[2];
+            if (stderr !== undefined && stderr.kind !== "string") {
+              err(`libCall cp.execFile callback stderr parameter must be string`, e.loc);
+            }
+          }
+        }
         if (e.fn === "child.onExit" || e.fn === "child.onClose" || e.fn === "child.onError") {
           // The listener: a closure with no params, or exactly the
           // supported parameter shapes per event — exit/close take
@@ -4382,12 +4537,11 @@ function validateFunction(
           // null) second parameter, error exactly (err: %Error).
           const cb = e.args[1];
           const cbT = cb?.type;
-          const hasStatus = e.fn === "child.onExit" || e.fn === "child.onClose";
-          const maxParams = hasStatus ? 2 : 1;
+          const maxParams = e.fn === "child.onError" ? 1 : 2;
           let ok = cbT?.kind === "func" && cbT.ret.kind === "void" && cbT.params.length <= maxParams;
           if (ok && cbT?.kind === "func" && cbT.params.length >= 1) {
             const p = cbT.params[0]!;
-            if (hasStatus) {
+            if (e.fn === "child.onExit" || e.fn === "child.onClose") {
               const def = p.kind === "union" ? unions.get(p.unionId) : undefined;
               ok =
                 def !== undefined &&
@@ -4410,6 +4564,17 @@ function validateFunction(
           if (!ok) {
             err(`libCall ${e.fn} callback shape (frontend must fence)`, e.loc);
           }
+          break;
+        }
+        if (e.fn === "writer.onDrain" || e.fn === "writer.onFinish" || e.fn === "writer.onError") {
+          const cbT = e.args[1]?.type;
+          const maxParams = e.fn === "writer.onError" ? 1 : 0;
+          let ok = cbT?.kind === "func" && cbT.ret.kind === "void" && cbT.params.length <= maxParams;
+          if (ok && cbT?.kind === "func" && cbT.params.length === 1) {
+            const p = cbT.params[0]!;
+            ok = p.kind === "object" && p.className === "%Error";
+          }
+          if (!ok) err(`libCall ${e.fn} callback shape (frontend must fence)`, e.loc);
           break;
         }
         if (e.fn === "process.onExit" || e.fn === "process.offExit" ||
@@ -4538,15 +4703,16 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "child.stdout" || e.fn === "child.stderr") {
+        if (e.fn === "child.stdin" || e.fn === "child.stdout" || e.fn === "child.stderr") {
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
+          const handleKind = e.fn === "child.stdin" ? "childWriter" : "childStream";
           const ok =
             def &&
             def.arms.length === 2 &&
-            def.arms.some((a) => a.kind === "childStream") &&
+            def.arms.some((a) => a.kind === handleKind) &&
             def.arms.some((a) => a.kind === "nullT");
           if (!ok) {
-            err(`libCall ${e.fn} must return the 'Readable | null' union`, e.loc);
+            err(`libCall ${e.fn} must return the '${e.fn === "child.stdin" ? "Writable" : "Readable"} | null' union`, e.loc);
           }
           break;
         }
@@ -4658,7 +4824,7 @@ function validateFunction(
           e.fn.startsWith("readable.") || e.fn.startsWith("writable.") ||
           e.fn.startsWith("duplex.") || e.fn.startsWith("transform.") ||
           e.fn.startsWith("passthrough.") || e.fn === "stream.destroy" ||
-          e.fn === "stream.destroyErr" || e.fn === "stream.prop" ||
+          e.fn === "stream.destroyErr" || e.fn === "stream.iteratorClose" || e.fn === "stream.prop" ||
           e.fn === "stream.errored" || e.fn === "stream.finished" ||
           e.fn === "stream.finishedDyn" || e.fn === "stream.pipeline" ||
           e.fn === "stream.pipelineDyn"
@@ -4764,7 +4930,8 @@ function validateFunction(
           if (e.fn === "readable.pause" || e.fn === "readable.resume" ||
               e.fn === "readable.unpipe" || e.fn === "writable.end" ||
               e.fn === "readable.setEncoding" || e.fn === "readable.pushEncoding" ||
-              e.fn === "stream.destroy" || e.fn === "stream.destroyErr") {
+              e.fn === "stream.destroy" || e.fn === "stream.destroyErr" ||
+              e.fn === "stream.iteratorClose") {
             if (!typeEquals(e.type, e.args[0]!.type)) {
               err(`libCall ${e.fn} must return its receiver's type (the chaining 'this')`, e.loc);
             }
@@ -4825,7 +4992,7 @@ function validateFunction(
           }
           // The chaining forms return the receiver's own static class.
           if (e.fn === "emitter.on" || e.fn === "emitter.off" ||
-              e.fn === "emitter.onDyn" || e.fn === "emitter.offDyn" ||
+              e.fn === "emitter.onDyn" || e.fn === "emitter.onFlex" || e.fn === "emitter.offDyn" ||
               e.fn === "emitter.onData" || e.fn === "emitter.onDataDyn" ||
               e.fn === "emitter.removeAll" || e.fn === "emitter.setMax" ||
               e.fn === "emitter.setMaxChk") {
@@ -4868,7 +5035,12 @@ function validateFunction(
             if (!ok) err(`libCall emitter.listeners must return a func array`, e.loc);
             break;
           }
-          if (e.fn === "emitter.emit" || e.fn === "emitter.count" ||
+          if (e.fn === "emitter.emitFlex") {
+            if (e.args.slice(2).some((arg) => arg.type.kind !== "dyn")) {
+              err("libCall emitter.emitFlex payloads must be checked-dynamic", e.loc);
+            }
+          }
+          if (e.fn === "emitter.emit" || e.fn === "emitter.emitFlex" || e.fn === "emitter.count" ||
               e.fn === "emitter.getMax" || e.fn === "emitter.ctor" ||
               e.fn === "emitter.countFn" || e.fn === "emitter.emitError") {
             if (!typeEquals(e.type, sig.result)) {
@@ -4924,16 +5096,22 @@ function validateFunction(
         // undefined and error values, which match those arms exactly.
         const jsonOk = (t: IrType): boolean =>
           isJsonSafeType(t, (id) => records.get(id), (id) => unions.get(id));
-        const undefArmedOk = canDynCheckTo(
-          e.type,
-          (id) => records.get(id),
-          (id) => unions.get(id),
-        );
-        // bytes<u8> extracts a checked native view (Rust) or payload copy (C/LLVM).
+        const undefArmedOk =
+          e.type.kind === "union" &&
+          (unions.get(e.type.unionId)?.arms.every(
+            (a) =>
+              a.kind === "undefinedT" ||
+              jsonOk(a) ||
+              isDynTypedRefType(a) ||
+              DYN_HANDLE_KINDS.has(a.kind),
+          ) ??
+            false);
+        // bytes<u8> targets extract the checked-dynamic tree's bytes kind (a copy).
         const bytesOk = e.type.kind === "bytes" && e.type.elem === "u8";
         // The %Error root extracts the checked-dynamic tree's error encoding (the "%error"
         // marker object caughtToDyn builds) as a fresh runtime error.
         const errorOk = e.type.kind === "object" && e.type.className === "%Error";
+        const classOk = isDynTypedRefType(e.type);
         // ADAPTABLE function targets unwrap or wrap the checked-dynamic tree's function
         // kind (the checked-dynamic function boundary, ir.ts).
         const funcOk =
@@ -4942,7 +5120,7 @@ function validateFunction(
         // Runtime HANDLE targets unwrap the checked-dynamic tree's handle kind by tag (a
         // retained reference, no copy — DYN_HANDLE_KINDS).
         const handleOk = DYN_HANDLE_KINDS.has(e.type.kind);
-        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !funcOk && !handleOk) {
+        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !classOk && !funcOk && !handleOk) {
           err(`dynCheck against non-JSON-representable type ${e.type.kind}`, e.loc);
         }
         break;

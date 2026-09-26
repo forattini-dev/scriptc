@@ -69,6 +69,7 @@ import { checkPreflightTypes, isIslandJsFile } from "./preflight-types.js";
 import { ProjectDeclarations } from "./project-declarations.js";
 import { jsoncSyntaxError } from "./config-json.js";
 import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js"; import { calleeChainInert, isDtsMemberCall, isHoistedFunctionBinding, isInertHoistedFunctionCallee, isNamespaceMemberRead, isOutsideClusterProgramCallee, kernelCallHoldsCallbacks, makeReachesCluster } from "./cycle-inert.js";
+import { forkTargetPaths } from "./fork-target.js";
 
 const BASE_OPTIONS: ts.Ts7CompilerOptions = {
   strict: true,
@@ -368,6 +369,34 @@ function externalTypeFileClosure7(
   return new Map(
     [...ownersByFile].map(([file, owners]) => [file, [...owners]] as const),
   );
+}
+
+/** Program roots hidden behind canonical createRequire bindings. */
+function createRequireProgramRoots7(program: ts.Program): string[] {
+  const known = new Set(program.getSourceFiles().map((sf) => tsgoPath(resolve(sf.fileName))));
+  const roots = new Set<string>();
+  for (const sf of program.getSourceFiles()) {
+    if (sf.isDeclarationFile || sf.fileName.endsWith(".json")) continue;
+    ts.walkPreorder(sf, (node) => {
+      if (
+        !ts.isCallExpression(node) || node.questionDotToken !== undefined ||
+        node.arguments.length !== 1 || !ts.isStringLiteralLike(node.arguments[0]!) ||
+        !ts.isIdentifier(node.expression) || !isCreateRequireBinding7(program, node.expression)
+      ) return undefined;
+      const spec = node.arguments[0]!.text;
+      if (canonicalBuiltinModule(spec) !== null) return "skip";
+      let target = resolveProjectModule(sf.fileName, spec);
+      if (target === null && !spec.startsWith("#")) {
+        const npm = resolveNpmImport7(sf.fileName, spec);
+        if (npm !== null && isNpmStaticPackage(npm.packageName) && isJsSourceFileName(npm.typesFile)) target = npm.typesFile;
+      }
+      if (target === null || target.endsWith(".json")) return "skip";
+      const normalized = tsgoPath(resolve(target));
+      if (!known.has(normalized)) roots.add(normalized);
+      return "skip";
+    });
+  }
+  return [...roots].sort();
 }
 
 function loadProgram7(

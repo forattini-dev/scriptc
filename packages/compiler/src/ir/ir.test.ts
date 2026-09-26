@@ -7,6 +7,7 @@ import {
   F64,
   HANDLE_KINDS,
   POINTER_KINDS,
+  STRING,
   VOID,
   moduleUsesDynAsync,
   type IrExpr,
@@ -18,7 +19,7 @@ const loc = { file: "test.ts", start: 0, end: 1 };
 
 function moduleWithExpr(expr: IrExpr): IrModule {
   return {
-    irVersion: 8,
+    irVersion: 11,
     sourceFile: loc.file,
     functions: [{
       name: "main",

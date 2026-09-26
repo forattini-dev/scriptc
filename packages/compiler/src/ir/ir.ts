@@ -32,18 +32,24 @@ export interface SrcLoc {
 
 /* ── types ─────────────────────────────────────────────────────────────── */
 
-/** The typed-array element kinds with a runtime representation: exactly
- * the constructors real CLI code reaches (Uint8Array/Buffer, Uint32Array,
- * Int32Array — the Atomics.wait sleep idiom's array — Float32Array/Float64Array). The
- * other TypedArray flavors stay frontend-fenced. */
+/** Typed-array element kinds with a runtime representation: Uint8Array/Buffer,
+ * Uint32Array, Int32Array, Float32Array, and Float64Array. Other flavors stay
+ * frontend-fenced. */
 export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64";
 
 export type IrType =
   | { kind: "f64" }
+  /** An ECMAScript bigint primitive. Runtime values are immutable,
+   * arbitrary-precision signed integers (ScrBigInt) whose numeric value,
+   * not pointer identity, defines equality. The heap representation is an
+   * implementation detail: bigint remains a JS primitive for truthiness,
+   * typeof, comparison, inspection, and container semantics. */
   | { kind: "bigint" }
-  /** A TimeClip'd millisecond slot. Rust retains native object identity across
-   * aliases and dynamic boundaries; legacy C/LLVM keep their scalar ABI and
-   * refuse identity-dependent forms before emission. */
+  /** The supported ES Date value slice: a scalar TimeClip'd millisecond
+   * value. Getters and toISOString observe only this slot, so copying it
+   * through locals/params/fields is exact while Date mutation and object
+   * identity remain frontend-fenced. It is therefore intentionally NOT
+   * refcounted despite being truthy like every JS object. */
   | { kind: "date" }
   | { kind: "string" } // heap, refcounted, UTF-8
   | { kind: "bool" }
@@ -65,7 +71,8 @@ export type IrType =
   /** A reference-identity regex. Rust stores mutable lastIndex per instance;
    * the C/LLVM runtimes retain their narrower immutable regex surface. */
   | { kind: "regex" }
-  /** A typed array / Node Buffer (Uint8Array, Uint32Array, Float32Array/Float64Array;
+  /** A typed array / Node Buffer (Uint8Array, Uint32Array, Float32Array,
+   * Float64Array;
    * Buffer IS a Uint8Array subclass and shares the u8 kind) — heap,
    * refcounted, MUTABLE, fixed-length, with ONE runtime representation
    * (ScrBytes) that owns storage or borrows it for subarray and DataView
@@ -183,6 +190,11 @@ export type IrType =
    * rules as child: union arms fine (the checker's `Readable | null`), 
    * arrays/maps/JSON fenced. */
   | { kind: "childStream" }
+  /** A piped child-input stream (child.stdin — spawn with a piped stdin
+   * slot; scr_child.c). Heap, refcounted, and mutable: writes queue into
+   * the platform pipe without blocking the JavaScript thread, and
+   * drain/finish/error listeners drop when the writer settles. */
+  | { kind: "childWriter" }
   /** A process output stream as a FIRST-CLASS value (process.stdout /
    * process.stderr flowing into a `NodeJS.WritableStream` slot — the
    * prefixStream idiom). Representation is the raw FD as a double (1 or
@@ -206,16 +218,24 @@ export type IrType =
    * as a Map VALUE (the per-hostname context cache) like child; fenced out
    * of array elements and JSON like the other opaque handles. */
   | { kind: "secureCtx" }
-  /** Mutable node:crypto digest handles. Hash and Hmac share a runtime
-   * representation but remain distinct IR kinds so unsupported methods
-   * cannot cross between their public surfaces. */
+  /** A node:crypto Hash or Hmac handle (scr_lib.c): heap, refcounted,
+   * MUTABLE until digest(), then permanently finalized. The two TypeScript
+   * surfaces share one runtime representation but stay distinct IR kinds so
+   * Hash.copy() cannot accidentally appear on Hmac values. The incremental
+   * digest state owns no script values and cannot participate in a cycle. */
   | { kind: "cryptoHash" }
   | { kind: "cryptoHmac" }
-  /** Heap, refcounted closure. A rest-marked value with no restAbi hides
-   * one trailing dyn-array slot supplied by its boxed thunk. restAbi jsval
-   * spells an engine-array slot; restAbi array spells a typed array slot.
-   * Typed calls complete that final slot with a fresh argument pack.
-   * The marker distinguishes a variadic call from one taking an array. */
+  /** Heap, refcounted closure. `rest` marks a variadic function value.
+   * `restAbi: "array"` spells one trailing typed array in `params`; static
+   * call sites pack their surplus arguments into it before `callValue`.
+   * `restAbi: "jsval"` similarly spells one trailing engine array for an
+   * island host callback. An absent `restAbi` is the legacy checked-dynamic
+   * JS form: `params` stays the declared non-rest list and the lifted
+   * function has one hidden trailing ScrDyn array filled by its boxed call
+   * thunk. `argumentsAll` keeps that hidden ABI but fills it with every
+   * actual argument, including named positions. The backends therefore
+   * still see one fixed native closure ABI;
+   * only the frontend's call completion observes variadic source arity. */
   | { kind: "func"; params: IrType[]; ret: IrType; rest?: true; restAbi?: "jsval" | "array"; argumentsAll?: true }
   | { kind: "object"; className: string } // heap, refcounted class instance
   /** The class STATIC side as a value — `typeof C`, the type of the class
@@ -234,6 +254,12 @@ export type IrType =
    * elements, Map VALUES, and union arms; fenced out of Map keys, Set
    * elements, JSON, dyn/jsval conversion, and ToString. */
   | { kind: "classval"; className: string }
+  /** An ECMAScript module namespace object for one statically-known module.
+   * `moduleId` is a canonical compiled source-file or builtin identity.
+   * Runtime representation is an interned immortal string token: identity
+   * is pointer identity, while member reads resolve to live module globals
+   * or builtin lowering tables rather than snapshotting export values. */
+  | { kind: "moduleNs"; moduleId: string }
   /** Structural record shape (object literal / interface / type alias over
    * data properties). `shapeId` indexes IrModule.records; the frontend
    * interns shapes structurally, so equal shapeId ⇔ equal shape and
@@ -329,6 +355,7 @@ const POINTER_HANDLE_KINDS = [
   "cryptoHmac",
   "fsWatcher",
   "childStream",
+  "childWriter",
 ] as const satisfies readonly IrType["kind"][];
 
 interface IrKindSet<K extends IrType["kind"]> extends ReadonlySet<IrType["kind"]> {
@@ -351,7 +378,7 @@ export const HANDLE_KINDS = irKindSet(HANDLE_KIND_LIST);
 
 /** The IR kinds represented as pointers in both native backends. */
 const POINTER_KIND_LIST = [
-  "string", "genericFunc",
+  "string", "bigint", "genericFunc",
   "array",
   "map",
   "set",
@@ -364,6 +391,7 @@ const POINTER_KIND_LIST = [
   "func",
   "object",
   "classval",
+  "moduleNs",
   "record",
   "union",
   "dyn",
@@ -380,8 +408,8 @@ export const POINTER_KINDS = irKindSet(POINTER_KIND_LIST);
  * Keeping this exhaustive makes a new runtime handle kind a compile error
  * until its one retain/release family is named here. */
 export const RUNTIME_RC_STEMS: Record<IrType["kind"], string> = {
-  bigint: "", // Rust-only immutable Rc value; no C runtime symbol family.
   f64: "",
+  bigint: "scr_bigint",
   date: "",
   string: "scr_str",
   bool: "",
@@ -407,6 +435,7 @@ export const RUNTIME_RC_STEMS: Record<IrType["kind"], string> = {
   httpRes: "scr_http_res",
   httpClientReq: "scr_http_client",
   childStream: "scr_child_stream",
+  childWriter: "scr_child_writer",
   procStream: "",
   fsWatcher: "scr_watcher",
   secureCtx: "scr_secure_ctx",
@@ -415,6 +444,7 @@ export const RUNTIME_RC_STEMS: Record<IrType["kind"], string> = {
   func: "scr_closure",
   object: "",
   classval: "scr_classobj",
+  moduleNs: "scr_str",
   record: "",
   union: "scr_union",
   dyn: "scr_dyn",
@@ -450,11 +480,13 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "symbol",
   "date", "array", "map", "set", "regex", "url", "searchParams", "stats", "fileHandle", "spawnRes", "child", "effect", "sqliteDb", "sqliteStmt", "genericFunc",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
-  "secureCtx", "cryptoHash", "cryptoHmac", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
+  "secureCtx", "cryptoHash", "cryptoHmac", "fsWatcher", "childStream", "childWriter", "procStream", "bytes", "func", "object", "record", "promise",
   // A generator object is a JS object: always truthy.
   "generator",
   // A class object is a JS object (constructors are functions): always truthy.
   "classval",
+  // A module namespace object is always truthy.
+  "moduleNs",
 ]);
 
 /** True for the payload-less unit kinds (`undefined`/`null`). Unit values
@@ -472,7 +504,7 @@ export function isUnitType(t: IrType): boolean {
  * otherwise-valid standalone type (Map, Set, dyn, opaque handles, ...). */
 export function isSupportedArrayElem(t: IrType): boolean {
   switch (t.kind) {
-    case "date": case "effect": case "genericFunc": case "f64": // effect/genericFunc: refcounted handles traced like any Gc element
+    case "date": case "effect": case "genericFunc": case "f64": case "bigint":
     case "bool":
     case "string":
     case "array":
@@ -488,6 +520,7 @@ export function isSupportedArrayElem(t: IrType): boolean {
     case "netServer":
     case "symbol":
     case "classval":
+    case "moduleNs":
       return true;
     default:
       return false;
@@ -670,11 +703,13 @@ export function typeKey(t: IrType): string {
     case "set":
       return `set<${typeKey(t.elem)}>`; case "genericFunc": return `genericFunc<${t.familyId}>`;
     case "func":
-      return `func(${[...t.params.map(typeKey), ...(t.rest ? [t.restAbi === "array" ? "...typed[]" : t.restAbi === "jsval" ? "...jsval[]" : t.argumentsAll ? "arguments[]" : "...dyn[]"] : [])].join(",")})=>${typeKey(t.ret)}`;
+      return `func(${[...t.params.map(typeKey), ...(t.rest ? [t.restAbi === "jsval" ? "...jsval[]" : t.restAbi === "array" ? "...typed[]" : t.argumentsAll ? "arguments[]" : "...dyn[]"] : [])].join(",")})=>${typeKey(t.ret)}`;
     case "object":
       return `object:${t.className}`;
     case "classval":
       return `classval:${t.className}`;
+    case "moduleNs":
+      return `moduleNs:${t.moduleId}`;
     case "record":
       return `record:${t.shapeId}`;
     case "union":
@@ -702,7 +737,8 @@ export function typeEquals(a: IrType, b: IrType): boolean {
     return (
       b.kind === "func" &&
       a.params.length === b.params.length &&
-      (a.rest === true) === (b.rest === true) && a.restAbi === b.restAbi &&
+      (a.rest === true) === (b.rest === true) &&
+      a.restAbi === b.restAbi &&
       a.argumentsAll === b.argumentsAll &&
       a.params.every((p, i) => typeEquals(p, b.params[i]!)) &&
       typeEquals(a.ret, b.ret)
@@ -710,6 +746,7 @@ export function typeEquals(a: IrType, b: IrType): boolean {
   }
   if (a.kind === "object") return b.kind === "object" && a.className === b.className;
   if (a.kind === "classval") return b.kind === "classval" && a.className === b.className;
+  if (a.kind === "moduleNs") return b.kind === "moduleNs" && a.moduleId === b.moduleId;
   // The frontend deduplicates shapes structurally (one shapeId per canonical
   // field list), so id equality IS structural equality.
   if (a.kind === "record") return b.kind === "record" && a.shapeId === b.shapeId;
@@ -740,7 +777,7 @@ export function isRefCounted(t: IrType): boolean {
 /* ── module ────────────────────────────────────────────────────────────── */ export interface IrFamily { id: string; impls: { name: string; captures: IrParam[] }[]; instances: { key: string; params: IrType[]; ret: IrType; targets: string[] }[] }
 export interface IrModule {
   /** Bumped on any breaking IR change; serialize.ts refuses mismatches. */
-  irVersion: 8;
+  irVersion: 11;
   sourceFile: string;
   /** The runtime target the program was lowered for (--target): the
    * backends configure the runtime's per-runtime semantic switches from
@@ -1955,6 +1992,14 @@ export type IrLibFn =
   | "dyn.typeof"
   /** Object.prototype.toString.call on a checked-dynamic value. */
   | "dyn.objectTag"
+  /** toString() on a checked-dynamic receiver: runtime kind dispatch
+   * (bytes decode per the literal encoding — utf8 default; strings,
+   * numbers, booleans, arrays, objects answer JS-exactly; undefined and
+   * null throw the catchable TypeError). */
+  | "dyn.toString"
+  /** Engine-free CommonJS module graph. Module values are scalar f64
+   * handles; generated startup defines the registry, init wrappers update
+   * loading/cache state, and the read surface answers Node's live metadata. */
   | "module.registryInit"
   | "module.define"
   | "module.enter"
@@ -1971,11 +2016,6 @@ export type IrLibFn =
   | "module.cacheGet"
   | "module.cacheHas"
   | "module.cacheKeys"
-  /** toString() on a checked-dynamic receiver: runtime kind dispatch
-   * (bytes decode per the literal encoding — utf8 default; strings,
-   * numbers, booleans, arrays, objects answer JS-exactly; undefined and
-   * null throw the catchable TypeError). */
-  | "dyn.toString"
   | "fs.readFileSync"
   /** readFileSync(path) — the Buffer read (+1 bytes); throws catchably
    * like the utf8 form. */
@@ -2117,6 +2157,30 @@ export type IrLibFn =
   | "math.atan"
   | "math.atan2"
   | IrNumericCoercionFn
+  /** The static global parsers/tests (scr_string.c). num.parseInt is
+   * ECMA-262 19.2.5 exactly — JS whitespace, sign, ToInt32 radix (the
+   * frontend completes an omitted radix to 0 = the spec's "undefined":
+   * base 10 with the 0x hex escape), longest digit prefix, and the exact
+   * mathematical value correctly rounded (u64 fast path, bignum beyond —
+   * overflow is ±Infinity). num.isNaN is the NaN self-test on an
+   * already-number argument (tsc pins the argument to number, so no
+   * ToNumber coercion exists to model). Borrow; never throw. */
+  | "num.parseInt"
+  | "num.isNaN"
+  /** ES parseFloat (scr_string.c): the longest StrDecimalLiteral prefix
+   * of the trimmed input (no hex, "Infinity" exact-case), NaN when none —
+   * ECMA-262 19.2.4 over a string argument (non-string arguments keep the
+   * fence: Node would ToNumber-coerce). Borrows; never throws. */
+  | "num.parseFloat"
+  /* ToNumber(string) — ECMA-262 7.1.4.1 StringToNumber (scr_string.c):
+   * trim the JS StrWhiteSpace set, empty/whitespace-only → +0, then the
+   * whole span must be one StrNumericLiteral — signed decimal (Infinity
+   * included, strtod-over-validated-span correct rounding) or unsigned
+   * 0x/0o/0b (exact value, nearest-even; signed forms are NaN) — with
+   * any trailing garbage answering NaN. Number(aString), unary + on
+   * strings, and util.format %d over strings lower here. Borrows; never
+   * throws. */
+  | "num.fromString"
   /** The static URI component codecs (scr_string.c), ECMA-262 Encode/
    * Decode with the component sets over the runtime's UTF-8 strings.
    * str.encodeUriComponent percent-encodes every byte outside the
@@ -2214,6 +2278,7 @@ export type IrLibFn =
   | "sp.with"
   | "url.searchParams"
   | "url.search"
+  | "url.hash"
   | "sp.get"
   | "sp.getAll"
   | "sp.append"
@@ -2272,12 +2337,47 @@ export type IrLibFn =
   | "sym.keyFor"
   | "sym.desc"
   | "sym.toString"
+  /** Engine-free arbitrary-precision bigint operations (scr_bigint.c).
+   * parse accepts the ECMAScript BigInt string grammar; fromF64 accepts
+   * finite integral Numbers. Arithmetic returns fresh immutable values.
+   * cmp returns -1/0/1 as f64; toString accepts a numeric radix. */
+  | "bigint.parse"
+  | "bigint.fromF64"
+  | "bigint.neg"
+  | "bigint.not"
+  | "bigint.add"
+  | "bigint.sub"
+  | "bigint.mul"
+  | "bigint.div"
+  | "bigint.mod"
+  | "bigint.pow"
+  | "bigint.and"
+  | "bigint.or"
+  | "bigint.xor"
+  | "bigint.shl"
+  | "bigint.shr"
+  | "bigint.eq"
+  | "bigint.eqString"
+  | "bigint.cmp"
+  | "bigint.cmpNumber"
+  | "bigint.truthy"
+  | "bigint.toString"
+  | "bigint.inspect"
+  | "bigint.toF64"
+  | "bigint.asUintN"
+  | "bigint.asIntN"
+  | "bigint.bufferRead"
+  | "bigint.bufferWrite"
+  | "bigint.dataViewGet"
+  | "bigint.dataViewSet"
   /** fs.statSync → a Stats value (may throw, like the other sync fs
    * calls); the stats.* getters are pure reads on it. */
   | "fs.statSync"
   | "stats.isFile"
   | "stats.isDirectory"
   | "stats.size"
+  | "stats.dev"
+  | "stats.ino"
   /** child_process.spawnSync (scr_child.c): posix_spawn + waitpid + piped
    * utf8 capture — cmd borrowed, args one borrowed string[] (the frontend
    * completes an omitted list to an empty literal), result an owned (+1)
@@ -2299,18 +2399,18 @@ export type IrLibFn =
    * the backend (the envGet convention). Never throws. */
   | "spawnRes.error"
   /** child_process.spawn (scr_child.c + the scr_async.c loop): posix_spawnp
-   * with stdio "ignore" (all three fds on /dev/null — the only supported
-   * stdio; "pipe"/"inherit" are frontend-fenced), the child registered
-   * with the event loop, which polls waitpid(WNOHANG) at quiescence like
-   * timers (kqueue is the follow-up; SEMANTICS.md documents the polling).
+   * with per-slot ignore/inherit/pipe modes (and number output fds), the
+   * all-piped Node default, and the child registered with the event loop,
+   * which polls waitpid(WNOHANG) at quiescence like timers.
    * NEVER throws: spawn failure defers to the "error" event, Node-exact
    * (the error message is Node's "spawn <cmd> <ERRNO-NAME>"; an "error"
    * event with no listener prints it and exits 1 like an EventEmitter).
    * cmd/args borrowed; result an owned (+1) child handle. The loop will
    * not exhaust while any spawned child is unreaped — Node's keep-alive.
    *
-   * child.onExit / child.onClose / child.onError — terminal child
-   * listeners. `close` is a distinct event and always follows `exit`.
+   * child.onExit / child.onClose / child.onError — terminal listener
+   * registration through child.on/once. Close uses the exit adapter shape
+   * but fires only after every piped stdio handle reaches EOF. The
    * receiver is borrowed, the CALLBACK MOVES into the child's listener
    * registry (released after the terminal event fires, or at reap for
    * the event that never fires). Both are void (chaining is fenced).
@@ -2323,6 +2423,28 @@ export type IrLibFn =
    * with the code (f64 arm) or null (signal death); "error" fires only
    * for spawn failure, exactly Node's split. */
   | "cp.spawn"
+  /** Static-native fork startup and IPC. process.forkTarget initializes a
+   * re-executed child's inherited channel and returns its embedded target id
+   * (-1 in the parent). The remaining entries mirror Node's JSON channel. */
+  | "process.forkTarget"
+  | "cp.fork"
+  | "child.connected"
+  | "child.send"
+  | "child.sendCb"
+  | "child.disconnect"
+  | "child.onMessage"
+  | "child.onDisconnect"
+  | "process.connected"
+  | "process.send"
+  | "process.sendCb"
+  | "process.disconnect"
+  | "process.onMessage"
+  | "process.onDisconnect"
+  /** child_process.execFile's callback slice: starts an all-piped child,
+   * captures stdout/stderr, and moves the error-first callback into the
+   * child registry. The callback shape is program-dependent and checked
+   * by the validator/backends. */
+  | "cp.execFile"
   | "child.onExit"
   | "child.onClose"
   | "child.onError"
@@ -2353,7 +2475,9 @@ export type IrLibFn =
    * arm). stream.onData/onEnd register 'data'/'end' listeners (receiver
    * borrowed, CALLBACK MOVES, trailing once-flag, void — chaining
    * fenced): 'data' fires one Buffer chunk per read (zero-param and
-   * Buffer-param adapters are runtime-provided; a union-param listener —
+   * Buffer/string adapters are runtime-provided; setEncoding threads
+   * split multibyte sequences through the shared StringDecoder core. A
+   * union-param listener —
    * ngrok's `Buffer | string` — gets a compiler-emitted adapter wrapping
    * the chunk at its Buffer arm), 'end' fires once at EOF, always BEFORE
    * the child's 'exit' (the pinned ordering). A flowing stream keeps the
@@ -2361,7 +2485,22 @@ export type IrLibFn =
   | "child.stdout"
   | "child.stderr"
   | "stream.onData"
+  | "stream.onDataStr"
   | "stream.onEnd"
+  | "stream.childSetEncoding"
+  /** The piped-input writer (stdio mode 3 on fd 0). child.stdin answers
+   * `Writable | null`; writes copy borrowed data into the nonblocking
+   * queue, end/destroy settle it, writable is a pure state read, and
+   * listener callbacks move into the writer registry. */
+  | "child.stdin"
+  | "writer.writeString"
+  | "writer.writeBytes"
+  | "writer.end"
+  | "writer.destroy"
+  | "writer.writable"
+  | "writer.onDrain"
+  | "writer.onFinish"
+  | "writer.onError"
   /** The first-class WritableStream write (`output.write(line)` — the
    * prefixStream idiom): the receiver IS the fd scalar (process.stdout/
    * stderr reads mint 1/2), dispatched onto the exact stdoutWrite/
@@ -2567,6 +2706,7 @@ export type IrLibFn =
   | "http.validateHeaderValue"
   | "http.serverJoinDupHeaders"
   | "http.serverMaxHeaderSizeSet"
+  | "http.serverAllowMissingHostHeader"
   /** The five writable numeric http.Server timeout fields use one
    * selector ABI: 0 timeout, 1 keepAliveTimeout, 2 headersTimeout,
    * 3 requestTimeout, 4 keepAliveTimeoutBuffer. These calls store/read
@@ -2603,12 +2743,6 @@ export type IrLibFn =
   | "http.resStrictContentLengthSet"
   | "http.resSetTimeout"
   | "http.resSetTimeoutCb"
-  | "http.resWritableEnded"
-  | "http.resFlushHeaders"
-  | "http.resAddTrailers"
-  | "http.resCork"
-  | "http.resUncork"
-  | "http.resWritableCorked"
   | "http.resGetHeader"
   | "http.resGetHeaderNames"
   | "http.resGetRawHeaderNames"
@@ -2619,6 +2753,9 @@ export type IrLibFn =
   | "http.reqUrl"
   | "http.reqMethod"
   | "http.reqHeader"
+  | "http.reqTrailer"
+  | "http.reqHeaderValues"
+  | "http.reqTrailerValues"
   | "http.reqOnData"
   | "http.reqOnEnd"
   | "http.resSetHeader"
@@ -2638,6 +2775,12 @@ export type IrLibFn =
   | "http.resWriteDyn"
   | "http.resEndDyn"
   | "http.resHeadersSent"
+  | "http.resWritableEnded"
+  | "http.resFlushHeaders"
+  | "http.resAddTrailers"
+  | "http.resCork"
+  | "http.resUncork"
+  | "http.resWritableCorked"
   /** The server-surface member follow-ups: reqStatusCode answers the
    * interned `number | undefined` union (negative = the undefined arm —
    * a SERVER request, where Node's statusCode is undefined; every client
@@ -2665,11 +2808,13 @@ export type IrLibFn =
    * statusCode split). sockDestroyed is socket.destroyed — true once the
    * fd is gone (destroy() or full close). */
   | "http.reqRawHeaders"
+  | "http.reqRawTrailers"
   | "http.reqStatusMessage"
   /** The `{ ...req.headers }` snapshot feed: [lowercased name, value,
    * ...] pairs in arrival order — the interned %headers.snapshot helper
    * builds the record over it, exactly the process.envPairs pattern. */
   | "http.reqHeaderPairs"
+  | "http.reqTrailerPairs"
   | "net.sockDestroyed"
   /** socket.writable — the write half is open: no end() yet, no FIN sent,
    * fd alive (connecting sockets answer true; writes queue). Node's
@@ -2710,8 +2855,6 @@ export type IrLibFn =
   | "http.reqHttpVersionMinor"
   | "http.reqAborted"
   | "http.reqComplete" | "http.reqDestroyed"
-  | "http.reqSetTimeout"
-  | "http.reqSetTimeoutCb"
   | "http.resDestroy"
   | "http.resOnClose"
   | "http.resWriteHeadPairs"
@@ -3018,6 +3161,13 @@ export type IrLibFn =
   | "http.clientGetHeaderNames"
   | "http.clientGetRawHeaderNames"
   | "http.clientGetHeaders"
+  | "http.clientWriteBytes"
+  | "http.clientEnd"
+  | "http.clientEndStr"
+  | "http.clientEndBytes"
+  /** The checked-dynamic chunk twins (the net.sockWriteDyn story). */
+  | "http.clientWriteDyn"
+  | "http.clientEndDyn"
   | "http.clientFlushHeaders"
   | "http.clientAddTrailers"
   | "http.clientCork"
@@ -3038,13 +3188,8 @@ export type IrLibFn =
   | "http.clientSetTimeoutCb"
   | "http.statusCodes"
   | "http.methods"
-  | "http.clientWriteBytes"
-  | "http.clientEnd"
-  | "http.clientEndStr"
-  | "http.clientEndBytes"
-  /** The checked-dynamic chunk twins (the net.sockWriteDyn story). */
-  | "http.clientWriteDyn"
-  | "http.clientEndDyn"
+  | "http.reqSetTimeout"
+  | "http.reqSetTimeoutCb"
   /** request/get with a URL-STRING first argument: the runtime parses it
    * (WHATWG) and dials — throws catchably on an unparsable input or a
    * non-http scheme. */
@@ -3067,18 +3212,14 @@ export type IrLibFn =
    * these are in the may-throw seed. readFile is utf8-fenced like
    * readFileSync. The non-interleaving divergence is documented in
    * SEMANTICS.md. */
-  /** node:crypto, the string-producing slice: randomUUID (never throws)
-   * and the COMPOSED randomBytes(n).toString("hex"|"base64") — one
-   * libCall, the Buffer never escapes (bare randomBytes is fenced).
-   * randomBytesToString THROWS Node's RangeError on out-of-range sizes. */
+  /** node:crypto randomness: randomUUID plus randomBytes as either a real
+   * Buffer or the fused randomBytes(n).toString("hex"|"base64") path.
+   * The size-taking forms throw Node's RangeError on invalid values. */
   | "crypto.randomUUID"
   | "crypto.randomBytesToString"
-  /** The COMPOSED hash chain createHash(alg).update(data).digest(enc)
-   * fused into one call — the Hash handle never materializes. Args are
-   * (alg, data, enc); alg is "sha256" | "sha1" and enc "hex" | "base64",
-   * both compile-time literals (frontend-fenced). Strings hash their
-   * UTF-8 bytes (Node's default input encoding); the bytes form hashes a
-   * Buffer/typed array's bytes. Pure; never throw. */
+  /** The fused createHash(alg).update(data).digest(enc) fast path and the
+   * one-shot crypto.hash implementation. First-class Hash/Hmac handles use
+   * the entries below; all paths share the incremental runtime core. */
   | "crypto.hashDigestStr"
   | "crypto.hashDigestBytes"
   /** The COMPOSED HMAC chain createHmac(alg, key).update(data).digest(enc)
@@ -3094,6 +3235,29 @@ export type IrLibFn =
    * ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH when the byte lengths differ (the
    * length is not secret, so that check is not constant time). */
   | "crypto.timingSafeEqual"
+  /** First-class static Hash/Hmac handles. Constructors validate the
+   * runtime algorithm string (md5/sha1/sha256); update returns the same
+   * handle by retained identity, copy snapshots Hash state, and digest
+   * finalizes the handle and returns either a Buffer or encoded string. */
+  | "crypto.hashNew"
+  | "crypto.hmacNewStr"
+  | "crypto.hmacNewBytes"
+  | "crypto.hashUpdateStr"
+  | "crypto.hashUpdateBytes"
+  | "crypto.hmacUpdateStr"
+  | "crypto.hmacUpdateBytes"
+  | "crypto.hashCopy"
+  | "crypto.hashDigestString"
+  | "crypto.hashDigestBuffer"
+  | "crypto.hmacDigestString"
+  | "crypto.hmacDigestBuffer"
+  | "crypto.timingSafeEqual"
+  | "crypto.randomFill"
+  | "crypto.randomFillRest"
+  | "crypto.randomInt"
+  | "crypto.pbkdf2"
+  | "crypto.randomBytesCb"
+  | "crypto.pbkdf2Cb"
   /** crypto.randomBytes(n) → a real u8 Buffer (+1). THROWS Node's
    * RangeError on out-of-range sizes, exactly like the composed
    * randomBytesToString (which keeps its one-libCall lowering — the two
@@ -3185,19 +3349,29 @@ export type IrLibFn =
   | "fs.writeFileSyncBytes"
   | "fsp.readFileBytes"
   /** node:zlib (scr_zlib.c — native-toolchain.ts compiles/links it ONLY when these
-   * appear on the IR, the regex/libcurl gating precedent): the one-shot
-   * family over u8 bytes with Node's default options — the zlib wrapper
-   * (deflateSync/inflateSync), gzip framing (gzipSync/gunzipSync), the
-   * header-sniffing unzipSync (gzip magic vs a zlib header), and the
-   * raw pair. deflateSyncLevel accepts a known integer -1..9; inflate throws. */
+   * appear on the IR, the regex/libcurl gating precedent): one-shot zlib,
+   * raw-DEFLATE, gzip, and auto-detect codecs over u8 bytes with Node's
+   * default options. Compression never throws (OOM aborts); decompression
+   * of corrupt input THROWS Node's error catchably. */
   | "zlib.deflateSync"
   | "zlib.deflateSyncLevel"
   | "zlib.inflateSync"
+  | "zlib.deflateRawSync"
+  | "zlib.inflateRawSync"
   | "zlib.gzipSync"
   | "zlib.gunzipSync"
   | "zlib.unzipSync"
-  | "zlib.deflateRawSync"
-  | "zlib.inflateRawSync"
+  /** The default-options callback twins run on the executable's shared
+   * native work pool and deliver (Error | null, Buffer) on a later loop
+   * turn. crc32 validates its optional uint32 seed synchronously. */
+  | "zlib.deflateCb"
+  | "zlib.inflateCb"
+  | "zlib.deflateRawCb"
+  | "zlib.inflateRawCb"
+  | "zlib.gzipCb"
+  | "zlib.gunzipCb"
+  | "zlib.unzipCb"
+  | "zlib.crc32"
   /** The Buffer overloads of the raw stream writes — same promptly
    * submitted streams as process.stdoutWrite/stderrWrite, constantly true.
    * The encoding arg is evaluated but ignored for bytes, like Node. The Cb
@@ -3231,11 +3405,18 @@ export type IrLibFn =
   | "fsp.chmod"
   | "fsp.rename"
   | "fsp.readdir"
+  /** `fs.promises.readdir(path, { withFileTypes: true })` — the settled-
+   * promise twin of fs.readdirTypesSync. The backends assemble the same
+   * call-site-shaped Dirent rows, then move the array into a promise;
+   * scandir failure becomes its rejection. */
+  | "fsp.readdirTypes"
   | "fsp.rm"
   /** fs.promises.rm(path, { recursive?, force? }): the rmOptsSync core
    * behind an already-settled promise. Failures become rejections. */
   | "fsp.rmOpts"
   | "fsp.stat"
+  | "fsp.realpath"
+  | "fsp.lstat"
   /** fs/promises.open and the statically represented FileHandle surface.
    * Every operation returns an already-settled promise; syscall failures
    * become rejections rather than escaping synchronously. read/write
@@ -3271,6 +3452,10 @@ export type IrLibFn =
   | "process.envPairs"
   | "process.exit"
   | "process.exitCodeSet"
+  /** Numeric process.exitCode write (integer validation, implicit exit status). */
+  | "process.setExitCode"
+  /** The code for process.exit() with no argument, or zero when unset. */
+  | "process.currentExitCode"
   | "process.cwd"
   /** getpid(2) / getuid(2): zero args → f64. POSIX-only target, so both
    * always answer (the checker's `getuid?` optionality covers Windows —
@@ -3509,6 +3694,17 @@ export type IrLibFn =
    * the replaced expression's own (never materialized — the
    * global.undefRead pattern). May-throw seed. */
   | "error.nodeThrow"
+  /** JS ToString over a dyn value WITH the object protocol (a user
+   * toString/valueOf member is CALLED and its throw propagates;
+   * exhaustion throws "Cannot convert object to primitive value"; units
+   * render "null"/"undefined") — the WHATWG USVString conversions
+   * (URLSearchParams names/values). Borrowed dyn; +1 string. May-throw. */
+  | "dyn.toStringCoerce"
+  /** JS ToNumber over a dyn value WITH the object protocol (number-hint
+   * valueOf/toString ordering; user throws propagate). Borrowed dyn;
+   * f64 result, or a throw. Used by statically lowered numeric coercions
+   * whose checker type remained any. */
+  | "dyn.toNumberCoerce"
   /** A read of a `declare`d const NOTHING defines (the bundler-define
    * pattern — __VERSION__): always throws the catchable ReferenceError
    * Node raises at the access ("<name> is not defined"). args[0] is the
@@ -3651,9 +3847,11 @@ export type IrLibFn =
   | "emitter.off"
   | "emitter.checkListener"
   | "emitter.onDyn"
+  | "emitter.onFlex"
   | "emitter.offDyn"
   | "emitter.removeAll"
   | "emitter.emit"
+  | "emitter.emitFlex"
   | "emitter.emitError"
   | "emitter.count"
   | "emitter.countFn"
@@ -3797,6 +3995,10 @@ export type IrLibFn =
   | "writable.uncork"
   | "stream.destroy"
   | "stream.destroyErr"
+  /** AsyncIteratorClose for Readable[Symbol.asyncIterator](): destroy with
+   * Node's AbortError/ABORT_ERR payload while the iterator's internal error
+   * consumer prevents an unhandled-error crash. */
+  | "stream.iteratorClose"
   | "stream.prop"
   | "stream.errored"
   /** The underscore-method assignment surface (`r._read = fn` after
@@ -3831,8 +4033,8 @@ export type IrLibFn =
    *
    * assert.ok: (pass, message) — the frontend computed the truthiness AND
    * the full message (the user's, or the compile-time source-text form —
-   * assert.fail lowers here too with pass=false). assert.eqF64/eqStr/
-   * eqBool: (a, b, negated, deep, msg, hasMsg) — Object.is comparison,
+   * assert.fail lowers here too with pass=false). assert.eqF64/eqBigInt/
+   * eqStr/eqBool: (a, b, negated, deep, msg, hasMsg) — Object.is comparison,
    * covering strictEqual/notStrictEqual and the scalar deepStrictEqual
    * pair; msg is a typed dummy ("" literal) when hasMsg is false (Node
    * distinguishes an omitted message from an empty one per operator).
@@ -3880,10 +4082,12 @@ export type IrLibFn =
    * All arguments are borrowed. */
   | "assert.ok"
   | "assert.eqF64"
+  | "assert.eqBigInt"
   | "assert.eqStr"
   | "assert.eqBool"
   | "assert.eqSym"
   | "assert.eqDyn"
+  | "assert.looseResult"
   | "assert.deepResult"
   | "assert.sameValue"
   /* deepStrictEqual's pair memo over cycle-capable types: enter answers
@@ -4133,6 +4337,8 @@ export type IrLibFn =
   | "date.newMs"
   | "date.newString"
   | "date.newComponents"
+  /** Date.parse(dateString), with its own reach witness for exact fences. */
+  | "date.parse"
   | "date.getTime"
   | "date.valueOf"
   | "date.toISOString"
@@ -4267,7 +4473,7 @@ export type IrLibFn =
    * uv_fs_copyfile behavior); its errors carry BOTH paths — Node's
    * "copyfile 'src' -> 'dest'". lstatSync is statSync without following
    * a trailing symlink (Node reports lstat); stats.isSymbolicLink /
-   * stats.blocks / nlink / atimeMs / mtimeMs are pure reads on the widened
+   * stats.dev / ino / blocks / nlink / atimeMs / mtimeMs / ctimeMs are pure reads on the widened
    * snapshot (blocks is allocated 512-byte units; the times are milliseconds
    * with their sub-second fractions, Node's arithmetic).
    * writeFileModeSync is writeFileSync(path, data, { mode }): the mode
@@ -4286,6 +4492,10 @@ export type IrLibFn =
   | "fs.renameSync"
   | "fs.renameCb"
   | "fs.lstatSync"
+  | "fs.fstatSync"
+  | "fs.fchmodSync"
+  | "fs.fsyncSync"
+  | "fs.linkSync"
   /** fs.openSync(path, flags) → the raw fd as f64; fs.readSync/fs.writeSync
    * over Buffer windows perform sequential I/O when position is -1 and
    * offset-preserving positioned I/O otherwise; fs.writeStrSync is the
@@ -4297,6 +4507,7 @@ export type IrLibFn =
    * fs errors (openSync ENOENT/EACCES..., readSync EBADF/range errors,
    * closeSync EBADF). */
   | "fs.openSync"
+  | "fs.openNumericSync"
   | "fs.readSync"
   | "fs.writeSync"
   | "fs.writeStrSync"
@@ -4335,6 +4546,7 @@ export type IrLibFn =
   | "stats.nlink"
   | "stats.atimeMs"
   | "stats.mtimeMs"
+  | "stats.ctimeMs"
   | "fs.writeFileModeSync"
   | "fs.writeFileExclusiveModeSync"
   | "fs.mkdirModeSync"
@@ -4412,6 +4624,8 @@ export type IrExpr =
    * for every program that held its numbers. */
   | { kind: "numLit"; value: number; spelling?: string; type: IrType; loc: SrcLoc }
   | { kind: "strLit"; value: string; type: IrType; loc: SrcLoc }
+  /** The singleton namespace token for one compiled or builtin module. */
+  | { kind: "moduleNsRef"; moduleId: string; type: IrType; loc: SrcLoc }
   | { kind: "boolLit"; value: boolean; type: IrType; loc: SrcLoc }
   /** An `undefined` or `null` literal; `type` is the matching unit kind.
    * Valid ONLY as the immediate value of a `unionWrap` (the frontend's slot
@@ -4453,8 +4667,8 @@ export type IrExpr =
    * statement-position `assign`). Statement position keeps the `assign`
    * statement; this node exists for value positions. */
   | { kind: "assignExpr"; localId: string; value: IrExpr; type: IrType; loc: SrcLoc }
-  /** JS ToBoolean: f64 is false iff 0, -0, or NaN; string is false iff empty.
-   * Operand is f64|string (bool needs no conversion) or a UNION — the ARM
+  /** JS ToBoolean: f64 is false iff 0, -0, or NaN; string is false iff empty;
+   * dyn asks its runtime kind. The other operand form is a UNION — the ARM
    * value's ToBoolean via a per-union interned helper (unit arms false;
    * f64/string/bool arms per-value; ref arms — arrays, records, objects,
    * functions, maps, sets, promises, ... — always true; jsval arms ask the
@@ -4944,12 +5158,13 @@ export type IrExpr =
    * TypeError), the interned signature key (dynCheck's exact-unwrap fast
    * path), and `fnName` — the best-effort static spelling for inspect
    * ([Function: name]) and Node-shaped call errors. The operand is
-   * borrowed; the result is owned (+1). Never throws. `liveRef` is the
-   * narrow Web-platform exception for record/array/bytes values (including
-   * mutable arms selected at runtime from a union) whose API contract
-   * exposes the same reference again (stream chunks and abort reasons): it
-   * emits a typed capsule with a live materializer instead of the ordinary
-   * deep copy. */
+   * borrowed; the result is owned (+1). Never throws. Program class
+   * instances always use a typed capsule so an exact checked cast recovers
+   * the original identity. `liveRef` requests the same capsule form for
+   * record/array/bytes values (including mutable arms selected at runtime
+   * from a union) whose Web API contract exposes the reference again, such
+   * as stream chunks and abort reasons; ordinary JSON-shaped values retain
+   * the documented deep-copy boundary. */
   | { kind: "dynFrom"; value: IrExpr; fnName?: string; liveRef?: true; type: IrType; loc: SrcLoc }
   /** Island value → dyn conversion (`type` is always dyn; the operand
    * is always jsval): the jsval→dyn crossing — an 'any'-typed engine
@@ -5604,6 +5819,7 @@ function isJsonSafeAt(
     // Symbols are DROPPED by Node's stringify (undefined at the top level,
     // omitted as object values) — silent divergence banned; rejected.
     case "symbol":
+    case "bigint":
     // Typed arrays stringify as index-keyed objects ({"0":1,...}) and
     // Buffers as {type:"Buffer",data:[...]} in Node — neither shape is
     // representable type-directedly; rejected like Maps.
@@ -5613,6 +5829,7 @@ function isJsonSafeAt(
     case "caught":
     case "promise":
     case "generator":
+    case "moduleNs":
     case "void":
       return false;
     // Record fields drop undefined. Stringification also represents it in
@@ -5817,6 +6034,7 @@ export function canMarshalTypedFuncIntoIsland(
  * entry carries the runtime tag spelling and the class display name
  * (dynCheck's "expected IncomingMessage ..." texts). */
 export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }> = new Map([
+  ["child", { tag: "SCR_DYNH_CHILD", cls: "ChildProcess" }],
   ["httpReq", { tag: "SCR_DYNH_HTTP_REQ", cls: "IncomingMessage" }],
   ["httpRes", { tag: "SCR_DYNH_HTTP_RES", cls: "ServerResponse" }],
   ["netSocket", { tag: "SCR_DYNH_NET_SOCKET", cls: "Socket" }],
@@ -5826,10 +6044,26 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
   ["httpClientReq", { tag: "SCR_DYNH_HTTP_CLIENT", cls: "ClientRequest" }],
 ]);
 
+/** A class value that crosses an `unknown` slot as a compiler-owned typed
+ * reference. %Error keeps its dedicated error encoding; every other class
+ * preserves the original object identity and exposes a materialized own-field
+ * view only when a checked-dynamic operation actually needs one. */
+export function isDynTypedRefType(t: IrType): t is Extract<IrType, { kind: "object" }> {
+  return t.kind === "object" && !RUNTIME_ERROR_CLASSES.has(t.className);
+}
+
+/** Whether a class layout field is an ECMAScript own enumerable property.
+ * `#private` slots and `%`-prefixed compiler storage exist only in the native
+ * layout; TypeScript `private`/`protected` fields keep ordinary names and are
+ * observable properties at runtime. */
+export function isClassOwnEnumerableFieldName(name: string): boolean {
+  return !name.startsWith("#") && !name.startsWith("%");
+}
+
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:
- * JSON-safe data, bytes<u8> (Rust shares views; C/LLVM copy), undefined-armed unions of
- * JSON-safe arms, boxable function types, and the runtime HANDLE kinds
- * (boxed by reference — DYN_HANDLE_KINDS). */
+ * JSON-safe data, bytes<u8> (payload copied), identity-preserving class
+ * references, undefined-armed unions of those arms, boxable function types,
+ * and the runtime HANDLE kinds (boxed by reference — DYN_HANDLE_KINDS). */
 export function canConvertToDyn(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
@@ -5848,6 +6082,7 @@ export function canConvertToDyn(
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
   if (t.kind === "object" && t.className === "%Error") return true;
+  if (isDynTypedRefType(t)) return true;
   if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   // Promises box by REFERENCE (SCR_DYN_PROMISE): promise<dyn> carries its
@@ -5865,12 +6100,16 @@ export function canConvertToDyn(
   }
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
-    if (!def) return false;
-    if (visiting.has(t.unionId)) return true;
-    visiting.add(t.unionId);
-    const convertible = def.arms.every((arm) => canConvertToDyn(arm, getRecord, getUnion, visiting));
-    visiting.delete(t.unionId);
-    return convertible;
+    // JSON-safe arms box as before; BOXABLE FUNCTION and PROMISE arms join them (the
+    // invalid-input probes iterate `[1, null, () => {}, true]` — the
+    // union's func arm crosses through the checked-dynamic function
+    // boundary exactly like a bare func dynFrom).
+    return !!def && def.arms.every((a) =>
+      a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion) ||
+      isDynTypedRefType(a) || DYN_HANDLE_KINDS.has(a.kind) ||
+      (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion)) ||
+      (a.kind === "promise" && canConvertToDyn(a, getRecord, getUnion)),
+    );
   }
   return false;
 }
@@ -5961,11 +6200,15 @@ export function canBoxFuncIntoDyn(
 ): boolean {
   return (
     t.kind === "func" &&
+    // Only the legacy hidden-dyn rest ABI has a checked-dynamic call thunk.
+    // Typed rest stays static (its trailing array is compiler-packed), and
+    // island rest has its separate engine host-callback adapter.
+    (t.rest !== true || t.restAbi === undefined) &&
     // A jsval (island) param converts through scr_jsval_from_dyn in the
     // thunk (wrapped cells unwrap by reference, dyn data deep-copies) —
     // the checker-'any' callback params of the routed-dispatch lane
     // (`bag.list.map((x) => ...)` with x typed any).
-    t.restAbi !== "array" && t.params.every((p) => p.kind === "dyn" || p.kind === "jsval" || canDynCheckTo(p, getRecord, getUnion)) &&
+    t.params.every((p) => p.kind === "dyn" || p.kind === "jsval" || canDynCheckTo(p, getRecord, getUnion)) &&
     // A jsval return converts through the by-reference wrap
     // (dynFromJsval — the thunk's result conversion), so engine-returning
     // callbacks box too: the routed-dispatch lane's flatMap shape.
@@ -6601,6 +6844,39 @@ export function moduleUsesInspect(mod: IrModule): boolean {
   return found;
 }
 
+/** True when the module reaches child_process or carries one of its runtime
+ * handle/result types. Besides the existing link consequence, this gates the
+ * checked-dynamic ChildProcess handle table installed from scr_child.c. */
+export function moduleUsesChildProcess(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (
+      node.kind === "libCall" &&
+      typeof node.fn === "string" &&
+      (node.fn.startsWith("cp.") || node.fn.startsWith("child.") || node.fn.startsWith("writer.") || node.fn.startsWith("spawnRes.") ||
+        node.fn === "process.forkTarget" || node.fn === "process.connected" || node.fn === "process.send" ||
+        node.fn === "process.sendCb" || node.fn === "process.disconnect" || node.fn === "process.onMessage" ||
+        node.fn === "process.onDisconnect")
+    ) {
+      found = true;
+      return;
+    }
+    if (node.kind === "child" || node.kind === "childStream" || node.kind === "childWriter" || node.kind === "spawnRes") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the module contains any net libCall — the link switch that
  * pulls scr_net.c into the binary and has the emitted main call
  * scr_net_install (native-toolchain.ts + emitter; the scr_events gating precedent).
@@ -6663,6 +6939,31 @@ export function moduleUsesSymbol(mod: IrModule): boolean {
       return;
     }
     if (node.kind === "symbol") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** True when bigint runtime operations or bigint-typed storage appears in
+ * the IR. The type check keeps retain/release references link-safe even
+ * when a producing statement was replaced by a runtime fence. */
+export function moduleUsesBigInt(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (
+      node.kind === "bigint" ||
+      (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("bigint."))
+    ) {
       found = true;
       return;
     }
@@ -6991,6 +7292,13 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   // exclude — refuse the surface like the rest of the event-loop family.
   ["fs.existsChk", "the async fs callback surface (fs.exists)"],
   ["fs.renameCb", "the async fs callback surface (fs.rename)"],
+  ["zlib.deflateCb", "the async node:zlib callback surface"],
+  ["zlib.inflateCb", "the async node:zlib callback surface"],
+  ["zlib.deflateRawCb", "the async node:zlib callback surface"],
+  ["zlib.inflateRawCb", "the async node:zlib callback surface"],
+  ["zlib.gzipCb", "the async node:zlib callback surface"],
+  ["zlib.gunzipCb", "the async node:zlib callback surface"],
+  ["zlib.unzipCb", "the async node:zlib callback surface"],
   ["process.stdoutWriteBytesCb", "process.stdout.write completion callbacks"],
   ["process.stderrWriteBytesCb", "process.stderr.write completion callbacks"],
   ["timers.", "the timers surface (setTimeout family)"],
@@ -7039,6 +7347,7 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["child", "the child_process surface"], ["effect", "the effect kernel"], ["genericFunc", "generic function values"],
   ["spawnRes", "the child_process surface"],
   ["childStream", "the child_process surface"],
+  ["childWriter", "the child_process surface"],
   ["netServer", "the node:net surface"],
   ["netSocket", "the node:net surface"],
   ["http2Session", "the node:http2 surface"],
@@ -7172,6 +7481,7 @@ export const LIB_NONDETERMINISTIC_PREFIXES: readonly [string, string][] = [
   ["process.kill", "process authority (kill)"],
   ["process.umask", "process authority (umask)"],
   ["process.exit", "process authority (exit)"],
+  ["process.setExitCode", "process authority (exit status)"],
   ["fs.", "the filesystem"],
   ["os.", "machine/OS identity"],
   // The CA-store surface reads the host's certificate bundle (and the
@@ -7208,13 +7518,26 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
 /** The may-throw seed: libCall members that can raise. Every fs.* member
  * EXCEPT existsSync (which, like Node's, swallows errors and returns false)
  * throws a catchable error on failure; json.parse throws a catchable
- * SyntaxError-shaped string on malformed input; process.* members never
- * throw. Backends' may-throw analyses must treat a function containing one
+ * SyntaxError-shaped string on malformed input. Backends' may-throw analyses must treat a function containing one
  * of these as throwing, exactly like a `throw` statement (and must ALSO
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   ...BIGINT_MAY_THROW, "json.stringifyReplacer",
+  "bigint.parse",
+  "bigint.fromF64",
+  "bigint.div",
+  "bigint.mod",
+  "bigint.pow",
+  "bigint.shl",
+  "bigint.shr",
+  "bigint.toString",
+  "bigint.asUintN",
+  "bigint.asIntN",
+  "bigint.bufferRead",
+  "bigint.bufferWrite",
+  "bigint.dataViewGet",
+  "bigint.dataViewSet",
   "fetch.responseNew",
   "fetch.abortTimeout",
   "fetch.abortAny",
@@ -7251,6 +7574,11 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dc.chanRunStores",
   "http.resWriteHeadDyn",
   "http.serverMaxHeaderSizeSet",
+  "http.resWriteContinue",
+  "http.resWriteProcessing",
+  "http.resWriteEarlyHints",
+  "http.validateHeaderName",
+  "http.validateHeaderValue",
   "http.serverTimeoutGet",
   "http.serverTimeoutOptionSet",
   "net.sockSetEncoding",
@@ -7282,11 +7610,13 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // any of them can throw. emitError additionally THROWS its payload when
   // 'error' has no listener, Node's unhandled-'error' contract.
   "emitter.emit",
+  "emitter.emitFlex",
   "emitter.emitError",
   "emitter.on",
   "emitter.off",
   "emitter.checkListener",
   "emitter.onDyn",
+  "emitter.onFlex",
   "emitter.offDyn",
   "emitter.onData",
   "emitter.onDataDyn",
@@ -7299,8 +7629,27 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "net.sockEndDyn",
   "http.resWriteDyn",
   "http.resEndDyn",
+  "http.resAddTrailers",
+  "http.resFlushHeaders",
+  "http.resUncork",
+  "http.resWriteHead",
+  "http.resWriteHeadN",
+  "http.resWriteHeadPairs",
+  "http.resWrite",
+  "http.resWriteBytes",
+  "http.resEnd",
+  "http.resEndStr",
+  "http.resEndBytes",
   "http.clientWriteDyn",
   "http.clientEndDyn",
+  "http.clientAddTrailers",
+  "http.clientFlushHeaders",
+  "http.clientUncork",
+  "http.clientWrite",
+  "http.clientWriteBytes",
+  "http.clientEnd",
+  "http.clientEndStr",
+  "http.clientEndBytes",
   // The URL-string client form throws catchably on an unparsable input
   // ("Invalid URL") or a non-http scheme (ERR_INVALID_PROTOCOL).
   "http.requestUrl",
@@ -7368,6 +7717,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "writable.uncork",
   "stream.destroy",
   "stream.destroyErr",
+  "stream.iteratorClose",
   // setMaxListeners(n) throws Node's ERR_OUT_OF_RANGE RangeError for
   // negative/NaN arguments; the static form's default-max write validates
   // identically (Node's validateNumber(n, "setMaxListeners", 0)).
@@ -7379,6 +7729,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "http.requestConnCb",
   "process.kill",
   "process.killNum",
+  "process.setExitCode",
   // cpuUsage(prev)'s field validation: negative/non-finite prev fields
   // throw Node's ERR_INVALID_ARG_VALUE RangeError, catchably.
   "process.cpuPrevValidate",
@@ -7498,6 +7849,27 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.statSync",
   "crypto.randomBytesToString",
   "crypto.randomBytes",
+  "crypto.hashDigestStr",
+  "crypto.hashDigestBytes",
+  "crypto.hashNew",
+  "crypto.hmacNewStr",
+  "crypto.hmacNewBytes",
+  "crypto.hashUpdateStr",
+  "crypto.hashUpdateBytes",
+  "crypto.hmacUpdateStr",
+  "crypto.hmacUpdateBytes",
+  "crypto.hashCopy",
+  "crypto.hashDigestString",
+  "crypto.hashDigestBuffer",
+  "crypto.hmacDigestString",
+  "crypto.hmacDigestBuffer",
+  "crypto.timingSafeEqual",
+  "crypto.randomFill",
+  "crypto.randomFillRest",
+  "crypto.randomInt",
+  "crypto.pbkdf2",
+  "crypto.randomBytesCb",
+  "crypto.pbkdf2Cb",
   "buffer.concat",
   "buffer.concatLen",
   // The checked-dynamic compare/equals validators: Node's argument
@@ -7528,9 +7900,10 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.readFileSyncBytes",
   "fs.writeFileSyncBytes",
   "zlib.inflateSync",
+  "zlib.inflateRawSync",
   "zlib.gunzipSync",
   "zlib.unzipSync",
-  "zlib.inflateRawSync",
+  "zlib.crc32",
   "date.toISOString",
   "date.toISOStringValue",
   "fs.mkdirRecursiveSync",
@@ -7558,10 +7931,12 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // catchable AssertionError on failure.
   "assert.ok",
   "assert.eqF64",
+  "assert.eqBigInt",
   "assert.eqStr",
   "assert.eqBool",
   "assert.eqSym",
   "assert.eqDyn",
+  "assert.looseResult",
   "assert.deepResult",
   "assert.match",
   "assert.refEqBytes",
@@ -7587,11 +7962,16 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.copyFileSync",
   "fs.renameSync",
   "fs.lstatSync",
+  "fs.fstatSync",
+  "fs.fchmodSync",
+  "fs.fsyncSync",
+  "fs.linkSync",
   "fs.writeFileModeSync",
   "fs.writeFileExclusiveModeSync",
   "fs.mkdirModeSync",
   "fs.mkdirRecursiveModeSync",
   "fs.openSync",
+  "fs.openNumericSync",
   "fs.readSync",
   "fs.writeSync",
   "fs.writeStrSync",

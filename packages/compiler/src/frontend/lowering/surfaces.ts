@@ -393,13 +393,6 @@ export const STR_METHODS: Record<
 > = {
   charCodeAt: { method: "charCodeAt", result: F64, minArgs: 1, maxArgs: 1 },
   charAt: { method: "charAt", result: STRING, minArgs: 1, maxArgs: 1 },
-  // codePointAt: the full CODE POINT number at a UTF-16 index (surrogate
-  // pairs combine) — NaN out of range, like charCodeAt's NaN.
-  codePointAt: { method: "codePointAt", result: F64, minArgs: 1, maxArgs: 1 },
-  // `at` uses relative UTF-16 indexing. The ambient override intentionally
-  // narrows its result to string; out-of-range indices throw the existing
-  // catchable TypeError divergence instead of producing undefined.
-  at: { method: "at", result: STRING, minArgs: 1, maxArgs: 1 },
   indexOf: { method: "indexOf", result: F64, minArgs: 1, maxArgs: 2 },
   // includes with a position argument is indexOf's clamp exactly (the
   // spec routes both through StringIndexOf) — the emitter composes
@@ -1056,7 +1049,7 @@ export function builtinConstLit(value: string | number | boolean, loc: { file: s
  * Node ships one frozen singleton; each read here mints a fresh string
  * array — a divergence only mutation could observe, and mutating Node's
  * frozen array throws anyway. */
-const NODE_BUILTIN_MODULES_V24: readonly string[] = [
+export const NODE_BUILTIN_MODULES_V24: readonly string[] = [
   "_http_agent", "_http_client", "_http_common", "_http_incoming",
   "_http_outgoing", "_http_server", "_stream_duplex", "_stream_passthrough",
   "_stream_readable", "_stream_transform", "_stream_wrap", "_stream_writable",

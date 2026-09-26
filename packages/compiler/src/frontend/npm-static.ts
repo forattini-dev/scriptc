@@ -61,6 +61,7 @@
  * slate. */
 
 import { thirdPartyDeclarationReason } from "./npm-static-declarations.js";
+import type { NpmStaticDeclarationOverloads, NpmStaticDeclarationProperties } from "./npm-static-declarations.js";
 import { rewriteBundlerCjsExports } from "./npm-static-rewrite.js";
 import { NpmStaticTypeBridge, resetNpmStaticTypes } from "./npm-static-types.js";
 import { isTsSourceFileName } from "./tsc-codes.js";
@@ -68,6 +69,8 @@ import { npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } fr
 import { trackedReadFile, trackedRealpath } from "./input-tracker.js";
 
 let activePackages: ReadonlySet<string> = new Set();
+let declarationOverloads: ReadonlyMap<string, NpmStaticDeclarationOverloads> = new Map();
+let declarationProperties: ReadonlyMap<string, NpmStaticDeclarationProperties> = new Map();
 
 /** Offender records of the CURRENT load attempt: packages whose static
  * compilation the preflight had to refuse, with the first reason. The
@@ -80,10 +83,21 @@ const rewriteCache = new Map<string, string | null>();
 
 export function setNpmStaticPackages(packages: Iterable<string>): void {
   activePackages = new Set(packages);
+  declarationOverloads = new Map();
+  declarationProperties = new Map();
   offenders.clear();
   rewriteCache.clear();
   resetNpmStaticTypes();
   realpathProbed.clear();
+}
+
+export function setNpmStaticDeclarationOverloads(
+  overloads: ReadonlyMap<string, NpmStaticDeclarationOverloads>,
+  properties: ReadonlyMap<string, NpmStaticDeclarationProperties> = new Map(),
+): void {
+  declarationOverloads = overloads;
+  declarationProperties = properties;
+  rewriteCache.clear();
 }
 
 export function npmStaticActive(): boolean {

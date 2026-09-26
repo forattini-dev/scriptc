@@ -131,6 +131,13 @@ static const struct {
      "ResultOrder,getServers,lookup,lookupService,promises,resolve,resolve4,resolve6,resolveAn"
      "y,resolveCaa,resolveCname,resolveMx,resolveNaptr,resolveNs,resolvePtr,resolveSoa,resolve"
      "Srv,resolveTlsa,resolveTxt,reverse,setDefaultResultOrder,setServers"},
+    {"node:dns/promises",
+     "ADDRGETNETWORKPARAMS,BADFAMILY,BADFLAGS,BADHINTS,BADNAME,BADQUERY,BADRESP,BADSTR,CANCELL"
+     "ED,CONNREFUSED,DESTRUCTION,EOF,FILE,FORMERR,LOADIPHLPAPI,NODATA,NOMEM,NONAME,NOTFOUND,NO"
+     "TIMP,NOTINITIALIZED,REFUSED,Resolver,SERVFAIL,TIMEOUT,getDefaultResultOrder,getServers,l"
+     "ookup,lookupService,resolve,resolve4,resolve6,resolveAny,resolveCaa,resolveCname,resolve"
+     "Mx,resolveNaptr,resolveNs,resolvePtr,resolveSoa,resolveSrv,resolveTlsa,resolveTxt,revers"
+     "e,setDefaultResultOrder,setServers"},
     {"node:readline",
      "Interface,clearLine,clearScreenDown,createInterface,cursorTo,emitKeypressEvents,moveCurs"
      "or,promises"},

@@ -31,8 +31,8 @@
       "apiEntries": 29,
       "static": {
         "supported": 0,
-        "partial": 15,
-        "refused": 6,
+        "partial": 17,
+        "refused": 4,
         "not-implemented": 8,
         "by-design": 0,
         "unreviewed": 0,
@@ -102,10 +102,10 @@
       "entries": 103,
       "apiEntries": 98,
       "static": {
-        "supported": 0,
+        "supported": 8,
         "partial": 2,
         "refused": 0,
-        "not-implemented": 96,
+        "not-implemented": 88,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -199,9 +199,9 @@
       "apiEntries": 39,
       "static": {
         "supported": 0,
-        "partial": 6,
-        "refused": 1,
-        "not-implemented": 32,
+        "partial": 17,
+        "refused": 0,
+        "not-implemented": 22,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -295,9 +295,9 @@
       "apiEntries": 145,
       "static": {
         "supported": 0,
-        "partial": 3,
-        "refused": 35,
-        "not-implemented": 107,
+        "partial": 18,
+        "refused": 30,
+        "not-implemented": 97,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -400,9 +400,9 @@
       },
       "dynamic": {
         "supported": 0,
-        "partial": 5,
-        "refused": 13,
-        "not-implemented": 33,
+        "partial": 12,
+        "refused": 36,
+        "not-implemented": 3,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -511,9 +511,9 @@
       "apiEntries": 276,
       "static": {
         "supported": 0,
-        "partial": 40,
+        "partial": 45,
         "refused": 0,
-        "not-implemented": 236,
+        "not-implemented": 231,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -559,9 +559,9 @@
       "apiEntries": 174,
       "static": {
         "supported": 0,
-        "partial": 24,
+        "partial": 131,
         "refused": 0,
-        "not-implemented": 150,
+        "not-implemented": 43,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -679,18 +679,18 @@
       "apiEntries": 27,
       "static": {
         "supported": 0,
-        "partial": 13,
+        "partial": 24,
         "refused": 0,
-        "not-implemented": 11,
+        "not-implemented": 1,
         "by-design": 0,
-        "unreviewed": 3,
+        "unreviewed": 2,
         "not-applicable": 0
       },
       "dynamic": {
         "supported": 0,
-        "partial": 18,
+        "partial": 20,
         "refused": 0,
-        "not-implemented": 9,
+        "not-implemented": 7,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -703,18 +703,18 @@
       "apiEntries": 22,
       "static": {
         "supported": 0,
-        "partial": 11,
+        "partial": 12,
         "refused": 0,
-        "not-implemented": 11,
+        "not-implemented": 10,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
       },
       "dynamic": {
         "supported": 0,
-        "partial": 8,
+        "partial": 9,
         "refused": 0,
-        "not-implemented": 14,
+        "not-implemented": 13,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -727,9 +727,9 @@
       "apiEntries": 30,
       "static": {
         "supported": 0,
-        "partial": 0,
-        "refused": 3,
-        "not-implemented": 27,
+        "partial": 5,
+        "refused": 0,
+        "not-implemented": 25,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -919,9 +919,9 @@
       "apiEntries": 119,
       "static": {
         "supported": 0,
-        "partial": 19,
+        "partial": 24,
         "refused": 0,
-        "not-implemented": 100,
+        "not-implemented": 95,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -1111,9 +1111,9 @@
       "apiEntries": 137,
       "static": {
         "supported": 0,
-        "partial": 31,
+        "partial": 36,
         "refused": 0,
-        "not-implemented": 106,
+        "not-implemented": 101,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -1255,9 +1255,9 @@
       "apiEntries": 18,
       "static": {
         "supported": 0,
-        "partial": 0,
+        "partial": 3,
         "refused": 0,
-        "not-implemented": 18,
+        "not-implemented": 15,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -1303,9 +1303,9 @@
       "apiEntries": 62,
       "static": {
         "supported": 0,
-        "partial": 3,
+        "partial": 5,
         "refused": 3,
-        "not-implemented": 55,
+        "not-implemented": 53,
         "by-design": 0,
         "unreviewed": 1,
         "not-applicable": 0
@@ -1327,8 +1327,8 @@
       "apiEntries": 105,
       "static": {
         "supported": 0,
-        "partial": 4,
-        "refused": 1,
+        "partial": 5,
+        "refused": 0,
         "not-implemented": 100,
         "by-design": 0,
         "unreviewed": 0,
@@ -1447,9 +1447,9 @@
       "apiEntries": 88,
       "static": {
         "supported": 0,
-        "partial": 2,
+        "partial": 3,
         "refused": 2,
-        "not-implemented": 84,
+        "not-implemented": 83,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -1538,7 +1538,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -1847,7 +1848,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -1937,7 +1939,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2000,7 +2003,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2036,7 +2040,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2096,8 +2101,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.assert.equal"
+        "status": "partial",
+        "evidence": "compiler-dedicated:assert.equal",
+        "tests": [
+          "tests/corpus/1600-assert-passing.ts",
+          "tests/corpus/1604-assert-deep-structures.ts",
+          "tests/corpus/1609-assert-async.ts",
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -2132,7 +2144,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2168,7 +2181,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2204,7 +2218,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2240,7 +2255,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2306,7 +2322,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2336,8 +2353,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.assert.notEqual"
+        "status": "partial",
+        "evidence": "compiler-dedicated:assert.notEqual",
+        "tests": [
+          "tests/corpus/1600-assert-passing.ts",
+          "tests/corpus/1604-assert-deep-structures.ts",
+          "tests/corpus/1609-assert-async.ts",
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -2372,7 +2396,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2408,7 +2433,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2444,7 +2470,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2480,7 +2507,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -2516,7 +2544,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -3976,7 +4005,9 @@
         "evidence": "derived:descendants",
         "tests": [
           "tests/corpus/1402-buffer-encodings.ts",
-          "tests/corpus/1660-buffer-read-write-num.ts"
+          "tests/corpus/1660-buffer-read-write-num.ts",
+          "tests/corpus/2902-bigint-bytes.ts",
+          "tests/corpus/2904-bigint-errors.ts"
         ]
       },
       "dynamic": {
@@ -4346,7 +4377,9 @@
         "evidence": "surface-manifest:node-builtin.buffer.isUtf8",
         "tests": [
           "tests/corpus/1402-buffer-encodings.ts",
-          "tests/corpus/1660-buffer-read-write-num.ts"
+          "tests/corpus/1660-buffer-read-write-num.ts",
+          "tests/corpus/2902-bigint-bytes.ts",
+          "tests/corpus/2904-bigint-errors.ts"
         ]
       },
       "dynamic": {
@@ -5156,8 +5189,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:buffer"
+        "status": "supported",
+        "evidence": "compiler-feature:buffer.buf.readBigInt64BE",
+        "tests": [
+          "tests/corpus/2902-bigint-bytes.ts",
+          "tests/corpus/2904-bigint-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -5186,8 +5223,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:buffer"
+        "status": "supported",
+        "evidence": "compiler-feature:buffer.buf.readBigInt64LE",
+        "tests": [
+          "tests/corpus/2902-bigint-bytes.ts",
+          "tests/corpus/2904-bigint-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -5216,8 +5257,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:buffer"
+        "status": "supported",
+        "evidence": "compiler-feature:buffer.buf.readBigUInt64BE",
+        "tests": [
+          "tests/corpus/2902-bigint-bytes.ts",
+          "tests/corpus/2904-bigint-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -5246,8 +5291,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:buffer"
+        "status": "supported",
+        "evidence": "compiler-feature:buffer.buf.readBigUInt64LE",
+        "tests": [
+          "tests/corpus/2902-bigint-bytes.ts",
+          "tests/corpus/2904-bigint-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -6083,8 +6132,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:buffer"
+        "status": "supported",
+        "evidence": "compiler-feature:buffer.buf.writeBigInt64BE",
+        "tests": [
+          "tests/corpus/2902-bigint-bytes.ts",
+          "tests/corpus/2904-bigint-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -6113,8 +6166,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:buffer"
+        "status": "supported",
+        "evidence": "compiler-feature:buffer.buf.writeBigInt64LE",
+        "tests": [
+          "tests/corpus/2902-bigint-bytes.ts",
+          "tests/corpus/2904-bigint-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -6143,8 +6200,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:buffer"
+        "status": "supported",
+        "evidence": "compiler-feature:buffer.buf.writeBigUInt64BE",
+        "tests": [
+          "tests/corpus/2902-bigint-bytes.ts",
+          "tests/corpus/2904-bigint-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -6173,8 +6234,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:buffer"
+        "status": "supported",
+        "evidence": "compiler-feature:buffer.buf.writeBigUInt64LE",
+        "tests": [
+          "tests/corpus/2902-bigint-bytes.ts",
+          "tests/corpus/2904-bigint-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -14000,7 +14065,16 @@
         "tests": [
           "tests/corpus/1361-spawn-events.ts",
           "tests/corpus/1565-spawn-pipe-streams.ts",
-          "tests/corpus/2844-node-disposable-resources.ts"
+          "tests/corpus/2844-node-disposable-resources.ts",
+          "tests/corpus/2893-child-stdin-duplex.ts",
+          "tests/corpus/2894-child-stdin-backpressure.ts",
+          "tests/corpus/2895-child-stdin-write-after-end.ts",
+          "tests/corpus/2896-child-stdin-write-after-finish.ts",
+          "tests/corpus/2897-child-stdin-destroy.ts",
+          "tests/corpus/2898-child-stdin-spawn-failure.ts",
+          "tests/corpus/2911-execfile-callback.ts",
+          "tests/corpus/2939-child-shell-text.ts",
+          "tests/corpus/2946-child-fork-ipc/main.ts"
         ]
       },
       "dynamic": {
@@ -14108,8 +14182,11 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.child_process.execFile"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.child_process.execFile",
+        "tests": [
+          "tests/corpus/2911-execfile-callback.ts"
+        ]
       },
       "dynamic": {
         "status": "refused",
@@ -14135,8 +14212,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.child_process.fork",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "refused",
@@ -14166,7 +14246,10 @@
         "evidence": "surface-manifest:node-builtin.child_process.spawn",
         "tests": [
           "tests/corpus/1361-spawn-events.ts",
-          "tests/corpus/1565-spawn-pipe-streams.ts"
+          "tests/corpus/1565-spawn-pipe-streams.ts",
+          "tests/corpus/2911-execfile-callback.ts",
+          "tests/corpus/2939-child-shell-text.ts",
+          "tests/corpus/2946-child-fork-ipc/main.ts"
         ]
       },
       "dynamic": {
@@ -14278,7 +14361,10 @@
         "evidence": "surface-manifest:node-builtin.child_process.execFileSync",
         "tests": [
           "tests/corpus/1361-spawn-events.ts",
-          "tests/corpus/1565-spawn-pipe-streams.ts"
+          "tests/corpus/1565-spawn-pipe-streams.ts",
+          "tests/corpus/2911-execfile-callback.ts",
+          "tests/corpus/2939-child-shell-text.ts",
+          "tests/corpus/2946-child-fork-ipc/main.ts"
         ]
       },
       "dynamic": {
@@ -14309,7 +14395,10 @@
         "evidence": "surface-manifest:node-builtin.child_process.execSync",
         "tests": [
           "tests/corpus/1361-spawn-events.ts",
-          "tests/corpus/1565-spawn-pipe-streams.ts"
+          "tests/corpus/1565-spawn-pipe-streams.ts",
+          "tests/corpus/2911-execfile-callback.ts",
+          "tests/corpus/2939-child-shell-text.ts",
+          "tests/corpus/2946-child-fork-ipc/main.ts"
         ]
       },
       "dynamic": {
@@ -14340,7 +14429,10 @@
         "evidence": "surface-manifest:node-builtin.child_process.spawnSync",
         "tests": [
           "tests/corpus/1361-spawn-events.ts",
-          "tests/corpus/1565-spawn-pipe-streams.ts"
+          "tests/corpus/1565-spawn-pipe-streams.ts",
+          "tests/corpus/2911-execfile-callback.ts",
+          "tests/corpus/2939-child-shell-text.ts",
+          "tests/corpus/2946-child-fork-ipc/main.ts"
         ]
       },
       "dynamic": {
@@ -14502,8 +14594,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.subprocess.disconnect",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -14613,8 +14708,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.subprocess.send",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -14748,8 +14846,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.connected",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -14937,8 +15038,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.stderr",
+        "tests": [
+          "tests/corpus/1565-spawn-pipe-streams.ts",
+          "tests/corpus/2939-child-shell-text.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -14964,8 +15069,16 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.stdin",
+        "tests": [
+          "tests/corpus/2893-child-stdin-duplex.ts",
+          "tests/corpus/2894-child-stdin-backpressure.ts",
+          "tests/corpus/2895-child-stdin-write-after-end.ts",
+          "tests/corpus/2896-child-stdin-write-after-finish.ts",
+          "tests/corpus/2897-child-stdin-destroy.ts",
+          "tests/corpus/2898-child-stdin-spawn-failure.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -15018,8 +15131,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.stdout",
+        "tests": [
+          "tests/corpus/1565-spawn-pipe-streams.ts",
+          "tests/corpus/2939-child-shell-text.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -15045,8 +15162,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.'close'",
+        "tests": [
+          "tests/corpus/2939-child-shell-text.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -15072,8 +15192,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.'disconnect'",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -15153,8 +15276,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.'message'",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -23211,7 +23337,9 @@
         "tests": [
           "tests/corpus/1358-crypto-random.ts",
           "tests/corpus/1534-crypto-hash-chain.ts",
-          "tests/corpus/2556-crypto-introspection.ts"
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
         ]
       },
       "dynamic": {
@@ -23808,8 +23936,12 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.createHash"
+        "status": "partial",
+        "evidence": "compiler-dedicated:crypto.createHash",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -23838,8 +23970,12 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.createHmac"
+        "status": "partial",
+        "evidence": "compiler-dedicated:crypto.createHmac",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -24450,8 +24586,12 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.hash"
+        "status": "partial",
+        "evidence": "compiler-dedicated:crypto.hash",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -24534,8 +24674,12 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.pbkdf2"
+        "status": "partial",
+        "evidence": "compiler-dedicated:crypto.pbkdf2",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -24564,8 +24708,12 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.pbkdf2Sync"
+        "status": "partial",
+        "evidence": "compiler-dedicated:crypto.pbkdf2Sync",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -24707,7 +24855,9 @@
         "tests": [
           "tests/corpus/1358-crypto-random.ts",
           "tests/corpus/1534-crypto-hash-chain.ts",
-          "tests/corpus/2556-crypto-introspection.ts"
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
         ]
       },
       "dynamic": {
@@ -24767,8 +24917,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:crypto"
+        "status": "partial",
+        "evidence": "compiler-dedicated:crypto.randomFillSync",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -24797,8 +24951,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:crypto"
+        "status": "partial",
+        "evidence": "compiler-dedicated:crypto.randomInt",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -24832,7 +24990,9 @@
         "tests": [
           "tests/corpus/1358-crypto-random.ts",
           "tests/corpus/1534-crypto-hash-chain.ts",
-          "tests/corpus/2556-crypto-introspection.ts"
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
         ]
       },
       "dynamic": {
@@ -25027,8 +25187,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:crypto"
+        "status": "partial",
+        "evidence": "compiler-dedicated:crypto.timingSafeEqual",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -26443,8 +26607,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:crypto"
+        "status": "partial",
+        "evidence": "compiler-dedicated:Hash",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -26473,8 +26641,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:crypto"
+        "status": "partial",
+        "evidence": "compiler-dedicated:hash.copy",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -26503,8 +26675,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:crypto"
+        "status": "partial",
+        "evidence": "compiler-dedicated:hash.digest",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -26533,8 +26709,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:crypto"
+        "status": "partial",
+        "evidence": "compiler-dedicated:hash.update",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -26563,8 +26743,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:crypto"
+        "status": "partial",
+        "evidence": "compiler-dedicated:Hmac",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -26593,8 +26777,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:crypto"
+        "status": "partial",
+        "evidence": "compiler-dedicated:hmac.digest",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -26623,8 +26811,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:crypto"
+        "status": "partial",
+        "evidence": "compiler-dedicated:hmac.update",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -28321,8 +28513,12 @@
       "anchor": "dep0009-cryptopbkdf2-without-digest",
       "nodeStability": null,
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.pbkdf2"
+        "status": "partial",
+        "evidence": "compiler-dedicated:crypto.pbkdf2",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "not-applicable",
@@ -28457,7 +28653,9 @@
         "evidence": "surface-manifest:node-builtin.fs.readSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -30156,7 +30354,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -32043,8 +32242,12 @@
       "anchor": "dep0179-hash-constructor",
       "nodeStability": null,
       "static": {
-        "status": "not-applicable",
-        "evidence": "compiler-chapter-policy:deprecations"
+        "status": "partial",
+        "evidence": "compiler-dedicated:Hash",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "not-applicable",
@@ -32087,8 +32290,12 @@
       "anchor": "dep0181-hmac-constructor",
       "nodeStability": null,
       "static": {
-        "status": "not-applicable",
-        "evidence": "compiler-chapter-policy:deprecations"
+        "status": "partial",
+        "evidence": "compiler-dedicated:Hmac",
+        "tests": [
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "not-applicable",
@@ -32201,7 +32408,9 @@
         "evidence": "surface-manifest:node-builtin.fs.existsSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -34965,8 +35174,11 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "partial",
+        "evidence": "island-export:node:dns/promises.Resolver",
+        "tests": [
+          "tests/fixtures/npm/cases/island-web-plumbing/main.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -35019,8 +35231,11 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "partial",
+        "evidence": "island-export:node:dns/promises.getServers",
+        "tests": [
+          "tests/fixtures/npm/cases/island-web-plumbing/main.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -35046,8 +35261,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.lookup"
       },
       "anchorSource": "exact"
     },
@@ -35073,8 +35288,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.lookupService"
       },
       "anchorSource": "exact"
     },
@@ -35100,8 +35315,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolve"
       },
       "anchorSource": "exact"
     },
@@ -35127,8 +35342,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolve4"
       },
       "anchorSource": "exact"
     },
@@ -35154,8 +35369,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolve6"
       },
       "anchorSource": "exact"
     },
@@ -35181,8 +35396,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolveAny"
       },
       "anchorSource": "exact"
     },
@@ -35208,8 +35423,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolveCaa"
       },
       "anchorSource": "exact"
     },
@@ -35235,8 +35450,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolveCname"
       },
       "anchorSource": "exact"
     },
@@ -35262,8 +35477,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolveMx"
       },
       "anchorSource": "exact"
     },
@@ -35289,8 +35504,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolveNaptr"
       },
       "anchorSource": "exact"
     },
@@ -35316,8 +35531,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolveNs"
       },
       "anchorSource": "exact"
     },
@@ -35343,8 +35558,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolvePtr"
       },
       "anchorSource": "exact"
     },
@@ -35370,8 +35585,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolveSoa"
       },
       "anchorSource": "exact"
     },
@@ -35397,8 +35612,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolveSrv"
       },
       "anchorSource": "exact"
     },
@@ -35424,8 +35639,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolveTlsa"
       },
       "anchorSource": "exact"
     },
@@ -35451,8 +35666,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.resolveTxt"
       },
       "anchorSource": "exact"
     },
@@ -35478,8 +35693,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns/promises.reverse"
       },
       "anchorSource": "exact"
     },
@@ -35505,8 +35720,11 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "partial",
+        "evidence": "island-export:node:dns/promises.setDefaultResultOrder",
+        "tests": [
+          "tests/fixtures/npm/cases/island-web-plumbing/main.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -35532,8 +35750,11 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "partial",
+        "evidence": "island-export:node:dns/promises.getDefaultResultOrder",
+        "tests": [
+          "tests/fixtures/npm/cases/island-web-plumbing/main.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -35559,8 +35780,11 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "partial",
+        "evidence": "island-export:node:dns/promises.setServers",
+        "tests": [
+          "tests/fixtures/npm/cases/island-web-plumbing/main.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -36000,8 +36224,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns.resolveAny"
       },
       "anchorSource": "exact"
     },
@@ -36054,8 +36278,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns.resolveCaa"
       },
       "anchorSource": "exact"
     },
@@ -36108,8 +36332,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns.resolveNaptr"
       },
       "anchorSource": "exact"
     },
@@ -36162,8 +36386,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns.resolvePtr"
       },
       "anchorSource": "exact"
     },
@@ -36189,8 +36413,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns.resolveSoa"
       },
       "anchorSource": "exact"
     },
@@ -36243,8 +36467,8 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "refused",
+        "evidence": "island-stub:node:dns.resolveTlsa"
       },
       "anchorSource": "exact"
     },
@@ -36324,8 +36548,11 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "partial",
+        "evidence": "island-export:node:dns.setDefaultResultOrder",
+        "tests": [
+          "tests/fixtures/npm/cases/island-web-plumbing/main.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -36351,8 +36578,11 @@
         "evidence": "compiler-unmatched:dns"
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-unmatched:dns"
+        "status": "partial",
+        "evidence": "island-export:node:dns.getDefaultResultOrder",
+        "tests": [
+          "tests/fixtures/npm/cases/island-web-plumbing/main.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -50395,7 +50625,12 @@
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
           "tests/corpus/2595-fs-arg-ladders.cjs",
-          "tests/corpus/2844-node-disposable-resources.ts"
+          "tests/corpus/2844-node-disposable-resources.ts",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts",
+          "tests/corpus/2940-fsp-realpath.ts",
+          "tests/corpus/2941-fsp-lstat-identity.ts",
+          "tests/corpus/2942-fsp-readdir-dirent.ts"
         ]
       },
       "dynamic": {
@@ -51269,7 +51504,9 @@
         "evidence": "surface-manifest:node-builtin.fs.promises.access",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -51333,7 +51570,9 @@
         "evidence": "surface-manifest:node-builtin.fs.promises.chmod",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -51582,8 +51821,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:fs"
+        "status": "partial",
+        "evidence": "compiler-feature:fs.fsPromises.lstat",
+        "tests": [
+          "tests/corpus/2941-fsp-lstat-identity.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -51616,7 +51858,9 @@
         "evidence": "surface-manifest:node-builtin.fs.promises.mkdir",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -51707,7 +51951,9 @@
         "evidence": "surface-manifest:node-builtin.fs.promises.open",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -51762,10 +52008,9 @@
       },
       "static": {
         "status": "partial",
-        "evidence": "surface-manifest:node-builtin.fs.promises.readdir",
+        "evidence": "compiler-feature:fs.fsPromises.readdir",
         "tests": [
-          "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2942-fsp-readdir-dirent.ts"
         ]
       },
       "dynamic": {
@@ -51799,7 +52044,9 @@
         "evidence": "surface-manifest:node-builtin.fs.promises.readFile",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -51859,8 +52106,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:fs"
+        "status": "partial",
+        "evidence": "compiler-feature:fs.fsPromises.realpath",
+        "tests": [
+          "tests/corpus/2940-fsp-realpath.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -51893,7 +52143,9 @@
         "evidence": "surface-manifest:node-builtin.fs.promises.rename",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -51957,7 +52209,9 @@
         "evidence": "surface-manifest:node-builtin.fs.promises.rm",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -51991,7 +52245,9 @@
         "evidence": "surface-manifest:node-builtin.fs.promises.stat",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -52106,7 +52362,9 @@
         "evidence": "surface-manifest:node-builtin.fs.promises.unlink",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -52194,7 +52452,9 @@
         "evidence": "surface-manifest:node-builtin.fs.promises.writeFile",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -53407,7 +53667,9 @@
         "evidence": "surface-manifest:node-builtin.fs.rename",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -53699,7 +53961,9 @@
         "evidence": "surface-manifest:node-builtin.fs.watch",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54060,7 +54324,9 @@
         "evidence": "surface-manifest:node-builtin.fs.accessSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54094,7 +54360,9 @@
         "evidence": "surface-manifest:node-builtin.fs.appendFileSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54128,7 +54396,9 @@
         "evidence": "surface-manifest:node-builtin.fs.chmodSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54162,7 +54432,9 @@
         "evidence": "surface-manifest:node-builtin.fs.chownSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54193,7 +54465,9 @@
         "evidence": "surface-manifest:node-builtin.fs.closeSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54227,7 +54501,9 @@
         "evidence": "surface-manifest:node-builtin.fs.copyFileSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54288,7 +54564,9 @@
         "evidence": "surface-manifest:node-builtin.fs.existsSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54646,7 +54924,9 @@
         "evidence": "surface-manifest:node-builtin.fs.lstatSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54680,7 +54960,9 @@
         "evidence": "surface-manifest:node-builtin.fs.mkdirSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54714,7 +54996,9 @@
         "evidence": "surface-manifest:node-builtin.fs.mkdtempSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54802,7 +55086,9 @@
         "evidence": "surface-manifest:node-builtin.fs.openSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54833,7 +55119,9 @@
         "evidence": "surface-manifest:node-builtin.fs.readdirSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54867,7 +55155,9 @@
         "evidence": "surface-manifest:node-builtin.fs.readFileSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54931,7 +55221,9 @@
         "evidence": "surface-manifest:node-builtin.fs.readSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -54962,7 +55254,9 @@
         "evidence": "surface-manifest:node-builtin.fs.readSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -55020,7 +55314,9 @@
         "evidence": "surface-manifest:node-builtin.fs.realpathSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -55081,7 +55377,9 @@
         "evidence": "surface-manifest:node-builtin.fs.renameSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -55115,7 +55413,9 @@
         "evidence": "surface-manifest:node-builtin.fs.rmdirSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -55149,7 +55449,9 @@
         "evidence": "surface-manifest:node-builtin.fs.rmSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -55183,7 +55485,9 @@
         "evidence": "surface-manifest:node-builtin.fs.statSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -55298,7 +55602,9 @@
         "evidence": "surface-manifest:node-builtin.fs.unlinkSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -55359,7 +55665,9 @@
         "evidence": "surface-manifest:node-builtin.fs.writeFileSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -55393,7 +55701,9 @@
         "evidence": "surface-manifest:node-builtin.fs.writeSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -55424,7 +55734,9 @@
         "evidence": "surface-manifest:node-builtin.fs.writeSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -55455,7 +55767,9 @@
         "evidence": "surface-manifest:node-builtin.fs.writeSync",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2919-fs-function-values.ts",
+          "tests/corpus/2920-fs-promises-function-values.ts"
         ]
       },
       "dynamic": {
@@ -56853,8 +57167,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:fs"
+        "status": "partial",
+        "evidence": "compiler-feature:fs.dev",
+        "tests": [
+          "tests/corpus/2941-fsp-lstat-identity.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -56880,8 +57197,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:fs"
+        "status": "partial",
+        "evidence": "compiler-feature:fs.ino",
+        "tests": [
+          "tests/corpus/2941-fsp-lstat-identity.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -57177,8 +57497,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:fs"
+        "status": "partial",
+        "evidence": "compiler-feature:fs.ctimeMs",
+        "tests": [
+          "tests/corpus/2941-fsp-lstat-identity.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -61859,7 +62182,35 @@
           "tests/corpus/2500-net-autosel-timeout.ts",
           "tests/corpus/2596-net-arg-ladders.cjs",
           "tests/corpus/2672-http-request-response-callback.ts",
-          "tests/corpus/2689-http-server-timeout-properties.ts"
+          "tests/corpus/2689-http-server-timeout-properties.ts",
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2953-http-header-validation.ts",
+          "tests/corpus/2954-http-outgoing-headers.ts",
+          "tests/corpus/2955-http-static-state.ts",
+          "tests/corpus/2956-http-static-informational.ts",
+          "tests/corpus/2957-http-static-response-controls.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/corpus/2973-http-static-agent.ts",
+          "tests/corpus/2974-http-static-module-values.ts",
+          "tests/corpus/2975-http-static-client-controls.ts",
+          "tests/corpus/2976-http-static-incoming-state.ts",
+          "tests/corpus/2977-http-static-incoming-timeout.ts",
+          "tests/corpus/2978-http-static-client-timeout.ts",
+          "tests/corpus/2979-http-static-server-timeout.ts",
+          "tests/corpus/2980-http-static-server-timeout-default.ts",
+          "tests/corpus/2981-http-static-events.ts",
+          "tests/corpus/2982-http-static-close-all.ts",
+          "tests/corpus/2983-http-static-close-idle.ts",
+          "tests/corpus/2984-http-static-close-upgrade.ts",
+          "tests/corpus/2985-http-static-message-destroy.ts",
+          "tests/corpus/2986-http-static-client-socket-finish.ts",
+          "tests/corpus/2987-http-static-timeout-errors.ts",
+          "tests/corpus/2988-http-static-client-abort.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts",
+          "tests/fixtures/server/cases/http2-connect/main.ts",
+          "tests/fixtures/server/cases/upgrade-both/main.ts"
         ]
       },
       "dynamic": {
@@ -61970,8 +62321,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.http.Agent",
+        "tests": [
+          "tests/corpus/2973-http-static-agent.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -62081,8 +62435,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.agent.destroy",
+        "tests": [
+          "tests/corpus/2973-http-static-agent.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -62111,8 +62468,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.agent.getName",
+        "tests": [
+          "tests/corpus/2973-http-static-agent.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62138,8 +62498,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.freeSockets",
+        "tests": [
+          "tests/corpus/2973-http-static-agent.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62165,8 +62528,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.maxFreeSockets",
+        "tests": [
+          "tests/corpus/2973-http-static-agent.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62192,8 +62558,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.maxSockets",
+        "tests": [
+          "tests/corpus/2973-http-static-agent.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62246,8 +62615,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.requests",
+        "tests": [
+          "tests/corpus/2973-http-static-agent.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62273,8 +62645,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.sockets",
+        "tests": [
+          "tests/corpus/2973-http-static-agent.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62300,8 +62675,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.http.ClientRequest",
+        "tests": [
+          "tests/corpus/2981-http-static-events.ts",
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -62330,8 +62709,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.abort",
+        "tests": [
+          "tests/corpus/2988-http-static-client-abort.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -62360,8 +62742,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.cork",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62457,8 +62846,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.destroyed",
+        "tests": [
+          "tests/corpus/2978-http-static-client-timeout.ts",
+          "tests/corpus/2986-http-static-client-socket-finish.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62484,8 +62877,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.flushHeaders",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -62514,8 +62914,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.getHeader",
+        "tests": [
+          "tests/corpus/2954-http-outgoing-headers.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -62544,8 +62947,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.getHeaderNames",
+        "tests": [
+          "tests/corpus/2954-http-outgoing-headers.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62571,8 +62977,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.getHeaders",
+        "tests": [
+          "tests/corpus/2954-http-outgoing-headers.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62598,8 +63007,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.getRawHeaderNames",
+        "tests": [
+          "tests/corpus/2954-http-outgoing-headers.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62625,8 +63037,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.hasHeader",
+        "tests": [
+          "tests/corpus/2954-http-outgoing-headers.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62652,8 +63067,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.removeHeader",
+        "tests": [
+          "tests/corpus/2954-http-outgoing-headers.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -62682,8 +63100,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.setHeader",
+        "tests": [
+          "tests/corpus/2954-http-outgoing-headers.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -62712,8 +63133,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.setNoDelay",
+        "tests": [
+          "tests/corpus/2975-http-static-client-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62739,8 +63163,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.setSocketKeepAlive",
+        "tests": [
+          "tests/corpus/2978-http-static-client-timeout.ts",
+          "tests/corpus/2987-http-static-timeout-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62767,11 +63195,10 @@
       },
       "static": {
         "status": "partial",
-        "evidence": "compiler-dedicated:request.setTimeout",
+        "evidence": "compiler-feature:http.request.setTimeout",
         "tests": [
-          "tests/corpus/1780-http-res-surface.ts",
-          "tests/corpus/2672-http-request-response-callback.ts",
-          "tests/corpus/2689-http-server-timeout-properties.ts"
+          "tests/corpus/2978-http-static-client-timeout.ts",
+          "tests/corpus/2987-http-static-timeout-errors.ts"
         ]
       },
       "dynamic": {
@@ -62801,8 +63228,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.request.uncork",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62863,8 +63297,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.aborted",
+        "tests": [
+          "tests/corpus/2988-http-static-client-abort.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62890,8 +63327,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.connection",
+        "tests": [
+          "tests/corpus/2986-http-static-client-socket-finish.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62917,8 +63357,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.finished",
+        "tests": [
+          "tests/corpus/2975-http-static-client-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62971,8 +63414,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.path",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -62998,8 +63444,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.method",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63025,8 +63474,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.host",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63052,8 +63504,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.protocol",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63079,8 +63534,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.reusedSocket",
+        "tests": [
+          "tests/corpus/2975-http-static-client-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63106,8 +63564,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.socket",
+        "tests": [
+          "tests/corpus/2986-http-static-client-socket-finish.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63133,8 +63594,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.writableEnded",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63160,8 +63624,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.writableFinished",
+        "tests": [
+          "tests/corpus/2986-http-static-client-socket-finish.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63187,8 +63654,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'abort'",
+        "tests": [
+          "tests/corpus/2988-http-static-client-abort.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63214,8 +63684,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'close'",
+        "tests": [
+          "tests/corpus/2981-http-static-events.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63295,8 +63768,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'finish'",
+        "tests": [
+          "tests/corpus/2986-http-static-client-socket-finish.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63349,8 +63825,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'response'",
+        "tests": [
+          "tests/corpus/2981-http-static-events.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63376,8 +63855,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'socket'",
+        "tests": [
+          "tests/corpus/2986-http-static-client-socket-finish.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63403,8 +63885,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'timeout'",
+        "tests": [
+          "tests/corpus/2978-http-static-client-timeout.ts",
+          "tests/corpus/2987-http-static-timeout-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63430,8 +63916,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'upgrade'",
+        "tests": [
+          "tests/fixtures/server/cases/upgrade-both/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63457,8 +63946,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.http.Server",
+        "tests": [
+          "tests/corpus/2981-http-static-events.ts",
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "refused",
@@ -63515,8 +64008,13 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.server.closeAllConnections",
+        "tests": [
+          "tests/corpus/2982-http-static-close-all.ts",
+          "tests/corpus/2983-http-static-close-idle.ts",
+          "tests/corpus/2984-http-static-close-upgrade.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63542,8 +64040,13 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.server.closeIdleConnections",
+        "tests": [
+          "tests/corpus/2982-http-static-close-all.ts",
+          "tests/corpus/2983-http-static-close-idle.ts",
+          "tests/corpus/2984-http-static-close-upgrade.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63600,8 +64103,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.server.setTimeout",
+        "tests": [
+          "tests/corpus/2979-http-static-server-timeout.ts",
+          "tests/corpus/2980-http-static-server-timeout-default.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63686,8 +64193,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.listening",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -63976,8 +64486,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'close'",
+        "tests": [
+          "tests/corpus/2981-http-static-events.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64003,8 +64516,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'connect'",
+        "tests": [
+          "tests/fixtures/server/cases/http2-connect/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64030,8 +64546,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'connection'",
+        "tests": [
+          "tests/corpus/2981-http-static-events.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64084,8 +64603,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'request'",
+        "tests": [
+          "tests/corpus/2981-http-static-events.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64111,8 +64633,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'upgrade'",
+        "tests": [
+          "tests/fixtures/server/cases/upgrade-both/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64138,8 +64663,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.http.ServerResponse",
+        "tests": [
+          "tests/corpus/2981-http-static-events.ts",
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64165,8 +64694,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.response.addTrailers",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64192,8 +64728,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.response.cork",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64251,8 +64794,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.response.flushHeaders",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64310,8 +64860,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.response.getHeaderNames",
+        "tests": [
+          "tests/corpus/2954-http-outgoing-headers.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64337,8 +64890,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.response.getHeaders",
+        "tests": [
+          "tests/corpus/2954-http-outgoing-headers.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64460,8 +65016,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.response.setTimeout",
+        "tests": [
+          "tests/corpus/2957-http-static-response-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64487,8 +65046,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.response.uncork",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64546,8 +65112,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.response.writeContinue",
+        "tests": [
+          "tests/corpus/2956-http-static-informational.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64573,8 +65142,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.response.writeEarlyHints",
+        "tests": [
+          "tests/corpus/2956-http-static-informational.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64632,8 +65204,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.response.writeProcessing",
+        "tests": [
+          "tests/corpus/2956-http-static-informational.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64659,8 +65234,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.connection",
+        "tests": [
+          "tests/corpus/2957-http-static-response-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64686,8 +65264,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.finished",
+        "tests": [
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64713,8 +65294,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.headersSent",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64740,8 +65324,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.req",
+        "tests": [
+          "tests/corpus/2957-http-static-response-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64767,8 +65354,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.sendDate",
+        "tests": [
+          "tests/corpus/2957-http-static-response-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64794,8 +65384,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.socket",
+        "tests": [
+          "tests/corpus/2957-http-static-response-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64821,8 +65414,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.statusCode",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64848,8 +65444,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.statusMessage",
+        "tests": [
+          "tests/corpus/2957-http-static-response-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64875,8 +65474,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.strictContentLength",
+        "tests": [
+          "tests/corpus/2957-http-static-response-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64902,8 +65504,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.writableEnded",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64929,8 +65534,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.writableFinished",
+        "tests": [
+          "tests/corpus/2957-http-static-response-controls.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64956,8 +65564,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'close'",
+        "tests": [
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -64983,8 +65594,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'finish'",
+        "tests": [
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65010,8 +65624,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.http.IncomingMessage",
+        "tests": [
+          "tests/corpus/2981-http-static-events.ts",
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -65040,8 +65658,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.message.destroy",
+        "tests": [
+          "tests/corpus/2985-http-static-message-destroy.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -65070,8 +65691,13 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.message.setTimeout",
+        "tests": [
+          "tests/corpus/2976-http-static-incoming-state.ts",
+          "tests/corpus/2977-http-static-incoming-timeout.ts",
+          "tests/corpus/2987-http-static-timeout-errors.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65097,8 +65723,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.aborted",
+        "tests": [
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65124,8 +65753,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.complete",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65151,8 +65783,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.message.connection",
+        "tests": [
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65178,8 +65813,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.headers",
+        "tests": [
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65205,8 +65843,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.headersDistinct",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65232,8 +65877,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.httpVersion",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65259,8 +65907,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.method",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65286,8 +65937,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.rawHeaders",
+        "tests": [
+          "tests/corpus/2972-http-static-distinct-snapshots.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65313,8 +65967,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.rawTrailers",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65340,8 +66001,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.socket",
+        "tests": [
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65367,8 +66031,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.statusCode",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65394,8 +66061,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.statusMessage",
+        "tests": [
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65421,8 +66091,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.trailers",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65448,8 +66125,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.trailersDistinct",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65475,8 +66159,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.url",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65502,8 +66189,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'aborted'",
+        "tests": [
+          "tests/corpus/2985-http-static-message-destroy.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65529,8 +66219,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.'close'",
+        "tests": [
+          "tests/corpus/2976-http-static-incoming-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65583,8 +66276,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.outgoingMessage.addTrailers",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65637,8 +66337,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.outgoingMessage.cork",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65718,8 +66425,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.outgoingMessage.flushHeaders",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -65988,8 +66702,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.outgoingMessage.uncork",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -66069,8 +66790,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.headersSent",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -66123,8 +66847,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.writableCorked",
+        "tests": [
+          "tests/corpus/2700-http-static-trailers.ts",
+          "tests/corpus/2701-http-static-trailer-wire.ts",
+          "tests/corpus/2702-http-static-trailer-end.ts",
+          "tests/corpus/2972-http-static-distinct-snapshots.ts",
+          "tests/fixtures/server/cases/http-trailers/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -66150,8 +66881,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.writableEnded",
+        "tests": [
+          "tests/corpus/2955-http-static-state.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -66565,8 +67299,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.http.validateHeaderName",
+        "tests": [
+          "tests/corpus/2953-http-header-validation.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -66592,8 +67329,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.http.validateHeaderValue",
+        "tests": [
+          "tests/corpus/2953-http-header-validation.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -66673,8 +67413,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.METHODS",
+        "tests": [
+          "tests/corpus/2974-http-static-module-values.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -66703,8 +67446,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.STATUS_CODES",
+        "tests": [
+          "tests/corpus/2974-http-static-module-values.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -66763,8 +67509,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:http"
+        "status": "partial",
+        "evidence": "compiler-feature:http.maxHeaderSize",
+        "tests": [
+          "tests/corpus/2974-http-static-module-values.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -73712,7 +74461,11 @@
           "tests/corpus/1598-cjs-builtin-require/main.js",
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2858-import-meta-resolve/main.mjs",
+          "tests/corpus/2860-require-resolve/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -73750,7 +74503,9 @@
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -73814,7 +74569,9 @@
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -73851,7 +74608,9 @@
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -73888,7 +74647,9 @@
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -73955,7 +74716,9 @@
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -73986,12 +74749,19 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:modules.require.resolve"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.require.resolve",
+        "tests": [
+          "tests/corpus/2858-import-meta-resolve/main.mjs",
+          "tests/corpus/2860-require-resolve/main.cjs"
+        ]
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-feature:modules.require.resolve"
+        "status": "partial",
+        "evidence": "island-feature:modules.require.resolve",
+        "tests": [
+          "tests/fixtures/npm/cases/create-require/main.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -74013,12 +74783,19 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:modules.require.resolve.paths"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.require.resolve.paths",
+        "tests": [
+          "tests/corpus/2858-import-meta-resolve/main.mjs",
+          "tests/corpus/2860-require-resolve/main.cjs"
+        ]
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-feature:modules.require.resolve.paths"
+        "status": "partial",
+        "evidence": "island-feature:modules.require.resolve.paths",
+        "tests": [
+          "tests/fixtures/npm/cases/create-require/main.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -74040,8 +74817,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:modules.cache"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.cache",
+        "tests": [
+          "tests/corpus/2880-cjs-module-graph/main.cjs"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -74104,7 +74884,9 @@
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -74167,7 +74949,9 @@
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -74194,8 +74978,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:modules.children"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.children",
+        "tests": [
+          "tests/corpus/2880-cjs-module-graph/main.cjs"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -74227,7 +75014,9 @@
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -74264,7 +75053,9 @@
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -74301,7 +75092,9 @@
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1629-require-main-filename.cjs",
-          "tests/corpus/2830-cjs-require-self-name/main.cjs"
+          "tests/corpus/2830-cjs-require-self-name/main.cjs",
+          "tests/corpus/2880-cjs-module-graph/main.cjs",
+          "tests/corpus/2923-cjs-factory-export/main.cjs"
         ]
       },
       "dynamic": {
@@ -74332,8 +75125,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:modules.id"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.id",
+        "tests": [
+          "tests/corpus/2880-cjs-module-graph/main.cjs"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -74363,8 +75159,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:modules.isPreloading"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.isPreloading",
+        "tests": [
+          "tests/corpus/2880-cjs-module-graph/main.cjs"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -74390,8 +75189,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:modules.loaded"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.loaded",
+        "tests": [
+          "tests/corpus/2880-cjs-module-graph/main.cjs"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -74421,8 +75223,11 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:modules.parent"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.parent",
+        "tests": [
+          "tests/corpus/2880-cjs-module-graph/main.cjs"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -74452,7 +75257,11 @@
         "inherited": true
       },
       "static": {
-        "status": "unreviewed"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.path",
+        "tests": [
+          "tests/corpus/2880-cjs-module-graph/main.cjs"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -74482,8 +75291,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:modules.paths"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.paths",
+        "tests": [
+          "tests/corpus/2880-cjs-module-graph/main.cjs"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -74509,8 +75321,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:modules.Module"
+        "status": "partial",
+        "evidence": "compiler-feature:modules.Module",
+        "tests": [
+          "tests/corpus/2880-cjs-module-graph/main.cjs"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -74962,6 +75777,10 @@
         "tests": [
           "tests/corpus/2646-top-level-await.ts",
           "tests/corpus/2701-import-meta/main.mjs",
+          "tests/corpus/2858-import-meta-resolve/main.mjs",
+          "tests/corpus/2933-static-dynamic-import/main.ts",
+          "tests/corpus/2934-static-import-stored.ts",
+          "tests/corpus/2935-module-namespace-values/main.ts",
           "tests/corpus/950-modules-basic/main.ts"
         ]
       },
@@ -74970,6 +75789,7 @@
         "evidence": "derived:descendants",
         "tests": [
           "tests/corpus/2646-top-level-await.ts",
+          "tests/fixtures/npm/cases/dual-entry/main.ts",
           "tests/fixtures/npm/cases/dynamic-import/main.ts"
         ]
       },
@@ -75020,12 +75840,18 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:esm.import.meta.resolve"
+        "status": "partial",
+        "evidence": "compiler-feature:esm.import.meta.resolve",
+        "tests": [
+          "tests/corpus/2858-import-meta-resolve/main.mjs"
+        ]
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-feature:esm.import.meta.resolve"
+        "status": "partial",
+        "evidence": "island-feature:esm.import.meta.resolve",
+        "tests": [
+          "tests/fixtures/npm/cases/dual-entry/main.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -75256,7 +76082,10 @@
         "evidence": "compiler-feature:esm.import",
         "tests": [
           "tests/corpus/950-modules-basic/main.ts",
-          "tests/corpus/2646-top-level-await.ts"
+          "tests/corpus/2646-top-level-await.ts",
+          "tests/corpus/2933-static-dynamic-import/main.ts",
+          "tests/corpus/2934-static-import-stored.ts",
+          "tests/corpus/2935-module-namespace-values/main.ts"
         ]
       },
       "dynamic": {
@@ -75372,7 +76201,10 @@
         "evidence": "compiler-feature:esm.file:",
         "tests": [
           "tests/corpus/950-modules-basic/main.ts",
-          "tests/corpus/2646-top-level-await.ts"
+          "tests/corpus/2646-top-level-await.ts",
+          "tests/corpus/2933-static-dynamic-import/main.ts",
+          "tests/corpus/2934-static-import-stored.ts",
+          "tests/corpus/2935-module-namespace-values/main.ts"
         ]
       },
       "dynamic": {
@@ -75434,7 +76266,10 @@
         "evidence": "compiler-feature:esm.node:",
         "tests": [
           "tests/corpus/950-modules-basic/main.ts",
-          "tests/corpus/2646-top-level-await.ts"
+          "tests/corpus/2646-top-level-await.ts",
+          "tests/corpus/2933-static-dynamic-import/main.ts",
+          "tests/corpus/2934-static-import-stored.ts",
+          "tests/corpus/2935-module-namespace-values/main.ts"
         ]
       },
       "dynamic": {
@@ -75523,7 +76358,10 @@
         "evidence": "compiler-feature:esm.import",
         "tests": [
           "tests/corpus/950-modules-basic/main.ts",
-          "tests/corpus/2646-top-level-await.ts"
+          "tests/corpus/2646-top-level-await.ts",
+          "tests/corpus/2933-static-dynamic-import/main.ts",
+          "tests/corpus/2934-static-import-stored.ts",
+          "tests/corpus/2935-module-namespace-values/main.ts"
         ]
       },
       "dynamic": {
@@ -75585,7 +76423,10 @@
         "evidence": "compiler-feature:esm.import",
         "tests": [
           "tests/corpus/950-modules-basic/main.ts",
-          "tests/corpus/2646-top-level-await.ts"
+          "tests/corpus/2646-top-level-await.ts",
+          "tests/corpus/2933-static-dynamic-import/main.ts",
+          "tests/corpus/2934-static-import-stored.ts",
+          "tests/corpus/2935-module-namespace-values/main.ts"
         ]
       },
       "dynamic": {
@@ -76079,7 +76920,10 @@
         "evidence": "compiler-feature:esm.await",
         "tests": [
           "tests/corpus/950-modules-basic/main.ts",
-          "tests/corpus/2646-top-level-await.ts"
+          "tests/corpus/2646-top-level-await.ts",
+          "tests/corpus/2933-static-dynamic-import/main.ts",
+          "tests/corpus/2934-static-import-stored.ts",
+          "tests/corpus/2935-module-namespace-values/main.ts"
         ]
       },
       "dynamic": {
@@ -76267,8 +77111,15 @@
       "anchor": "",
       "nodeStability": null,
       "static": {
-        "status": "not-implemented",
-        "evidence": "derived:descendants"
+        "status": "partial",
+        "evidence": "derived:descendants",
+        "tests": [
+          "tests/corpus/2631-create-require/main.ts",
+          "tests/corpus/2637-create-require-bare/main.ts",
+          "tests/corpus/2675-create-require-nested-esm.js",
+          "tests/corpus/2932-create-require-program/main.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -76315,8 +77166,15 @@
       "anchor": "modulecreaterequirefilename",
       "nodeStability": null,
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.module.createRequire"
+        "status": "partial",
+        "evidence": "compiler-feature:module.module.createRequire",
+        "tests": [
+          "tests/corpus/2631-create-require/main.ts",
+          "tests/corpus/2637-create-require-bare/main.ts",
+          "tests/corpus/2675-create-require-nested-esm.js",
+          "tests/corpus/2932-create-require-program/main.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -76368,8 +77226,11 @@
       "anchor": "moduleisbuiltinmodulename",
       "nodeStability": null,
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.module.isBuiltin"
+        "status": "partial",
+        "evidence": "compiler-feature:module.module.isBuiltin",
+        "tests": [
+          "tests/corpus/2932-create-require-program/main.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -76475,8 +77336,11 @@
       "anchor": "modulesyncbuiltinesmexports",
       "nodeStability": null,
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.module.syncBuiltinESMExports"
+        "status": "partial",
+        "evidence": "compiler-feature:module.module.syncBuiltinESMExports",
+        "tests": [
+          "tests/corpus/2932-create-require-program/main.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -76501,8 +77365,13 @@
       "anchor": "the-module-object",
       "nodeStability": null,
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:module"
+        "status": "partial",
+        "evidence": "compiler-feature:module.builtinModules",
+        "tests": [
+          "tests/corpus/2631-create-require/main.ts",
+          "tests/corpus/2637-create-require-bare/main.ts",
+          "tests/corpus/2932-create-require-program/main.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -81211,7 +82080,8 @@
         "status": "partial",
         "evidence": "derived:descendants",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -81637,7 +82507,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.os.homedir",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -81670,7 +82541,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.os.hostname",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -81763,7 +82635,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.os.networkInterfaces",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -81796,7 +82669,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.os.platform",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -81829,7 +82703,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.os.release",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -81889,7 +82764,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.os.tmpdir",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -81922,7 +82798,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.os.totalmem",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -81955,7 +82832,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.os.type",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -82018,7 +82896,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.os.userInfo",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -82081,7 +82960,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.os.EOL",
         "tests": [
-          "tests/corpus/1480-os-network-interfaces.ts"
+          "tests/corpus/1480-os-network-interfaces.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -82171,6 +83051,10 @@
         "status": "partial",
         "evidence": "derived:descendants",
         "tests": [
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts",
           "tests/corpus/957-builtins-namespace.ts"
         ]
       },
@@ -82231,7 +83115,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.basename",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82264,7 +83152,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.dirname",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82297,7 +83189,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.extname",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82387,7 +83283,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.isAbsolute",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82420,7 +83320,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.join",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82453,7 +83357,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.normalize",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82516,7 +83424,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.relative",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82549,7 +83461,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.resolve",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82582,7 +83498,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.toNamespacedPath",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82615,7 +83535,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.delimiter",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82648,7 +83572,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.posix",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82681,7 +83609,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.sep",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -82714,7 +83646,11 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.path.win32",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2915-path-function-values.ts",
+          "tests/corpus/2916-path-function-values-cjs.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts",
+          "tests/corpus/2918-builtin-callable-widths-cjs.ts"
         ]
       },
       "dynamic": {
@@ -85894,6 +86830,7 @@
         "evidence": "derived:descendants",
         "tests": [
           "tests/corpus/2314-process-introspection.ts",
+          "tests/corpus/2946-child-fork-ipc/main.ts",
           "tests/corpus/990-process-basics.ts"
         ]
       },
@@ -85963,8 +86900,11 @@
       "anchor": "event-disconnect",
       "nodeStability": null,
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:process"
+        "status": "partial",
+        "evidence": "compiler-feature:process.'disconnect'",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -86007,8 +86947,11 @@
       "anchor": "event-message",
       "nodeStability": null,
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:process"
+        "status": "partial",
+        "evidence": "compiler-feature:process.'message'",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -86475,8 +87418,11 @@
       "anchor": "processdisconnect",
       "nodeStability": null,
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:process"
+        "status": "partial",
+        "evidence": "compiler-feature:process.process.disconnect",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -87213,8 +88159,11 @@
       "anchor": "processsendmessage-sendhandle-options-callback",
       "nodeStability": null,
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:process"
+        "status": "partial",
+        "evidence": "compiler-feature:process.process.send",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -87731,8 +88680,11 @@
       "anchor": "",
       "nodeStability": null,
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:process"
+        "status": "partial",
+        "evidence": "compiler-feature:process.connected",
+        "tests": [
+          "tests/corpus/2946-child-fork-ipc/main.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -89197,6 +90149,7 @@
         "status": "partial",
         "evidence": "derived:descendants",
         "tests": [
+          "tests/corpus/2917-builtin-callable-widths.ts",
           "tests/corpus/957-builtins-namespace.ts"
         ]
       },
@@ -89230,7 +90183,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.querystring.decode",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -89263,7 +90217,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.querystring.encode",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -89296,7 +90251,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.querystring.escape",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -89329,7 +90285,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.querystring.parse",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -89362,7 +90319,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.querystring.stringify",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -89395,7 +90353,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.querystring.unescape",
         "tests": [
-          "tests/corpus/957-builtins-namespace.ts"
+          "tests/corpus/957-builtins-namespace.ts",
+          "tests/corpus/2917-builtin-callable-widths.ts"
         ]
       },
       "dynamic": {
@@ -93868,7 +94827,13 @@
         "tests": [
           "tests/corpus/1685-stream-readable-basics.ts",
           "tests/corpus/1688-stream-writable-basics.ts",
-          "tests/corpus/1814-stream-pipeline.cjs"
+          "tests/corpus/1746-stream-for-await.ts",
+          "tests/corpus/1814-stream-pipeline.cjs",
+          "tests/corpus/2861-readable-iterator-close.ts",
+          "tests/corpus/2893-child-stdin-duplex.ts",
+          "tests/corpus/2894-child-stdin-backpressure.ts",
+          "tests/corpus/2895-child-stdin-write-after-end.ts",
+          "tests/corpus/2897-child-stdin-destroy.ts"
         ]
       },
       "dynamic": {
@@ -95441,8 +96406,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:stream"
+        "status": "partial",
+        "evidence": "compiler-feature:stream.writable.destroy",
+        "tests": [
+          "tests/corpus/2897-child-stdin-destroy.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -95692,8 +96660,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:stream"
+        "status": "partial",
+        "evidence": "compiler-feature:stream.writable",
+        "tests": [
+          "tests/corpus/2893-child-stdin-duplex.ts",
+          "tests/corpus/2895-child-stdin-write-after-end.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -95989,8 +96961,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:stream"
+        "status": "partial",
+        "evidence": "compiler-feature:stream.'drain'",
+        "tests": [
+          "tests/corpus/2894-child-stdin-backpressure.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -96604,8 +97579,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:stream"
+        "status": "partial",
+        "evidence": "compiler-feature:stream.readable",
+        "tests": [
+          "tests/corpus/1746-stream-for-await.ts",
+          "tests/corpus/2861-readable-iterator-close.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -96685,8 +97664,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:stream"
+        "status": "partial",
+        "evidence": "compiler-feature:stream.readable.iterator",
+        "tests": [
+          "tests/corpus/1746-stream-for-await.ts",
+          "tests/corpus/2861-readable-iterator-close.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -98804,6 +99787,7 @@
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
           "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts",
           "tests/harness/node-test.test.ts"
         ]
       },
@@ -99461,7 +100445,8 @@
           "tests/corpus/1600-assert-passing.ts",
           "tests/corpus/1604-assert-deep-structures.ts",
           "tests/corpus/1609-assert-async.ts",
-          "tests/corpus/1721-assert-throws-regex-class.ts"
+          "tests/corpus/1721-assert-throws-regex-class.ts",
+          "tests/corpus/2936-static-loose-equality.ts"
         ]
       },
       "dynamic": {
@@ -105719,8 +106704,13 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "derived:descendants"
+        "status": "partial",
+        "evidence": "derived:descendants",
+        "tests": [
+          "tests/corpus/1448-stream-columns.ts",
+          "tests/corpus/2992-stream-rows.ts",
+          "tests/harness/terminal-geometry.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -106079,8 +107069,13 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:tty"
+        "status": "partial",
+        "evidence": "compiler-dedicated:writeStream.columns",
+        "tests": [
+          "tests/corpus/1448-stream-columns.ts",
+          "tests/corpus/2992-stream-rows.ts",
+          "tests/harness/terminal-geometry.test.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -106133,8 +107128,13 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:tty"
+        "status": "partial",
+        "evidence": "compiler-dedicated:writeStream.rows",
+        "tests": [
+          "tests/corpus/1448-stream-columns.ts",
+          "tests/corpus/2992-stream-rows.ts",
+          "tests/harness/terminal-geometry.test.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -107282,7 +108282,8 @@
         "status": "partial",
         "evidence": "derived:descendants",
         "tests": [
-          "tests/corpus/1794-searchparams-url-live.ts"
+          "tests/corpus/1794-searchparams-url-live.ts",
+          "tests/corpus/2946-url-port-hash.ts"
         ]
       },
       "dynamic": {
@@ -107602,8 +108603,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:url"
+        "status": "partial",
+        "evidence": "compiler-feature:url.hash",
+        "tests": [
+          "tests/corpus/2946-url-port-hash.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -107791,8 +108795,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:url"
+        "status": "partial",
+        "evidence": "compiler-feature:url.port",
+        "tests": [
+          "tests/corpus/2946-url-port-hash.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -109300,7 +110307,10 @@
         "status": "partial",
         "evidence": "derived:descendants",
         "tests": [
-          "tests/corpus/2440-console-inspect-args.ts"
+          "tests/corpus/1473-promisify-execfile.ts",
+          "tests/corpus/1573-promisify-execfile-env-spread.ts",
+          "tests/corpus/2440-console-inspect-args.ts",
+          "tests/corpus/2912-promisify-fs-readfile.ts"
         ]
       },
       "dynamic": {
@@ -110920,7 +111930,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.util.parseArgs",
         "tests": [
-          "tests/corpus/2440-console-inspect-args.ts"
+          "tests/corpus/2440-console-inspect-args.ts",
+          "tests/corpus/2912-promisify-fs-readfile.ts"
         ]
       },
       "dynamic": {
@@ -110953,7 +111964,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.util.parseArgs",
         "tests": [
-          "tests/corpus/2440-console-inspect-args.ts"
+          "tests/corpus/2440-console-inspect-args.ts",
+          "tests/corpus/2912-promisify-fs-readfile.ts"
         ]
       },
       "dynamic": {
@@ -111010,8 +112022,13 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.util.promisify"
+        "status": "partial",
+        "evidence": "compiler-feature:util.util.promisify",
+        "tests": [
+          "tests/corpus/1473-promisify-execfile.ts",
+          "tests/corpus/1573-promisify-execfile-env-spread.ts",
+          "tests/corpus/2912-promisify-fs-readfile.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -111268,7 +112285,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.util.types",
         "tests": [
-          "tests/corpus/2440-console-inspect-args.ts"
+          "tests/corpus/2440-console-inspect-args.ts",
+          "tests/corpus/2912-promisify-fs-readfile.ts"
         ]
       },
       "dynamic": {
@@ -115593,7 +116611,9 @@
         "tests": [
           "tests/corpus/1358-crypto-random.ts",
           "tests/corpus/1534-crypto-hash-chain.ts",
-          "tests/corpus/2556-crypto-introspection.ts"
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
         ]
       },
       "dynamic": {
@@ -119384,7 +120404,9 @@
         "tests": [
           "tests/corpus/1358-crypto-random.ts",
           "tests/corpus/1534-crypto-hash-chain.ts",
-          "tests/corpus/2556-crypto-introspection.ts"
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
         ]
       },
       "dynamic": {
@@ -120149,6 +121171,7 @@
         "status": "partial",
         "evidence": "derived:descendants",
         "tests": [
+          "tests/corpus/2862-web-readable-async-iteration.ts",
           "tests/harness/fetch-conformance.test.ts"
         ]
       },
@@ -120668,8 +121691,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:webstreams"
+        "status": "partial",
+        "evidence": "compiler-feature:webstreams.readableStream.values",
+        "tests": [
+          "tests/corpus/2862-web-readable-async-iteration.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -124724,7 +125750,8 @@
         "status": "partial",
         "evidence": "derived:descendants",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -125828,7 +126855,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.deflateSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -125891,7 +126919,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.deflateRawSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -125954,7 +126983,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.gunzipSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -126017,7 +127047,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.gzipSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -126080,7 +127111,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.inflateSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -126143,7 +127175,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.inflateRawSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -126206,7 +127239,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.unzipSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -127061,7 +128095,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.deflateSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -127124,7 +128159,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.deflateRawSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -127187,7 +128223,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.gunzipSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -127250,7 +128287,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.gzipSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -127313,7 +128351,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.inflateSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -127376,7 +128415,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.inflateRawSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {
@@ -127439,7 +128479,8 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.unzipSync",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts"
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
         ]
       },
       "dynamic": {

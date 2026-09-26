@@ -19,6 +19,7 @@ import { isRelativeSpecifier } from "../workspace-registry.js";
 import { probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { trackedReadFile } from "../input-tracker.js";
+import { requireResolvePathsRuntime, resolveImportMetaRuntime, resolveRequireRuntime, type RuntimeResolveError, type RuntimeResolveResult } from "../runtime-resolve.js";
 import { invalidJsonModuleDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import {
   BuiltinModuleFn,
@@ -31,6 +32,7 @@ import {
   builtinConstLit,
   fenceOrDropOptionKey,
   isChildSurfaceMember,
+  NODE_BUILTIN_MODULES_V24,
 } from "./surfaces.js";
 import { conditionalSpreadOf, droppableStatic, lowerAbsenceProbe, lowerDynObjectLiteral } from "./lower-exprs.js";
 import { lowerOptionalArgument, lowerStringSearchArgument } from "./optional-arguments.js";
@@ -39,7 +41,7 @@ import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "
 import { generatorMeta, timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding, voidizedCallback } from "./lower-server.js";
 import { pairsSnapshotHelper } from "./pairs-snapshot.js";
-import { BOOL, BYTES_U8, CHILD_T, CHILDSTREAM_T, DYN, F64, FILEHANDLE_T, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/ir.js";
+import { BOOL, BYTES_U8, CHILD_T, CHILDSTREAM_T, CHILDWRITER_T, CRYPTOHASH_T, DYN, F64, FILEHANDLE_T, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/ir.js";
 import { boolLit, countedFor, numLit, strLit, varRef } from "../../ir/build.js";
 
 export function optionalStringTags(lowerer: Lowerer, type: IrType): { stringTag: number; undefinedTag: number } | null {
@@ -3390,6 +3392,16 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       lowerer.checker.getSymbolAtLocation(access.name),
     );
   }
+
+
+
+function cryptoEncoding(lowerer: Lowerer, node: ts.Expression, use: string): IrExpr {
+  const type = lowerer.typeOf(node);
+  if (!type.isStringLiteralType() || (type.value !== "hex" && type.value !== "base64")) {
+    lowerer.noLowering(`${use} with this encoding`, node, 'the lowered output encodings are "hex" and "base64"');
+  }
+  return lowerer.lowerExprExpecting(node, STRING);
+}
 
   /** True when `node`'s checker type is async_hooks' AsyncLocalStorage
    * (the Channel detection's shape — the value is an f64 store handle,
@@ -8142,4 +8154,430 @@ export function isConsoleLog(lowerer: Lowerer, call: ts.CallExpression): boolean
     const name = access.name.text;
     if (name !== "log" && name !== "info" && name !== "debug" && name !== "error" && name !== "warn") return null;
     return lowerer.isStdlibGlobal(access.expression, "console") ? name : null;
+  }
+
+
+
+/** node:module's two compiler-only calls. isBuiltin compares one evaluated
+   * string against the pinned Node 24 list (bare builtins also accept their
+   * node: spelling; prefix-only entries do not gain a bare alias).
+   * syncBuiltinESMExports is observably a no-op inside the static surface:
+   * builtin exports cannot be mutated, so its only supported behavior is
+   * evaluating no arguments and returning undefined. */
+  export function lowerNodeModuleCall(
+    lowerer: Lowerer,
+    expr: ts.CallExpression,
+    bi: { module: string; member: string },
+    loc: SrcLoc,
+  ): IrExpr | null {
+    if (bi.module !== "module") return null;
+    if (bi.member === "syncBuiltinESMExports") {
+      if (expr.arguments.length !== 0 || expr.arguments.some(ts.isSpreadElement)) {
+        lowerer.noLowering(
+          `module.syncBuiltinESMExports with ${expr.arguments.length} arguments`,
+          expr,
+          "syncBuiltinESMExports() takes no arguments",
+        );
+      }
+      if (!ts.isExpressionStatement(expr.parent)) {
+        lowerer.noLowering(
+          "module.syncBuiltinESMExports used as a value",
+          expr,
+          "call syncBuiltinESMExports() as its own statement; the supported static effect is a no-op",
+        );
+      }
+      return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
+    }
+    if (bi.member !== "isBuiltin") return null;
+    if (expr.arguments.length !== 1 || expr.arguments.some(ts.isSpreadElement)) {
+      lowerer.noLowering(
+        `module.isBuiltin with ${expr.arguments.length} arguments`,
+        expr,
+        "isBuiltin(moduleName) takes one string",
+      );
+    }
+    const argumentNode = expr.arguments[0]!;
+    const argument = lowerer.lowerExpr(argumentNode);
+    if (argument.type.kind !== "string") {
+      if (argument.type.kind === "dyn" || argument.type.kind === "jsval" || argument.type.kind === "union") {
+        lowerer.noLowering(
+          "module.isBuiltin with a runtime-polymorphic argument",
+          argumentNode,
+          "narrow the module name to a string first; statically non-string values return false",
+        );
+      }
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: argument, loc: locOf(argumentNode) }],
+        result: boolLit(false, loc),
+        type: BOOL,
+        loc,
+      };
+    }
+    const slot = lowerer.declareHiddenLocal("%builtinName", STRING);
+    const ref = (): IrExpr => varRef(slot.id, STRING, loc);
+    const accepted = NODE_BUILTIN_MODULES_V24.flatMap((name) =>
+      name.startsWith("node:") ? [name] : [name, `node:${name}`],
+    );
+    let staticArgument: ts.Expression = argumentNode;
+    while (
+      ts.isParenthesizedExpression(staticArgument) || ts.isAsExpression(staticArgument) ||
+      ts.isTypeAssertion(staticArgument) || ts.isNonNullExpression(staticArgument)
+    ) {
+      staticArgument = staticArgument.expression;
+    }
+    if (ts.isStringLiteralLike(staticArgument)) {
+      return boolLit(accepted.includes(staticArgument.text), loc);
+    }
+    let result: IrExpr = boolLit(false, loc);
+    for (let i = accepted.length - 1; i >= 0; i--) {
+      const equal: IrExpr = {
+        kind: "strEq",
+        negated: false,
+        left: ref(),
+        right: strLit(accepted[i]!, loc),
+        type: BOOL,
+        loc,
+      };
+      result = { kind: "logical", op: "||", left: equal, right: result, type: BOOL, loc };
+    }
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: slot.id, init: argument, loc }],
+      result,
+      type: BOOL,
+      loc,
+    };
+  }
+
+
+  /** import.meta.resolve("literal") folds through the runtime-module
+   * resolver, never TypeScript's declaration-file resolver. Relative and
+   * URL-like names remain valid even when no file exists; bare packages use
+   * Node's import-condition exports path. */
+function staticString(node: ts.Expression | undefined): string | null {
+  if (node === undefined) return null;
+  const value = stripTypeCasts(node);
+  return ts.isStringLiteralLike(value) ? value.text : null;
+}
+
+function runtimeResolveThrow(error: RuntimeResolveError, type: IrType, loc: SrcLoc): IrExpr {
+  return nodeThrowExpr(error.name === "TypeError" ? 1 : 0, error.code, error.message, type, loc);
+}
+
+function requireResolverBaseFile(lowerer: Lowerer, receiver: ts.Expression): ts.SourceFile | null {
+  const created = createRequireCalleeFileOf(lowerer, receiver);
+  if (created !== null) return created;
+  return lowerer.isStdlibGlobal(receiver, "require") ? receiver.getSourceFile() : null;
+}
+
+function staticResolveOptionPaths(node: ts.Expression | undefined): readonly string[] | undefined | null {
+  if (node === undefined) return undefined;
+  const value = stripTypeCasts(node);
+  if (ts.isIdentifier(value) && value.text === "undefined") return undefined;
+  if (!ts.isObjectLiteralExpression(value)) return null;
+  let paths: readonly string[] | undefined;
+  for (const prop of value.properties) {
+    if (!ts.isPropertyAssignment(prop)) return null;
+    const name = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : null;
+    if (name !== "paths" || paths !== undefined) return null;
+    const init = stripTypeCasts(prop.initializer);
+    if (!ts.isArrayLiteralExpression(init)) return null;
+    const entries: string[] = [];
+    for (const item of init.elements) {
+      if (!ts.isStringLiteralLike(item)) return null;
+      entries.push(item.text);
+    }
+    paths = entries;
+  }
+  return paths;
+}
+
+export function lowerImportMetaResolveCall(
+    lowerer: Lowerer,
+    call: ts.CallExpression,
+  ): IrExpr | null {
+    const callee = call.expression;
+    if (
+      !ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined ||
+      callee.name.text !== "resolve" || !ts.isMetaProperty(callee.expression) ||
+      callee.expression.keywordToken !== ts.SyntaxKind.ImportKeyword ||
+      callee.expression.name.text !== "meta"
+    ) {
+      return null;
+    }
+    if (call.questionDotToken !== undefined || call.arguments.length !== 1) {
+      lowerer.noLowering(
+        "import.meta.resolve with this argument shape",
+        call,
+        "the lowered form is import.meta.resolve(\"<static specifier>\") using the containing module as its parent",
+      );
+    }
+    const specifier = staticString(call.arguments[0]);
+    if (specifier === null) {
+      lowerer.noLowering(
+        "import.meta.resolve with a runtime-computed specifier",
+        call.arguments[0]!,
+        "a compiled binary has a fixed module graph — pass a string literal",
+      );
+    }
+    const result = resolveImportMetaRuntime(
+      call.getSourceFile().fileName,
+      specifier,
+      lowerer.targetPlatform,
+    );
+    if (result === null) {
+      lowerer.noLowering(
+        `import.meta.resolve of '${specifier}'`,
+        call,
+        "relative paths, URL-like names, builtins, and installed package names are supported; package-import aliases remain unsupported",
+      );
+    }
+    const loc = locOf(call);
+    return result.ok
+      ? { kind: "strLit", value: result.value, type: STRING, loc }
+      : runtimeResolveThrow(result.error, STRING, loc);
+  }
+
+
+  /** CommonJS require.resolve and require.resolve.paths for the ambient
+   * wrapper or a supported createRequire binding. Results are build-time
+   * constants; failures lower to Node's catchable error object. */
+  export function lowerRequireResolveCall(
+    lowerer: Lowerer,
+    call: ts.CallExpression,
+  ): IrExpr | null {
+    const callee = call.expression;
+    if (!ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined) return null;
+    let receiver: ts.Expression;
+    let pathsCall = false;
+    if (callee.name.text === "resolve") {
+      receiver = callee.expression;
+    } else if (
+      callee.name.text === "paths" && ts.isPropertyAccessExpression(callee.expression) &&
+      callee.expression.questionDotToken === undefined && callee.expression.name.text === "resolve"
+    ) {
+      receiver = callee.expression.expression;
+      pathsCall = true;
+    } else {
+      return null;
+    }
+    const baseFile = requireResolverBaseFile(lowerer, receiver);
+    if (baseFile === null) return null;
+    if (call.questionDotToken !== undefined || call.arguments.length < 1 || call.arguments.length > (pathsCall ? 1 : 2)) {
+      lowerer.noLowering(
+        pathsCall ? "require.resolve.paths with this argument shape" : "require.resolve with this argument shape",
+        call,
+      );
+    }
+    const specifier = staticString(call.arguments[0]);
+    if (specifier === null) {
+      lowerer.noLowering(
+        `${pathsCall ? "require.resolve.paths" : "require.resolve"} with a runtime-computed request`,
+        call.arguments[0]!,
+        "a compiled binary has a fixed module graph — pass a string literal",
+      );
+    }
+    const loc = locOf(call);
+    if (pathsCall) {
+      const result = requireResolvePathsRuntime(baseFile.fileName, specifier, lowerer.targetPlatform);
+      if (result !== null && !Array.isArray(result)) {
+        return runtimeResolveThrow(result as RuntimeResolveError, lowerer.irTypeOf(call), loc);
+      }
+      const raw: IrExpr = result === null
+        ? { kind: "unitLit", unit: "null", type: NULL_T, loc }
+        : {
+            kind: "arrayLit",
+            elems: result.map((value) => ({ kind: "strLit", value, type: STRING, loc })),
+            type: arrayOf(STRING),
+            loc,
+          };
+      return lowerer.coerceInto(call, raw, lowerer.irTypeOf(call));
+    }
+    const paths = staticResolveOptionPaths(call.arguments[1]);
+    if (paths === null) {
+      lowerer.noLowering(
+        "require.resolve with runtime-computed options",
+        call.arguments[1]!,
+        "omit options or pass { paths: [\"<static directory>\", ...] }",
+      );
+    }
+    const result: RuntimeResolveResult = resolveRequireRuntime(
+      baseFile.fileName,
+      specifier,
+      lowerer.targetPlatform,
+      paths,
+    );
+    return result.ok
+      ? { kind: "strLit", value: result.value, type: STRING, loc }
+      : runtimeResolveThrow(result.error, STRING, loc);
+  }
+
+
+/** Calls on native crypto.Hash/Hmac handles. The handle survives locals,
+   * aliases, loops, and returns; update() retains and returns the receiver,
+   * digest() finalizes it, and Hash.copy() snapshots the incremental state. */
+  export function lowerCryptoHashMethodCall(lowerer: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (call.questionDotToken || access.questionDotToken) return null;
+    const receiverType = lowerer.mapTypeOf(lowerer.typeOf(access.expression));
+    if (receiverType?.kind !== "cryptoHash" && receiverType?.kind !== "cryptoHmac") return null;
+    if (!lowerer.isStdlibMember(access)) return null;
+    const name = access.name.text;
+    const loc = locOf(call);
+    const receiver = (): IrExpr => lowerer.lowerExprExpecting(access.expression, receiverType);
+    if (name === "update") {
+      if (call.arguments.length < 1 || call.arguments.length > 2 || call.arguments.some(ts.isSpreadElement)) {
+        lowerer.noLowering(`${receiverType.kind === "cryptoHash" ? "Hash" : "Hmac"}.update with ${call.arguments.length} arguments`, call, "update(stringOrBuffer[, inputEncoding]) is supported");
+      }
+      const dataNode = call.arguments[0]!;
+      const data = lowerer.lowerExpr(dataNode);
+      const prefix = receiverType.kind === "cryptoHash" ? "crypto.hashUpdate" : "crypto.hmacUpdate";
+      if (data.type.kind === "bytes" && data.type.elem === "u8") {
+        if (call.arguments.length !== 1) {
+          lowerer.noLowering("Hash/Hmac.update with an encoding for Buffer data", call.arguments[1]!, "input encodings apply only to string data");
+        }
+        return { kind: "libCall", fn: `${prefix}Bytes` as IrLibFn, args: [receiver(), data], type: receiverType, loc };
+      }
+      if (data.type.kind === "string") {
+        const encodingNode = call.arguments[1];
+        if (encodingNode === undefined) {
+          return { kind: "libCall", fn: `${prefix}Str` as IrLibFn, args: [receiver(), data], type: receiverType, loc };
+        }
+        const encodingType = lowerer.typeOf(encodingNode);
+        if (!encodingType.isStringLiteralType() || !["utf8", "utf-8", "hex", "base64"].includes(encodingType.value)) {
+          lowerer.noLowering("Hash/Hmac.update with this input encoding", encodingNode, 'utf8, hex, and base64 string inputs are supported');
+        }
+        if (encodingType.value === "utf8" || encodingType.value === "utf-8") {
+          lowerer.lowerExprExpecting(encodingNode, STRING);
+          return { kind: "libCall", fn: `${prefix}Str` as IrLibFn, args: [receiver(), data], type: receiverType, loc };
+        }
+        const encoded: IrExpr = {
+          kind: "libCall",
+          fn: "buffer.fromStr",
+          args: [data, lowerer.lowerExprExpecting(encodingNode, STRING)],
+          type: BYTES_U8,
+          loc,
+        };
+        return { kind: "libCall", fn: `${prefix}Bytes` as IrLibFn, args: [receiver(), encoded], type: receiverType, loc };
+      }
+      lowerer.noLowering(`Hash/Hmac.update of '${lowerer.fmt(data.type)}' values`, dataNode, "string and Buffer/Uint8Array inputs are supported");
+    }
+    if (name === "digest") {
+      if (call.arguments.length > 1 || call.arguments.some(ts.isSpreadElement)) {
+        lowerer.noLowering(`${receiverType.kind === "cryptoHash" ? "Hash" : "Hmac"}.digest with ${call.arguments.length} arguments`, call, 'digest() and digest("hex" | "base64") are supported');
+      }
+      if (call.arguments.length === 0) {
+        return {
+          kind: "libCall",
+          fn: receiverType.kind === "cryptoHash" ? "crypto.hashDigestBuffer" : "crypto.hmacDigestBuffer",
+          args: [receiver()],
+          type: BYTES_U8,
+          loc,
+        };
+      }
+      return {
+        kind: "libCall",
+        fn: receiverType.kind === "cryptoHash" ? "crypto.hashDigestString" : "crypto.hmacDigestString",
+        args: [receiver(), cryptoEncoding(lowerer, call.arguments[0]!, `${receiverType.kind === "cryptoHash" ? "Hash" : "Hmac"}.digest`)],
+        type: STRING,
+        loc,
+      };
+    }
+    if (name === "copy" && receiverType.kind === "cryptoHash") {
+      if (call.arguments.length !== 0) lowerer.noLowering(`Hash.copy with ${call.arguments.length} arguments`, call, "copy() without options is supported");
+      return { kind: "libCall", fn: "crypto.hashCopy", args: [receiver()], type: CRYPTOHASH_T, loc };
+    }
+    lowerer.noLowering(
+      `${receiverType.kind === "cryptoHash" ? "Hash" : "Hmac"}.${name}`,
+      call,
+      receiverType.kind === "cryptoHash" ? "update(), digest(), and copy() are supported" : "update() and digest() are supported",
+      lowerer.checker.getSymbolAtLocation(access.name),
+    );
+  }
+
+
+/** Method calls on a piped child stdin writer. Writes copy one string or
+ * Uint8Array into the nonblocking runtime queue and return the backpressure
+ * signal. end()/destroy() are statement-only, as are drain/finish/error
+ * listener registrations; unsupported callbacks/encodings stay fenced. */
+  export function lowerChildWriterMethodCall(lowerer: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (lowerer.chainBlocked(call, access)) return null;
+    if (lowerer.mapTypeOf(lowerer.typeOf(access.expression))?.kind !== "childWriter") return null;
+    if (!lowerer.isStdlibMember(access)) return null;
+    const name = access.name.text;
+    const loc = locOf(call);
+
+    if (name === "write") {
+      if (call.arguments.length !== 1 || call.arguments.some(ts.isSpreadElement)) {
+        lowerer.noLowering(
+          `child stdin write with ${call.arguments.length} arguments`,
+          call,
+          "write(string | Uint8Array) with no encoding or callback is supported",
+        );
+      }
+      const receiver = lowerer.lowerExprExpecting(access.expression, CHILDWRITER_T);
+      const data = lowerer.lowerExpr(call.arguments[0]!);
+      if (data.type.kind === "string") {
+        return { kind: "libCall", fn: "writer.writeString", args: [receiver, data], type: BOOL, loc };
+      }
+      if (data.type.kind === "bytes" && data.type.elem === "u8") {
+        return { kind: "libCall", fn: "writer.writeBytes", args: [receiver, data], type: BOOL, loc };
+      }
+      lowerer.noLowering(
+        `child stdin write of '${lowerer.fmt(data.type)}'`,
+        call.arguments[0]!,
+        "write one string, Buffer, or Uint8Array value (narrow unions first)",
+      );
+    }
+
+    if ((name === "end" || name === "destroy") && call.arguments.length === 0) {
+      if (!ts.isExpressionStatement(call.parent)) {
+        lowerer.unsupported("SC1090", call, `chaining child.stdin.${name}() (call it as its own statement)`);
+      }
+      const receiver = lowerer.lowerExprExpecting(access.expression, CHILDWRITER_T);
+      return { kind: "libCall", fn: name === "end" ? "writer.end" : "writer.destroy", args: [receiver], type: VOID, loc };
+    }
+
+    if ((name === "on" || name === "once") && call.arguments.length === 2) {
+      const eventType = lowerer.typeOf(call.arguments[0]!);
+      const event = eventType.isStringLiteralType() ? eventType.value : null;
+      if (event !== "drain" && event !== "finish" && event !== "error") {
+        lowerer.noLowering(
+          `child stdin ${name}(${event === null ? "non-literal event" : `"${event}"`}, ...)`,
+          call.arguments[0]!,
+          '"drain", "finish", and "error" are the supported child stdin events',
+        );
+      }
+      if (!ts.isExpressionStatement(call.parent)) {
+        lowerer.unsupported("SC1090", call, "chaining child stdin listener registration");
+      }
+      const receiver = lowerer.lowerExprExpecting(access.expression, CHILDWRITER_T);
+      const cb = lowerer.lowerExpr(call.arguments[1]!);
+      const maxParams = event === "error" ? 1 : 0;
+      if (cb.type.kind !== "func" || cb.type.ret.kind !== "void" || cb.type.params.length > maxParams) {
+        lowerer.unsupported(
+          "SC1090",
+          call.arguments[1]!,
+          event === "error"
+            ? "error listeners with at most one Error parameter and no return value"
+            : `${event} listeners with no parameters or return value`,
+        );
+      }
+      if (event === "error" && cb.type.params[0] !== undefined &&
+          !(cb.type.params[0]!.kind === "object" && cb.type.params[0]!.className === "%Error")) {
+        lowerer.unsupported("SC1090", call.arguments[1]!, "child stdin error listeners whose parameter is Error");
+      }
+      const once = boolLit(name === "once", loc);
+      const fn = event === "drain" ? "writer.onDrain" : event === "finish" ? "writer.onFinish" : "writer.onError";
+      return { kind: "libCall", fn, args: [receiver, cb, once], type: VOID, loc };
+    }
+
+    lowerer.noLowering(
+      `Writable.${name}`,
+      call,
+      'write(string | Uint8Array), end(), destroy(), and on/once("drain" | "finish" | "error", cb) are supported',
+      lowerer.checker.getSymbolAtLocation(access.name),
+    );
   }

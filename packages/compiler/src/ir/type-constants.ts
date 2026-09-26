@@ -1,6 +1,7 @@
 import type { IrType } from "./ir.js";
 
 export const BIGINT: IrType = { kind: "bigint" };
+export const BIGINT_T: IrType = BIGINT;
 export const F64: IrType = { kind: "f64" };
 export const DATE_T: IrType = { kind: "date" };
 export const BYTES_U8: IrType = { kind: "bytes", elem: "u8" };
@@ -25,8 +26,11 @@ export const HTTPREQ_T: IrType = { kind: "httpReq" };
 export const HTTPRES_T: IrType = { kind: "httpRes" };
 export const HTTPCLIENTREQ_T: IrType = { kind: "httpClientReq" };
 export const SECURECTX_T: IrType = { kind: "secureCtx" };
+export const CRYPTOHASH_T: IrType = { kind: "cryptoHash" };
+export const CRYPTOHMAC_T: IrType = { kind: "cryptoHmac" };
 export const FSWATCHER_T: IrType = { kind: "fsWatcher" };
 export const CHILDSTREAM_T: IrType = { kind: "childStream" };
+export const CHILDWRITER_T: IrType = { kind: "childWriter" };
 export const PROCSTREAM_T: IrType = { kind: "procStream" };
 export const VOID: IrType = { kind: "void" };
 export const DYN: IrType = { kind: "dyn" };

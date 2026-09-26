@@ -903,7 +903,1047 @@ static const char *scr_byte_find(const char *hay, size_t hay_len,
   return NULL;
 }
 
+/* Search backwards from a clamped UTF-16 position. A low-surrogate position
+ * maps to its scalar's first byte, so that scalar remains searchable. */
+double scr_str_last_index_of_from(ScrStr *s, ScrStr *needle, double position) {
+  ScrSidx *e = scr_sidx(s);
   size_t len16 = scr_sidx_len(s, e);
   size_t start16 = isnan(position) || position >= (double)len16 ? len16
                    : position <= 0 ? 0 : (size_t)trunc(position);
   if (needle->len == 0) return (double)start16;
+  if (needle->len > s->len) return -1.0;
+  bool mid;
+  size_t start_byte = scr_u16_to_byte_c(s, e, start16, &mid);
+  size_t max_start = s->len - needle->len;
+  if (start_byte < max_start) max_start = start_byte;
+  for (size_t i = max_start + 1; i-- > 0;) {
+    if (memcmp(s->data + i, needle->data, needle->len) == 0) {
+      double index = (double)scr_byte_to_u16_c(s, e, i);
+      if (index <= position) return index;
+    }
+  }
+  return -1.0;
+}
+
+double scr_str_last_index_of(ScrStr *s, ScrStr *needle) {
+  return scr_str_last_index_of_from(s, needle, INFINITY);
+}
+
+double scr_str_utf16_len(ScrStr *s) {
+  return (double)scr_sidx_len(s, scr_sidx(s));
+}
+
+double scr_str_char_code_at(ScrStr *s, double i) {
+  double idx = scr_to_integer_or_infinity(i);
+  if (!(idx >= 0)) return NAN; /* negative or -Infinity */
+  /* UTF-16 length <= byte length always, so this also fences the cast. */
+  if (idx >= (double)s->len) return NAN;
+  ScrSidx *e = scr_sidx(s);
+  if (e->u16len == s->len) return (double)(unsigned char)s->data[(size_t)idx];
+  bool mid;
+  size_t off = scr_u16_to_byte_c(s, e, (size_t)idx, &mid);
+  if (off >= s->len) return NAN; /* idx >= length */
+  size_t adv;
+  uint32_t cp = scr_utf8_decode(s->data + off, &adv);
+  if (cp < 0x10000) return (double)cp;
+  uint32_t v = cp - 0x10000;
+  return mid ? (double)(0xDC00 + (v & 0x3FF)) : (double)(0xD800 + (v >> 10));
+}
+
+/* String.prototype.codePointAt: the full CODE POINT at a UTF-16 index —
+ * the charCodeAt ladder WITHOUT the surrogate split (a lead surrogate
+ * combines with its trail into one number above BMP). NaN out of range,
+ * like charCodeAt. */
+double scr_str_code_point_at(ScrStr *s, double i) {
+  double idx = scr_to_integer_or_infinity(i);
+  if (!(idx >= 0)) return NAN;
+  ScrSidx *e = scr_sidx(s);
+  if (idx >= (double)e->u16len) return NAN;
+  bool mid;
+  size_t off = scr_u16_to_byte_c(s, e, (size_t)idx, &mid);
+  if (off >= s->len) return NAN;
+  size_t adv;
+  uint32_t cp = scr_utf8_decode(s->data + off, &adv);
+  if (cp < 0x10000) return (double)cp;
+  /* mid = the index lands on the TRAIL unit — Node answers the trail
+   * surrogate there (charCodeAt's same mid-swap, the cp ladder swapped). */
+  if (mid) return (double)(0xDC00 + ((cp - 0x10000) & 0x3FF));
+  return (double)cp;
+}
+
+double scr_str_index_of(ScrStr *s, ScrStr *needle, double fromIndex) {
+  double pos = scr_to_integer_or_infinity(fromIndex);
+  ScrSidx *e = scr_sidx(s);
+  size_t len16 = scr_sidx_len(s, e);
+  size_t start16 = pos <= 0             ? 0
+                   : pos >= (double)len16 ? len16
+                                          : (size_t)pos;
+  /* Per spec, the empty needle is found at the clamped fromIndex itself —
+   * even when that index is between the halves of an astral pair. */
+  if (needle->len == 0) return (double)start16;
+  bool mid;
+  size_t start_b = scr_u16_to_byte_c(s, e, start16, &mid);
+  /* A match can't begin on a low-surrogate half (needles are well-formed),
+   * so resume at the next char boundary. */
+  if (mid) start_b += 4;
+  const char *found =
+      scr_byte_find(s->data + start_b, s->len - start_b, needle->data,
+                     needle->len);
+  if (!found) return -1.0;
+  return (double)scr_byte_to_u16_c(s, e, (size_t)(found - s->data));
+}
+
+/* substring: slice's clamp-and-swap sibling — ToIntegerOrInfinity both
+ * boundaries (NaN → 0), clamp each to [0, len16] (negatives clamp to 0,
+ * NOT relative like slice's), swap when start > end, then extract exactly
+ * like slice (whose relative/negative handling is inert on the
+ * already-clamped values — delegation is exact). */
+ScrStr *scr_str_substring(ScrStr *s, double start, double end) {
+  ScrSidx *e = scr_sidx(s);
+  double len16 = (double)scr_sidx_len(s, e);
+  double a = scr_to_integer_or_infinity(start);
+  double b = scr_to_integer_or_infinity(end);
+  double fa = a < 0 ? 0 : a > len16 ? len16 : a;
+  double fb = b < 0 ? 0 : b > len16 ? len16 : b;
+  return fa < fb ? scr_str_slice(s, fa, fb) : scr_str_slice(s, fb, fa);
+}
+
+bool scr_str_includes(ScrStr *s, ScrStr *needle) {
+  return scr_byte_find(s->data, s->len, needle->data, needle->len) != NULL;
+}
+
+bool scr_str_starts_with(ScrStr *s, ScrStr *needle, double position) {
+  double pos = scr_to_integer_or_infinity(position);
+  double len16 = scr_str_utf16_len(s);
+  double start16 = pos <= 0 ? 0 : pos >= len16 ? len16 : pos;
+  return scr_str_index_of(s, needle, start16) == start16;
+}
+
+bool scr_str_ends_with(ScrStr *s, ScrStr *needle, double endPosition) {
+  double pos = scr_to_integer_or_infinity(endPosition);
+  ScrSidx *e = scr_sidx(s);
+  size_t len16 = scr_sidx_len(s, e);
+  size_t end16 = pos <= 0             ? 0
+                 : pos >= (double)len16 ? len16
+                                        : (size_t)pos;
+  size_t needle16 = (size_t)scr_str_utf16_len(needle);
+  if (needle16 > end16) return false;
+  if (needle16 == 0) return true;
+  bool start_mid, end_mid;
+  size_t start_b = scr_u16_to_byte_c(s, e, end16 - needle16, &start_mid);
+  size_t end_b = scr_u16_to_byte_c(s, e, end16, &end_mid);
+  return !start_mid && !end_mid && end_b - start_b == needle->len &&
+         memcmp(s->data + start_b, needle->data, needle->len) == 0;
+}
+
+static size_t scr_str_clamp_u16_position(double position, size_t len16) {
+  double pos = scr_to_integer_or_infinity(position);
+  return pos <= 0 ? 0 : pos >= (double)len16 ? len16 : (size_t)pos;
+}
+
+bool scr_str_starts_with_from(ScrStr *s, ScrStr *needle, double position) {
+  ScrSidx *e = scr_sidx(s);
+  size_t len16 = scr_sidx_len(s, e);
+  size_t start16 = scr_str_clamp_u16_position(position, len16);
+  if (needle->len == 0) return true;
+  bool mid;
+  size_t start_byte = scr_u16_to_byte_c(s, e, start16, &mid);
+  return !mid && needle->len <= s->len - start_byte &&
+         memcmp(s->data + start_byte, needle->data, needle->len) == 0;
+}
+
+bool scr_str_ends_with_from(ScrStr *s, ScrStr *needle, double end_position) {
+  ScrSidx *e = scr_sidx(s);
+  size_t len16 = scr_sidx_len(s, e);
+  size_t end16 = scr_str_clamp_u16_position(end_position, len16);
+  size_t needle16 = scr_sidx_len(needle, scr_sidx(needle));
+  if (needle16 == 0) return true;
+  if (needle16 > end16) return false;
+  bool start_mid, end_mid;
+  size_t start_byte = scr_u16_to_byte_c(s, e, end16 - needle16, &start_mid);
+  size_t end_byte = scr_u16_to_byte_c(s, e, end16, &end_mid);
+  return !start_mid && !end_mid && end_byte - start_byte == needle->len &&
+         memcmp(s->data + start_byte, needle->data, needle->len) == 0;
+}
+
+/* Resolve one slice() boundary: negatives are relative to the end, then
+ * clamp to [0, len16]. Handles ±Infinity (already through
+ * ToIntegerOrInfinity). */
+static size_t scr_slice_boundary(double v, size_t len16) {
+  if (v < 0) {
+    double t = v + (double)len16; /* -Infinity stays -Infinity */
+    return t <= 0 ? 0 : (size_t)t;
+  }
+  return v >= (double)len16 ? len16 : (size_t)v;
+}
+
+ScrStr *scr_str_slice(ScrStr *s, double start, double end) {
+  ScrSidx *e = scr_sidx(s);
+  size_t len16 = scr_sidx_len(s, e);
+  size_t from = scr_slice_boundary(scr_to_integer_or_infinity(start), len16);
+  size_t to = scr_slice_boundary(scr_to_integer_or_infinity(end), len16);
+  if (from >= to) return scr_str_empty();
+
+  bool from_mid, to_mid;
+  size_t from_b = scr_u16_to_byte_c(s, e, from, &from_mid);
+  size_t to_b = scr_u16_to_byte_c(s, e, to, &to_mid);
+  /* Both *_mid offsets point at the start of the split astral char; the
+   * kept content is the whole chars strictly inside the boundaries. */
+  size_t content_b = from_mid ? from_b + 4 : from_b;
+  size_t content_len = to_b - content_b;
+
+  if (!from_mid && !to_mid)
+    return scr_str_from_span(s->data + from_b, content_len);
+
+  /* Divergence: JS would emit the lone surrogate half; we emit U+FFFD. */
+  size_t total = content_len + (from_mid ? SCR_REPLACEMENT_LEN : 0) +
+                 (to_mid ? SCR_REPLACEMENT_LEN : 0);
+  char *tmp = malloc(total);
+  if (!tmp) scr_oom();
+  size_t o = 0;
+  if (from_mid) {
+    memcpy(tmp + o, SCR_REPLACEMENT, SCR_REPLACEMENT_LEN);
+    o += SCR_REPLACEMENT_LEN;
+  }
+  memcpy(tmp + o, s->data + content_b, content_len);
+  o += content_len;
+  if (to_mid) memcpy(tmp + o, SCR_REPLACEMENT, SCR_REPLACEMENT_LEN);
+  ScrStr *r = scr_str_new(tmp, total);
+  free(tmp);
+  return r;
+}
+
+ScrStr *scr_str_repeat(ScrStr *s, double count) {
+  double n = scr_to_integer_or_infinity(count);
+  if (n < 0 || (isinf(n) && n > 0)) {
+    scr_trap("scriptc: RangeError: Invalid count value\n");
+  }
+  if (n == 0 || s->len == 0) return scr_str_empty();
+  /* n is a finite non-negative integer here. Reject sizes malloc could not
+   * satisfy anyway before the double→size_t conversion can overflow. */
+  if (n > (double)((SIZE_MAX - sizeof(ScrStr) - 1) / s->len)) scr_oom();
+  size_t total = (size_t)n * s->len;
+  ScrStr *r = scr_str_alloc(total, total);
+  memcpy(r->data, s->data, s->len);
+  size_t filled = s->len;
+  while (filled < total) { /* doubling fill */
+    size_t chunk = filled <= total - filled ? filled : total - filled;
+    memcpy(r->data + filled, r->data, chunk);
+    filled += chunk;
+  }
+  r->data[total] = '\0';
+  return r;
+}
+
+/* Exact ECMA-262 WhiteSpace ∪ LineTerminator membership. */
+static bool scr_is_js_whitespace(uint32_t cp) {
+  switch (cp) {
+    case 0x0009: case 0x000A: case 0x000B: case 0x000C: case 0x000D:
+    case 0x0020: case 0x00A0: case 0x1680: case 0x2028: case 0x2029:
+    case 0x202F: case 0x205F: case 0x3000: case 0xFEFF:
+      return true;
+    default:
+      return cp >= 0x2000 && cp <= 0x200A;
+  }
+}
+
+ScrStr *scr_str_trim(ScrStr *s) {
+  size_t b = 0, e = s->len;
+  while (b < e) {
+    size_t adv;
+    uint32_t cp = scr_utf8_decode(s->data + b, &adv);
+    if (!scr_is_js_whitespace(cp)) break;
+    b += adv;
+  }
+  while (e > b) {
+    size_t cs = e - 1; /* back up to the lead byte of the last char */
+    while (cs > b && ((unsigned char)s->data[cs] & 0xC0) == 0x80) cs--;
+    size_t adv;
+    uint32_t cp = scr_utf8_decode(s->data + cs, &adv);
+    if (!scr_is_js_whitespace(cp)) break;
+    e = cs;
+  }
+  return scr_str_from_span(s->data + b, e - b);
+}
+
+ScrStr *scr_str_char_at(ScrStr *s, double i) {
+  double idx = scr_to_integer_or_infinity(i);
+  if (!(idx >= 0)) return scr_str_empty();
+  if (idx >= (double)s->len) return scr_str_empty(); /* len16 <= len */
+  ScrSidx *e = scr_sidx(s);
+  if (e->u16len == s->len) { /* all ASCII */
+    return (ScrStr *)&scr_ascii1[(unsigned char)s->data[(size_t)idx]];
+  }
+  bool mid;
+  size_t off = scr_u16_to_byte_c(s, e, (size_t)idx, &mid);
+  if (off >= s->len) return scr_str_empty(); /* out of range */
+  size_t adv;
+  uint32_t cp = scr_utf8_decode(s->data + off, &adv);
+  if (cp >= 0x10000) {
+    /* Divergence: JS returns the lone surrogate half; we return U+FFFD. */
+    return scr_str_new(SCR_REPLACEMENT, SCR_REPLACEMENT_LEN);
+  }
+  return scr_str_from_span(s->data + off, adv);
+}
+
+/* String.prototype.at: relative UTF-16 indexing. The ambient type narrows
+ * the result to string, so the existing documented out-of-range divergence
+ * is a catchable TypeError instead of undefined. */
+ScrStr *scr_str_at(ScrStr *s, double i) {
+  double relative = scr_to_integer_or_infinity(i);
+  ScrSidx *e = scr_sidx(s);
+  size_t len = scr_sidx_len(s, e);
+  double absolute = relative >= 0 ? relative : (double)len + relative;
+  if (!isfinite(absolute) || absolute < 0 || absolute >= (double)len) {
+    static const char message[] = "expected string, got undefined";
+    scr_throw_error_named(scr_str_new("TypeError", 9),
+                          scr_str_new(message, sizeof(message) - 1));
+    return NULL; /* scr_throw_error_named does not return */
+  }
+  return scr_str_char_at(s, absolute);
+}
+
+/* trimStart()/trimEnd(): the one-sided halves of trim — same exact JS
+ * WhiteSpace ∪ LineTerminator set, same scan loops. */
+ScrStr *scr_str_trim_start(ScrStr *s) {
+  size_t b = 0;
+  while (b < s->len) {
+    size_t adv;
+    uint32_t cp = scr_utf8_decode(s->data + b, &adv);
+    if (!scr_is_js_whitespace(cp)) break;
+    b += adv;
+  }
+  return scr_str_from_span(s->data + b, s->len - b);
+}
+
+ScrStr *scr_str_trim_end(ScrStr *s) {
+  size_t e = s->len;
+  while (e > 0) {
+    size_t cs = e - 1; /* back up to the lead byte of the last char */
+    while (cs > 0 && ((unsigned char)s->data[cs] & 0xC0) == 0x80) cs--;
+    size_t adv;
+    uint32_t cp = scr_utf8_decode(s->data + cs, &adv);
+    if (!scr_is_js_whitespace(cp)) break;
+    e = cs;
+  }
+  return scr_str_from_span(s->data, e);
+}
+
+/* Immortal U+FFFD — the divergence-2 stand-in wherever JS would produce a
+ * lone surrogate (empty-separator split of an astral char, a pad fill
+ * truncated mid-pair). */
+static const struct { size_t rc; size_t len; size_t cap; char data[4]; }
+    scr_lit_fffd = {SIZE_MAX, 3, 3, "\xEF\xBF\xBD"};
+
+/* split(separator, limit) with a STRING separator (ECMA-262 22.1.3.23):
+ * limit is ToUint32'd; zero returns [] and reaching the limit stops before
+ * any later separator probes. The no-limit wrapper supplies 2^32-1.
+ * an empty separator splits into single UTF-16 code units ("".split("") is
+ * [] — no probe matches nothing); a non-empty separator splits on every
+ * byte-level occurrence (well-formed UTF-8 is self-synchronizing, so byte
+ * matches are exactly code-point matches), keeping empty pieces at the
+ * ends and between adjacent separators; an empty subject with a non-empty
+ * separator is [""]. Where JS's per-unit split of an astral char would
+ * yield the two lone surrogate halves, each half is U+FFFD here
+ * (divergence 2 — the same substitution the island's boundary marshal
+ * applied). Borrows both; returns a +1 string[]. */
+ScrArr *scr_str_split_limit(ScrStr *s, ScrStr *sep, double limit_num) {
+  ScrArr *out = scr_arr_new(SCR_ELEM_STR, 0);
+  uint32_t limit = scr_to_uint32(limit_num);
+  if (limit == 0) return out;
+  if (sep->len == 0) {
+    size_t i = 0;
+    while (i < s->len) {
+      size_t adv;
+      uint32_t cp = scr_utf8_decode(s->data + i, &adv);
+      if (cp >= 0x10000) { /* two units in JS: both halves become U+FFFD */
+        scr_arr_push_ref(out, scr_str_retain((ScrStr *)&scr_lit_fffd));
+        if (out->len == limit) return out;
+        scr_arr_push_ref(out, scr_str_retain((ScrStr *)&scr_lit_fffd));
+      } else {
+        scr_arr_push_ref(out, scr_str_from_span(s->data + i, adv));
+      }
+      if (out->len == limit) return out;
+      i += adv;
+    }
+    return out;
+  }
+  size_t start = 0;
+  for (;;) {
+    const char *found = scr_byte_find(s->data + start, s->len - start,
+                                       sep->data, sep->len);
+    if (!found) break;
+    size_t at = (size_t)(found - s->data);
+    scr_arr_push_ref(out, scr_str_from_span(s->data + start, at - start));
+    if (out->len == limit) return out;
+    start = at + sep->len;
+  }
+  scr_arr_push_ref(out, scr_str_from_span(s->data + start, s->len - start));
+  return out;
+}
+
+ScrArr *scr_str_split(ScrStr *s, ScrStr *sep) {
+  return scr_str_split_limit(s, sep, 4294967295.0);
+}
+
+/* StringPad (ECMA-262 22.1.3.16/17): target length in UTF-16 units, the
+ * filler built from whole repetitions of `fill` plus a truncated prefix.
+ * A target at or below the length (or an empty fill) returns the receiver
+ * unchanged. A truncation that would split an astral char in the fill
+ * emits U+FFFD for the kept half (one unit, like the lone surrogate JS
+ * keeps — divergence 2). Sizes beyond what malloc can satisfy abort (the
+ * repeat() policy; JS's RangeError fires around 2^29 units). Borrows both;
+ * returns +1. */
+static ScrStr *scr_pad_impl(ScrStr *s, double maxLength, ScrStr *fill,
+                             bool at_start) {
+  double target = scr_to_integer_or_infinity(maxLength);
+  ScrSidx *e = scr_sidx(s);
+  size_t len16 = scr_sidx_len(s, e);
+  if (!(target > (double)len16) || fill->len == 0) return scr_str_retain(s);
+  /* Reject pad sizes malloc could not satisfy before the double→size_t
+   * conversion can overflow (each unit is at most 3 bytes here: BMP chars
+   * and the U+FFFD stand-in; astral chars are 4 bytes for 2 units). */
+  if (target > (double)((SIZE_MAX - sizeof(ScrStr) - 1) / 4)) scr_oom();
+  size_t pad16 = (size_t)target - len16;
+  size_t fill16 = scr_sidx_len(fill, scr_sidx(fill));
+  size_t reps = pad16 / fill16, rem16 = pad16 % fill16;
+  /* The truncated prefix of fill: whole chars while they fit in rem16
+   * units; a final astral char that doesn't fit contributes U+FFFD. */
+  size_t prefix_b = 0, prefix_units = 0;
+  bool prefix_fffd = false;
+  while (prefix_units < rem16) {
+    size_t seq = scr_utf8_seq_len((unsigned char)fill->data[prefix_b]);
+    size_t w = seq == 4 ? 2 : 1;
+    if (prefix_units + w > rem16) { /* astral char split by the truncation */
+      prefix_fffd = true;
+      prefix_units += 1;
+      break;
+    }
+    prefix_b += seq;
+    prefix_units += w;
+  }
+  size_t pad_b = reps * fill->len + prefix_b +
+                 (prefix_fffd ? SCR_REPLACEMENT_LEN : 0);
+  if (pad_b > SIZE_MAX - sizeof(ScrStr) - 1 - s->len) scr_oom();
+  size_t total = s->len + pad_b;
+  ScrStr *r = scr_str_alloc(total, total);
+  char *w = r->data + (at_start ? 0 : s->len);
+  for (size_t i = 0; i < reps; i++) {
+    memcpy(w, fill->data, fill->len);
+    w += fill->len;
+  }
+  memcpy(w, fill->data, prefix_b);
+  w += prefix_b;
+  if (prefix_fffd) {
+    memcpy(w, SCR_REPLACEMENT, SCR_REPLACEMENT_LEN);
+    w += SCR_REPLACEMENT_LEN;
+  }
+  memcpy(at_start ? w : r->data, s->data, s->len);
+  r->data[total] = '\0';
+  return r;
+}
+
+ScrStr *scr_str_pad_start(ScrStr *s, double maxLength, ScrStr *fill) {
+  return scr_pad_impl(s, maxLength, fill, true);
+}
+
+ScrStr *scr_str_pad_end(ScrStr *s, double maxLength, ScrStr *fill) {
+  return scr_pad_impl(s, maxLength, fill, false);
+}
+
+static ScrStr *scr_str_replace_impl(ScrStr *s, ScrStr *search,
+                                    ScrStr *replacement, bool all) {
+  ScrU16Buf source = scr_u16_from_str(s);
+  ScrU16Buf needle = scr_u16_from_str(search);
+  ScrU16Buf template = scr_u16_from_str(replacement);
+  ScrU16Buf output = {0};
+  size_t position = scr_u16_find(source.data, source.len, needle.data,
+                                 needle.len, 0);
+  if (position == SIZE_MAX) {
+    free(source.data);
+    free(needle.data);
+    free(template.data);
+    return scr_str_retain(s);
+  }
+
+  size_t end_of_last_match = 0;
+  for (;;) {
+    size_t preserved = position - end_of_last_match;
+    scr_u16_append(&output,
+                   preserved ? source.data + end_of_last_match : NULL,
+                   preserved);
+    scr_u16_substitution(&output, &source, &needle, position, &template);
+    end_of_last_match = position + needle.len;
+    if (!all || position == source.len) break;
+    size_t advance = needle.len ? needle.len : 1;
+    position = scr_u16_find(source.data, source.len, needle.data, needle.len,
+                            position + advance);
+    if (position == SIZE_MAX) break;
+  }
+  size_t tail = source.len - end_of_last_match;
+  scr_u16_append(&output, tail ? source.data + end_of_last_match : NULL,
+                 tail);
+  ScrStr *result = scr_str_from_u16_lossy(output.data, output.len);
+  free(source.data);
+  free(needle.data);
+  free(template.data);
+  free(output.data);
+  return result;
+}
+
+ScrStr *scr_str_replace(ScrStr *s, ScrStr *search, ScrStr *replacement) {
+  return scr_str_replace_impl(s, search, replacement, false);
+}
+
+ScrStr *scr_str_replace_all(ScrStr *s, ScrStr *search,
+                            ScrStr *replacement) {
+  return scr_str_replace_impl(s, search, replacement, true);
+}
+
+/* ── parseInt: ECMA-262 19.2.5, exactly ───────────────────────────────
+ * Skip JS whitespace, take an optional sign, resolve the radix through
+ * ToInt32 (0 → 10 with a 0x/0X hex escape; 16 also strips the prefix;
+ * outside 2..36 → NaN), scan the longest digit prefix, and round the
+ * EXACT mathematical value to double. The fast path accumulates in u64
+ * (u64→double conversion is correctly rounded); digit strings that
+ * overflow 64 bits go through a small base-2^32 bignum and round-to-
+ * nearest-even on the top 53 bits, so thousand-digit inputs in any radix
+ * are Node-exact, Infinity overflow included. */
+
+static double scr_to_int32_d(double d) {
+  if (!isfinite(d) || d == 0) return 0;
+  double m = fmod(trunc(d), 4294967296.0);
+  if (m < 0) m += 4294967296.0;
+  return m >= 2147483648.0 ? m - 4294967296.0 : m;
+}
+
+static int scr_digit_value(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
+  return 99;
+}
+
+/* Digit string → double (digits already validated against the radix,
+ * leading zeros stripped, count >= 1). Node (V8) is the oracle, and V8 is
+ * only EXACT where the spec requires it (radix 2, 4, 8, 10, 16, 32); for
+ * every other radix it runs a 32-bit-chunked double accumulation whose
+ * rounding error the spec explicitly permits ("mathInt may be an
+ * implementation-dependent approximation"). Reproduce both behaviors
+ * bit-exactly: the chunk loop for the approximate radixes, correct
+ * rounding (u64 fast path, bignum beyond) for the exact ones. */
+static double scr_digits_to_double(const char *p, size_t n, int radix) {
+  if (radix != 10 && (radix & (radix - 1)) != 0) {
+    /* V8's generic-radix loop (numbers/conversions.cc): consume the
+     * longest digit run whose multiplier stays below 0xFFFFFFFF/36, then
+     * fold with one double multiply-add per chunk — the rounding of each
+     * fold IS the observable Node behavior. */
+    const uint32_t kMaximumMultiplier = 0xFFFFFFFFu / 36u;
+    double v = 0.0;
+    size_t i = 0;
+    bool done = false;
+    do {
+      uint32_t part = 0, multiplier = 1;
+      for (;;) {
+        if (i == n) {
+          done = true;
+          break;
+        }
+        uint32_t d = (uint32_t)scr_digit_value(p[i]);
+        uint32_t m = multiplier * (uint32_t)radix;
+        if (m > kMaximumMultiplier) break; /* digit starts the next chunk */
+        part = part * (uint32_t)radix + d;
+        multiplier = m;
+        i++;
+      }
+      v = v * (double)multiplier + (double)part;
+    } while (!done);
+    return v;
+  }
+  /* u64 fast path: exact while the accumulator fits. */
+  uint64_t acc = 0;
+  size_t i = 0;
+  for (; i < n; i++) {
+    int dv = scr_digit_value(p[i]);
+    if (acc > (UINT64_MAX - (uint64_t)dv) / (uint64_t)radix) break;
+    acc = acc * (uint64_t)radix + (uint64_t)dv;
+  }
+  if (i == n) return (double)acc;
+  /* Bignum path: base-2^32 limbs, little-endian, multiply-add per digit. */
+  size_t cap = 4 + (n * 6) / 32; /* log2(36) < 6 bits per digit */
+  uint32_t *limbs = malloc(cap * sizeof(uint32_t));
+  if (!limbs) scr_oom();
+  limbs[0] = (uint32_t)acc;
+  limbs[1] = (uint32_t)(acc >> 32);
+  size_t nl = limbs[1] ? 2 : 1;
+  for (; i < n; i++) {
+    uint64_t carry = (uint64_t)scr_digit_value(p[i]);
+    for (size_t j = 0; j < nl; j++) {
+      uint64_t t = (uint64_t)limbs[j] * (uint64_t)radix + carry;
+      limbs[j] = (uint32_t)t;
+      carry = t >> 32;
+    }
+    if (carry) {
+      if (nl == cap) { /* unreachable by the cap bound; belt and braces */
+        cap *= 2;
+        limbs = realloc(limbs, cap * sizeof(uint32_t));
+        if (!limbs) scr_oom();
+      }
+      limbs[nl++] = (uint32_t)carry;
+    }
+  }
+  /* Round the bignum to double: top 53 bits, guard, sticky, half-even. */
+  size_t topbits = 32 - (size_t)__builtin_clz(limbs[nl - 1]);
+  size_t bitlen = 32 * (nl - 1) + topbits;
+  /* bitlen > 64 here (the fast path overflowed), so shift > 0. */
+  size_t shift = bitlen - 54; /* keep 53 mantissa bits + 1 guard bit */
+  uint64_t top = 0;
+  for (size_t k = 0; k < 54; k++) {
+    size_t bit = shift + k;
+    uint64_t b = (limbs[bit / 32] >> (bit % 32)) & 1u;
+    top |= b << k;
+  }
+  bool sticky = false;
+  for (size_t bit = 0; bit < shift && !sticky; bit++) {
+    sticky = ((limbs[bit / 32] >> (bit % 32)) & 1u) != 0;
+  }
+  free(limbs);
+  uint64_t mant = top >> 1;
+  bool guard = (top & 1u) != 0;
+  if (guard && (sticky || (mant & 1u))) mant++;
+  int exp2 = (int)shift + 1;
+  if (mant == (1ull << 53)) { /* rounding carried into a new bit */
+    mant >>= 1;
+    exp2++;
+  }
+  return ldexp((double)mant, exp2); /* overflow → HUGE_VAL, JS's Infinity */
+}
+
+double scr_parse_int(ScrStr *s, double radix) {
+  double r32 = scr_to_int32_d(radix);
+  const char *p = s->data;
+  size_t n = s->len, i = 0;
+  while (i < n) {
+    size_t adv;
+    uint32_t cp = scr_utf8_decode(p + i, &adv);
+    if (!scr_is_js_whitespace(cp)) break;
+    i += adv;
+  }
+  double sign = 1.0;
+  if (i < n && (p[i] == '+' || p[i] == '-')) {
+    if (p[i] == '-') sign = -1.0;
+    i++;
+  }
+  int radix_i;
+  bool strip_prefix = true;
+  if (r32 != 0) {
+    if (r32 < 2 || r32 > 36) return NAN;
+    radix_i = (int)r32;
+    if (radix_i != 16) strip_prefix = false;
+  } else {
+    radix_i = 10;
+  }
+  if (strip_prefix && i + 1 < n && p[i] == '0' &&
+      (p[i + 1] == 'x' || p[i + 1] == 'X')) {
+    i += 2;
+    radix_i = 16;
+  }
+  size_t dig_start = i;
+  while (i < n && scr_digit_value(p[i]) < radix_i) i++;
+  if (i == dig_start) return NAN;
+  while (dig_start < i && p[dig_start] == '0') dig_start++;
+  if (dig_start == i) return sign * 0.0; /* all zeros; "-0" is -0 */
+  return sign * scr_digits_to_double(p + dig_start, i - dig_start, radix_i);
+}
+
+/* ES parseFloat (ECMA-262 StrDecimalLiteral prefix over the trimmed
+ * input): skip JS whitespace, then take the LONGEST decimal-literal
+ * prefix — [+-]? (Infinity | digits [. digits*] | . digits) with an
+ * optional [eE][+-]?digits exponent — and answer NaN when none exists.
+ * Deliberately narrower than strtod's own grammar (no hex, no
+ * "inf"/"nan" spellings, "Infinity" exact-case only), so the validated
+ * span is COPIED before strtod sees it — handing strtod the raw tail
+ * would let it claim "0x10" as hex where JS answers 0. strtod on the
+ * validated span is correctly rounded (the JSON parser's precedent). */
+double scr_parse_float(ScrStr *s) {
+  const char *p = s->data;
+  size_t n = s->len, i = 0;
+  while (i < n) {
+    size_t adv;
+    uint32_t cp = scr_utf8_decode(p + i, &adv);
+    if (!scr_is_js_whitespace(cp)) break;
+    i += adv;
+  }
+  size_t start = i;
+  double sign = 1.0;
+  if (i < n && (p[i] == '+' || p[i] == '-')) {
+    if (p[i] == '-') sign = -1.0;
+    i++;
+  }
+  if (i + 8 <= n && memcmp(p + i, "Infinity", 8) == 0) {
+    return sign * (double)INFINITY;
+  }
+  size_t int_digits = 0, frac_digits = 0;
+  while (i < n && p[i] >= '0' && p[i] <= '9') {
+    i++;
+    int_digits++;
+  }
+  if (i < n && p[i] == '.') {
+    size_t j = i + 1;
+    while (j < n && p[j] >= '0' && p[j] <= '9') {
+      j++;
+      frac_digits++;
+    }
+    /* "." alone is not a literal; "1." is (trailing dot, no fraction). */
+    if (int_digits > 0 || frac_digits > 0) i = j;
+  }
+  if (int_digits == 0 && frac_digits == 0) return NAN;
+  size_t end = i;
+  if (i < n && (p[i] == 'e' || p[i] == 'E')) {
+    size_t j = i + 1;
+    if (j < n && (p[j] == '+' || p[j] == '-')) j++;
+    size_t ed = j;
+    while (j < n && p[j] >= '0' && p[j] <= '9') j++;
+    if (j > ed) end = j; /* exponent joins only with digits ("1e" is 1) */
+  }
+  size_t span = end - start;
+  char buf[64];
+  char *tmp = span < sizeof(buf) ? buf : malloc(span + 1);
+  if (!tmp) scr_oom();
+  memcpy(tmp, p + start, span);
+  tmp[span] = '\0';
+  double r = strtod(tmp, NULL);
+  if (tmp != buf) free(tmp);
+  return r;
+}
+
+/* ToNumber(string) — ECMA-262 7.1.4.1 StringToNumber, exactly. The
+ * grammar (StringNumericLiteral) differs from parseFloat's in all three
+ * directions: the WHOLE trimmed span must match (trailing garbage → NaN,
+ * where parseFloat keeps the longest prefix), the non-decimal 0x/0o/0b
+ * integer literals join (UNSIGNED only — a sign on them is NaN), and the
+ * empty/whitespace-only string is +0 (parseFloat: NaN). Decimal spans
+ * convert through strtod like parseFloat (copied first — strtod's own
+ * grammar is wider — inheriting correct rounding, the JSON precedent);
+ * 0x/0o/0b digits are the exact mathematical value rounded to nearest-
+ * even via scr_digits_to_double (u64 fast path, bignum beyond 2^64 —
+ * Node-exact for giant hex, Infinity overflow included: power-of-two
+ * radixes take the exact path, never V8's approximate chunk loop). */
+double scr_string_to_number(ScrStr *s) {
+  const char *p = s->data;
+  size_t b = 0, e = s->len;
+  while (b < e) {
+    size_t adv;
+    uint32_t cp = scr_utf8_decode(p + b, &adv);
+    if (!scr_is_js_whitespace(cp)) break;
+    b += adv;
+  }
+  while (e > b) {
+    size_t cs = e - 1; /* back up to the lead byte of the last char */
+    while (cs > b && ((unsigned char)p[cs] & 0xC0) == 0x80) cs--;
+    size_t adv;
+    uint32_t cp = scr_utf8_decode(p + cs, &adv);
+    if (!scr_is_js_whitespace(cp)) break;
+    e = cs;
+  }
+  if (b == e) return 0.0; /* empty or all StrWhiteSpace */
+  p += b;
+  size_t n = e - b;
+  /* NonDecimalIntegerLiteral: 0x/0X, 0o/0O, 0b/0B — no sign admitted. */
+  if (n >= 2 && p[0] == '0' &&
+      (p[1] == 'x' || p[1] == 'X' || p[1] == 'o' || p[1] == 'O' ||
+       p[1] == 'b' || p[1] == 'B')) {
+    int radix = (p[1] == 'x' || p[1] == 'X') ? 16
+              : (p[1] == 'o' || p[1] == 'O') ? 8
+                                             : 2;
+    size_t i = 2, dig_start = 2;
+    while (i < n && scr_digit_value(p[i]) < radix) i++;
+    if (i == dig_start || i != n) return NAN; /* no digits, or garbage */
+    while (dig_start < i && p[dig_start] == '0') dig_start++;
+    if (dig_start == i) return 0.0;
+    return scr_digits_to_double(p + dig_start, i - dig_start, radix);
+  }
+  /* StrDecimalLiteral, whole-span: [+-]? (Infinity | digits [. digits*]
+   * | . digits) ([eE][+-]?digits)? — nothing before, nothing after. */
+  size_t i = 0;
+  double sign = 1.0;
+  if (p[0] == '+' || p[0] == '-') {
+    if (p[0] == '-') sign = -1.0;
+    i = 1;
+  }
+  if (n - i == 8 && memcmp(p + i, "Infinity", 8) == 0) {
+    return sign * (double)INFINITY;
+  }
+  size_t int_digits = 0, frac_digits = 0;
+  while (i < n && p[i] >= '0' && p[i] <= '9') {
+    i++;
+    int_digits++;
+  }
+  if (i < n && p[i] == '.') {
+    i++;
+    while (i < n && p[i] >= '0' && p[i] <= '9') {
+      i++;
+      frac_digits++;
+    }
+  }
+  if (int_digits == 0 && frac_digits == 0) return NAN; /* ".", "+", "e5" */
+  if (i < n && (p[i] == 'e' || p[i] == 'E')) {
+    i++;
+    if (i < n && (p[i] == '+' || p[i] == '-')) i++;
+    size_t ed = i;
+    while (i < n && p[i] >= '0' && p[i] <= '9') i++;
+    if (i == ed) return NAN; /* "1e", "1e+" — exponent needs digits */
+  }
+  if (i != n) return NAN; /* trailing garbage ("1_000", "1.2.3", "12px") */
+  char buf[64];
+  char *tmp = n < sizeof(buf) ? buf : malloc(n + 1);
+  if (!tmp) scr_oom();
+  memcpy(tmp, p, n);
+  tmp[n] = '\0';
+  double r = strtod(tmp, NULL);
+  if (tmp != buf) free(tmp);
+  return r;
+}
+
+ScrStr *scr_f64_to_scrstr(double x) {
+  char buf[32];
+  size_t len = scr_f64_to_str(x, buf);
+  return scr_str_new(buf, len);
+}
+
+/* ── encodeURIComponent / encodeURI ───────────────────────────────────
+ * ECMA-262 Encode() over the UTF-8 storage. The spec transcodes UTF-16
+ * to UTF-8 and percent-encodes every byte outside the unescaped set —
+ * storage here already IS well-formed UTF-8 (lone surrogates were
+ * substituted with U+FFFD at their producers, SEMANTICS.md 2), so the
+ * walk is byte-wise and the spec's URIError arm (unpaired surrogates)
+ * is unreachable: the encoders are total. Unescaped sets are the
+ * spec's: uriUnescaped = ALPHA / DIGIT / -_.!~*'() for
+ * encodeURIComponent; encodeURI keeps uriReserved ;/?:@&=+$, and #
+ * too. Hex digits are uppercase, per spec. Borrows s; result +1. */
+static bool scr_uri_unescaped(unsigned char c, bool keep_reserved) {
+  if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) return true;
+  switch (c) {
+    case '-': case '_': case '.': case '!': case '~': case '*': case '\'': case '(': case ')':
+      return true;
+    default:
+      break;
+  }
+  if (!keep_reserved) return false;
+  switch (c) {
+    case ';': case '/': case '?': case ':': case '@': case '&': case '=':
+    case '+': case '$': case ',': case '#':
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ScrStr *scr_encode_uri_impl(ScrStr *s, bool keep_reserved) {
+  const unsigned char *b = (const unsigned char *)s->data;
+  size_t n = s->len, out_len = 0;
+  for (size_t i = 0; i < n; i++) out_len += scr_uri_unescaped(b[i], keep_reserved) ? 1 : 3;
+  if (out_len == n) return scr_str_retain(s); /* nothing escapes — share */
+  ScrStr *out = scr_str_alloc_raw(out_len, out_len);
+  static const char hex[] = "0123456789ABCDEF";
+  char *w = out->data;
+  for (size_t i = 0; i < n; i++) {
+    if (scr_uri_unescaped(b[i], keep_reserved)) {
+      *w++ = (char)b[i];
+    } else {
+      *w++ = '%';
+      *w++ = hex[b[i] >> 4];
+      *w++ = hex[b[i] & 0xF];
+    }
+  }
+  out->len = out_len;
+  out->data[out_len] = '\0';
+  return out;
+}
+
+ScrStr *scr_encode_uri_component(ScrStr *s) { return scr_encode_uri_impl(s, false); }
+
+ScrStr *scr_encode_uri(ScrStr *s) { return scr_encode_uri_impl(s, true); }
+
+/* ── isWellFormed / toWellFormed ──────────────────────────────────────
+ * Storage here IS well-formed by invariant: every producer substitutes
+ * the lone surrogates JS strings could carry with U+FFFD at creation
+ * (SEMANTICS.md 2), so no string this runtime can hold is ill-formed.
+ * isWellFormed answers the constant the invariant guarantees and
+ * toWellFormed is the identity (per spec both are no-ops on well-formed
+ * input). A program whose Node run would see `false` already diverged
+ * at the string's creation, not here. */
+bool scr_str_is_well_formed(ScrStr *s) {
+  (void)s;
+  return true;
+}
+
+ScrStr *scr_str_to_well_formed(ScrStr *s) { return scr_str_retain(s); }
+
+/* Immortal interned booleans (same layout trick the emitter uses for
+ * string literals). */
+static const struct { size_t rc; size_t len; size_t cap; char data[5]; }
+    scr_lit_true = {SIZE_MAX, 4, 4, "true"};
+static const struct { size_t rc; size_t len; size_t cap; char data[6]; }
+    scr_lit_false = {SIZE_MAX, 5, 5, "false"};
+
+ScrStr *scr_bool_to_scrstr(bool b) {
+  return b ? (ScrStr *)&scr_lit_true : (ScrStr *)&scr_lit_false;
+}
+
+/* The string iterator's step (for-of over strings): the full CHARACTER at
+ * UTF-16 index i — one code POINT, so an astral char comes back as its
+ * whole two-unit string where charAt would truncate to U+FFFD. The
+ * iterating loop advances by the result's UTF-16 length, exactly JS's
+ * String[Symbol.iterator] contract. Storage is valid UTF-8 by invariant
+ * (literals canonicalized lone surrogates to U+FFFD at creation), so every
+ * decode is a whole char; an i addressing the LOW half of an astral pair
+ * (unreachable from the iterator, which only lands on char starts) answers
+ * the containing char. Out of range → empty string. Borrows s; +1. */
+ScrStr *scr_str_cp_at(ScrStr *s, double i) {
+  double idx = scr_to_integer_or_infinity(i);
+  if (!(idx >= 0)) return scr_str_empty();
+  if (idx >= (double)s->len) return scr_str_empty(); /* len16 <= len */
+  ScrSidx *e = scr_sidx(s);
+  if (e->u16len == s->len) { /* all ASCII */
+    return (ScrStr *)&scr_ascii1[(unsigned char)s->data[(size_t)idx]];
+  }
+  bool mid;
+  size_t off = scr_u16_to_byte_c(s, e, (size_t)idx, &mid);
+  if (off >= s->len) return scr_str_empty(); /* out of range */
+  size_t adv;
+  (void)scr_utf8_decode(s->data + off, &adv);
+  return scr_str_from_span(s->data + off, adv);
+}
+
+
+/* ── the URI component codecs (encodeURIComponent/decodeURIComponent) ──
+ * ECMA-262 Encode/Decode with the component sets, byte-wise over the
+ * runtime's UTF-8 storage: the spec percent-encodes each code point's
+ * UTF-8 bytes, which over UTF-8 storage is exactly a byte scan, and
+ * Decode's "octets must form a valid UTF-8 encoding" is a strict
+ * validation of the assembled escape bytes (raw bytes copy through —
+ * they are the already-valid encoding of code points the spec leaves
+ * untouched). */
+
+/* The component unreserved set: ALPHA / DIGIT / - _ . ! ~ * ' ( ). */
+static bool scr_uri_unreserved(unsigned char c) {
+  if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) return true;
+  switch (c) {
+    case '-': case '_': case '.': case '!': case '~':
+    case '*': case '\'': case '(': case ')':
+      return true;
+    default:
+      return false;
+  }
+}
+
+ScrStr *scr_str_encode_uri_component(ScrStr *s) {
+  size_t extra = 0;
+  for (size_t i = 0; i < s->len; i++) {
+    if (!scr_uri_unreserved((unsigned char)s->data[i])) extra += 2;
+  }
+  if (extra == 0) {
+    scr_str_retain(s);
+    return s;
+  }
+  static const char hex[] = "0123456789ABCDEF";
+  ScrStr *out = scr_str_alloc_raw(s->len + extra, s->len + extra);
+  char *w = out->data;
+  for (size_t i = 0; i < s->len; i++) {
+    unsigned char c = (unsigned char)s->data[i];
+    if (scr_uri_unreserved(c)) {
+      *w++ = (char)c;
+    } else {
+      *w++ = '%';
+      *w++ = hex[c >> 4];
+      *w++ = hex[c & 0xf];
+    }
+  }
+  out->data[out->len] = '\0';
+  return out;
+}
+
+static void scr_uri_malformed(void) {
+  scr_throw_error_named(scr_str_new("URIError", 8),
+                        scr_str_new("URI malformed", 13));
+}
+
+/* One %XX escape's byte, or -1 (bad hex / truncated). */
+static int scr_uri_hex_byte(const char *p, size_t rem) {
+  if (rem < 3 || p[0] != '%') return -1;
+  int hi, lo;
+  char a = p[1], b = p[2];
+  if (a >= '0' && a <= '9') hi = a - '0';
+  else if (a >= 'A' && a <= 'F') hi = a - 'A' + 10;
+  else if (a >= 'a' && a <= 'f') hi = a - 'a' + 10;
+  else return -1;
+  if (b >= '0' && b <= '9') lo = b - '0';
+  else if (b >= 'A' && b <= 'F') lo = b - 'A' + 10;
+  else if (b >= 'a' && b <= 'f') lo = b - 'a' + 10;
+  else return -1;
+  return (hi << 4) | lo;
+}
+
+/* The non-throwing core of decodeURIComponent: NULL on malformed input
+ * (bad hex, invalid UTF-8 octets) instead of the URIError — the
+ * querystring unit's unescape needs exactly the try/catch shape Node's
+ * qsUnescape wraps around decodeURIComponent (scr_qs.c), and the throwing
+ * entry point below stays byte-identical by rethrowing over NULL. */
+ScrStr *scr_str_decode_uri_component_try(ScrStr *s) {
+  /* Decoding only ever shrinks (%XX → 1 byte), so len is a safe cap. */
+  ScrStr *out = scr_str_alloc_raw(0, s->len);
+  size_t w = 0;
+  const char *p = s->data;
+  size_t n = s->len, i = 0;
+  while (i < n) {
+    if (p[i] != '%') {
+      out->data[w++] = p[i++];
+      continue;
+    }
+    int b0 = scr_uri_hex_byte(p + i, n - i);
+    if (b0 < 0) goto malformed;
+    i += 3;
+    if (b0 < 0x80) {
+      /* The empty component reserved set: every ASCII escape decodes. */
+      out->data[w++] = (char)b0;
+      continue;
+    }
+    /* Multibyte: the continuation bytes must ALSO be escapes (a raw byte
+     * is its own code point in the spec's string, never a continuation),
+     * and the whole sequence must be strictly valid UTF-8. */
+    int need;                /* continuation count */
+    int lo = 0x80, hi = 0xBF; /* first continuation's tightened range */
+    if (b0 >= 0xC2 && b0 <= 0xDF) need = 1;
+    else if (b0 == 0xE0) { need = 2; lo = 0xA0; }
+    else if (b0 == 0xED) { need = 2; hi = 0x9F; } /* no surrogates */
+    else if (b0 >= 0xE1 && b0 <= 0xEF) need = 2;
+    else if (b0 == 0xF0) { need = 3; lo = 0x90; }
+    else if (b0 == 0xF4) { need = 3; hi = 0x8F; } /* <= U+10FFFF */
+    else if (b0 >= 0xF1 && b0 <= 0xF3) need = 3;
+    else goto malformed; /* 0x80..0xC1, 0xF5..0xFF: never a leading byte */
+    out->data[w++] = (char)b0;
+    for (int k = 0; k < need; k++) {
+      int bc = scr_uri_hex_byte(p + i, n - i);
+      if (bc < 0) goto malformed;
+      if (k == 0 ? (bc < lo || bc > hi) : (bc < 0x80 || bc > 0xBF)) goto malformed;
+      i += 3;
+      out->data[w++] = (char)bc;
+    }
+  }
+  out->len = w;
+  out->data[w] = '\0';
+  return out;
+malformed:
+  scr_str_release(out);
+  return NULL;
+}
+
+ScrStr *scr_str_decode_uri_component(ScrStr *s) {
+  ScrStr *out = scr_str_decode_uri_component_try(s);
+  if (!out) {
+    scr_uri_malformed();
+    return NULL;
+  }
+  return out;
+}

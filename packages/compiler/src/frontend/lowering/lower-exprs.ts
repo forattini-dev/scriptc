@@ -78,6 +78,7 @@ import { recordKeyResultOk } from "./lower-record-key-types.js";
 import { lowerDynamicRequestInstanceOf } from "./lower-instanceof-island.js";
 import { lowerBuiltinTypeof, lowerBuiltinTypeofTest } from "./lower-typeof.js";
 import { lowerDynamicGlobalIdentifier } from "../ambient-values.js";
+import { fenceNodeModuleMutation } from "./lower-node-module.js";
 import { templateRawTextOf } from "./lower-templates.js";
 import { coerceStringSearchValue, defaultAfterUndefined, lowerStaticallyUndefinedArgument } from "./optional-arguments.js";
 export {

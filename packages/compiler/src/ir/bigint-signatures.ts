@@ -1,11 +1,15 @@
-import { BIGINT, BOOL, F64, STRING } from "./type-constants.js";
+import { BIGINT, BOOL, BYTES_U8, F64, STRING, VOID } from "./type-constants.js";
 
 export const BIGINT_LIB_FN_SIGS = {
   "bigint.fromString": { argTypes: [STRING], result: BIGINT },
   "bigint.fromNumber": { argTypes: [F64], result: BIGINT },
   "bigint.fromBool": { argTypes: [BOOL], result: BIGINT },
+  "bigint.parse": { argTypes: [STRING], result: BIGINT },
+  "bigint.fromF64": { argTypes: [F64], result: BIGINT },
   "bigint.toString": { argTypes: [BIGINT], result: STRING },
   "bigint.toNumber": { argTypes: [BIGINT], result: F64 },
+  "bigint.toF64": { argTypes: [BIGINT], result: F64 },
+  "bigint.inspect": { argTypes: [BIGINT], result: STRING },
   "bigint.truthy": { argTypes: [BIGINT], result: BOOL },
   "bigint.radix": { argTypes: [BIGINT, F64], result: STRING },
   "bigint.add": { argTypes: [BIGINT, BIGINT], result: BIGINT },
@@ -13,6 +17,7 @@ export const BIGINT_LIB_FN_SIGS = {
   "bigint.mul": { argTypes: [BIGINT, BIGINT], result: BIGINT },
   "bigint.div": { argTypes: [BIGINT, BIGINT], result: BIGINT },
   "bigint.rem": { argTypes: [BIGINT, BIGINT], result: BIGINT },
+  "bigint.mod": { argTypes: [BIGINT, BIGINT], result: BIGINT },
   "bigint.pow": { argTypes: [BIGINT, BIGINT], result: BIGINT },
   "bigint.and": { argTypes: [BIGINT, BIGINT], result: BIGINT },
   "bigint.or": { argTypes: [BIGINT, BIGINT], result: BIGINT },
@@ -23,8 +28,14 @@ export const BIGINT_LIB_FN_SIGS = {
   "bigint.not": { argTypes: [BIGINT], result: BIGINT },
   "bigint.cmp": { argTypes: [BIGINT, BIGINT], result: F64 },
   "bigint.cmpNumber": { argTypes: [BIGINT, F64], result: F64 },
+  "bigint.eq": { argTypes: [BIGINT, BIGINT], result: BOOL },
+  "bigint.eqString": { argTypes: [BIGINT, STRING], result: BOOL },
   "bigint.asIntN": { argTypes: [F64, BIGINT], result: BIGINT },
   "bigint.asUintN": { argTypes: [F64, BIGINT], result: BIGINT },
+  "bigint.bufferRead": { argTypes: [BYTES_U8, F64, BOOL, BOOL], result: BIGINT },
+  "bigint.bufferWrite": { argTypes: [BYTES_U8, BIGINT, F64, BOOL, BOOL], result: F64 },
+  "bigint.dataViewGet": { argTypes: [BYTES_U8, F64, BOOL, BOOL], result: BIGINT },
+  "bigint.dataViewSet": { argTypes: [BYTES_U8, F64, BIGINT, BOOL], result: VOID },
 };
 export type IrBigIntLibFn = keyof typeof BIGINT_LIB_FN_SIGS;
 export const BIGINT_MAY_THROW = Object.keys(BIGINT_LIB_FN_SIGS) as IrBigIntLibFn[];

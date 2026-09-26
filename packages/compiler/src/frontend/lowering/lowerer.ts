@@ -59,7 +59,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/ir.js";
-import { BOOL, canCrossIslandBoundary, canExitIslandToType, DYN, F64, isJsonSafeType, isJsonStringifySafeType, isUndefinedArmedUnion, JSVAL, RUNTIME_ERROR_CLASSES, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/ir.js";
+import { arrayOf, BOOL, canCrossIslandBoundary, canExitIslandToType, DYN, F64, isJsonSafeType, isJsonStringifySafeType, isUndefinedArmedUnion, JSVAL, RUNTIME_ERROR_CLASSES, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/ir.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -70,6 +70,7 @@ import {
   cjsExportDiscardReason,
   fallbackDtsPath,
   isCjsExportTableLiteral,
+  isCjsJsFile,
   isJsSourceFile,
   isNodeEsmFile,
   isNodeTypesPath,
@@ -99,7 +100,7 @@ import { noteNativeImportSource, lowerNativeImportAssertion } from "./lower-nati
 import { prepareModuleInits, lowerFileInit, pruneUnusedNativeModuleCaches } from "./lower-module-init.js";
 import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonImports, collectAssetImports, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall } from "./lower-classes.js"; import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
-import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bodyReadsArguments, implicitMonoFile, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
+import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bodyReadsArguments, funcTypeFromParamShapes, implicitMonoFile, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
 import { lowerStreamModuleCall } from "./lower-stream.js";
 import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from "./lower-event-emitter.js";
@@ -964,6 +965,36 @@ export function jsFuncNameOf(node: ts.Node): string | null {
   return null;
 }
 
+export function staticImportNamespaceType(lowerer: Lowerer, expr: ts.Expression | undefined): IrType | null {
+  if (!expr || lowerer.dynamic) return null;
+  let e = expr;
+  let awaited = false;
+  for (;;) {
+    if (ts.isParenthesizedExpression(e)) e = e.expression;
+    else if (ts.isAwaitExpression(e)) {
+      awaited = true;
+      e = e.expression;
+    } else break;
+  }
+  if (!ts.isCallExpression(e) || e.expression.kind !== ts.SyntaxKind.ImportKeyword) return null;
+  const arg = e.arguments[0];
+  if (!arg || !ts.isStringLiteralLike(arg)) return null;
+  const builtin = canonicalBuiltinModule(arg.text);
+  let moduleId: string | null = builtin === null ? null : `builtin:${builtin}`;
+  if (moduleId === null) {
+    const symbol = lowerer.checker.getSymbolAtLocation(arg);
+    const source = symbol && lowerer.checker.declarationsOf(symbol).find(
+      (decl): decl is ts.SourceFile => ts.isSourceFile(decl) && !decl.isDeclarationFile,
+    );
+    if (source && !source.fileName.endsWith(".cts") && !isCjsJsFile(source) && lowerer.moduleOrder.includes(source)) {
+      moduleId = `file:${tsgoPath(resolve(source.fileName))}`;
+    }
+  }
+  if (moduleId === null) return null;
+  const ns: IrType = { kind: "moduleNs", moduleId };
+  return awaited ? ns : { kind: "promise", inner: ns };
+}
+
 export class Lowerer {
   readonly statefulRegex: boolean;
   readonly nativePromiseViews: boolean;
@@ -1517,6 +1548,9 @@ export class Lowerer {
    * any body lowers: import headers and inline require statements call
    * dependency inits by these names. */
   readonly initNameOf = new Map<ts.SourceFile, string>();
+  readonly cjsModuleIdOf = new Map<ts.SourceFile, number>();
+  readonly cjsModuleFiles: ts.SourceFile[] = [];
+  cjsModuleGraphEnabled = false;
   /** File → the id of its run-once guard global (a bool module global,
    * false at program start). Every non-entry module gets one: its %init
    * may be called from several importers/requirers, and the guard is what
@@ -1638,8 +1672,8 @@ export class Lowerer {
     return this.env.current;
   }
 
-  /** The current function's block scopes, outermost first. Read-only: scopes open through `env.inScope`. */
-  get scopes(): readonly Map<ts.Symbol, IrLocal>[] {
+  /** The current function's block scopes, outermost first. Structured lowering helpers may bracket a scope explicitly. */
+  get scopes(): Map<ts.Symbol, IrLocal>[] {
     return this.env.current.scopes;
   }
 
@@ -2613,7 +2647,7 @@ export class Lowerer {
       this.diags.length > 0
         ? null
         : {
-            irVersion: 8,
+            irVersion: 11,
             sourceFile: this.entry.fileName,
             runtimeTarget: runtimeTargetIr(activeRuntimeTarget()),
             ...(!isNodeEsmFile(this.entry) ? { entryCommonJs: true as const } : {}),

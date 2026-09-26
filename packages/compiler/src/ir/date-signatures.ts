@@ -6,6 +6,7 @@ export const DATE_LIB_FN_SIGS = {
   "date.newMs": { argTypes: [F64], result: DATE_T },
   "date.newString": { argTypes: [STRING], result: DATE_T },
   "date.newComponents": { argTypes: [F64, F64, F64, F64, F64, F64, F64], result: DATE_T },
+  "date.parse": { argTypes: [STRING], result: F64 },
   "date.getTime": { argTypes: [DATE_T], result: F64 },
   "date.valueOf": { argTypes: [DATE_T], result: F64 },
   "date.toISOString": { argTypes: [F64], result: STRING },

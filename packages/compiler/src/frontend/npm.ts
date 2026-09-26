@@ -650,6 +650,8 @@ interface SpecifierUse {
   requireViaHelper: boolean;
   /** import("x") — evaluation-time. */
   dynamicImport: boolean;
+  /** import.meta.resolve("x") — resolution without evaluation. */
+  importMetaResolve: boolean;
 }
 
 /** moduleSpecifiersOf's full answer: the per-specifier call-site kinds
@@ -694,6 +696,7 @@ function moduleSpecifiersOf(source: string, fileName: string): ModuleSpecifiers 
         requireLocal: false,
         requireViaHelper: false,
         dynamicImport: false,
+        importMetaResolve: false,
       };
       bySpec.set(spec, use);
       uses.push(use);
@@ -980,6 +983,20 @@ export class NpmGraphBuilder {
   private readonly specifiersCache = new Map<string, ModuleSpecifiers | null>();
 
   constructor(private readonly host: Host = realHost) {}
+
+  resolveForIntrospection(
+    fromFile: string,
+    specifier: string,
+    mode: "import" | "require",
+  ): string | null {
+    const before = this.errors.length;
+    const key = this.resolvePackage(dirname(resolve(fromFile)), specifier, mode, {
+      importer: resolve(fromFile),
+      chain: [],
+    });
+    this.errors.length = before;
+    return key;
+  }
 
   /** Registers one user-level npm import and walks everything it reaches.
    * Idempotent per (importing dir, specifier). */

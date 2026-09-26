@@ -136,6 +136,14 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
       return "FSWatcher";
     case "childStream":
       return "Readable";
+    case "childWriter":
+      return "Writable";
+    case "cryptoHash":
+      return "Hash";
+    case "cryptoHmac":
+      return "Hmac";
+    case "moduleNs":
+      return "Module namespace";
     case "procStream":
       return "WriteStream";
     case "promise":
@@ -149,4 +157,3 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
     }
   }
 }
-

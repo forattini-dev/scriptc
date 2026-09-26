@@ -322,3 +322,272 @@ export function emitProcessLibCall(host: LlvmEmitterContext, e: LibCallExpr): Ll
         B.line(`${present} = icmp ne ptr ${raw}, null`);
       } else {
         const runtimeFn = e.fn === "process.rows" ? "scr_process_rows" : "scr_process_columns";
+        host.declare(`declare double @${runtimeFn}(double)`);
+        B.line(`${raw} = call double @${runtimeFn}(double ${args[0]!.name})`);
+        B.line(`${present} = fcmp oge double ${raw}, ${f64Lit(0)}`);
+      }
+      B.condBr(present, lp, la);
+      B.startBlock(lp);
+      B.line(
+        `store ptr ${host.unionNewOwned(valTag, { name: raw, type: isEnv ? STRING : F64 })}, ptr ${slot}`,
+      );
+      B.br(lj);
+      B.startBlock(la);
+      B.line(`store ptr ${host.unitInstanceRef(e.type.unionId, undefTag)}, ptr ${slot}`);
+      B.br(lj);
+      B.startBlock(lj);
+      const t = B.tmp();
+      B.line(`${t} = load ptr, ptr ${slot}`);
+      return host.own({ name: t, type: e.type });
+    }
+    return host.emitGenericLibCall(e);
+  }
+
+export function emitErrorsEventsLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
+    const B = host.B;
+    if (e.fn === "error.argTypeThrow") {
+      // Always throws with the runtime-rendered Received tail (the
+      // error.nodeThrow dummy pattern). Borrows all three.
+      const an = host.emitExpr(e.args[0]!);
+      const ex = host.emitExpr(e.args[1]!);
+      const got = host.emitExpr(e.args[2]!);
+      host.declare(`declare void @scr_throw_arg_type(ptr, ptr, ptr)`);
+      B.line(`call void @scr_throw_arg_type(ptr ${an.name}, ptr ${ex.name}, ptr ${got.name})`);
+      const ty = host.llType(e.type);
+      if (ty === "void") {
+        host.emitPendingCheck();
+        return { name: "", type: e.type };
+      }
+      const dummy = ty === "double" ? f64Lit(0) : ty === "i1" ? "false" : "null";
+      const out = host.own({ name: dummy, type: e.type });
+      host.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "error.propTypeThrow") {
+      // The property flavor of argTypeThrow — same always-throw shape.
+      const an = host.emitExpr(e.args[0]!);
+      const ex = host.emitExpr(e.args[1]!);
+      const got = host.emitExpr(e.args[2]!);
+      host.declare(`declare void @scr_throw_prop_type(ptr, ptr, ptr)`);
+      B.line(`call void @scr_throw_prop_type(ptr ${an.name}, ptr ${ex.name}, ptr ${got.name})`);
+      const ty = host.llType(e.type);
+      if (ty === "void") {
+        host.emitPendingCheck();
+        return { name: "", type: e.type };
+      }
+      const dummy = ty === "double" ? f64Lit(0) : ty === "i1" ? "false" : "null";
+      const out = host.own({ name: dummy, type: e.type });
+      host.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "error.nodeThrow") {
+      // The compiler-resolved Node-parity throw (always throws — the
+      // typed dummy is abandoned by the pending check's unwind).
+      const kind = host.emitExpr(e.args[0]!);
+      const code = host.emitExpr(e.args[1]!);
+      const msg = host.emitExpr(e.args[2]!);
+      host.declare(`declare void @scr_throw_node_coded(double, ptr, ptr)`);
+      B.line(`call void @scr_throw_node_coded(double ${kind.name}, ptr ${code.name}, ptr ${msg.name})`);
+      const ty = host.llType(e.type);
+      if (ty === "void") {
+        host.emitPendingCheck();
+        return { name: "", type: e.type };
+      }
+      const dummy = ty === "double" ? f64Lit(0) : ty === "i1" ? "false" : "null";
+      const out = host.own({ name: dummy, type: e.type });
+      host.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "emitter.on") {
+      // (recv, name, cb /moves — the identity/, once, prepend): the
+      // listener registers through scr_emitter_on_via with an emitted
+      // fixed-arity adapter closure (what emit invokes) and the runtime's
+      // matching va_list shim — the C backend's emitterInvokeThunkFor
+      // split across the C/LLVM boundary. May-throw ('newListener' meta
+      // listeners run inside).
+      const cbT = e.args[2]!.type;
+      if (cbT.kind !== "func") throw new InternalCompilerError("llvm emitter bug: emitter.on listener not a func");
+      const args = e.args.map((a) => host.emitExpr(a));
+      const { fn: adapterFn, shim } = host.emitterFixedAdapter(cbT);
+      // The wrapper's capture box owns its OWN +1 of the listener; the
+      // frame's +1 moves in as the entry's identity (orig).
+      host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
+      const cbr = B.tmp();
+      B.line(`${cbr} = call ptr @scr_closure_retain_v(ptr ${args[2]!.name})`);
+      const wrapped = host.wrapEmitterListener(cbr, adapterFn);
+      host.moveTemp(args[2]!);
+      host.declare(`declare ptr @scr_emitter_on_via(ptr, ptr, ptr, ptr, ptr, i1 zeroext, i1 zeroext)`);
+      const t = B.tmp();
+      B.line(
+        `${t} = call ptr @scr_emitter_on_via(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+          `ptr ${args[2]!.name}, ptr ${wrapped}, ptr @${shim}, i1 ${args[3]!.name}, i1 ${args[4]!.name})`,
+      );
+      const out = host.own({ name: t, type: e.type });
+      host.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "emitter.onDyn") {
+      // (recv, name, cb /borrowed dyn — the identity/, adapter /moves/,
+      // once, prepend): the frontend's dyn adapter (it boxes the tuple to
+      // dyn and calls the original through the checked-dynamic machinery)
+      // rides behind the same fixed-arity wrapper; the runtime keeps the
+      // dyn box's underlying closure as the entry's identity.
+      const adT = e.args[3]!.type;
+      if (adT.kind !== "func") throw new InternalCompilerError("llvm emitter bug: emitter.onDyn adapter not a func");
+      const args = e.args.map((a) => host.emitExpr(a));
+      const { fn: adapterFn, shim } = host.emitterFixedAdapter(adT);
+      host.moveTemp(args[3]!); // the frame's +1 moves into the wrapper's box
+      const wrapped = host.wrapEmitterListener(args[3]!.name, adapterFn);
+      host.declare(`declare ptr @scr_emitter_on_dyn(ptr, ptr, ptr, ptr, ptr, i1 zeroext, i1 zeroext)`);
+      const t = B.tmp();
+      B.line(
+        `${t} = call ptr @scr_emitter_on_dyn(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+          `ptr ${args[2]!.name}, ptr ${wrapped}, ptr @${shim}, i1 ${args[4]!.name}, i1 ${args[5]!.name})`,
+      );
+      const out = host.own({ name: t, type: e.type });
+      host.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "emitter.emit") {
+      // The variadic dispatch: the event's unified tuple rides the C
+      // variadic tail POINTER-CLASSED. Scalar values ride pointers to
+      // call-lived stack slots, while reference values ride directly; the
+      // fixed shim can therefore read one pointer-width slot per argument
+      // on both wasm32 and native targets. Every argument is borrowed. May
+      // throw (listeners run inside).
+      const args = e.args.map((a) => host.emitExpr(a));
+      const tuple = args.slice(2).map((a) => {
+        const ty = host.llType(a.type);
+        if (ty === "double" || ty === "i1") {
+          const slot = B.slot();
+          B.entryAllocas.push(`${slot} = alloca ${ty} ; EventEmitter scalar argument`);
+          B.line(`store ${ty} ${a.name}, ptr ${slot}`);
+          return `ptr ${slot}`;
+        }
+        return `ptr ${a.name}`;
+      });
+      host.declare(`declare zeroext i1 @scr_emitter_emit(ptr, ptr, ...)`);
+      const call = `call zeroext i1 (ptr, ptr, ...) @scr_emitter_emit(` +
+        [`ptr ${args[0]!.name}`, `ptr ${args[1]!.name}`, ...tuple].join(", ") + `)`;
+      if (e.type.kind === "void") {
+        B.line(`${B.tmp()} = ${call}`);
+        host.emitPendingCheck();
+        return { name: "", type: e.type };
+      }
+      const t = B.tmp();
+      B.line(`${t} = ${call}`);
+      host.emitPendingCheck();
+      return { name: t, type: e.type };
+    }
+    if (e.fn === "emitter.emitData") {
+      // A user emit('data', chunk) on a stream-rooted receiver: fill the
+      // matching payload slot of the two-slot 'data' ABI, NULL the other.
+      const args = e.args.map((a) => host.emitExpr(a));
+      const chunkT = e.args[2]!.type;
+      const both = chunkT.kind === "string"
+        ? [`ptr null`, `ptr ${args[2]!.name}`]
+        : [`ptr ${args[2]!.name}`, `ptr null`];
+      host.declare(`declare zeroext i1 @scr_emitter_emit(ptr, ptr, ...)`);
+      const t = B.tmp();
+      B.line(
+        `${t} = call zeroext i1 (ptr, ptr, ...) @scr_emitter_emit(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ${both.join(", ")})`,
+      );
+      host.emitPendingCheck();
+      return e.type.kind === "void" ? { name: "", type: e.type } : { name: t, type: e.type };
+    }
+    if (e.fn === "emitter.onData" || e.fn === "emitter.onDataDyn") {
+      // The stream-'data' registration: same runtime entries as
+      // emitter.on/onDyn, but the DATA adapter (the two-slot payload ABI
+      // — scr_stream_emit_data) behind the arity-2 fixed shim.
+      const isDyn = e.fn === "emitter.onDataDyn";
+      const cbT = e.args[isDyn ? 3 : 2]!.type;
+      if (cbT.kind !== "func") throw new InternalCompilerError(`llvm emitter bug: ${e.fn} listener not a func`);
+      const args = e.args.map((a) => host.emitExpr(a));
+      const adapterFn = host.streamDataAdapter(cbT);
+      host.declare(`declare void @scr_ee_inv_fixed2(ptr, ptr)`);
+      const t = B.tmp();
+      if (isDyn) {
+        host.moveTemp(args[3]!);
+        const wrapped = host.wrapEmitterListener(args[3]!.name, adapterFn);
+        host.declare(`declare ptr @scr_emitter_on_dyn(ptr, ptr, ptr, ptr, ptr, i1 zeroext, i1 zeroext)`);
+        B.line(
+          `${t} = call ptr @scr_emitter_on_dyn(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+            `ptr ${args[2]!.name}, ptr ${wrapped}, ptr @scr_ee_inv_fixed2, i1 ${args[4]!.name}, i1 ${args[5]!.name})`,
+        );
+      } else {
+        host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
+        const cbr = B.tmp();
+        B.line(`${cbr} = call ptr @scr_closure_retain_v(ptr ${args[2]!.name})`);
+        const wrapped = host.wrapEmitterListener(cbr, adapterFn);
+        host.moveTemp(args[2]!);
+        host.declare(`declare ptr @scr_emitter_on_via(ptr, ptr, ptr, ptr, ptr, i1 zeroext, i1 zeroext)`);
+        B.line(
+          `${t} = call ptr @scr_emitter_on_via(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+            `ptr ${args[2]!.name}, ptr ${wrapped}, ptr @scr_ee_inv_fixed2, i1 ${args[3]!.name}, i1 ${args[4]!.name})`,
+        );
+      }
+      const out = host.own({ name: t, type: e.type });
+      host.emitPendingCheck();
+      return out;
+    }
+    if (e.fn === "error.new") {
+      // Which builtin the runtime constructs is named by the RESULT type;
+      // the message is borrowed (the runtime retains its copy). Never
+      // throws.
+      if (e.type.kind !== "object") throw new InternalCompilerError("llvm emitter bug: error.new result is not a class");
+      const rec = RUNTIME_ERROR_CLASSES.get(e.type.className);
+      if (!rec) throw new InternalCompilerError(`llvm emitter bug: error.new of ${e.type.className}`);
+      const msg = host.emitExpr(e.args[0]!);
+      host.declare(`declare ptr @scr_error_new(i32, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_error_new(i32 ${rec.kind}, ptr ${msg.name})`);
+      return host.own({ name: t, type: e.type });
+    }
+    if (e.fn === "error.newCause") {
+      if (e.type.kind !== "object") throw new InternalCompilerError("llvm emitter bug: error.newCause result is not a class");
+      const rec = RUNTIME_ERROR_CLASSES.get(e.type.className);
+      if (!rec) throw new InternalCompilerError(`llvm emitter bug: error.newCause of ${e.type.className}`);
+      const message = host.emitExpr(e.args[0]!);
+      const cause = host.emitExpr(e.args[1]!);
+      host.declare(`declare ptr @scr_error_new_cause(i32, ptr, ptr)`);
+      const out = B.tmp();
+      B.line(`${out} = call ptr @scr_error_new_cause(i32 ${rec.kind}, ptr ${message.name}, ptr ${cause.name})`);
+      return host.own({ name: out, type: e.type });
+    }
+    if (e.fn === "error.cause") {
+      const receiver = host.emitExpr(e.args[0]!);
+      host.declare(`declare ptr @scr_error_cause(ptr)`);
+      const out = B.tmp();
+      B.line(`${out} = call ptr @scr_error_cause(ptr ${receiver.name})`);
+      return host.own({ name: out, type: e.type });
+    }
+    if (e.fn === "error.ctor") {
+      // super(message) into the builtin base: stamps name/message on the
+      // receiver (borrowed, like the message). The RECEIVER'S static class
+      // names which builtin name to stamp.
+      const recvT = e.args[0]!.type;
+      if (recvT.kind !== "object") throw new InternalCompilerError("llvm emitter bug: error.ctor receiver is not a class");
+      const rec = RUNTIME_ERROR_CLASSES.get(recvT.className);
+      if (!rec) throw new InternalCompilerError(`llvm emitter bug: error.ctor on ${recvT.className}`);
+      const args = e.args.map((a) => host.emitExpr(a));
+      host.declare(`declare void @scr_error_init(ptr, i32, ptr)`);
+      B.line(`call void @scr_error_init(ptr ${args[0]!.name}, i32 ${rec.kind}, ptr ${args[1]!.name})`);
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "error.code") {
+      // `string | undefined`, constructed type-directedly like
+      // process.envGet: the runtime answers +1 or NULL (the receiver may
+      // be a user subclass — the code slot sits in its ScrError prefix).
+      if (e.type.kind !== "union") throw new InternalCompilerError("llvm emitter bug: error.code result is not a union");
+      const def = host.unionsById.get(e.type.unionId);
+      const strTag = def ? def.arms.findIndex((a) => a.kind === "string") : -1;
+      const undefTag = undefinedArmTag(e.type, host.unionsById);
+      if (strTag < 0 || undefTag < 0) throw new InternalCompilerError("llvm emitter bug: error.code union lacks its arms");
+      const recv = host.emitExpr(e.args[0]!);
+      host.declare(`declare ptr @scr_error_code(ptr)`);
+      const raw = B.tmp();
+      B.line(`${raw} = call ptr @scr_error_code(ptr ${recv.name})`);
+      return host.wrapNullable(raw, raw, STRING, strTag, e.type, undefTag);
+    }
+    return host.emitGenericLibCall(e);
+  }

@@ -1318,6 +1318,17 @@ function isStdlibFetchInterface(
   return null;
 }
 
+/** The statically represented element channel of a native Web ReadableStream. */
+export function staticReadableStreamElementType(
+  lowerer: Lowerer,
+  node: ts.Expression,
+): IrType | null {
+  if (lowerer.dynamic || !isStdlibFetchInterface(lowerer, node, "ReadableStream")) return null;
+  const type = lowerer.checker.getBaseTypeOfLiteralType(lowerer.typeOf(node));
+  const [element] = lowerer.checker.getTypeArguments(type as ts.TypeReference);
+  return element ? lowerer.mapTypeOf(element) : DYN;
+}
+
 function fetchObjectBindingMemberName(
   lowerer: Lowerer,
   element: ts.BindingElement,

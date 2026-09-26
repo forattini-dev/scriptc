@@ -5475,37 +5475,51 @@ function makeUtil(env) {
       throw fenceErr(what);
     };
     const pFence = (what) => (...args) => Promise.reject(fenceErr(what));
+    let defaultResultOrder = 'verbatim';
+    const getDefaultResultOrder = () => defaultResultOrder;
+    const setDefaultResultOrder = (order) => {
+      if (!['verbatim', 'ipv4first', 'ipv6first'].includes(order)) throw new TypeError('Invalid DNS result order: ' + order);
+      defaultResultOrder = order;
+    };
+    const getServers = () => [];
+    const setServers = () => {};
+    const queryMethods = ['resolve', 'resolve4', 'resolve6', 'resolveAny', 'resolveCaa', 'resolveCname', 'resolveMx', 'resolveNaptr', 'resolveNs', 'resolvePtr', 'resolveSoa', 'resolveSrv', 'resolveTlsa', 'resolveTxt', 'reverse'];
     const promises = {
       lookup: pFence('lookup'), lookupService: pFence('lookupService'),
-      resolve: pFence('resolve'), resolve4: pFence('resolve4'), resolve6: pFence('resolve6'),
-      resolveCname: pFence('resolveCname'), resolveMx: pFence('resolveMx'),
-      resolveNs: pFence('resolveNs'), resolveSrv: pFence('resolveSrv'),
-      resolveTxt: pFence('resolveTxt'), reverse: pFence('reverse'),
-      getServers: () => [], setServers: () => {},
+      getServers, setServers, getDefaultResultOrder, setDefaultResultOrder,
     };
     class Resolver {
       constructor() {}
-      getServers() { return []; }
-      setServers() {}
+      getServers() { return getServers(); }
+      setServers(servers) { return setServers(servers); }
+      cancel() {}
     }
-    for (const m of ['resolve', 'resolve4', 'resolve6', 'resolveCname', 'resolveMx', 'resolveNs', 'resolveSrv', 'resolveTxt', 'reverse']) {
-      Resolver.prototype[m] = cbFence(m);
-    }
+    const PromiseResolver = class Resolver {
+      getServers() { return getServers(); }
+      setServers(servers) { return setServers(servers); }
+      cancel() {}
+    };
+    promises.Resolver = PromiseResolver;
     const d = {
       lookup: cbFence('lookup'), lookupService: cbFence('lookupService'),
-      resolve: cbFence('resolve'), resolve4: cbFence('resolve4'), resolve6: cbFence('resolve6'),
-      resolveCname: cbFence('resolveCname'), resolveMx: cbFence('resolveMx'),
-      resolveNs: cbFence('resolveNs'), resolveSrv: cbFence('resolveSrv'),
-      resolveTxt: cbFence('resolveTxt'), reverse: cbFence('reverse'),
-      getServers: () => [], setServers: () => {},
-      Resolver, promises,
-      ADDRCONFIG: 1024, V4MAPPED: 2048, ALL: 256,
-      NODATA: 'ENODATA', FORMERR: 'EFORMERR', SERVFAIL: 'ESERVFAIL',
-      NOTFOUND: 'ENOTFOUND', NOTIMP: 'ENOTIMP', REFUSED: 'EREFUSED',
+      getServers, setServers, getDefaultResultOrder, setDefaultResultOrder,
+      Resolver, promises, ADDRCONFIG: 1024, V4MAPPED: 2048, ALL: 256,
     };
+    for (const m of queryMethods) {
+      Resolver.prototype[m] = cbFence(m);
+      PromiseResolver.prototype[m] = pFence(m);
+      d[m] = cbFence(m);
+      promises[m] = pFence(m);
+    }
+    for (const name of ['NODATA', 'FORMERR', 'SERVFAIL', 'NOTFOUND', 'NOTIMP', 'REFUSED', 'BADQUERY', 'BADNAME', 'BADFAMILY', 'BADRESP', 'CONNREFUSED', 'TIMEOUT', 'EOF', 'FILE', 'NOMEM', 'DESTRUCTION', 'BADSTR', 'BADFLAGS', 'NONAME', 'BADHINTS', 'NOTINITIALIZED', 'LOADIPHLPAPI', 'ADDRGETNETWORKPARAMS', 'CANCELLED']) {
+      const value = name === 'EOF' ? name : 'E' + name;
+      d[name] = value;
+      promises[name] = value;
+    }
     d.default = d;
     return d;
   });
+  builtins['dns/promises'] = memo(() => builtins.dns().promises);
   builtins.readline = memo(() => {
     const EventEmitter = builtins.events();
     class Interface extends EventEmitter {

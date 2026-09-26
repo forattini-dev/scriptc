@@ -4349,6 +4349,25 @@ function lowerClientHeadersOption(lowerer: Lowerer, node: ts.Expression): IrExpr
 /** Method calls on ClientRequest receivers: write/end/destroy and
  * on/once("response" | "error" | "timeout" | "close"). Null for other
  * receivers. */
+function lowerHttpTrailersOption(lowerer: Lowerer, node: ts.Expression): IrExpr {
+  if (!ts.isArrayLiteralExpression(node)) return lowerClientHeadersOption(lowerer, node);
+  const loc = locOf(node);
+  const flat: IrExpr[] = [];
+  for (const entry of node.elements) {
+    if (!ts.isArrayLiteralExpression(entry) || entry.elements.length !== 2) {
+      lowerer.noLowering("addTrailers pair list", entry, "use an object/Record or literal [name, value] pairs");
+    }
+    const pair = entry as ts.ArrayLiteralExpression;
+    const name = pair.elements[0]!;
+    const value = pair.elements[1]!;
+    if (ts.isSpreadElement(name) || ts.isSpreadElement(value)) {
+      lowerer.noLowering("addTrailers pair with spread", entry, "use direct string name/value expressions");
+    }
+    flat.push(lowerer.lowerExprExpecting(name, STRING), lowerer.lowerExprExpecting(value, STRING));
+  }
+  return { kind: "arrayLit", elems: flat, type: arrayOf(STRING), loc };
+}
+
 function lowerHttpClientMethodCall(lowerer: Lowerer, call: ts.CallExpression,
   access: ts.PropertyAccessExpression,): IrExpr | null {
   if (lowerer.mapTypeOf(lowerer.typeOf(access.expression))?.kind !== "httpClientReq") return null;
@@ -4607,6 +4626,17 @@ function isHttpReqHeaders(lowerer: Lowerer, node: ts.Expression): boolean {
  * called from lowerElementAccess (the process.env precedent). Answers the
  * interned `string | undefined` union; names match case-insensitively
  * (the runtime stores them lowercased, like Node). */
+function httpReqFieldCollection(lowerer: Lowerer, node: ts.Expression): "headers" | "trailers" | "headersDistinct" | "trailersDistinct" | null {
+  if (
+    ts.isPropertyAccessExpression(node) && !node.questionDotToken &&
+    (node.name.text === "headers" || node.name.text === "trailers" ||
+      node.name.text === "headersDistinct" || node.name.text === "trailersDistinct") &&
+    lowerer.mapTypeOf(lowerer.typeOf(node.expression))?.kind === "httpReq" &&
+    lowerer.isStdlibMember(node)
+  ) return node.name.text;
+  return null;
+}
+
 export function lowerHttpHeadersElement(lowerer: Lowerer, expr: ts.ElementAccessExpression): IrExpr | null {
   if (!isHttpReqHeaders(lowerer, expr.expression)) return null;
   const recv = (expr.expression as ts.PropertyAccessExpression).expression;
