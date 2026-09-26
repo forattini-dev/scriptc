@@ -20,15 +20,15 @@ import { BIGINT_T, BOOL, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam,
 import type { IrFfiCallbackParam, IrFfiCallbackParamClass, IrFfiImport, IrFfiReleaseParam } from "../../ir/ir.js";
 import { isJsSourceFile, isNodeEsmFile, locOf } from "../program.js";
 import { genResultRecord, isGenericCallableMemberType, typeKey } from "../type-mapper.js";
-import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, nodeThrowExpr, staticImportNamespaceType } from "./lowerer.js";
+import { PoisonError, dynFallbackType, dynUndefinedExpr, jsFuncNameOf, nodeThrowExpr } from "./lowerer.js";
 import { newFnCtx } from "./scope-env.js";
 import { islandPromiseStorageTypeOf, nativeImportHandleType } from "./lower-native-import-types.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
-import { NARROW_FIRST, STRING_INDEX_METHODS, STR_METHODS, builtinFenceHintOf, builtinModuleFnOf } from "./surfaces.js";
+import { STRING_INDEX_METHODS, STR_METHODS, builtinFenceHintOf, builtinModuleFnOf } from "./surfaces.js";
 import { ffiBindingDiag, ffiSignatureDiag, libCallbackDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
-import { dynStringReceiver, lowerArrayConstructor, lowerArrayFromCall, lowerArrayOfCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerTupleReadMethodCall } from "./lower-containers.js";
+import { dynStringReceiver, lowerArrayConstructor, lowerArrayFromCall, lowerArrayOfCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectFromEntriesCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { bufEncoding } from "./containers/bytes.js";
 import { lowerRegexMethodCall, lowerStringIndexCall, lowerStringMethodCall, lowerStringPaddingCall, lowerStringSplitCall } from "./containers/string-and-regexp.js";
 import { lowerChildStreamMethodCall, lowerChildWriterMethodCall, lowerCreateRequireCall, lowerCryptoHashMethodCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerImportMetaResolveCall, lowerNodeModuleCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerRequireResolveCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js";
@@ -39,7 +39,6 @@ import { lowerFamilyCall, lowerFamilyImpl, prepareFamilyInstanceCtx, recordFamil
 import { lowerStringConstructor } from "./lower-string-constructor.js";
 import { droppableStatic, lowerAbsenceProbe, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, stringWrapperToString, templateRawTextOf } from "./lower-exprs.js";
 import { isSafeToDiscard } from "./expressions/evaluation-safety.js";
-import { tryLowerExpression } from "./expressions/try-lower-expression.js";
 import { voidTernaryIfStmtOrExprStmt } from "./lower-stmts.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerCompatReqStreamOptionalCall, lowerHttpClientFnCall } from "./lower-server.js";
 import { EMITTER_API_MEMBERS, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
@@ -53,7 +52,7 @@ import { npmStaticPackageOfPath } from "../npm-static.js";
 import { countedFor, varRef } from "../../ir/build.js";
 import { rejectStaticThis } from "./static-this.js";
 import { packDynamicRest } from "./dynamic-rest.js";
-import { fenceNodeModuleMutationCall, lowerRequireCacheKeys } from "./lower-node-module.js";
+import { fenceNodeModuleMutationCall } from "./lower-node-module.js";
 import { defaultAfterUndefined, lowerOptionalArgument, lowerStaticallyUndefinedArgument, positionNumber } from "./optional-arguments.js";
 
 import { lowerLegacyHasOwnCall, lowerObjectStaticCall } from "./lower-object-statics.js";

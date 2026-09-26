@@ -39,8 +39,6 @@ import { lowerHttpResPropertyAssignment, lowerHttpServerTimeoutAssignment, lower
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, createRequireProgramModuleDecl, createRequireProgramModuleOf, isReadlineTyped, textCodecBindingDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, isMatchSliceType, lowerAbsenceProbe, lowerElementCompound, lowerGroupsProjection, lowerOptionalNumber, matchResultNamedGroupsOf, probeLower, pureReemittable, runtimeOptionalTrueIds, symbolFieldInfo, withRuntimeOptionalNarrowed } from "./lower-exprs.js";
-import { isSafeToRepeat } from "./expressions/evaluation-safety.js";
-import { tryLowerExpression } from "./expressions/try-lower-expression.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isParseArgsDynTypeName, isUnitOnlyTsType, unitOnlyUnion } from "../type-mapper.js";
 import { canonicalBuiltinModule } from "../builtin-modules.js";
