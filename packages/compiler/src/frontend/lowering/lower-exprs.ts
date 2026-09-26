@@ -1321,13 +1321,17 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       // type-mapper.ts pins the one concrete signature `(value: string) =>
       // primitive`; direct calls `String(x)` never reach here — the call
       // lowering intercepts them with the wider static coercions).
-      // JavaScript sources keep the identity-token path below.
+      const jsPrimitiveCtorSelector =
+        isJsSourceFile(expr.getSourceFile()) &&
+        expr.parent !== undefined &&
+        ts.isArrowFunction(expr.parent) &&
+        expr.parent.body === expr;
       if (
         (expr.text === "String" || expr.text === "Number" || expr.text === "Boolean") &&
-        !isJsSourceFile(expr.getSourceFile()) &&
+        (!isJsSourceFile(expr.getSourceFile()) || jsPrimitiveCtorSelector) &&
         lowerer.isStdlibSymbol(lowerer.checker.getSymbolAtLocation(expr))
       ) {
-        return primitiveCtorClosure(lowerer, expr.text, loc);
+        return primitiveCtorClosure(lowerer, expr.text, loc, jsPrimitiveCtorSelector);
       }
       const dynamicGlobal = lowerDynamicGlobalIdentifier(lowerer, expr, loc);
       if (dynamicGlobal !== null) return dynamicGlobal;
@@ -6768,7 +6772,10 @@ export function lowerPrefixUnary(lowerer: Lowerer, expr: ts.PrefixUnaryExpressio
       }
       case ts.SyntaxKind.TildeToken: {
         // `~x`: ToInt32, complement, back to f64 (JS-exact, incl. NaN → -1).
-        const operand = lowerOptionalNumber(lowerer, lowerer.lowerExpr(expr.operand), loc, expr.operand);
+        const raw = lowerer.lowerExpr(expr.operand);
+        const operand = raw.type.kind === "dyn"
+          ? { kind: "libCall" as const, fn: "dyn.toNumberCoerce" as const, args: [raw], type: F64, loc }
+          : lowerOptionalNumber(lowerer, raw, loc, expr.operand);
         if (operand.type.kind !== "f64") lowerer.unsupported("SC1043", expr);
         return { kind: "unary", op: "~", operand, type: F64, loc };
       }
@@ -7139,6 +7146,9 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
       if (left.kind === "unitLit") {
         return op === ts.SyntaxKind.BarBarToken ? right : left;
       }
+      if (op === ts.SyntaxKind.BarBarToken && REF_TRUTHY_KINDS.has(left.type.kind)) {
+        return left;
+      }
       if (left.type.kind === "dyn" || right.type.kind === "dyn") {
         // A checked-dynamic operand (`fn.name || '<anonymous>'` —
         // test/common's _mustCallInner): both sides live in the checked-dynamic tree and
@@ -7375,10 +7385,42 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
           };
         }
       }
-      // Native JS arithmetic uses ToPrimitive/ToNumeric and retains BigInt.
-      if (isJsSourceFile(expr.getSourceFile()) && [ts.SyntaxKind.PlusToken,
-        ts.SyntaxKind.MinusToken, ts.SyntaxKind.AsteriskToken, ts.SyntaxKind.SlashToken,
-        ts.SyntaxKind.PercentToken, ts.SyntaxKind.AsteriskAsteriskToken].includes(op)) return lowerIslandBinary();
+      if (isJsSourceFile(expr.getSourceFile())) {
+        const checkNum = (e: IrExpr): IrExpr =>
+          e.type.kind === "dyn" ? { kind: "dynCheck", value: e, type: F64, loc: e.loc } : e;
+        const other = left.type.kind === "dyn" ? right : left;
+        const NUM_BIN: Partial<Record<ts.SyntaxKind, "-" | "*" | "/" | "%" | "**">> = {
+          [ts.SyntaxKind.MinusToken]: "-",
+          [ts.SyntaxKind.AsteriskToken]: "*",
+          [ts.SyntaxKind.SlashToken]: "/",
+          [ts.SyntaxKind.PercentToken]: "%",
+          [ts.SyntaxKind.AsteriskAsteriskToken]: "**",
+        };
+        const NUM_CMP: Partial<Record<ts.SyntaxKind, "<" | "<=" | ">" | ">=">> = {
+          [ts.SyntaxKind.LessThanToken]: "<",
+          [ts.SyntaxKind.LessThanEqualsToken]: "<=",
+          [ts.SyntaxKind.GreaterThanToken]: ">",
+          [ts.SyntaxKind.GreaterThanEqualsToken]: ">=",
+        };
+        const arith = NUM_BIN[op];
+        const cmp = NUM_CMP[op];
+        if ((arith || cmp) && (other.type.kind === "f64" || other.type.kind === "dyn")) {
+          const l = checkNum(left);
+          const r = checkNum(right);
+          if (arith) return { kind: "bin", op: arith, left: l, right: r, type: F64, loc };
+          return { kind: "bin", op: cmp!, left: l, right: r, type: BOOL, loc };
+        }
+        if (op === ts.SyntaxKind.PlusToken) {
+          if (other.type.kind === "f64" || other.type.kind === "dyn") {
+            return { kind: "bin", op: "+", left: checkNum(left), right: checkNum(right), type: F64, loc };
+          }
+          if (other.type.kind === "string") {
+            const strOf = (e: IrExpr): IrExpr =>
+              e.type.kind === "dyn" ? { kind: "toString", operand: e, type: STRING, loc: e.loc } : e;
+            return { kind: "strConcat", left: strOf(left), right: strOf(right), type: STRING, loc };
+          }
+        }
+      }
       // `any`-origin operands (tsc rejects these operator forms on real
       // `unknown`, so in a checker-clean TS program only `any` reaches
       // here): JS's full coercion semantics (ToPrimitive, NaN, string +)
@@ -7388,10 +7430,8 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         (left.type.kind === "dyn" && lowerer.anyOrigin(expr.left)) ||
         (right.type.kind === "dyn" && lowerer.anyOrigin(expr.right));
       if (dynAnyOperand) {
-        if (!lowerer.dynamic) {
-          lowerer.anyOpFence(`the '${ts.tokenToString(op) ?? ts.SyntaxKind[op]}' operator`, expr);
-        }
-        return lowerIslandBinary();
+        if (lowerer.dynamic) return lowerIslandBinary();
+        lowerer.anyOpFence(`the '${ts.tokenToString(op) ?? ts.SyntaxKind[op]}' operator`, expr);
       }
       // Remaining unknown operations have no supported native representation.
       lowerer.unsupported("SC1100", expr, "operators on 'unknown' values");
@@ -9774,25 +9814,33 @@ function primitiveCtorClosure(
   lowerer: Lowerer,
   name: "String" | "Number" | "Boolean",
   loc: SrcLoc,
+  dynamicInput: boolean,
 ): IrExpr {
   const ret = name === "String" ? STRING : name === "Number" ? F64 : BOOL;
-  const fnT = funcOf([STRING], ret);
-  let fnName = lowerer.primitiveCtorFns.get(name);
+  const input = dynamicInput ? DYN : STRING;
+  const fnT = funcOf([input], ret);
+  const key = `${name}:${dynamicInput ? "dyn" : "string"}`;
+  let fnName = lowerer.primitiveCtorFns.get(key);
   if (!fnName) {
-    fnName = `%builtin.${name}`;
-    lowerer.primitiveCtorFns.set(name, fnName);
-    const s: IrExpr = { kind: "varRef", localId: "v.0", type: STRING, loc };
-    const value: IrExpr =
-      name === "String"
-        ? s
+    fnName = `%builtin.${name}${dynamicInput ? ".dyn" : ""}`;
+    lowerer.primitiveCtorFns.set(key, fnName);
+    const v: IrExpr = { kind: "varRef", localId: "v.0", type: input, loc };
+    const value: IrExpr = dynamicInput
+      ? name === "String"
+        ? { kind: "libCall", fn: "dyn.toStringCoerce", args: [v], type: STRING, loc }
         : name === "Number"
-          ? { kind: "libCall", fn: "num.fromString", args: [s], type: F64, loc }
-          : { kind: "strEq", negated: true, left: s, right: { kind: "strLit", value: "", type: STRING, loc }, type: BOOL, loc };
+          ? { kind: "libCall", fn: "dyn.toNumberCoerce", args: [v], type: F64, loc }
+          : { kind: "dynTest", test: "truthy", value: v, type: BOOL, loc }
+      : name === "String"
+        ? v
+        : name === "Number"
+          ? { kind: "libCall", fn: "num.fromString", args: [v], type: F64, loc }
+          : { kind: "strEq", negated: true, left: v, right: { kind: "strLit", value: "", type: STRING, loc }, type: BOOL, loc };
     const fn: IrFunction = {
       name: fnName,
-      params: [{ localId: "v.0", name: "value", type: STRING }],
+      params: [{ localId: "v.0", name: "value", type: input }],
       returnType: ret,
-      locals: [{ id: "v.0", name: "value", type: STRING, mutable: false }],
+      locals: [{ id: "v.0", name: "value", type: input, mutable: false }],
       body: [{ kind: "return", value, loc }],
       loc,
     };

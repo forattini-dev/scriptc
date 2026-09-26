@@ -5546,6 +5546,14 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
     if (member !== "isTTY" && member !== "columns" && member !== "rows") return null;
     let recv: ts.Expression = expr.expression;
     while (ts.isParenthesizedExpression(recv) || ts.isAsExpression(recv) || ts.isTypeAssertion(recv)) recv = recv.expression;
+    if (
+      ts.isBinaryExpression(recv) &&
+      recv.operatorToken.kind === ts.SyntaxKind.BarBarToken
+    ) {
+      let left = recv.left;
+      while (ts.isParenthesizedExpression(left) || ts.isAsExpression(left) || ts.isTypeAssertion(left)) left = left.expression;
+      if (ts.isPropertyAccessExpression(left)) recv = left;
+    }
     if (!ts.isPropertyAccessExpression(recv)) return null;
     const stream = lowerer.stdlibGlobalMember(recv, "process");
     if (stream !== "stdin" && stream !== "stdout" && stream !== "stderr") return null;

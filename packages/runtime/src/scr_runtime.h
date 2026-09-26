@@ -660,7 +660,7 @@ double scr_str_index_of(ScrStr *s, ScrStr *needle, double fromIndex);
 
 /* lastIndexOf(needle): the one-argument form returns the last occurrence's
  * UTF-16 index, or -1. Empty needle returns length. */
-double scr_str_last_index_of(ScrStr *s, ScrStr *needle, double position);
+double scr_str_last_index_of(ScrStr *s, ScrStr *needle);
 
 /* lastIndexOf(needle, position): search at or before the clamped UTF-16
  * position. NaN starts at the end, including for an empty needle. */
@@ -2335,6 +2335,7 @@ ScrStr *scr_fs_read_file(ScrStr *path);
 /* realpath(3) (+1 fresh); failures throw with Node's realpathSync
  * spelling (syscall "lstat"). */
 ScrStr *scr_fs_realpath(ScrStr *path);
+ScrStr *scr_fs_realpath_promise(ScrStr *path);
 void scr_fs_write_file(ScrStr *path, ScrStr *data);
 void scr_fs_append_file(ScrStr *path, ScrStr *data);
 bool scr_fs_exists(ScrStr *path);
@@ -2458,6 +2459,8 @@ ScrPromise *scr_fsp_readdir(ScrStr *path);
 ScrPromise *scr_fsp_rm(ScrStr *path);
 ScrPromise *scr_fsp_rm_opts(ScrStr *path, bool recursive, bool force);
 ScrPromise *scr_fsp_stat(ScrStr *path);
+ScrPromise *scr_fsp_realpath(ScrStr *path);
+ScrPromise *scr_fsp_lstat(ScrStr *path);
 ScrPromise *scr_fsp_rename(ScrStr *oldpath, ScrStr *newpath);
 ScrPromise *scr_fsp_open(ScrStr *path, ScrStr *flags, double mode);
 ScrPromise *scr_fsp_open_numeric(ScrStr *path, double flags, double mode);
@@ -2467,6 +2470,12 @@ ScrPromise *scr_file_handle_read_file_bytes_promise(ScrFileHandle *h, ScrStr *en
 ScrPromise *scr_file_handle_write_file_promise(ScrFileHandle *h, ScrStr *data, ScrStr *encoding);
 ScrPromise *scr_file_handle_write_file_bytes_promise(ScrFileHandle *h, ScrBytes *data, ScrStr *encoding);
 ScrPromise *scr_file_handle_stat_promise(ScrFileHandle *h);
+
+/* Shared executable worker pool. `work` runs on a native worker thread;
+ * `after` and `destroy` run on the main runtime thread. */
+typedef void (*ScrWorkFn)(void *payload);
+void scr_work_submit(void *payload, ScrWorkFn work, ScrWorkFn after,
+                     ScrWorkFn destroy);
 
 /* fs.rename: the syscall is submitted to a native worker immediately and
  * its error-first callback fires on a later event-loop turn through an
@@ -2744,6 +2753,7 @@ const char *scr_signal_name(int sig);
  * pending child: non-kqueue platforms, spawn failures awaiting their
  * first-pass settle, or a child whose exit filter could not be armed. */
 bool scr_children_pending(void);
+bool scr_children_ready(void);
 bool scr_children_failed_pending(void);
 void scr_children_poll(void);
 bool scr_children_wait(double max_wait_ms);
@@ -2775,6 +2785,27 @@ ScrStr *scr_crypto_hmac_digest_bytes(ScrStr *alg, ScrBytes *key, ScrBytes *data,
  * equal-length inputs. THROWS Node's RangeError coded
  * ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH when the byte lengths differ. */
 bool scr_crypto_timing_safe_equal(ScrBytes *a, ScrBytes *b);
+typedef struct ScrCryptoHash ScrCryptoHash;
+ScrCryptoHash *scr_crypto_hash_new(ScrStr *alg);
+ScrCryptoHash *scr_crypto_hmac_new_str(ScrStr *alg, ScrStr *key);
+ScrCryptoHash *scr_crypto_hmac_new_bytes(ScrStr *alg, ScrBytes *key);
+ScrCryptoHash *scr_crypto_hash_retain(ScrCryptoHash *h);
+void scr_crypto_hash_release(ScrCryptoHash *h);
+void *scr_crypto_hash_retain_v(void *p);
+void scr_crypto_hash_release_v(void *p);
+ScrCryptoHash *scr_crypto_hash_update_str(ScrCryptoHash *h, ScrStr *data);
+ScrCryptoHash *scr_crypto_hash_update_bytes(ScrCryptoHash *h, ScrBytes *data);
+ScrCryptoHash *scr_crypto_hash_copy(ScrCryptoHash *h);
+ScrStr *scr_crypto_hash_digest_string(ScrCryptoHash *h, ScrStr *enc);
+ScrBytes *scr_crypto_hash_digest_buffer(ScrCryptoHash *h);
+typedef void (*ScrCryptoBytesFn)(ScrClosure *cb, ScrBytes *value /* moves */);
+void scr_crypto_defer_bytes(ScrBytes *value /* moves */, ScrClosure *cb /* moves */,
+                            ScrCryptoBytesFn fn);
+void scr_crypto_random_bytes_async(double size, ScrClosure *cb /* moves */,
+                                   ScrCryptoBytesFn fn);
+void scr_crypto_pbkdf2_async(ScrBytes *password, ScrBytes *salt,
+                             double iterations, double keylen, ScrStr *digest,
+                             ScrClosure *cb /* moves */, ScrCryptoBytesFn fn);
 /* One-shot raw digest/HMAC by algorithm name ("md5" | "sha1" | "sha256"
  * | "sha384" | "sha512") — the island crypto shim's bridge (scr_island.c
  * host hooks) and the fused chains' own dispatch. Digest bytes into out

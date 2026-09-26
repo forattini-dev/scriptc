@@ -108,6 +108,11 @@ extern char **environ; /* env snapshot (scr_env_pairs) */
 
 static SCR_TL int scr_lib_argc = 0;
 static SCR_TL char **scr_lib_argv = NULL;
+static SCR_TL char **scr_lib_argv_owned = NULL;
+static SCR_TL bool scr_lib_has_fork = false;
+static SCR_TL double scr_lib_fork_target_id = -1;
+static SCR_TL uintptr_t scr_lib_fork_read_handle = 0;
+static SCR_TL uintptr_t scr_lib_fork_write_handle = 0;
 static SCR_TL ScrArr *scr_argv_arr = NULL;    /* interned process.argv */
 static SCR_TL ScrStr *scr_platform_str = NULL; /* interned process.platform */
 static SCR_TL ScrStr *scr_exec_path_str = NULL; /* interned process.execPath */
@@ -115,6 +120,38 @@ static SCR_TL ScrStr *scr_arch_str = NULL;      /* interned process.arch */
 static SCR_TL ScrStr *scr_versions_node_str = NULL; /* interned process.versions.node */
 static SCR_TL ScrStr *scr_navigator_user_agent_str = NULL;
 static SCR_TL ScrStr *scr_versions_openssl_str = NULL; /* interned process.versions.openssl */
+
+typedef struct {
+  ScrStr *filename;
+  ScrStr *id;
+  ScrStr *path;
+  ScrArr *paths;
+  ScrArr *children;
+  double parent;
+  size_t cache_order;
+  bool in_cache;
+  bool loaded;
+  bool is_main;
+} ScrModuleRecord;
+
+static SCR_TL ScrModuleRecord *scr_module_records = NULL;
+static SCR_TL size_t scr_module_record_count = 0;
+static SCR_TL size_t scr_module_next_cache_order = 1;
+
+static void scr_module_registry_cleanup(void) {
+  for (size_t i = 0; i < scr_module_record_count; i++) {
+    ScrModuleRecord *m = &scr_module_records[i];
+    scr_str_release(m->filename);
+    scr_str_release(m->id);
+    scr_str_release(m->path);
+    scr_arr_release(m->paths);
+    scr_arr_release(m->children);
+  }
+  free(scr_module_records);
+  scr_module_records = NULL;
+  scr_module_record_count = 0;
+  scr_module_next_cache_order = 1;
+}
 
 /* Keep lazy process values out of the startup cleanup root.  The executable
  * linker can discard an otherwise-unused getter, but an unconditional atexit
@@ -124,8 +161,17 @@ static SCR_TL ScrStr *scr_versions_openssl_str = NULL; /* interned process.versi
  * at process exit and retains the RC-audit cleanup guarantee for the values a
  * program actually observes. */
 static void scr_lib_cleanup(void) {
+  scr_module_registry_cleanup();
   scr_arr_release(scr_argv_arr);
   scr_argv_arr = NULL;
+  free(scr_lib_argv_owned);
+  scr_lib_argv_owned = NULL;
+  scr_lib_argc = 0;
+  scr_lib_argv = NULL;
+  scr_lib_has_fork = false;
+  scr_lib_fork_target_id = -1;
+  scr_lib_fork_read_handle = 0;
+  scr_lib_fork_write_handle = 0;
 }
 
 static void scr_process_platform_cleanup(void) {
@@ -200,6 +246,24 @@ bool scr_lib_should_collapse_reexec_arg(ScrStr *cmd, ScrArr *args) {
 void scr_lib_init(int argc, char **argv) {
   scr_lib_argc = argc;
   scr_lib_argv = argv;
+  if (argc >= 2 && strncmp(argv[1], "--scriptc-fork=", 15) == 0) {
+    unsigned long long target = 0, read_handle = 0, write_handle = 0;
+    char tail = '\0';
+    if (sscanf(argv[1] + 15, "%llu,%llu,%llu%c", &target, &read_handle,
+               &write_handle, &tail) == 3) {
+      scr_lib_has_fork = true;
+      scr_lib_fork_target_id = (double)target;
+      scr_lib_fork_read_handle = (uintptr_t)read_handle;
+      scr_lib_fork_write_handle = (uintptr_t)write_handle;
+      scr_lib_argv_owned = malloc((size_t)argc * sizeof(char *));
+      if (!scr_lib_argv_owned) scr_trap("out of memory");
+      scr_lib_argv_owned[0] = argv[0];
+      for (int i = 2; i < argc; i++) scr_lib_argv_owned[i - 1] = argv[i];
+      scr_lib_argv_owned[argc - 1] = NULL;
+      scr_lib_argc = argc - 1;
+      scr_lib_argv = scr_lib_argv_owned;
+    }
+  }
   atexit(scr_lib_cleanup);
 }
 #endif /* !SCR_LIB */
@@ -220,11 +284,165 @@ void scr_lib_session_cleanup(void) {
 }
 #endif
 
+static size_t scr_module_index(double module_id) {
+  if (!isfinite(module_id) || module_id < 0 || trunc(module_id) != module_id ||
+      module_id >= (double)scr_module_record_count) {
+    scr_trap("invalid CommonJS module handle");
+  }
+  return (size_t)module_id;
+}
+
+static ScrModuleRecord *scr_module_record(double module_id) {
+  return &scr_module_records[scr_module_index(module_id)];
+}
+
+void scr_module_registry_init(double count_value) {
+  if (!isfinite(count_value) || count_value < 0 || trunc(count_value) != count_value ||
+      count_value > (double)SIZE_MAX) {
+    scr_trap("invalid CommonJS module registry size");
+  }
+  scr_module_registry_cleanup();
+  scr_module_record_count = (size_t)count_value;
+  if (scr_module_record_count == 0) return;
+  scr_module_records = (ScrModuleRecord *)calloc(scr_module_record_count, sizeof(*scr_module_records));
+  if (!scr_module_records) scr_trap("out of memory");
+  for (size_t i = 0; i < scr_module_record_count; i++) {
+    scr_module_records[i].parent = -1;
+  }
+}
+
+void scr_module_define(double module_id, ScrStr *filename, ScrStr *id,
+                       ScrStr *path, ScrArr *paths, bool is_main) {
+  ScrModuleRecord *m = scr_module_record(module_id);
+  scr_str_release(m->filename);
+  scr_str_release(m->id);
+  scr_str_release(m->path);
+  scr_arr_release(m->paths);
+  scr_arr_release(m->children);
+  m->filename = scr_str_retain(filename);
+  m->id = scr_str_retain(id);
+  m->path = scr_str_retain(path);
+  m->paths = scr_arr_retain(paths);
+  m->children = scr_arr_new(SCR_ELEM_F64, 4);
+  m->parent = is_main ? -1 : -2;
+  m->cache_order = 0;
+  m->in_cache = false;
+  m->loaded = false;
+  m->is_main = is_main;
+}
+
+void scr_module_enter(double module_id) {
+  ScrModuleRecord *m = scr_module_record(module_id);
+  if (!m->in_cache) {
+    m->in_cache = true;
+    m->cache_order = scr_module_next_cache_order++;
+  }
+  m->loaded = false;
+}
+
+void scr_module_link(double parent_id, double child_id) {
+  ScrModuleRecord *parent = scr_module_record(parent_id);
+  ScrModuleRecord *child = scr_module_record(child_id);
+  if (!child->is_main && child->parent < 0) child->parent = parent_id;
+  if (!scr_arr_includes_f64(parent->children, child_id)) {
+    scr_arr_push_f64(parent->children, child_id);
+  }
+}
+
+void scr_module_finish(double module_id) {
+  ScrModuleRecord *m = scr_module_record(module_id);
+  m->loaded = true;
+}
+
+void scr_module_fail(double module_id) {
+  ScrModuleRecord *m = scr_module_record(module_id);
+  if (m->parent >= 0) {
+    ScrModuleRecord *parent = scr_module_record(m->parent);
+    double at = scr_arr_index_of_f64(parent->children, module_id);
+    if (at >= 0) {
+      ScrArr *removed = scr_arr_splice(parent->children, at, 1);
+      scr_arr_release(removed);
+    }
+  }
+  m->parent = m->is_main ? -1 : -2;
+  m->cache_order = 0;
+  m->in_cache = false;
+  m->loaded = false;
+}
+
+ScrStr *scr_module_filename(double module_id) {
+  return scr_str_retain(scr_module_record(module_id)->filename);
+}
+
+ScrStr *scr_module_id(double module_id) {
+  return scr_str_retain(scr_module_record(module_id)->id);
+}
+
+ScrStr *scr_module_path(double module_id) {
+  return scr_str_retain(scr_module_record(module_id)->path);
+}
+
+ScrArr *scr_module_paths(double module_id) {
+  return scr_arr_retain(scr_module_record(module_id)->paths);
+}
+
+ScrArr *scr_module_children(double module_id) {
+  return scr_arr_retain(scr_module_record(module_id)->children);
+}
+
+double scr_module_parent(double module_id) {
+  return scr_module_record(module_id)->parent;
+}
+
+bool scr_module_loaded(double module_id) {
+  return scr_module_record(module_id)->loaded;
+}
+
+static bool scr_module_filename_equal(const ScrModuleRecord *m, const ScrStr *filename) {
+  return m->filename && m->filename->len == filename->len &&
+         memcmp(m->filename->data, filename->data, filename->len) == 0;
+}
+
+double scr_module_cache_get(ScrStr *filename) {
+  for (size_t i = 0; i < scr_module_record_count; i++) {
+    const ScrModuleRecord *m = &scr_module_records[i];
+    if (m->in_cache && scr_module_filename_equal(m, filename)) return (double)i;
+  }
+  return -1;
+}
+
+bool scr_module_cache_has(ScrStr *filename) {
+  return scr_module_cache_get(filename) >= 0;
+}
+
+ScrArr *scr_module_cache_keys(void) {
+  ScrArr *keys = scr_arr_new(SCR_ELEM_STR, scr_module_record_count);
+  for (size_t order = 1; order < scr_module_next_cache_order; order++) {
+    for (size_t i = 0; i < scr_module_record_count; i++) {
+      ScrModuleRecord *m = &scr_module_records[i];
+      if (m->in_cache && m->cache_order == order) {
+        scr_arr_push_ref(keys, scr_str_retain(m->filename));
+        break;
+      }
+    }
+  }
+  return keys;
+}
+
 /* Raw argv accessors for the island's process shim (scr_island.c): the
  * island's process.argv must match the static world's ["scriptc",
  * argv[0], ...] shape exactly, so both build from the same stash. */
 int scr_lib_arg_count(void) { return scr_lib_argc; }
 const char *scr_lib_arg(int i) { return scr_lib_argv[i]; }
+
+bool scr_lib_fork_info(double *target, uintptr_t *read_handle,
+                       uintptr_t *write_handle) {
+  if (!scr_lib_has_fork) return false;
+  *target = scr_lib_fork_target_id;
+  *read_handle = scr_lib_fork_read_handle;
+  *write_handle = scr_lib_fork_write_handle;
+  return true;
+}
 
 ScrArr *scr_process_argv(void) {
   if (!scr_argv_arr) {
@@ -1206,16 +1424,41 @@ void scr_os_ifaddrs_free(ScrIfaddrs *s) {
 void (*scr_process_exit_hook)(double code) = NULL;
 void (*scr_stdin_destroy_hook)(void) = NULL;
 
-static SCR_TL int scr_process_implicit_exit_code = 0;
-
-void scr_process_exit_code_set(double code) {
-  uint32_t bits = scr_to_uint32(code);
-  scr_process_implicit_exit_code = bits >= UINT32_C(0x80000000)
-      ? (int)((double)bits - 4294967296.0)
-      : (int)bits;
+void scr_process_set_exit_code(double code) {
+  if (!isfinite(code) || trunc(code) != code) {
+    char recv[48], msg[160];
+    scr_num_received(code, recv);
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"code\" is out of range. It must be an integer. Received %s", recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return;
+  }
+  if (fabs(code) > 9007199254740991.0) {
+    char recv[48], msg[192];
+    scr_num_received(code, recv);
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"code\" is out of range. It must be >= -9007199254740991 && <= 9007199254740991. Received %s", recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return;
+  }
+  /* Node converts valid safe integers to signed int32 for exitCode and
+   * exit listeners. The OS subsequently observes the low eight bits. */
+  double low = fmod(code, 4294967296.0);
+  if (low < 0) low += 4294967296.0;
+  int64_t signed_code = (int64_t)low;
+  if (signed_code > INT_MAX) signed_code -= 4294967296LL;
+  scr_exit_code_note((int)signed_code);
 }
 
-int scr_process_exit_code_get(void) { return scr_process_implicit_exit_code; }
+double scr_process_exit_code_or_zero(void) {
+  return (double)scr_exit_code_hint_get();
+}
+
+/* Backend ABI retained by the Rust-fork emitters. The upstream runtime now
+ * owns validation and the process-wide exit hint, so both spellings share
+ * one source of truth. */
+void scr_process_exit_code_set(double code) { scr_process_set_exit_code(code); }
+int scr_process_exit_code_get(void) { return scr_exit_code_hint_get(); }
 
 void scr_process_exit(double code) {
   /* Node runs 'exit' listeners on explicit process.exit() too — they run
@@ -1617,6 +1860,8 @@ static const char *scr_errno_name(int e, char *fallback, size_t cap) {
   case EFBIG: return "EFBIG";
   case EPIPE: return "EPIPE";
   case ESPIPE: return "ESPIPE";
+  case ELOOP: return "ELOOP";
+  case ENOSYS: return "ENOSYS";
   default:
     snprintf(fallback, cap, "E%d", e);
     return fallback;
@@ -1645,6 +1890,8 @@ static const char *scr_errno_text(int e) {
   case EFBIG: return "file too large";
   case EPIPE: return "broken pipe";
   case ESPIPE: return "invalid seek";
+  case ELOOP: return "too many levels of symbolic links";
+  case ENOSYS: return "function not implemented";
   default: return strerror(e);
   }
 }
@@ -1734,36 +1981,92 @@ ScrStr *scr_fs_read_file(ScrStr *path) {
   return s;
 }
 
-ScrStr *scr_fs_realpath(ScrStr *path) {
-#ifdef __wasi__
-  /* wasi-libc cannot canonicalize a path against a host filesystem root. */
-  scr_fs_throw(ENOSYS, "realpath", path);
-  return NULL;
-#elif defined(_WIN32)
-  /* _fullpath resolves . / .. and drive-relative forms (symlink-free —
-   * the honest Windows approximation); a missing path throws Node's
-   * lstat-spelled ENOENT like the POSIX arm. */
-  char buf[PATH_MAX];
-  if (_fullpath(buf, path->data, sizeof buf) == NULL) {
-    scr_fs_throw(errno ? errno : ENOENT, "lstat", path);
+#ifdef _WIN32
+static WCHAR *scr_fs_win_wide(const ScrStr *path);
+static int scr_fs_win_errno(DWORD error);
+#endif
+
+static ScrStr *scr_fs_realpath_common(ScrStr *path, const char *op) {
+#ifdef _WIN32
+  WCHAR *wide = scr_fs_win_wide(path);
+  if (!wide) {
+    scr_fs_throw(scr_fs_win_errno(GetLastError()), op, path);
     return NULL;
   }
-  if (GetFileAttributesA(buf) == INVALID_FILE_ATTRIBUTES) {
-    scr_fs_throw(ENOENT, "lstat", path);
+  HANDLE handle = CreateFileW(wide, FILE_READ_ATTRIBUTES,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  free(wide);
+  if (handle == INVALID_HANDLE_VALUE) {
+    scr_fs_throw(scr_fs_win_errno(GetLastError()), op, path);
     return NULL;
   }
-  return scr_str_new(buf, strlen(buf));
+  DWORD needed = GetFinalPathNameByHandleW(handle, NULL, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  if (needed == 0) {
+    DWORD error = GetLastError();
+    CloseHandle(handle);
+    scr_fs_throw(scr_fs_win_errno(error), op, path);
+    return NULL;
+  }
+  WCHAR *resolved = malloc(((size_t)needed + 1) * sizeof *resolved);
+  if (!resolved) {
+    CloseHandle(handle);
+    scr_trap("scriptc: out of memory\n");
+  }
+  DWORD length = GetFinalPathNameByHandleW(handle, resolved, needed + 1,
+                                           FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  DWORD error = length == 0 ? GetLastError() : length > needed ? ERROR_INSUFFICIENT_BUFFER : ERROR_SUCCESS;
+  CloseHandle(handle);
+  if (error != ERROR_SUCCESS) {
+    free(resolved);
+    scr_fs_throw(scr_fs_win_errno(error), op, path);
+    return NULL;
+  }
+  size_t prefix = 0;
+  bool unc = false;
+  if (length >= 8 && wcsncmp(resolved, L"\\\\?\\UNC\\", 8) == 0) {
+    prefix = 8;
+    unc = true;
+  } else if (length >= 4 && wcsncmp(resolved, L"\\\\?\\", 4) == 0) {
+    prefix = 4;
+  }
+  int utf8_len = WideCharToMultiByte(CP_UTF8, 0, resolved + prefix,
+                                     (int)(length - prefix), NULL, 0, NULL, NULL);
+  if (utf8_len <= 0) {
+    error = GetLastError();
+    free(resolved);
+    scr_fs_throw(scr_fs_win_errno(error), op, path);
+    return NULL;
+  }
+  size_t extra = unc ? 2 : 0;
+  char *utf8 = malloc(extra + (size_t)utf8_len);
+  if (!utf8) {
+    free(resolved);
+    scr_trap("scriptc: out of memory\n");
+  }
+  if (unc) { utf8[0] = '\\'; utf8[1] = '\\'; }
+  (void)WideCharToMultiByte(CP_UTF8, 0, resolved + prefix, (int)(length - prefix),
+                            utf8 + extra, utf8_len, NULL, NULL);
+  ScrStr *result = scr_str_new(utf8, extra + (size_t)utf8_len);
+  free(utf8);
+  free(resolved);
+  return result;
 #else
-  /* realpath(3); Node's realpathSync reports failures with the "lstat"
-   * syscall in the message ("ENOENT: no such file or directory, lstat
-   * 'x'") — its own resolution walks lstat by component. */
   char buf[PATH_MAX];
   if (realpath(path->data, buf) == NULL) {
-    scr_fs_throw(errno, "lstat", path);
+    scr_fs_throw(errno, op, path);
     return NULL;
   }
   return scr_str_new(buf, strlen(buf));
 #endif
+}
+
+ScrStr *scr_fs_realpath(ScrStr *path) {
+  return scr_fs_realpath_common(path, "lstat");
+}
+
+ScrStr *scr_fs_realpath_promise(ScrStr *path) {
+  return scr_fs_realpath_common(path, "realpath");
 }
 
 static void scr_fs_write_common(ScrStr *path, ScrStr *data, const char *mode) {
@@ -1925,6 +2228,62 @@ double scr_fs_open(ScrStr *path, ScrStr *flags) {
     return 0;
   }
   return (double)fd;
+}
+
+/* fs.openSync(path, fs.constants.O_* [, mode]). The compiler passes a
+ * platform-independent mask for inline flag expressions; native flags are
+ * chosen here so cross-compiled programs retain the target's values. */
+double scr_fs_open_numeric(ScrStr *path, double flags, double mode) {
+  int bits = (int)flags;
+  int access = bits & 3;
+  if (access == 3 || !(isfinite(mode) && trunc(mode) == mode && mode >= 0 && mode <= 4294967295.0)) {
+    scr_throw_error_msg(SCR_ERR_RANGE, "Invalid open flags or mode", 26);
+    return 0;
+  }
+  int native = access == 1 ? O_WRONLY : access == 2 ? O_RDWR : O_RDONLY;
+  if (bits & 4) native |= O_CREAT;
+  if (bits & 8) native |= O_EXCL;
+  if (bits & 64) native |= O_TRUNC;
+  if (bits & 128) native |= O_APPEND;
+#ifdef _WIN32
+  /* The CRT cannot open a reparse point without following it. Fail closed
+   * until a handle-based no-follow open is available on this target. */
+  if (bits & 16) {
+    scr_fs_throw(ENOSYS, "open", path);
+    return 0;
+  }
+#else
+  if (bits & 16) native |= O_NOFOLLOW;
+  if (bits & 32) native |= O_NONBLOCK;
+#endif
+  int fd = open(path->data, native | O_BINARY, (mode_t)mode);
+  if (fd < 0) {
+    scr_fs_throw(errno, "open", path);
+    return 0;
+  }
+  return (double)fd;
+}
+
+static void scr_fs_throw_nopath(int e, const char *op);
+
+void scr_fs_fchmod(double fd, double mode) {
+#ifdef _WIN32
+  (void)fd;
+  (void)mode;
+  /* The CRT cannot enforce Unix permission bits through a descriptor.
+   * A silent success would misrepresent a security-sensitive operation. */
+  scr_fs_throw_nopath(ENOSYS, "fchmod");
+#else
+  if (fchmod((int)fd, (mode_t)mode) != 0) scr_fs_throw_nopath(errno, "fchmod");
+#endif
+}
+
+void scr_fs_fsync(double fd) {
+#ifdef _WIN32
+  if (_commit((int)fd) != 0) scr_fs_throw_nopath(errno, "fsync");
+#else
+  if (fsync((int)fd) != 0) scr_fs_throw_nopath(errno, "fsync");
+#endif
 }
 
 /* fs.closeSync(fd) — close(2); failure throws Node's path-less fs error
@@ -2353,6 +2712,28 @@ static void scr_fs_throw2(int e, const char *op, const ScrStr *src, const ScrStr
   int len = snprintf(msg, cap, "%s: %s, %s '%s' -> '%s'", name, text, op, shown_src, shown_dest);
   scr_throw_error_msg_code(SCR_ERR_ERROR, msg, (size_t)len, name);
   free(msg);
+}
+
+void scr_fs_link(ScrStr *source, ScrStr *dest) {
+#ifdef _WIN32
+  WCHAR *from = scr_fs_win_wide(source);
+  WCHAR *to = scr_fs_win_wide(dest);
+  if (!from || !to) {
+    free(from); free(to);
+    scr_fs_throw2(EINVAL, "link", source, dest);
+    return;
+  }
+  BOOL ok = CreateHardLinkW(to, from, NULL);
+  DWORD error = ok ? 0 : GetLastError();
+  free(from); free(to);
+  if (!ok) {
+    int code = error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS ? EEXIST :
+      error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? ENOENT : EACCES;
+    scr_fs_throw2(code, "link", source, dest);
+  }
+#else
+  if (link(source->data, dest->data) != 0) scr_fs_throw2(errno, "link", source, dest);
+#endif
 }
 
 /* copyFileSync(src, dest): contents copied into a created-or-truncated
@@ -2925,3 +3306,2763 @@ static double scr_process_dimension(double fd, bool rows) {
 
 double scr_process_columns(double fd) { return scr_process_dimension(fd, false); }
 double scr_process_rows(double fd) { return scr_process_dimension(fd, true); }
+
+/* process.stdin.setRawMode(mode). TTY stdin: libuv's UV_TTY_MODE_RAW
+ * termios flag set — exactly what Node's setRawMode(true) applies — and
+ * setRawMode(false) restores the termios saved at the first raw entry
+ * (libuv's orig_termios), a no-op when raw mode was never entered.
+ * NON-TTY stdin: Node's process.stdin is a Socket with no setRawMode
+ * member at all, so the call throws Node's exact catchable TypeError. */
+#ifdef _WIN32
+static SCR_TL DWORD scr_stdin_cooked;
+static SCR_TL bool scr_stdin_cooked_saved = false;
+
+void scr_process_stdin_set_raw_mode(bool raw) {
+  if (!isatty(0)) {
+    const char msg[] = "process.stdin.setRawMode is not a function";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return;
+  }
+  /* libuv's uv_tty_set_mode(UV_TTY_MODE_RAW) console half: drop line
+   * buffering, echo, and Ctrl-C cooking; restore the entry mode on the
+   * way back — the termios save/restore shape, translated. */
+  HANDLE h = (HANDLE)_get_osfhandle(0);
+  DWORD mode;
+  if (h == INVALID_HANDLE_VALUE || !GetConsoleMode(h, &mode)) return;
+  if (raw) {
+    if (!scr_stdin_cooked_saved) {
+      scr_stdin_cooked = mode;
+      scr_stdin_cooked_saved = true;
+    }
+    mode &= ~(DWORD)(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+    (void)SetConsoleMode(h, mode);
+  } else if (scr_stdin_cooked_saved) {
+    (void)SetConsoleMode(h, scr_stdin_cooked);
+  }
+}
+#elif defined(__wasi__)
+void scr_process_stdin_set_raw_mode(bool raw) {
+  (void)raw;
+  const char msg[] = "process.stdin.setRawMode is not a function";
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+}
+#else
+static SCR_TL struct termios scr_stdin_cooked;
+static SCR_TL bool scr_stdin_cooked_saved = false;
+
+void scr_process_stdin_set_raw_mode(bool raw) {
+  if (!isatty(0)) {
+    const char msg[] = "process.stdin.setRawMode is not a function";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return;
+  }
+  if (raw) {
+    struct termios t;
+    if (tcgetattr(0, &t) != 0) return;
+    if (!scr_stdin_cooked_saved) {
+      scr_stdin_cooked = t;
+      scr_stdin_cooked_saved = true;
+    }
+    /* libuv uv__tty_make_raw (UV_TTY_MODE_RAW) */
+    t.c_iflag &= (tcflag_t)~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    t.c_oflag |= (tcflag_t)ONLCR;
+    t.c_cflag |= (tcflag_t)CS8;
+    t.c_lflag &= (tcflag_t)~(ECHO | ICANON | IEXTEN | ISIG);
+    t.c_cc[VMIN] = 1;
+    t.c_cc[VTIME] = 0;
+    (void)tcsetattr(0, TCSADRAIN, &t);
+  } else if (scr_stdin_cooked_saved) {
+    (void)tcsetattr(0, TCSADRAIN, &scr_stdin_cooked);
+  }
+}
+#endif /* _WIN32 */
+
+/* Node's destroy() tears down the stream: the events unit (scr_events.c)
+ * drops every stdin listener, stops watching fd 0, and ends a running
+ * for-await — nothing fires after, and the loop stops keeping the
+ * process alive for stdin. With the events unit not linked there is
+ * nothing to tear down and the call is a no-op, as before. */
+void scr_process_stdin_destroy(void) {
+  if (scr_stdin_destroy_hook != NULL) scr_stdin_destroy_hook();
+}
+
+/* ── Stats values ────────────────────────────────────────────────────
+ * An immutable snapshot of stat(2) results — the lowered type/mode, device,
+ * inode, size, allocation/link, and access/write/change-time slice. statSync
+ * THROWS like the other sync fs calls; the promise form rejects (see the fsp
+ * section). */
+
+struct ScrStats {
+  size_t rc;
+  bool is_file;
+  bool is_dir;
+  bool is_symlink; /* lstat only — a followed stat never sees one */
+  double dev;
+  double ino;
+  double size;
+  double blocks;   /* allocated size in 512-byte units (Node/libuv) */
+  double nlink;
+  double atime_ms;
+  double mtime_ms; /* milliseconds with the nanosecond fraction (Node) */
+  double ctime_ms;
+};
+
+ScrStats *scr_stats_retain(ScrStats *s) {
+  if (s->rc != SIZE_MAX) s->rc++;
+  return s;
+}
+
+void scr_stats_release(ScrStats *s) {
+  if (!s || s->rc == SIZE_MAX) return;
+  if (--s->rc == 0) free(s);
+}
+
+void *scr_stats_retain_v(void *p) { return scr_stats_retain(p); }
+void scr_stats_release_v(void *p) { scr_stats_release(p); }
+
+bool scr_stats_is_file(ScrStats *s) { return s->is_file; }
+bool scr_stats_is_dir(ScrStats *s) { return s->is_dir; }
+bool scr_stats_is_symlink(ScrStats *s) { return s->is_symlink; }
+double scr_stats_dev(ScrStats *s) { return s->dev; }
+double scr_stats_ino(ScrStats *s) { return s->ino; }
+double scr_stats_size(ScrStats *s) { return s->size; }
+double scr_stats_blocks(ScrStats *s) { return s->blocks; }
+double scr_stats_nlink(ScrStats *s) { return s->nlink; }
+double scr_stats_atime_ms(ScrStats *s) { return s->atime_ms; }
+double scr_stats_mtime_ms(ScrStats *s) { return s->mtime_ms; }
+double scr_stats_ctime_ms(ScrStats *s) { return s->ctime_ms; }
+
+static ScrStats *scr_stats_new(void) {
+  ScrStats *s = malloc(sizeof(ScrStats));
+  if (!s) {
+    scr_trap("scriptc: out of memory\n");
+  }
+  s->rc = 1;
+  return s;
+}
+
+#ifdef _WIN32
+/* The CRT fallback is deliberately complete: callers either get every field
+ * from this one stat() result or every field from one Win32 handle below,
+ * never a snapshot spliced across two path resolutions. */
+static ScrStats *scr_stats_of_crt(const struct stat *st) {
+  ScrStats *s = scr_stats_new();
+  s->is_file = S_ISREG(st->st_mode);
+  s->is_dir = S_ISDIR(st->st_mode);
+  s->is_symlink = false;
+  s->dev = (double)st->st_dev;
+  s->ino = (double)st->st_ino;
+  s->size = (double)st->st_size;
+  s->blocks = st->st_size <= 0 ? 0.0 : (double)(((uint64_t)st->st_size + 511) >> 9);
+  s->nlink = (double)st->st_nlink;
+  s->atime_ms = (double)st->st_atime * 1000.0;
+  s->mtime_ms = (double)st->st_mtime * 1000.0;
+  s->ctime_ms = (double)st->st_ctime * 1000.0;
+  return s;
+}
+
+static ScrStats *scr_stats_crt_fallback(const ScrStr *path, const char *op) {
+  struct stat st;
+  if (stat(path->data, &st) != 0) {
+    scr_fs_throw(errno, op, path);
+    return NULL;
+  }
+  return scr_stats_of_crt(&st);
+}
+
+/* Resolve ordinary disk paths once and populate every public field from the
+ * resulting handle. Splitting size/type across CRT stat() and a later
+ * CreateFile call can mix two entries when another process replaces path. */
+static bool scr_stats_is_link_tag(DWORD tag) {
+  return tag == IO_REPARSE_TAG_SYMLINK ||
+         tag == IO_REPARSE_TAG_MOUNT_POINT ||
+         tag == IO_REPARSE_TAG_APPEXECLINK ||
+         tag == UINT32_C(0xA000001D); /* IO_REPARSE_TAG_LX_SYMLINK */
+}
+
+static double scr_stats_utf16_len(const WCHAR *text, size_t len) {
+  if (len == 0) return 0;
+  if (len > INT_MAX) return -1;
+  int bytes = WideCharToMultiByte(
+    CP_UTF8, 0, text, (int)len, NULL, 0, NULL, NULL);
+  return bytes > 0 ? (double)bytes : -1;
+}
+
+typedef struct {
+  ULONG tag;
+  USHORT data_len;
+  USHORT reserved;
+  union {
+    struct {
+      USHORT substitute_offset;
+      USHORT substitute_len;
+      USHORT print_offset;
+      USHORT print_len;
+      ULONG flags;
+      WCHAR path[1];
+    } symlink;
+    struct {
+      USHORT substitute_offset;
+      USHORT substitute_len;
+      USHORT print_offset;
+      USHORT print_len;
+      WCHAR path[1];
+    } mount;
+    struct {
+      unsigned char bytes[1];
+    } generic;
+  } body;
+} ScrStatsReparseData;
+
+/* Node/libuv reports a Windows link's target-text length as st_size. The
+ * ordinary handle information does not carry that value, so read the reparse
+ * payload while the no-follow handle is live. */
+static bool scr_stats_link_size(HANDLE h, DWORD tag, double *size_out) {
+  union {
+    ScrStatsReparseData align;
+    unsigned char bytes[MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
+  } storage;
+  DWORD used;
+  if (!DeviceIoControl(h, FSCTL_GET_REPARSE_POINT, NULL, 0,
+                       storage.bytes, sizeof storage.bytes, &used, NULL)) return false;
+  ScrStatsReparseData *data = (ScrStatsReparseData *)storage.bytes;
+  const size_t body_offset = offsetof(ScrStatsReparseData, body);
+  if (used < body_offset || data->data_len > used - body_offset ||
+      data->tag != tag) return false;
+
+  const WCHAR *target;
+  size_t len;
+  if (tag == IO_REPARSE_TAG_SYMLINK) {
+    const size_t fixed = offsetof(ScrStatsReparseData, body.symlink.path) -
+      body_offset;
+    size_t offset = data->body.symlink.substitute_offset;
+    size_t bytes = data->body.symlink.substitute_len;
+    if (data->data_len < fixed || ((offset | bytes) & 1) != 0 ||
+        offset > data->data_len - fixed ||
+        bytes > data->data_len - fixed - offset) return false;
+    target = (const WCHAR *)((const unsigned char *)data->body.symlink.path +
+      offset);
+    len = bytes / sizeof(WCHAR);
+  } else if (tag == IO_REPARSE_TAG_MOUNT_POINT) {
+    const size_t fixed = offsetof(ScrStatsReparseData, body.mount.path) -
+      body_offset;
+    size_t offset = data->body.mount.substitute_offset;
+    size_t bytes = data->body.mount.substitute_len;
+    if (data->data_len < fixed || ((offset | bytes) & 1) != 0 ||
+        offset > data->data_len - fixed ||
+        bytes > data->data_len - fixed - offset) return false;
+    target = (const WCHAR *)((const unsigned char *)data->body.mount.path +
+      offset);
+    len = bytes / sizeof(WCHAR);
+    _Static_assert(sizeof(WCHAR) == sizeof(uint16_t),
+                   "Windows reparse payloads use UTF-16 code units");
+    if (!scr_win_stats_mount_target_is_junction(
+          (const uint16_t *)target, len)) return false;
+  } else if (tag == UINT32_C(0xA000001D)) {
+    /* WSL's LX symlink payload is a version word followed by UTF-8 bytes. */
+    if (data->data_len < sizeof(ULONG)) return false;
+    *size_out = (double)(data->data_len - sizeof(ULONG));
+    return true;
+  } else {
+    /* App execution links carry a counted UTF-16 string list; the third
+     * string is the target path. */
+    if (tag != IO_REPARSE_TAG_APPEXECLINK ||
+        data->data_len < sizeof(ULONG)) return false;
+    const unsigned char *raw = data->body.generic.bytes;
+    ULONG count;
+    memcpy(&count, raw, sizeof count);
+    if (count < 3 || ((data->data_len - sizeof count) & 1) != 0) return false;
+    target = (const WCHAR *)(raw + sizeof count);
+    size_t chars = (data->data_len - sizeof count) / sizeof(WCHAR);
+    for (size_t item = 0; item < 2; item++) {
+      size_t part = 0;
+      while (part < chars && target[part] != L'\0') part++;
+      if (part == 0 || part == chars) return false;
+      target += part + 1;
+      chars -= part + 1;
+    }
+    len = 0;
+    while (len < chars && target[len] != L'\0') len++;
+    if (len == 0 || len == chars || len < 3 ||
+        !((target[0] >= L'A' && target[0] <= L'Z') ||
+          (target[0] >= L'a' && target[0] <= L'z')) ||
+        target[1] != L':' || target[2] != L'\\') return false;
+    double size = scr_stats_utf16_len(target, len);
+    if (size < 0) return false;
+    *size_out = size;
+    return true;
+  }
+
+  /* Undo the NT namespace prefix CreateSymbolicLinkW stores for absolute
+   * DOS/UNC targets, matching libuv's readlink normalization. */
+  if (len >= 4 && target[0] == L'\\' && target[1] == L'?' &&
+      target[2] == L'?' && target[3] == L'\\') {
+    if (len >= 6 && target[5] == L':' &&
+        ((target[4] >= L'A' && target[4] <= L'Z') ||
+         (target[4] >= L'a' && target[4] <= L'z')) &&
+        (len == 6 || target[6] == L'\\')) {
+      target += 4;
+      len -= 4;
+    } else if (len >= 8 &&
+               (target[4] == L'U' || target[4] == L'u') &&
+               (target[5] == L'N' || target[5] == L'n') &&
+               (target[6] == L'C' || target[6] == L'c') &&
+               target[7] == L'\\') {
+      target += 6;
+      len -= 6;
+    }
+  }
+  double size = scr_stats_utf16_len(target, len);
+  if (size < 0) return false;
+  *size_out = size;
+  return true;
+}
+
+static ScrStats *scr_stats_of_path(const ScrStr *path, const char *op,
+                                   bool no_follow) {
+  WCHAR *wide = scr_fs_win_wide(path);
+  if (!wide) return scr_stats_crt_fallback(path, op);
+
+  DWORD flags = FILE_FLAG_BACKUP_SEMANTICS;
+  if (no_follow) flags |= FILE_FLAG_OPEN_REPARSE_POINT;
+  HANDLE h = CreateFileW(wide, FILE_READ_ATTRIBUTES,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                         NULL, OPEN_EXISTING, flags, NULL);
+  free(wide);
+  if (h == INVALID_HANDLE_VALUE) return scr_stats_crt_fallback(path, op);
+
+  DWORD file_type = GetFileType(h);
+  if (file_type != FILE_TYPE_DISK) {
+    CloseHandle(h);
+    return scr_stats_crt_fallback(path, op);
+  }
+  BY_HANDLE_FILE_INFORMATION basic;
+  if (!GetFileInformationByHandle(h, &basic)) {
+    CloseHandle(h);
+    return scr_stats_crt_fallback(path, op);
+  }
+  bool is_link = false;
+  double link_size = -1;
+  if (no_follow && (basic.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+    FILE_ATTRIBUTE_TAG_INFO tagged;
+    if (!GetFileInformationByHandleEx(
+          h, FileAttributeTagInfo, &tagged, sizeof tagged) ||
+        !scr_stats_is_link_tag(tagged.ReparseTag)) {
+      /* Reparse points are a general interception mechanism. Node/libuv
+       * follows non-link tags even for lstat, so reopen the resolved target. */
+      CloseHandle(h);
+      return scr_stats_of_path(path, op, false);
+    }
+    if (!scr_stats_link_size(h, tagged.ReparseTag, &link_size)) {
+      /* A mount-point tag may name a mounted volume rather than a junction.
+       * libuv treats those (and malformed/unsupported link payloads) as
+       * ordinary reparse points and retries with the final component
+       * followed. Do not classify from the tag alone. */
+      CloseHandle(h);
+      return scr_stats_of_path(path, op, false);
+    }
+    is_link = true;
+  }
+  FILE_STANDARD_INFO standard;
+  bool have_standard = GetFileInformationByHandleEx(
+    h, FileStandardInfo, &standard, sizeof standard);
+  FILE_BASIC_INFO times;
+  bool have_times = GetFileInformationByHandleEx(
+    h, FileBasicInfo, &times, sizeof times);
+  CloseHandle(h);
+
+  bool is_dir = (basic.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+  uint64_t size = ((uint64_t)basic.nFileSizeHigh << 32) | basic.nFileSizeLow;
+  ScrStats *s = scr_stats_new();
+  s->is_file = !is_link && (have_standard ? !standard.Directory : !is_dir);
+  s->is_dir = !is_link && (have_standard ? standard.Directory : is_dir);
+  s->is_symlink = is_link;
+  s->dev = (double)basic.dwVolumeSerialNumber;
+  s->ino = (double)basic.nFileIndexHigh * 4294967296.0 +
+    (double)basic.nFileIndexLow;
+  s->size = is_link && link_size >= 0 ? link_size : s->is_dir ? 0.0
+    : have_standard ? (double)standard.EndOfFile.QuadPart : (double)size;
+  s->blocks = have_standard
+    ? (double)((uint64_t)standard.AllocationSize.QuadPart >> 9)
+    : size == 0 ? 0.0 : (double)((size + 511) >> 9);
+  s->nlink = have_standard
+    ? (double)standard.NumberOfLinks
+    : (double)basic.nNumberOfLinks;
+  s->atime_ms = scr_filetime_unix_ms(basic.ftLastAccessTime);
+  s->mtime_ms = scr_filetime_unix_ms(basic.ftLastWriteTime);
+  if (have_times) {
+    FILETIME changed;
+    changed.dwLowDateTime = times.ChangeTime.LowPart;
+    changed.dwHighDateTime = times.ChangeTime.HighPart;
+    s->ctime_ms = scr_filetime_unix_ms(changed);
+  } else {
+    s->ctime_ms = s->mtime_ms;
+  }
+  return s;
+}
+#else
+static ScrStats *scr_stats_of(const struct stat *st) {
+  ScrStats *s = scr_stats_new();
+  s->is_file = S_ISREG(st->st_mode);
+  s->is_dir = S_ISDIR(st->st_mode);
+  s->is_symlink = S_ISLNK(st->st_mode);
+  s->dev = (double)st->st_dev;
+  s->ino = (double)st->st_ino;
+#if defined(__APPLE__)
+  s->atime_ms = (double)st->st_atimespec.tv_sec * 1000.0 +
+                (double)st->st_atimespec.tv_nsec / 1e6;
+  s->mtime_ms = (double)st->st_mtimespec.tv_sec * 1000.0 +
+                (double)st->st_mtimespec.tv_nsec / 1e6;
+  s->ctime_ms = (double)st->st_ctimespec.tv_sec * 1000.0 +
+                (double)st->st_ctimespec.tv_nsec / 1e6;
+#else
+  s->atime_ms = (double)st->st_atim.tv_sec * 1000.0 +
+                (double)st->st_atim.tv_nsec / 1e6;
+  s->mtime_ms = (double)st->st_mtim.tv_sec * 1000.0 +
+                (double)st->st_mtim.tv_nsec / 1e6;
+  s->ctime_ms = (double)st->st_ctim.tv_sec * 1000.0 +
+                (double)st->st_ctim.tv_nsec / 1e6;
+#endif
+  s->blocks = (double)st->st_blocks;
+  s->nlink = (double)st->st_nlink;
+  s->size = (double)st->st_size;
+  return s;
+}
+#endif
+
+ScrStats *scr_fs_stat(ScrStr *path) {
+#ifdef _WIN32
+  return scr_stats_of_path(path, "stat", false);
+#else
+  struct stat st;
+  if (stat(path->data, &st) != 0) { /* follows symlinks, like Node's statSync */
+    scr_fs_throw(errno, "stat", path);
+    return NULL;
+  }
+  return scr_stats_of(&st);
+#endif
+}
+
+ScrStats *scr_fs_lstat(ScrStr *path) {
+#ifdef _WIN32
+  return scr_stats_of_path(path, "lstat", true);
+#else
+  struct stat st;
+  if (lstat(path->data, &st) != 0) { /* no follow; Node reports lstat */
+    scr_fs_throw(errno, "lstat", path);
+    return NULL;
+  }
+  return scr_stats_of(&st);
+#endif
+}
+
+ScrStats *scr_fs_fstat(double fd) {
+  struct stat st;
+  if (fstat((int)fd, &st) != 0) {
+    scr_fs_throw_nopath(errno, "fstat");
+    return NULL;
+  }
+#ifdef _WIN32
+  ScrStats *s = scr_stats_new();
+  s->is_file = S_ISREG(st.st_mode);
+  s->is_dir = S_ISDIR(st.st_mode);
+  s->is_symlink = false;
+  s->dev = (double)st.st_dev;
+  s->ino = (double)st.st_ino;
+  s->size = (double)st.st_size;
+  s->blocks = s->size <= 0 ? 0 : ceil(s->size / 512.0);
+  s->nlink = (double)st.st_nlink;
+  s->atime_ms = (double)st.st_atime * 1000.0;
+  s->mtime_ms = (double)st.st_mtime * 1000.0;
+  s->ctime_ms = (double)st.st_ctime * 1000.0;
+  return s;
+#else
+  return scr_stats_of(&st);
+#endif
+}
+
+ScrArr *scr_fs_readdir(ScrStr *path) {
+  DIR *d = opendir(path->data);
+  if (!d) {
+    scr_fs_throw(errno, "scandir", path); /* Node reports scandir */
+    return NULL;
+  }
+  ScrArr *arr = scr_arr_new(SCR_ELEM_STR, 8);
+  const struct dirent *ent;
+  while ((ent = readdir(d)) != NULL) {
+    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+    scr_arr_push_ref(arr, scr_str_new(ent->d_name, strlen(ent->d_name)));
+  }
+  closedir(d);
+  return arr; /* OS order, exactly like Node (unsorted) */
+}
+
+/* ── the withFileTypes scandir snapshot ──────────────────────────────
+ * One readdir pass capturing name + entry kind for the emitter's Dirent
+ * assembly (scr_runtime.h has the contract). Kinds are libuv's UV_DIRENT
+ * encoding; DT_UNKNOWN (filesystems that don't fill d_type) falls back
+ * to lstat(2) on the joined path — Node's own getDirents rule (a failed
+ * lstat leaves 0/unknown: every is*() probe answers false, like Node's
+ * Dirent over an UNKNOWN row it could not stat). */
+
+struct ScrScandir {
+  size_t len, cap;
+  ScrStr **names;
+  unsigned char *kinds;
+};
+
+static unsigned char scr_dirent_kind_of_mode(mode_t m) {
+  if (S_ISREG(m)) return 1;
+  if (S_ISDIR(m)) return 2;
+#ifdef S_ISLNK /* no symlink/socket bits in the CRT's stat */
+  if (S_ISLNK(m)) return 3;
+#endif
+  if (S_ISFIFO(m)) return 4;
+#ifdef S_ISSOCK
+  if (S_ISSOCK(m)) return 5;
+#endif
+  if (S_ISCHR(m)) return 6;
+  if (S_ISBLK(m)) return 7;
+  return 0;
+}
+
+ScrScandir *scr_fs_scandir(ScrStr *path) {
+  DIR *d = opendir(path->data);
+  if (!d) {
+    scr_fs_throw(errno, "scandir", path); /* Node reports scandir */
+    return NULL;
+  }
+  ScrScandir *s = malloc(sizeof *s);
+  if (!s) {
+    scr_trap("scriptc: out of memory\n");
+  }
+  s->len = 0;
+  s->cap = 8;
+  s->names = malloc(s->cap * sizeof *s->names);
+  s->kinds = malloc(s->cap);
+  if (!s->names || !s->kinds) {
+    scr_trap("scriptc: out of memory\n");
+  }
+  const struct dirent *ent;
+  while ((ent = readdir(d)) != NULL) {
+    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+    unsigned char kind;
+#ifdef DT_REG
+    switch (ent->d_type) {
+      case DT_REG: kind = 1; break;
+      case DT_DIR: kind = 2; break;
+      case DT_LNK: kind = 3; break;
+      case DT_FIFO: kind = 4; break;
+#ifdef DT_SOCK
+      case DT_SOCK: kind = 5; break;
+#endif
+      case DT_CHR: kind = 6; break;
+      case DT_BLK: kind = 7; break;
+      default: { /* DT_UNKNOWN: the lstat fallback */
+        char buf[4096];
+        int w = snprintf(buf, sizeof buf, "%s/%s", path->data, ent->d_name);
+        struct stat st;
+        kind = (w > 0 && (size_t)w < sizeof buf && lstat(buf, &st) == 0)
+                   ? scr_dirent_kind_of_mode(st.st_mode)
+                   : 0;
+        break;
+      }
+    }
+#else
+    { /* mingw dirent has no d_type: every row takes the stat fallback
+       * (lstat degrades to stat on Windows — see the include seam). */
+      char buf[4096];
+      int w = snprintf(buf, sizeof buf, "%s/%s", path->data, ent->d_name);
+      struct stat st;
+      kind = (w > 0 && (size_t)w < sizeof buf && lstat(buf, &st) == 0)
+                 ? scr_dirent_kind_of_mode(st.st_mode)
+                 : 0;
+    }
+#endif
+    if (s->len == s->cap) {
+      s->cap *= 2;
+      s->names = realloc(s->names, s->cap * sizeof *s->names);
+      s->kinds = realloc(s->kinds, s->cap);
+      if (!s->names || !s->kinds) {
+        scr_trap("scriptc: out of memory\n");
+      }
+    }
+    s->names[s->len] = scr_str_new(ent->d_name, strlen(ent->d_name));
+    s->kinds[s->len] = kind;
+    s->len++;
+  }
+  closedir(d);
+  return s;
+}
+
+size_t scr_fs_scandir_count(const ScrScandir *s) { return s ? s->len : 0; }
+
+ScrStr *scr_fs_scandir_name(const ScrScandir *s, size_t i) {
+  return scr_str_retain(s->names[i]);
+}
+
+double scr_fs_scandir_type(const ScrScandir *s, size_t i) { return (double)s->kinds[i]; }
+
+void scr_fs_scandir_free(ScrScandir *s) {
+  if (!s) return;
+  for (size_t i = 0; i < s->len; i++) scr_str_release(s->names[i]);
+  free(s->names);
+  free(s->kinds);
+  free(s);
+}
+
+/* ── node:crypto ─────────────────────────────────────────────────────
+ * Randomness comes from arc4random_buf. Hash/Hmac/PBKDF2 follow below;
+ * Buffer allocation itself lives in scr_bytes_io.c, while this unit owns
+ * the shared digest implementation and utility validation ladders. */
+
+/* ── the scalar Math statics ─────────────────────────────────────────
+ * Math.min/max at two arguments: the ECMA folds — C's fmin/fmax are NOT
+ * these (they return the non-NaN operand where JS lets NaN poison, and
+ * leave the ±0 order unspecified). Math.random(): a uniform double in
+ * [0,1) at the spec's 53-bit granularity, drawn from arc4random_buf —
+ * the same CSPRNG behind the crypto lowerings. Same distribution as
+ * Node's, necessarily a different sequence (SEMANTICS.md 62); range and
+ * granularity are pinned differentially by invariant, not by bytes. */
+
+double scr_math_min(double a, double b) {
+  if (isnan(a) || isnan(b)) return (double)NAN;
+  if (a == 0.0 && b == 0.0) return signbit(a) ? a : b; /* -0 wins */
+  return a < b ? a : b;
+}
+
+double scr_math_max(double a, double b) {
+  if (isnan(a) || isnan(b)) return (double)NAN;
+  if (a == 0.0 && b == 0.0) return signbit(a) ? b : a; /* +0 wins */
+  return a > b ? a : b;
+}
+
+/* Math.round: ECMA half-toward-+Infinity. NOT C round() (half away from
+ * zero: round(-1.5) is -2 where JS answers -1) and NOT floor(x + 0.5)
+ * (the float ADD drifts at the epsilon boundary: 0.49999999999999994 +
+ * 0.5 == 1.0 in doubles where the exact sum is below one — JS answers
+ * 0). x - floor(x) is EXACT for doubles (Sterbenz), so the fraction
+ * comparison decides losslessly; results in (-0.5, 0] keep the sign (JS:
+ * Math.round(-0.3) is -0). */
+double scr_math_round(double x) {
+  if (isnan(x) || isinf(x) || x == 0.0) return x;
+  double f = floor(x);
+  double diff = x - f;
+  double r = diff < 0.5 ? f : f + 1.0;
+  return (r == 0.0 && x < 0.0) ? -0.0 : r;
+}
+
+/* IEEE pow(±1, ±Infinity) and pow(1, NaN) return 1; ECMAScript requires
+ * NaN. The other special cases, including signed zero and odd integer
+ * powers, follow libm. */
+double scr_math_pow(double base, double exponent) {
+  if (isnan(exponent) || (isinf(exponent) && fabs(base) == 1.0)) return NAN;
+  return pow(base, exponent);
+}
+
+double scr_math_random(void) {
+  uint64_t r;
+  arc4random_buf(&r, sizeof r);
+  /* The top 53 bits scaled by 2^-53: every representable k/2^53 in [0,1)
+   * is equally likely — V8's own construction. */
+  return (double)(r >> 11) * 0x1.0p-53;
+}
+
+ScrStr *scr_crypto_random_uuid(void) {
+  unsigned char b[16];
+  arc4random_buf(b, sizeof b);
+  b[6] = (unsigned char)((b[6] & 0x0f) | 0x40); /* version 4 */
+  b[8] = (unsigned char)((b[8] & 0x3f) | 0x80); /* variant 10xx */
+  char out[37];
+  static const char hex[] = "0123456789abcdef";
+  size_t o = 0;
+  for (size_t i = 0; i < 16; i++) {
+    if (i == 4 || i == 6 || i == 8 || i == 10) out[o++] = '-';
+    out[o++] = hex[b[i] >> 4];
+    out[o++] = hex[b[i] & 0x0f];
+  }
+  return scr_str_new(out, 36);
+}
+
+/* randomBytes(n).toString(enc): n truncates like Node's (1.5 → 1 byte);
+ * out-of-range n THROWS Node's RangeError verbatim. enc is "hex" or
+ * "base64" (the compiler fences other encodings at the call site). */
+ScrStr *scr_crypto_random_string(double n, ScrStr *enc) {
+  if (!(n >= 0 && n <= 2147483647)) {
+    char num[32];
+    size_t numlen = scr_f64_to_str(n, num);
+    char msg[128];
+    int mlen = snprintf(msg, sizeof msg,
+                        "The value of \"size\" is out of range. It must be >= 0 && <= 2147483647. Received %.*s",
+                        (int)numlen, num);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)mlen, "ERR_OUT_OF_RANGE");
+    return NULL;
+  }
+  size_t size = (size_t)n;
+  unsigned char *bytes = malloc(size ? size : 1);
+  if (!bytes) {
+    scr_trap("scriptc: out of memory\n");
+  }
+  arc4random_buf(bytes, size);
+  ScrStr *out;
+  if (enc->len == 3 && memcmp(enc->data, "hex", 3) == 0) {
+    static const char hex[] = "0123456789abcdef";
+    char *buf = malloc(size * 2 + 1);
+    if (!buf) {
+      scr_trap("scriptc: out of memory\n");
+    }
+    for (size_t i = 0; i < size; i++) {
+      buf[i * 2] = hex[bytes[i] >> 4];
+      buf[i * 2 + 1] = hex[bytes[i] & 0x0f];
+    }
+    out = scr_str_new(buf, size * 2);
+    free(buf);
+  } else {
+    /* base64, standard alphabet, '=' padded — Buffer.toString("base64"). */
+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t outlen = (size + 2) / 3 * 4;
+    char *buf = malloc(outlen + 1);
+    if (!buf) {
+      scr_trap("scriptc: out of memory\n");
+    }
+    size_t o = 0;
+    for (size_t i = 0; i < size; i += 3) {
+      unsigned v = (unsigned)bytes[i] << 16;
+      if (i + 1 < size) v |= (unsigned)bytes[i + 1] << 8;
+      if (i + 2 < size) v |= (unsigned)bytes[i + 2];
+      buf[o++] = b64[(v >> 18) & 63];
+      buf[o++] = b64[(v >> 12) & 63];
+      buf[o++] = i + 1 < size ? b64[(v >> 6) & 63] : '=';
+      buf[o++] = i + 2 < size ? b64[v & 63] : '=';
+    }
+    out = scr_str_new(buf, o);
+    free(buf);
+  }
+  free(bytes);
+  return out;
+}
+
+/* ── incremental MD5/SHA-1/SHA-256 and HMAC ──────────────────────────
+ * The first-class Hash/Hmac handles, fused one-shot paths, island bridge,
+ * and PBKDF2 all share these contexts. Hash.copy() is a context snapshot;
+ * update never buffers the full input. Differential tests pin every
+ * algorithm against Node's implementation. */
+
+static const uint32_t scr_sha256_k[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+    0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+    0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+
+static uint32_t scr_sha256_rotr(uint32_t x, unsigned n) {
+  return (x >> n) | (x << (32 - n));
+}
+
+static void scr_sha256_block(uint32_t h[8], const unsigned char *p) {
+  uint32_t w[64];
+  for (int i = 0; i < 16; i++) {
+    w[i] = ((uint32_t)p[i * 4] << 24) | ((uint32_t)p[i * 4 + 1] << 16) |
+           ((uint32_t)p[i * 4 + 2] << 8) | (uint32_t)p[i * 4 + 3];
+  }
+  for (int i = 16; i < 64; i++) {
+    uint32_t s0 = scr_sha256_rotr(w[i - 15], 7) ^ scr_sha256_rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+    uint32_t s1 = scr_sha256_rotr(w[i - 2], 17) ^ scr_sha256_rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+    w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+  }
+  uint32_t a = h[0], b = h[1], c = h[2], d = h[3];
+  uint32_t e = h[4], f = h[5], g = h[6], hh = h[7];
+  for (int i = 0; i < 64; i++) {
+    uint32_t s1 = scr_sha256_rotr(e, 6) ^ scr_sha256_rotr(e, 11) ^ scr_sha256_rotr(e, 25);
+    uint32_t ch = (e & f) ^ (~e & g);
+    uint32_t t1 = hh + s1 + ch + scr_sha256_k[i] + w[i];
+    uint32_t s0 = scr_sha256_rotr(a, 2) ^ scr_sha256_rotr(a, 13) ^ scr_sha256_rotr(a, 22);
+    uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+    uint32_t t2 = s0 + maj;
+    hh = g; g = f; f = e; e = d + t1;
+    d = c; c = b; b = a; a = t1 + t2;
+  }
+  h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+  h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+}
+
+typedef struct ScrSha256Ctx {
+  uint32_t h[8];
+  uint64_t bytes;
+  unsigned char tail[64];
+  size_t tail_len;
+} ScrSha256Ctx;
+
+static void scr_sha256_init(ScrSha256Ctx *ctx) {
+  static const uint32_t initial[8] = {
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+  memcpy(ctx->h, initial, sizeof initial);
+  ctx->bytes = 0;
+  ctx->tail_len = 0;
+}
+
+static void scr_sha256_update(ScrSha256Ctx *ctx, const unsigned char *data, size_t len) {
+  ctx->bytes += len;
+  if (ctx->tail_len != 0) {
+    size_t take = 64 - ctx->tail_len;
+    if (take > len) take = len;
+    memcpy(ctx->tail + ctx->tail_len, data, take);
+    ctx->tail_len += take;
+    data += take;
+    len -= take;
+    if (ctx->tail_len == 64) {
+      scr_sha256_block(ctx->h, ctx->tail);
+      ctx->tail_len = 0;
+    }
+  }
+  while (len >= 64) {
+    scr_sha256_block(ctx->h, data);
+    data += 64;
+    len -= 64;
+  }
+  if (len != 0) {
+    memcpy(ctx->tail, data, len);
+    ctx->tail_len = len;
+  }
+}
+
+/* Final block(s): the 0x80 terminator, zero padding, and 64-bit
+ * big-endian bit length. Finalization reads a snapshot so Hash.copy()
+ * remains a plain context copy and one-shot callers share this path. */
+static size_t scr_sha256_final(const ScrSha256Ctx *source, unsigned char out[32]) {
+  ScrSha256Ctx ctx = *source;
+  unsigned char tail[128];
+  size_t rem = ctx.tail_len;
+  memcpy(tail, ctx.tail, rem);
+  tail[rem] = 0x80;
+  size_t pad = (rem + 1 + 8 <= 64) ? 64 : 128;
+  memset(tail + rem + 1, 0, pad - rem - 1 - 8);
+  uint64_t bits = ctx.bytes * 8;
+  for (int b = 0; b < 8; b++) tail[pad - 1 - b] = (unsigned char)(bits >> (8 * b));
+  scr_sha256_block(ctx.h, tail);
+  if (pad == 128) scr_sha256_block(ctx.h, tail + 64);
+  for (int j = 0; j < 8; j++) {
+    for (int b = 0; b < 4; b++) out[j * 4 + b] = (unsigned char)(ctx.h[j] >> (24 - 8 * b));
+  }
+  return 32;
+}
+
+/* ── SHA-1 (FIPS 180-4) — the RFC 6455 Sec-WebSocket-Accept hash ────── */
+
+static void scr_sha1_block(uint32_t h[5], const unsigned char *p) {
+  uint32_t w[80];
+  for (int i = 0; i < 16; i++) {
+    w[i] = ((uint32_t)p[i * 4] << 24) | ((uint32_t)p[i * 4 + 1] << 16) |
+           ((uint32_t)p[i * 4 + 2] << 8) | (uint32_t)p[i * 4 + 3];
+  }
+  for (int i = 16; i < 80; i++) {
+    uint32_t x = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16];
+    w[i] = (x << 1) | (x >> 31);
+  }
+  uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
+  for (int i = 0; i < 80; i++) {
+    uint32_t f, k;
+    if (i < 20) { f = (b & c) | (~b & d); k = 0x5a827999; }
+    else if (i < 40) { f = b ^ c ^ d; k = 0x6ed9eba1; }
+    else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdc; }
+    else { f = b ^ c ^ d; k = 0xca62c1d6; }
+    uint32_t t = ((a << 5) | (a >> 27)) + f + e + k + w[i];
+    e = d; d = c; c = ((b << 30) | (b >> 2)); b = a; a = t;
+  }
+  h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
+}
+
+typedef struct ScrSha1Ctx {
+  uint32_t h[5];
+  uint64_t bytes;
+  unsigned char tail[64];
+  size_t tail_len;
+} ScrSha1Ctx;
+
+static void scr_sha1_init(ScrSha1Ctx *ctx) {
+  static const uint32_t initial[5] = {
+      0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0};
+  memcpy(ctx->h, initial, sizeof initial);
+  ctx->bytes = 0;
+  ctx->tail_len = 0;
+}
+
+static void scr_sha1_update(ScrSha1Ctx *ctx, const unsigned char *data, size_t len) {
+  ctx->bytes += len;
+  if (ctx->tail_len != 0) {
+    size_t take = 64 - ctx->tail_len;
+    if (take > len) take = len;
+    memcpy(ctx->tail + ctx->tail_len, data, take);
+    ctx->tail_len += take;
+    data += take;
+    len -= take;
+    if (ctx->tail_len == 64) {
+      scr_sha1_block(ctx->h, ctx->tail);
+      ctx->tail_len = 0;
+    }
+  }
+  while (len >= 64) {
+    scr_sha1_block(ctx->h, data);
+    data += 64;
+    len -= 64;
+  }
+  if (len != 0) {
+    memcpy(ctx->tail, data, len);
+    ctx->tail_len = len;
+  }
+}
+
+static size_t scr_sha1_final(const ScrSha1Ctx *source, unsigned char out[32]) {
+  ScrSha1Ctx ctx = *source;
+  unsigned char tail[128];
+  size_t rem = ctx.tail_len;
+  memcpy(tail, ctx.tail, rem);
+  tail[rem] = 0x80;
+  size_t pad = (rem + 1 + 8 <= 64) ? 64 : 128;
+  memset(tail + rem + 1, 0, pad - rem - 1 - 8);
+  uint64_t bits = ctx.bytes * 8;
+  for (int b = 0; b < 8; b++) tail[pad - 1 - b] = (unsigned char)(bits >> (8 * b));
+  scr_sha1_block(ctx.h, tail);
+  if (pad == 128) scr_sha1_block(ctx.h, tail + 64);
+  for (int j = 0; j < 5; j++) {
+    for (int b = 0; b < 4; b++) out[j * 4 + b] = (unsigned char)(ctx.h[j] >> (24 - 8 * b));
+  }
+  return 20;
+}
+
+static size_t scr_sha1_digest(const unsigned char *data, size_t len, unsigned char out[32]) {
+  ScrSha1Ctx ctx;
+  scr_sha1_init(&ctx);
+  scr_sha1_update(&ctx, data, len);
+  return scr_sha1_final(&ctx, out);
+}
+
+/* The digest's encoding: "hex" or "base64" (compiler-fenced literals). */
+static ScrStr *scr_digest_encode(const unsigned char *d, size_t n, const ScrStr *enc) {
+  if (enc->len == 3 && memcmp(enc->data, "hex", 3) == 0) {
+    static const char hex[] = "0123456789abcdef";
+    /* Sized for the widest lowered digest (SHA-512: 64 bytes → 128 hex). */
+    char buf[128];
+    for (size_t i = 0; i < n; i++) {
+      buf[i * 2] = hex[d[i] >> 4];
+      buf[i * 2 + 1] = hex[d[i] & 0x0f];
+    }
+    return scr_str_new(buf, n * 2);
+  }
+  /* base64, standard alphabet, '=' padded — Buffer.toString("base64"). */
+  static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  char buf[88]; /* ceil(64 / 3) * 4 — the SHA-512 digest's base64 width. */
+  size_t o = 0;
+  for (size_t i = 0; i < n; i += 3) {
+    unsigned v = (unsigned)d[i] << 16;
+    if (i + 1 < n) v |= (unsigned)d[i + 1] << 8;
+    if (i + 2 < n) v |= (unsigned)d[i + 2];
+    buf[o++] = b64[(v >> 18) & 63];
+    buf[o++] = b64[(v >> 12) & 63];
+    buf[o++] = i + 1 < n ? b64[(v >> 6) & 63] : '=';
+    buf[o++] = i + 2 < n ? b64[v & 63] : '=';
+  }
+  return scr_str_new(buf, o);
+}
+
+/* ── MD5 (RFC 1321) ───────────────────────────────────────────────── */
+
+static const uint32_t scr_md5_k[64] = {
+    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a,
+    0xa8304613, 0xfd469501, 0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
+    0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821, 0xf61e2562, 0xc040b340,
+    0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8,
+    0x676f02d9, 0x8d2a4c8a, 0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c,
+    0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70, 0x289b7ec6, 0xeaa127fa,
+    0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92,
+    0xffeff47d, 0x85845dd1, 0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1,
+    0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391};
+static const unsigned char scr_md5_r[64] = {
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9,  14, 20, 5, 9,  14, 20, 5, 9,  14, 20, 5, 9,  14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21};
+
+static void scr_md5_block(uint32_t h[4], const unsigned char *p) {
+  uint32_t m[16];
+  for (int i = 0; i < 16; i++) {
+    m[i] = (uint32_t)p[i * 4] | ((uint32_t)p[i * 4 + 1] << 8) |
+           ((uint32_t)p[i * 4 + 2] << 16) | ((uint32_t)p[i * 4 + 3] << 24);
+  }
+  uint32_t a = h[0], b = h[1], c = h[2], d = h[3];
+  for (int i = 0; i < 64; i++) {
+    uint32_t f, g;
+    if (i < 16) { f = (b & c) | (~b & d); g = (uint32_t)i; }
+    else if (i < 32) { f = (d & b) | (~d & c); g = (5u * i + 1) & 15; }
+    else if (i < 48) { f = b ^ c ^ d; g = (3u * i + 5) & 15; }
+    else { f = c ^ (b | ~d); g = (7u * i) & 15; }
+    uint32_t t = d;
+    d = c;
+    c = b;
+    uint32_t x = a + f + scr_md5_k[i] + m[g];
+    b = b + ((x << scr_md5_r[i]) | (x >> (32 - scr_md5_r[i])));
+    a = t;
+  }
+  h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+}
+
+typedef struct ScrMd5Ctx {
+  uint32_t h[4];
+  uint64_t bytes;
+  unsigned char tail[64];
+  size_t tail_len;
+} ScrMd5Ctx;
+
+static void scr_md5_init(ScrMd5Ctx *ctx) {
+  static const uint32_t initial[4] = {
+      0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476};
+  memcpy(ctx->h, initial, sizeof initial);
+  ctx->bytes = 0;
+  ctx->tail_len = 0;
+}
+
+static void scr_md5_update(ScrMd5Ctx *ctx, const unsigned char *data, size_t len) {
+  ctx->bytes += len;
+  if (ctx->tail_len != 0) {
+    size_t take = 64 - ctx->tail_len;
+    if (take > len) take = len;
+    memcpy(ctx->tail + ctx->tail_len, data, take);
+    ctx->tail_len += take;
+    data += take;
+    len -= take;
+    if (ctx->tail_len == 64) {
+      scr_md5_block(ctx->h, ctx->tail);
+      ctx->tail_len = 0;
+    }
+  }
+  while (len >= 64) {
+    scr_md5_block(ctx->h, data);
+    data += 64;
+    len -= 64;
+  }
+  if (len != 0) {
+    memcpy(ctx->tail, data, len);
+    ctx->tail_len = len;
+  }
+}
+
+static size_t scr_md5_final(const ScrMd5Ctx *source, unsigned char out[32]) {
+  ScrMd5Ctx ctx = *source;
+  unsigned char tail[128];
+  size_t rem = ctx.tail_len;
+  memcpy(tail, ctx.tail, rem);
+  tail[rem] = 0x80;
+  size_t pad = (rem + 1 + 8 <= 64) ? 64 : 128;
+  memset(tail + rem + 1, 0, pad - rem - 1 - 8);
+  uint64_t bits = ctx.bytes * 8;
+  for (int b = 0; b < 8; b++) tail[pad - 8 + b] = (unsigned char)(bits >> (8 * b));
+  scr_md5_block(ctx.h, tail);
+  if (pad == 128) scr_md5_block(ctx.h, tail + 64);
+  for (int j = 0; j < 4; j++) {
+    for (int b = 0; b < 4; b++) out[j * 4 + b] = (unsigned char)(ctx.h[j] >> (8 * b));
+  }
+  return 16;
+}
+
+typedef enum ScrDigestAlg {
+  SCR_DIGEST_MD5,
+  SCR_DIGEST_SHA1,
+  SCR_DIGEST_SHA256,
+} ScrDigestAlg;
+
+typedef struct ScrDigestCtx {
+  ScrDigestAlg alg;
+  union {
+    ScrMd5Ctx md5;
+    ScrSha1Ctx sha1;
+    ScrSha256Ctx sha256;
+  } state;
+} ScrDigestCtx;
+
+static unsigned char scr_ascii_lower(unsigned char c) {
+  return c >= 'A' && c <= 'Z' ? (unsigned char)(c + ('a' - 'A')) : c;
+}
+
+static bool scr_digest_name_is(const char *name, size_t len, const char *literal) {
+  size_t n = strlen(literal);
+  if (len != n) return false;
+  for (size_t i = 0; i < n; i++) {
+    if (scr_ascii_lower((unsigned char)name[i]) != (unsigned char)literal[i]) return false;
+  }
+  return true;
+}
+
+static bool scr_digest_alg(const char *name, size_t len, ScrDigestAlg *out) {
+  if (scr_digest_name_is(name, len, "md5")) *out = SCR_DIGEST_MD5;
+  else if (scr_digest_name_is(name, len, "sha1")) *out = SCR_DIGEST_SHA1;
+  else if (scr_digest_name_is(name, len, "sha256")) *out = SCR_DIGEST_SHA256;
+  else return false;
+  return true;
+}
+
+static void scr_digest_init(ScrDigestCtx *ctx, ScrDigestAlg alg) {
+  ctx->alg = alg;
+  switch (alg) {
+    case SCR_DIGEST_MD5: scr_md5_init(&ctx->state.md5); break;
+    case SCR_DIGEST_SHA1: scr_sha1_init(&ctx->state.sha1); break;
+    case SCR_DIGEST_SHA256: scr_sha256_init(&ctx->state.sha256); break;
+  }
+}
+
+static void scr_digest_update(ScrDigestCtx *ctx, const unsigned char *data, size_t len) {
+  switch (ctx->alg) {
+    case SCR_DIGEST_MD5: scr_md5_update(&ctx->state.md5, data, len); break;
+    case SCR_DIGEST_SHA1: scr_sha1_update(&ctx->state.sha1, data, len); break;
+    case SCR_DIGEST_SHA256: scr_sha256_update(&ctx->state.sha256, data, len); break;
+  }
+}
+
+static size_t scr_digest_final(const ScrDigestCtx *ctx, unsigned char out[32]) {
+  switch (ctx->alg) {
+    case SCR_DIGEST_MD5: return scr_md5_final(&ctx->state.md5, out);
+    case SCR_DIGEST_SHA1: return scr_sha1_final(&ctx->state.sha1, out);
+    case SCR_DIGEST_SHA256: return scr_sha256_final(&ctx->state.sha256, out);
+  }
+  return 0;
+}
+
+static void scr_crypto_zero(void *ptr, size_t len) {
+  volatile unsigned char *p = ptr;
+  while (len-- != 0) *p++ = 0;
+}
+
+static void scr_hmac_init(ScrDigestCtx *inner, ScrDigestCtx *outer, ScrDigestAlg alg,
+                          const unsigned char *key, size_t keylen) {
+  unsigned char kblock[64] = {0};
+  unsigned char kd[32];
+  if (keylen > sizeof kblock) {
+    ScrDigestCtx key_hash;
+    scr_digest_init(&key_hash, alg);
+    scr_digest_update(&key_hash, key, keylen);
+    size_t n = scr_digest_final(&key_hash, kd);
+    memcpy(kblock, kd, n);
+    scr_crypto_zero(&key_hash, sizeof key_hash);
+    scr_crypto_zero(kd, sizeof kd);
+  } else if (keylen != 0) {
+    memcpy(kblock, key, keylen);
+  }
+  unsigned char ipad[64];
+  unsigned char opad[64];
+  for (size_t i = 0; i < 64; i++) {
+    ipad[i] = (unsigned char)(kblock[i] ^ 0x36);
+    opad[i] = (unsigned char)(kblock[i] ^ 0x5c);
+  }
+  scr_digest_init(inner, alg);
+  scr_digest_update(inner, ipad, sizeof ipad);
+  scr_digest_init(outer, alg);
+  scr_digest_update(outer, opad, sizeof opad);
+  scr_crypto_zero(kblock, sizeof kblock);
+  scr_crypto_zero(ipad, sizeof ipad);
+  scr_crypto_zero(opad, sizeof opad);
+}
+
+static size_t scr_hmac_final(const ScrDigestCtx *inner, const ScrDigestCtx *outer,
+                             unsigned char out[32]) {
+  unsigned char inner_digest[32];
+  size_t inner_len = scr_digest_final(inner, inner_digest);
+  ScrDigestCtx final_outer = *outer;
+  scr_digest_update(&final_outer, inner_digest, inner_len);
+  size_t n = scr_digest_final(&final_outer, out);
+  scr_crypto_zero(inner_digest, sizeof inner_digest);
+  scr_crypto_zero(&final_outer, sizeof final_outer);
+  return n;
+}
+
+/* One-shot digest/HMAC by algorithm name — the island bridge and static
+ * helpers both use the incremental core. Returns zero for an unknown
+ * algorithm, preserving the island's unsupported-digest probe. */
+size_t scr_crypto_digest_raw(const char *alg, const unsigned char *data, size_t len,
+                             unsigned char out[32]) {
+  ScrDigestAlg kind;
+  if (!scr_digest_alg(alg, strlen(alg), &kind)) return 0;
+  ScrDigestCtx ctx;
+  scr_digest_init(&ctx, kind);
+  scr_digest_update(&ctx, data, len);
+  return scr_digest_final(&ctx, out);
+}
+
+size_t scr_crypto_hmac_raw(const char *alg, const unsigned char *key, size_t keylen,
+                           const unsigned char *data, size_t len, unsigned char out[32]) {
+  ScrDigestAlg kind;
+  if (!scr_digest_alg(alg, strlen(alg), &kind)) return 0;
+  ScrDigestCtx inner, outer;
+  scr_hmac_init(&inner, &outer, kind, key, keylen);
+  scr_digest_update(&inner, data, len);
+  size_t n = scr_hmac_final(&inner, &outer, out);
+  scr_crypto_zero(&inner, sizeof inner);
+  scr_crypto_zero(&outer, sizeof outer);
+  return n;
+}
+
+struct ScrCryptoHash {
+  size_t rc;
+  bool finalized;
+  bool hmac;
+  ScrDigestCtx inner;
+  ScrDigestCtx outer;
+};
+
+static void scr_crypto_digest_unsupported(void) {
+  static const char msg[] = "Digest method not supported";
+  scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+}
+
+static void scr_crypto_invalid_digest(const ScrStr *alg) {
+  static const char prefix[] = "Invalid digest: ";
+  const size_t prefix_len = sizeof prefix - 1;
+  if (alg->len > SIZE_MAX - prefix_len) scr_trap("scriptc: out of memory\n");
+  const size_t msg_len = prefix_len + alg->len;
+  char *msg = malloc(msg_len);
+  if (!msg) scr_trap("scriptc: out of memory\n");
+  memcpy(msg, prefix, prefix_len);
+  memcpy(msg + prefix_len, alg->data, alg->len);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, msg_len,
+                           "ERR_CRYPTO_INVALID_DIGEST");
+  free(msg);
+}
+
+static void scr_crypto_hash_digest_unsupported(const ScrStr *alg) {
+  static const char prefix[] = "Digest method ";
+  static const char suffix[] = " is not supported";
+  const size_t prefix_len = sizeof prefix - 1;
+  const size_t suffix_len = sizeof suffix - 1;
+  if (alg->len > SIZE_MAX - prefix_len ||
+      suffix_len > SIZE_MAX - prefix_len - alg->len) {
+    scr_trap("scriptc: out of memory\n");
+  }
+  const size_t msg_len = prefix_len + alg->len + suffix_len;
+  char *msg = malloc(msg_len);
+  if (!msg) scr_trap("scriptc: out of memory\n");
+  memcpy(msg, prefix, prefix_len);
+  memcpy(msg + prefix_len, alg->data, alg->len);
+  memcpy(msg + prefix_len + alg->len, suffix, suffix_len);
+  scr_throw_error_msg(SCR_ERR_ERROR, msg, msg_len);
+  free(msg);
+}
+
+static void scr_crypto_hash_finalized(void) {
+  static const char msg[] = "Digest already called";
+  scr_throw_error_msg_code(SCR_ERR_ERROR, msg, sizeof msg - 1,
+                           "ERR_CRYPTO_HASH_FINALIZED");
+}
+
+static ScrCryptoHash *scr_crypto_hash_alloc(ScrDigestAlg alg, bool hmac,
+                                            const unsigned char *key, size_t keylen) {
+  ScrCryptoHash *hash = calloc(1, sizeof *hash);
+  if (!hash) scr_trap("scriptc: out of memory\n");
+  hash->rc = 1;
+  hash->hmac = hmac;
+  if (hmac) scr_hmac_init(&hash->inner, &hash->outer, alg, key, keylen);
+  else scr_digest_init(&hash->inner, alg);
+  return hash;
+}
+
+ScrCryptoHash *scr_crypto_hash_new(ScrStr *alg) {
+  ScrDigestAlg kind;
+  if (!scr_digest_alg(alg->data, alg->len, &kind)) {
+    scr_crypto_digest_unsupported();
+    return NULL;
+  }
+  return scr_crypto_hash_alloc(kind, false, NULL, 0);
+}
+
+ScrCryptoHash *scr_crypto_hmac_new_str(ScrStr *alg, ScrStr *key) {
+  ScrDigestAlg kind;
+  if (!scr_digest_alg(alg->data, alg->len, &kind)) {
+    scr_crypto_invalid_digest(alg);
+    return NULL;
+  }
+  return scr_crypto_hash_alloc(kind, true, (const unsigned char *)key->data, key->len);
+}
+
+ScrCryptoHash *scr_crypto_hmac_new_bytes(ScrStr *alg, ScrBytes *key) {
+  ScrDigestAlg kind;
+  if (!scr_digest_alg(alg->data, alg->len, &kind)) {
+    scr_crypto_invalid_digest(alg);
+    return NULL;
+  }
+  return scr_crypto_hash_alloc(kind, true, key->data,
+                               key->len * scr_bytes_elem_size(key->elem));
+}
+
+ScrCryptoHash *scr_crypto_hash_retain(ScrCryptoHash *hash) {
+  if (hash && hash->rc != SIZE_MAX) hash->rc++;
+  return hash;
+}
+
+void scr_crypto_hash_release(ScrCryptoHash *hash) {
+  if (!hash || hash->rc == SIZE_MAX) return;
+  if (--hash->rc == 0) {
+    scr_crypto_zero(hash, sizeof *hash);
+    free(hash);
+  }
+}
+
+void *scr_crypto_hash_retain_v(void *p) { return scr_crypto_hash_retain(p); }
+void scr_crypto_hash_release_v(void *p) { scr_crypto_hash_release(p); }
+
+static ScrCryptoHash *scr_crypto_hash_update_raw(ScrCryptoHash *hash,
+                                                 const unsigned char *data, size_t len) {
+  if (hash->finalized) {
+    scr_crypto_hash_finalized();
+    return NULL;
+  }
+  scr_digest_update(&hash->inner, data, len);
+  return scr_crypto_hash_retain(hash);
+}
+
+ScrCryptoHash *scr_crypto_hash_update_str(ScrCryptoHash *hash, ScrStr *data) {
+  return scr_crypto_hash_update_raw(hash, (const unsigned char *)data->data, data->len);
+}
+
+ScrCryptoHash *scr_crypto_hash_update_bytes(ScrCryptoHash *hash, ScrBytes *data) {
+  return scr_crypto_hash_update_raw(hash, data->data,
+                                    data->len * scr_bytes_elem_size(data->elem));
+}
+
+ScrCryptoHash *scr_crypto_hash_copy(ScrCryptoHash *hash) {
+  if (hash->finalized) {
+    scr_crypto_hash_finalized();
+    return NULL;
+  }
+  ScrCryptoHash *copy = malloc(sizeof *copy);
+  if (!copy) scr_trap("scriptc: out of memory\n");
+  *copy = *hash;
+  copy->rc = 1;
+  return copy;
+}
+
+static size_t scr_crypto_hash_finish(ScrCryptoHash *hash, unsigned char out[32]) {
+  if (hash->finalized) {
+    if (hash->hmac) return 0; /* Node's repeated Hmac.digest() is empty. */
+    scr_crypto_hash_finalized();
+    return 0;
+  }
+  hash->finalized = true;
+  return hash->hmac
+      ? scr_hmac_final(&hash->inner, &hash->outer, out)
+      : scr_digest_final(&hash->inner, out);
+}
+
+ScrStr *scr_crypto_hash_digest_string(ScrCryptoHash *hash, ScrStr *enc) {
+  unsigned char digest[32];
+  size_t n = scr_crypto_hash_finish(hash, digest);
+  if (n == 0) return scr_exc_pending() ? NULL : scr_str_new("", 0);
+  ScrStr *result = scr_digest_encode(digest, n, enc);
+  scr_crypto_zero(digest, sizeof digest);
+  return result;
+}
+
+ScrBytes *scr_crypto_hash_digest_buffer(ScrCryptoHash *hash) {
+  unsigned char digest[32];
+  size_t n = scr_crypto_hash_finish(hash, digest);
+  if (n == 0) return scr_exc_pending() ? NULL : scr_bytes_new(SCR_BYTES_U8, 0);
+  ScrBytes *result = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  memcpy(result->data, digest, n);
+  scr_crypto_zero(digest, sizeof digest);
+  return result;
+}
+
+static ScrStr *scr_hash_digest_raw(const ScrStr *alg, const unsigned char *data, size_t len,
+                                    const ScrStr *enc) {
+  ScrDigestAlg kind;
+  if (!scr_digest_alg(alg->data, alg->len, &kind)) {
+    scr_crypto_hash_digest_unsupported(alg);
+    return NULL;
+  }
+  unsigned char d[32];
+  ScrDigestCtx ctx;
+  scr_digest_init(&ctx, kind);
+  scr_digest_update(&ctx, data, len);
+  size_t n = scr_digest_final(&ctx, d);
+  ScrStr *result = scr_digest_encode(d, n, enc);
+  scr_crypto_zero(d, sizeof d);
+  return result;
+}
+
+static ScrStr *scr_hmac_digest_raw(const ScrStr *alg, const ScrBytes *key,
+                                   const unsigned char *data, size_t len, const ScrStr *enc) {
+  ScrDigestAlg kind;
+  if (!scr_digest_alg(alg->data, alg->len, &kind)) {
+    scr_crypto_invalid_digest(alg);
+    return NULL;
+  }
+  unsigned char d[32];
+  ScrDigestCtx inner, outer;
+  scr_hmac_init(&inner, &outer, kind, key->data,
+                key->len * scr_bytes_elem_size(key->elem));
+  scr_digest_update(&inner, data, len);
+  size_t n = scr_hmac_final(&inner, &outer, d);
+  ScrStr *result = scr_digest_encode(d, n, enc);
+  scr_crypto_zero(d, sizeof d);
+  return result;
+}
+
+/* The composed createHmac(alg, key).update(data).digest(enc) chain. The
+ * key always arrives as bytes (the compiler decodes a string key's UTF-8
+ * first); the data keeps the hash chain's string/bytes split. */
+ScrStr *scr_crypto_hmac_digest_str(ScrStr *alg, ScrBytes *key, ScrStr *data, ScrStr *enc) {
+  return scr_hmac_digest_raw(alg, key, (const unsigned char *)data->data, data->len, enc);
+}
+
+ScrStr *scr_crypto_hmac_digest_bytes(ScrStr *alg, ScrBytes *key, ScrBytes *data, ScrStr *enc) {
+  return scr_hmac_digest_raw(alg, key, data->data,
+                             data->len * scr_bytes_elem_size(data->elem), enc);
+}
+
+/* crypto.timingSafeEqual: a constant-time comparison of two equally long
+ * byte views. Node throws a RangeError coded
+ * ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH when the lengths differ — the
+ * length is not secret, so that check is not itself constant time. */
+bool scr_crypto_timing_safe_equal(ScrBytes *a, ScrBytes *b) {
+  size_t an = a->len * scr_bytes_elem_size(a->elem);
+  size_t bn = b->len * scr_bytes_elem_size(b->elem);
+  if (an != bn) {
+    static const char msg[] = "Input buffers must have the same byte length";
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, sizeof(msg) - 1,
+                             "ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH");
+    return false;
+  }
+  unsigned char diff = 0;
+  for (size_t i = 0; i < an; i++) diff = (unsigned char)(diff | (a->data[i] ^ b->data[i]));
+  return diff == 0;
+}
+
+/* Strings hash their UTF-8 bytes (Node's default input encoding — ScrStr
+ * storage IS utf8, so the bytes are the string's own). Borrowed; +1. */
+ScrStr *scr_crypto_hash_digest_str(ScrStr *alg, ScrStr *data, ScrStr *enc) {
+  return scr_hash_digest_raw(alg, (const unsigned char *)data->data, data->len, enc);
+}
+
+ScrStr *scr_crypto_hash_digest_bytes(ScrStr *alg, ScrBytes *data, ScrStr *enc) {
+  return scr_hash_digest_raw(alg, data->data, data->len * scr_bytes_elem_size(data->elem), enc);
+}
+
+ScrBytes *scr_crypto_random_fill(ScrBytes *bytes, double offset, double size) {
+  double length = (double)(bytes->len * scr_bytes_elem_size(bytes->elem));
+  if (!isfinite(offset) || floor(offset) != offset || offset < 0 || offset > length) {
+    char value[32], msg[160];
+    size_t value_len = scr_f64_to_str(offset, value);
+    int n = snprintf(msg, sizeof msg,
+                     "The value of \"offset\" is out of range. It must be >= 0 && <= %.0f. Received %.*s",
+                     length, (int)value_len, value);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    return NULL;
+  }
+  double available = length - offset;
+  if (!isfinite(size) || floor(size) != size || size < 0 || size > 2147483647.0) {
+    char value[32], msg[160];
+    size_t value_len = scr_f64_to_str(size, value);
+    int n = snprintf(msg, sizeof msg,
+                     "The value of \"size\" is out of range. It must be >= 0 && <= 2147483647. Received %.*s",
+                     (int)value_len, value);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    return NULL;
+  }
+  if (size > available) {
+    char value[32], msg[160];
+    double total = size + offset;
+    size_t value_len = scr_f64_to_str(total, value);
+    int n = snprintf(msg, sizeof msg,
+                     "The value of \"size + offset\" is out of range. It must be <= %.0f. Received %.*s",
+                     length, (int)value_len, value);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    return NULL;
+  }
+  arc4random_buf(bytes->data + (size_t)offset, (size_t)size);
+  return scr_bytes_retain(bytes);
+}
+
+ScrBytes *scr_crypto_random_fill_rest(ScrBytes *bytes, double offset) {
+  double length = (double)(bytes->len * scr_bytes_elem_size(bytes->elem));
+  return scr_crypto_random_fill(bytes, offset, length - offset);
+}
+
+double scr_crypto_random_int(double min, double max) {
+  if (!isfinite(min) || floor(min) != min || fabs(min) > 9007199254740991.0) {
+    static const char msg[] = "The \"min\" argument must be a safe integer.";
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_INVALID_ARG_TYPE");
+    return 0;
+  }
+  if (!isfinite(max) || floor(max) != max || fabs(max) > 9007199254740991.0) {
+    static const char msg[] = "The \"max\" argument must be a safe integer.";
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_INVALID_ARG_TYPE");
+    return 0;
+  }
+  if (max <= min) {
+    char min_text[32], max_text[32], msg[192];
+    size_t min_len = scr_f64_to_str(min, min_text);
+    size_t max_len = scr_f64_to_str(max, max_text);
+    int n = snprintf(msg, sizeof msg,
+                     "The value of \"max\" is out of range. It must be greater than the value of \"min\" (%.*s). Received %.*s",
+                     (int)min_len, min_text, (int)max_len, max_text);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    return 0;
+  }
+  double range = max - min;
+  if (range > 281474976710656.0) {
+    static const char msg[] = "The value of \"max - min\" is out of range. It must be <= 281474976710656.";
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, sizeof msg - 1, "ERR_OUT_OF_RANGE");
+    return 0;
+  }
+  const uint64_t span = (uint64_t)range;
+  const uint64_t ceiling = UINT64_C(1) << 48;
+  const uint64_t limit = ceiling - (ceiling % span);
+  uint64_t value;
+  do {
+    uint64_t random;
+    arc4random_buf(&random, sizeof random);
+    value = random >> 16;
+  } while (value >= limit);
+  return min + (double)(value % span);
+}
+
+static ScrBytes *scr_crypto_pbkdf2_raw(const unsigned char *password, size_t password_len,
+                                      const unsigned char *salt, size_t salt_len,
+                                      uint32_t iterations, size_t keylen,
+                                      ScrDigestAlg alg) {
+  ScrDigestCtx empty;
+  unsigned char empty_digest[32];
+  scr_digest_init(&empty, alg);
+  size_t digest_len = scr_digest_final(&empty, empty_digest);
+  scr_crypto_zero(empty_digest, sizeof empty_digest);
+  ScrBytes *result = scr_bytes_new(SCR_BYTES_U8, (double)keylen);
+  unsigned char *block = malloc(salt_len + 4);
+  if (!block) scr_trap("scriptc: out of memory\n");
+  memcpy(block, salt, salt_len);
+  size_t blocks = (keylen + digest_len - 1) / digest_len;
+  for (size_t index = 1; index <= blocks; index++) {
+    block[salt_len] = (unsigned char)(index >> 24);
+    block[salt_len + 1] = (unsigned char)(index >> 16);
+    block[salt_len + 2] = (unsigned char)(index >> 8);
+    block[salt_len + 3] = (unsigned char)index;
+    ScrDigestCtx inner, outer;
+    unsigned char u[32], accum[32];
+    scr_hmac_init(&inner, &outer, alg, password, password_len);
+    scr_digest_update(&inner, block, salt_len + 4);
+    scr_hmac_final(&inner, &outer, u);
+    memcpy(accum, u, digest_len);
+    for (uint32_t round = 1; round < iterations; round++) {
+      scr_hmac_init(&inner, &outer, alg, password, password_len);
+      scr_digest_update(&inner, u, digest_len);
+      scr_hmac_final(&inner, &outer, u);
+      for (size_t i = 0; i < digest_len; i++) accum[i] ^= u[i];
+    }
+    size_t offset = (index - 1) * digest_len;
+    size_t take = keylen - offset < digest_len ? keylen - offset : digest_len;
+    memcpy(result->data + offset, accum, take);
+    scr_crypto_zero(&inner, sizeof inner);
+    scr_crypto_zero(&outer, sizeof outer);
+    scr_crypto_zero(u, sizeof u);
+    scr_crypto_zero(accum, sizeof accum);
+  }
+  scr_crypto_zero(block, salt_len + 4);
+  free(block);
+  return result;
+}
+
+ScrBytes *scr_crypto_pbkdf2(ScrBytes *password, ScrBytes *salt,
+                            double iterations, double keylen, ScrStr *digest) {
+  if (!isfinite(iterations) || floor(iterations) != iterations ||
+      iterations < 1 || iterations > 2147483647.0) {
+    char value[32], msg[176];
+    size_t value_len = scr_f64_to_str(iterations, value);
+    int n = snprintf(msg, sizeof msg,
+                     "The value of \"iterations\" is out of range. It must be >= 1 && <= 2147483647. Received %.*s",
+                     (int)value_len, value);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    return NULL;
+  }
+  if (!isfinite(keylen) || floor(keylen) != keylen || keylen < 0 || keylen > 2147483647.0) {
+    char value[32], msg[176];
+    size_t value_len = scr_f64_to_str(keylen, value);
+    int n = snprintf(msg, sizeof msg,
+                     "The value of \"keylen\" is out of range. It must be >= 0 && <= 2147483647. Received %.*s",
+                     (int)value_len, value);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    return NULL;
+  }
+  ScrDigestAlg alg;
+  if (!scr_digest_alg(digest->data, digest->len, &alg)) {
+    scr_crypto_invalid_digest(digest);
+    return NULL;
+  }
+  return scr_crypto_pbkdf2_raw(password->data,
+      password->len * scr_bytes_elem_size(password->elem), salt->data,
+      salt->len * scr_bytes_elem_size(salt->elem), (uint32_t)iterations,
+      (size_t)keylen, alg);
+}
+
+/* The composed `new crypto.X509Certificate(data).fingerprint` read, fused
+ * by the compiler (no certificate handle exists). Node's .fingerprint IS
+ * the SHA-1 of the certificate's DER bytes, uppercase colon-separated —
+ * pinned against Node. Accepts what Node's constructor accepts from the
+ * fs.readFileSync idiom: PEM (the armor's base64 body decodes to DER,
+ * Node-leniently — whitespace skipped) or raw DER (a leading SEQUENCE
+ * tag). Anything else throws Node's exact PEM error (Error, code
+ * ERR_OSSL_PEM_NO_START_LINE). Input borrowed; result +1. */
+static ScrStr *scr_x509_fingerprint_raw(const uint8_t *in, size_t n);
+
+ScrStr *scr_crypto_x509_fingerprint(ScrBytes *data) {
+  return scr_x509_fingerprint_raw(data->data, data->len * scr_bytes_elem_size(data->elem));
+}
+
+/* The string-input form (readFileSync(path, "utf-8") — PEM text; ScrStr
+ * storage IS the bytes). */
+ScrStr *scr_crypto_x509_fingerprint_str(ScrStr *pem) {
+  return scr_x509_fingerprint_raw((const uint8_t *)pem->data, pem->len);
+}
+
+/* PEM armor → DER (or raw-DER passthrough), the shared front half of
+ * every X509Certificate member. On success `*der`/`*der_len` hold the
+ * certificate bytes and `*decoded` the malloc'd base64 buffer to free
+ * (NULL for raw-DER input); unparseable input throws Node's exact PEM
+ * error and answers false with the exception pending. */
+static bool scr_x509_der(const uint8_t *in, size_t n, const uint8_t **der, size_t *der_len,
+                          uint8_t **decoded) {
+  static const char begin[] = "-----BEGIN CERTIFICATE-----";
+  static const char end[] = "-----END CERTIFICATE-----";
+  *der = NULL;
+  *der_len = 0;
+  *decoded = NULL;
+  /* PEM: base64-decode the armor's body. */
+  const uint8_t *b = NULL;
+  for (size_t i = 0; i + sizeof begin - 1 <= n; i++) {
+    if (memcmp(in + i, begin, sizeof begin - 1) == 0) {
+      b = in + i + sizeof begin - 1;
+      break;
+    }
+  }
+  if (b != NULL) {
+    const uint8_t *stop = in + n;
+    for (const uint8_t *p = b; p + sizeof end - 1 <= in + n; p++) {
+      if (memcmp(p, end, sizeof end - 1) == 0) {
+        stop = p;
+        break;
+      }
+    }
+    uint8_t *out = malloc(((size_t)(stop - b) / 4 + 1) * 3 + 3);
+    if (!out) {
+      scr_trap("scriptc: out of memory\n");
+    }
+    size_t o = 0;
+    unsigned acc = 0;
+    int have = 0;
+    for (const uint8_t *p = b; p < stop; p++) {
+      int v;
+      uint8_t c = *p;
+      if (c >= 'A' && c <= 'Z') v = c - 'A';
+      else if (c >= 'a' && c <= 'z') v = c - 'a' + 26;
+      else if (c >= '0' && c <= '9') v = c - '0' + 52;
+      else if (c == '+') v = 62;
+      else if (c == '/') v = 63;
+      else continue; /* whitespace, '=' */
+      acc = (acc << 6) | (unsigned)v;
+      if (++have == 4) {
+        out[o++] = (uint8_t)(acc >> 16);
+        out[o++] = (uint8_t)(acc >> 8);
+        out[o++] = (uint8_t)acc;
+        acc = 0;
+        have = 0;
+      }
+    }
+    if (have == 2) out[o++] = (uint8_t)(acc >> 4);
+    else if (have == 3) {
+      out[o++] = (uint8_t)(acc >> 10);
+      out[o++] = (uint8_t)(acc >> 2);
+    }
+    *decoded = out;
+    *der = out;
+    *der_len = o;
+    return true;
+  }
+  if (n > 0 && in[0] == 0x30) {
+    /* Raw DER: the certificate SEQUENCE. */
+    *der = in;
+    *der_len = n;
+    return true;
+  }
+  scr_throw_error_msg_code(SCR_ERR_ERROR,
+                            "error:0480006C:PEM routines::no start line",
+                            42, "ERR_OSSL_PEM_NO_START_LINE");
+  return false; /* exception pending */
+}
+
+static ScrStr *scr_x509_fingerprint_raw(const uint8_t *in, size_t n) {
+  const uint8_t *der;
+  size_t der_len;
+  uint8_t *decoded;
+  if (!scr_x509_der(in, n, &der, &der_len, &decoded)) return NULL;
+  unsigned char digest[32];
+  size_t dn = scr_sha1_digest(der, der_len, digest);
+  free(decoded);
+  char buf[64];
+  static const char hex[] = "0123456789ABCDEF";
+  size_t o = 0;
+  for (size_t i = 0; i < dn; i++) {
+    if (i > 0) buf[o++] = ':';
+    buf[o++] = hex[digest[i] >> 4];
+    buf[o++] = hex[digest[i] & 0x0f];
+  }
+  return scr_str_new(buf, o);
+}
+
+/* ── the certificate's Validity window (validFrom / validTo) ─────────────
+ *
+ * A minimal DER walk to TBSCertificate.validity: Certificate ::= SEQUENCE
+ * { tbsCertificate SEQUENCE { version [0] OPTIONAL, serialNumber INTEGER,
+ * signature SEQUENCE, issuer, validity SEQUENCE { notBefore, notAfter },
+ * ... } }. Each Time is UTCTime (YYMMDDHHMMSSZ; RFC 5280's 50-year pivot)
+ * or GeneralizedTime (YYYYMMDDHHMMSSZ), rendered in Node's exact
+ * ASN1_TIME_print shape: "Jul  1 00:00:00 2026 GMT" (%2d space-padded
+ * day). Truncated/non-Zulu encodings (RFC 5280 forbids them in certs)
+ * and walk failures answer OpenSSL's "Bad time value". */
+
+/* Reads one DER TL header at p (before end): tag to *tag, content length
+ * to *len, and answers the content pointer (NULL on malformed/overlong). */
+static const uint8_t *scr_der_tl(const uint8_t *p, const uint8_t *end, uint8_t *tag, size_t *len) {
+  if (p == NULL || end - p < 2) return NULL;
+  *tag = p[0];
+  uint8_t l0 = p[1];
+  const uint8_t *content = p + 2;
+  size_t l;
+  if (l0 < 0x80) {
+    l = l0;
+  } else {
+    size_t nb = l0 & 0x7f;
+    if (nb == 0 || nb > sizeof(size_t) || end - content < (ptrdiff_t)nb) return NULL;
+    l = 0;
+    for (size_t i = 0; i < nb; i++) l = (l << 8) | content[i];
+    content += nb;
+  }
+  if ((size_t)(end - content) < l) return NULL;
+  *tag = p[0];
+  *len = l;
+  return content;
+}
+
+/* Formats one Time element (UTCTime/GeneralizedTime content bytes) in
+ * ASN1_TIME_print's shape into buf; answers the length (0 = bad value). */
+static size_t scr_x509_time_print(uint8_t tag, const uint8_t *t, size_t n, char buf[32]) {
+  static const char *mon[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  int year, mo, day, hh, mm, ss;
+  const uint8_t *d = t;
+  size_t need = tag == 0x17 ? 13 : 15; /* ...HHMMSSZ, Zulu only */
+  if (n != need || t[n - 1] != 'Z') return 0;
+  for (size_t i = 0; i + 1 < n; i++) {
+    if (t[i] < '0' || t[i] > '9') return 0;
+  }
+#define SCR_DER_2D(p) (((p)[0] - '0') * 10 + ((p)[1] - '0'))
+  if (tag == 0x17) {
+    year = SCR_DER_2D(d);
+    year += year < 50 ? 2000 : 1900; /* RFC 5280's UTCTime pivot */
+    d += 2;
+  } else {
+    year = SCR_DER_2D(d) * 100;
+    d += 2;
+    year += SCR_DER_2D(d);
+    d += 2;
+  }
+  mo = SCR_DER_2D(d); d += 2;
+  day = SCR_DER_2D(d); d += 2;
+  hh = SCR_DER_2D(d); d += 2;
+  mm = SCR_DER_2D(d); d += 2;
+  ss = SCR_DER_2D(d);
+#undef SCR_DER_2D
+  if (mo < 1 || mo > 12) return 0;
+  int r = snprintf(buf, 32, "%s %2d %02d:%02d:%02d %d GMT", mon[mo - 1], day, hh, mm, ss, year);
+  return r > 0 ? (size_t)r : 0;
+}
+
+static ScrStr *scr_x509_validity_raw(const uint8_t *in, size_t n, bool want_to) {
+  const uint8_t *der;
+  size_t der_len;
+  uint8_t *decoded;
+  if (!scr_x509_der(in, n, &der, &der_len, &decoded)) return NULL;
+  static const char bad[] = "Bad time value";
+  const uint8_t *end = der + der_len;
+  uint8_t tag;
+  size_t len;
+  char buf[32];
+  size_t blen = 0;
+  /* Certificate SEQUENCE → tbsCertificate SEQUENCE */
+  const uint8_t *p = scr_der_tl(der, end, &tag, &len);
+  if (p && tag == 0x30) {
+    end = p + len;
+    p = scr_der_tl(p, end, &tag, &len);
+  } else {
+    p = NULL;
+  }
+  if (p && tag == 0x30) {
+    const uint8_t *tbs_end = p + len;
+    /* [0] version (optional), serialNumber, signature, issuer */
+    const uint8_t *q = p;
+    for (int skip = 0; skip < 4 && q != NULL; skip++) {
+      const uint8_t *c = scr_der_tl(q, tbs_end, &tag, &len);
+      if (!c) { q = NULL; break; }
+      if (skip == 0 && tag != 0xA0) {
+        /* no version field: this element is already serialNumber */
+        skip++;
+      }
+      q = c + len;
+    }
+    /* validity SEQUENCE { notBefore, notAfter } */
+    const uint8_t *v = scr_der_tl(q, tbs_end, &tag, &len);
+    if (v && tag == 0x30) {
+      const uint8_t *v_end = v + len;
+      const uint8_t *t1 = scr_der_tl(v, v_end, &tag, &len);
+      if (t1 && (tag == 0x17 || tag == 0x18)) {
+        if (!want_to) {
+          blen = scr_x509_time_print(tag, t1, len, buf);
+        } else {
+          const uint8_t *t2 = scr_der_tl(t1 + len, v_end, &tag, &len);
+          if (t2 && (tag == 0x17 || tag == 0x18)) {
+            blen = scr_x509_time_print(tag, t2, len, buf);
+          }
+        }
+      }
+    }
+  }
+  free(decoded);
+  if (blen == 0) return scr_str_new(bad, sizeof bad - 1);
+  return scr_str_new(buf, blen);
+}
+
+ScrStr *scr_crypto_x509_valid_from(ScrBytes *data) {
+  return scr_x509_validity_raw(data->data, data->len * scr_bytes_elem_size(data->elem), false);
+}
+
+ScrStr *scr_crypto_x509_valid_from_str(ScrStr *pem) {
+  return scr_x509_validity_raw((const uint8_t *)pem->data, pem->len, false);
+}
+
+ScrStr *scr_crypto_x509_valid_to(ScrBytes *data) {
+  return scr_x509_validity_raw(data->data, data->len * scr_bytes_elem_size(data->elem), true);
+}
+
+ScrStr *scr_crypto_x509_valid_to_str(ScrStr *pem) {
+  return scr_x509_validity_raw((const uint8_t *)pem->data, pem->len, true);
+}
+
+/* ── String surface (fromCharCode) ────────────────────────────────────── */
+
+/* String.fromCharCode core over n UTF-16 code units read through
+ * `unit(src, i)` (already ToUint16'd): combine adjacent surrogate pairs,
+ * substitute U+FFFD for lone surrogates (divergence 1's storage policy —
+ * Node writing a lone surrogate to stdout produces the same replacement
+ * bytes), UTF-8 encode. */
+static ScrStr *scr_str_from_units(size_t n, uint32_t (*unit)(void *, size_t), void *src) {
+  if (n == 1) return scr_str_from_char_code_one((double)unit(src, 0));
+  char *out = malloc(n * 3 + 1); /* worst case: 3 bytes per UTF-16 unit */
+  if (!out) {
+    scr_trap("scriptc: out of memory\n");
+  }
+  size_t o = 0;
+  for (size_t i = 0; i < n; i++) {
+    uint32_t cp = unit(src, i);
+    if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < n) {
+      uint32_t lo = unit(src, i + 1);
+      if (lo >= 0xDC00 && lo <= 0xDFFF) {
+        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+        i++;
+      } else {
+        cp = 0xFFFD;
+      }
+    } else if (cp >= 0xD800 && cp <= 0xDFFF) {
+      cp = 0xFFFD;
+    }
+    if (cp <= 0x7F) {
+      out[o++] = (char)cp;
+    } else if (cp <= 0x7FF) {
+      out[o++] = (char)(0xC0 | (cp >> 6));
+      out[o++] = (char)(0x80 | (cp & 0x3F));
+    } else if (cp <= 0xFFFF) {
+      out[o++] = (char)(0xE0 | (cp >> 12));
+      out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+      out[o++] = (char)(0x80 | (cp & 0x3F));
+    } else {
+      out[o++] = (char)(0xF0 | (cp >> 18));
+      out[o++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+      out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+      out[o++] = (char)(0x80 | (cp & 0x3F));
+    }
+  }
+  ScrStr *s = scr_str_new(out, o);
+  free(out);
+  return s;
+}
+
+static uint32_t scr_fcc_arr_unit(void *src, size_t i) {
+  return scr_to_uint32(scr_arr_get_f64((ScrArr *)src, (double)i)) & 0xFFFFu;
+}
+
+/* String.fromCharCode(...codes) over ONE packed f64[]. */
+ScrStr *scr_str_from_char_code(ScrArr *codes) {
+  return scr_str_from_units(codes->len, scr_fcc_arr_unit, codes);
+}
+
+static uint32_t scr_fcc_bytes_unit(void *src, size_t i) {
+  return scr_to_uint32(scr_bytes_get((const ScrBytes *)src, (double)i)) & 0xFFFFu;
+}
+
+/* String.fromCharCode(...bytes) — a spread typed array/Buffer source (the
+ * magic-number ASCII probe: String.fromCharCode(...data.slice(4, 8))).
+ * u8 elements are plain code units; u32/f32 elements ride the same
+ * ToUint16 the packed-array form applies. */
+ScrStr *scr_str_from_char_code_bytes(ScrBytes *codes) {
+  return scr_str_from_units(codes->len, scr_fcc_bytes_unit, codes);
+}
+
+/* ── Date, the read-only value slice ───────────────────────────────────
+ * Values are TimeClip'd epoch-millisecond scalars. Identity/mutation are
+ * frontend-fenced; construction, storage, getters, and ISO formatting
+ * observe exactly this payload. */
+
+double scr_date_now(void) {
+  /* Node's Date.now() is integer milliseconds. */
+  return floor(scr_clock_realtime_ms());
+}
+
+/* Date's TimeClip: non-finite/out-of-range values become Invalid Date,
+ * finite values truncate toward zero, and -0 normalizes to +0. */
+double scr_date_new_ms(double ms) {
+  if (!isfinite(ms) || fabs(ms) > 8640000000000000.0) return NAN;
+  double clipped = trunc(ms);
+  return clipped == 0 ? 0 : clipped;
+}
+
+double scr_date_get_time(double ms) { return ms; }
+
+/* Node's Date.prototype.toISOString over a millisecond time value:
+ * TimeClip's ToInteger truncation, proleptic Gregorian civil-from-days
+ * (Howard Hinnant's algorithm), YYYY-MM-DDTHH:mm:ss.sssZ with expanded
+ * ±YYYYYY years outside 0–9999, and Node's "Invalid time value"
+ * RangeError on NaN / out-of-range values — verified against Node over
+ * epoch, negative, fractional, boundary (±8.64e15), and expanded-year
+ * inputs. */
+ScrStr *scr_date_to_iso(double ms) {
+  if (!(fabs(ms) <= 8640000000000000.0)) { /* NaN and out of range */
+    scr_throw_error_msg(SCR_ERR_RANGE, "Invalid time value", 18);
+    return NULL;
+  }
+  double t = trunc(ms);
+  double dayd = floor(t / 86400000.0);
+  long long msday = (long long)(t - dayd * 86400000.0);
+  long long z = (long long)dayd + 719468;
+  long long era = (z >= 0 ? z : z - 146096) / 146097;
+  unsigned long long doe = (unsigned long long)(z - era * 146097);
+  unsigned long long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  long long y = (long long)yoe + era * 400;
+  unsigned long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  unsigned long long mp = (5 * doy + 2) / 153;
+  unsigned long long d = doy - (153 * mp + 2) / 5 + 1;
+  unsigned long long m = mp < 10 ? mp + 3 : mp - 9;
+  if (m <= 2) y += 1;
+  int hh = (int)(msday / 3600000), mi = (int)(msday / 60000 % 60),
+      ss = (int)(msday / 1000 % 60), sss = (int)(msday % 1000);
+  char buf[40];
+  int len;
+  if (y < 0) {
+    len = snprintf(buf, sizeof buf, "-%06lld-%02llu-%02lluT%02d:%02d:%02d.%03dZ", -y, m, d, hh, mi, ss, sss);
+  } else if (y > 9999) {
+    len = snprintf(buf, sizeof buf, "+%06lld-%02llu-%02lluT%02d:%02d:%02d.%03dZ", y, m, d, hh, mi, ss, sss);
+  } else {
+    len = snprintf(buf, sizeof buf, "%04lld-%02llu-%02lluT%02d:%02d:%02d.%03dZ", y, m, d, hh, mi, ss, sss);
+  }
+  return scr_str_new(buf, (size_t)len);
+}
+
+/* ── new Date(dateString).getTime() ──────────────────────────────────────
+ *
+ * The BOUNDED date-string parse (documented divergence — V8's parser
+ * accepts far more): two grammars answer a time value, everything else is
+ * NaN (Node's invalid-date getTime).
+ *
+ *   1. The ASN1_TIME_print shape X509Certificate.validFrom/validTo answer
+ *      ("Jul  1 00:00:00 2026 GMT", "Jul 17 17:52:11 2026 GMT") — the
+ *      portless cert-expiry read. Month names match case-insensitively;
+ *      one or two spaces precede the day (%2d's padding).
+ *   2. ECMA's own date-time string format with an EXPLICIT offset:
+ *      YYYY[-MM[-DD]] date-only forms (UTC, per the spec) and full
+ *      date-times YYYY-MM-DDTHH:mm[:ss[.sss]] ending in Z or ±HH:MM.
+ *      Offset-less date-times are LOCAL time in JS; that arm answers NaN
+ *      here rather than guessing a zone (the divergence note).
+ */
+
+/* Howard Hinnant's days_from_civil (the to_iso walk inverted). */
+static double scr_days_from_civil(long long y, int m, int d) {
+  y -= m <= 2;
+  long long era = (y >= 0 ? y : y - 399) / 400;
+  unsigned long long yoe = (unsigned long long)(y - era * 400);
+  unsigned long long doy = (unsigned long long)((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1);
+  unsigned long long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return (double)(era * 146097 + (long long)doe - 719468);
+}
+
+static double scr_date_make_ms(long long y, int mo, int d, int hh, int mi, int ss, int ms) {
+  /* V8 accepts days 1..31 in every month and ROLLS OVER past the month's
+   * end (Feb 30 → Mar 2) — days_from_civil extrapolates linearly, so the
+   * rollover falls out; day 0 and 32+ are NaN, like V8. */
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return NAN;
+  if (hh > 24 || mi > 59 || ss > 59 || (hh == 24 && (mi || ss || ms))) return NAN;
+  double t = scr_days_from_civil(y, mo, d) * 86400000.0 +
+             hh * 3600000.0 + mi * 60000.0 + ss * 1000.0 + ms;
+  return t;
+}
+
+static double scr_date_ms_of(long long y, int mo, int d, int hh, int mi, int ss, int ms) {
+  return scr_date_new_ms(scr_date_make_ms(y, mo, d, hh, mi, ss, ms));
+}
+
+static bool scr_date_digits(const char **p, const char *end, int n, int *out) {
+  int v = 0;
+  if (end - *p < n) return false;
+  for (int i = 0; i < n; i++) {
+    char c = (*p)[i];
+    if (c < '0' || c > '9') return false;
+    v = v * 10 + (c - '0');
+  }
+  *p += n;
+  *out = v;
+  return true;
+}
+
+double scr_date_parse_get_time(ScrStr *s) {
+  const char *p = s->data;
+  const char *end = s->data + s->len;
+  static const char *mon[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  /* Grammar 1: "MMM [D]D HH:MM:SS YYYY GMT" (ASN1_TIME_print). */
+  if (end - p > 3 && ((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z'))) {
+    int mo = 0;
+    for (int i = 0; i < 12; i++) {
+      if (tolower((unsigned char)p[0]) == tolower((unsigned char)mon[i][0]) &&
+          tolower((unsigned char)p[1]) == tolower((unsigned char)mon[i][1]) &&
+          tolower((unsigned char)p[2]) == tolower((unsigned char)mon[i][2])) {
+        mo = i + 1;
+        break;
+      }
+    }
+    if (mo == 0) return NAN;
+    p += 3;
+    if (p < end && *p == ' ') p++;
+    if (p < end && *p == ' ') p++; /* %2d's padding space */
+    int d = 0, hh, mi, ss, y;
+    if (!scr_date_digits(&p, end, 1, &d)) return NAN;
+    int d2;
+    if (p < end && *p >= '0' && *p <= '9' && scr_date_digits(&p, end, 1, &d2)) d = d * 10 + d2;
+    if (p >= end || *p++ != ' ') return NAN;
+    if (!scr_date_digits(&p, end, 2, &hh) || p >= end || *p++ != ':') return NAN;
+    if (!scr_date_digits(&p, end, 2, &mi) || p >= end || *p++ != ':') return NAN;
+    if (!scr_date_digits(&p, end, 2, &ss) || p >= end || *p++ != ' ') return NAN;
+    if (!scr_date_digits(&p, end, 4, &y)) return NAN;
+    if (end - p != 4 || memcmp(p, " GMT", 4) != 0) return NAN;
+    return scr_date_ms_of(y, mo, d, hh, mi, ss, 0);
+  }
+  /* Grammar 2: ECMA's date-time string format. */
+  {
+    int y, mo = 1, d = 1, hh = 0, mi = 0, ss = 0, ms = 0;
+    bool sign_year = p < end && (*p == '+' || *p == '-');
+    long long yy;
+    if (sign_year) {
+      int y6;
+      bool neg = *p == '-';
+      p++;
+      if (!scr_date_digits(&p, end, 6, &y6)) return NAN;
+      if (neg && y6 == 0) return NAN; /* ECMA forbids expanded -000000 */
+      yy = neg ? -(long long)y6 : y6;
+    } else {
+      if (!scr_date_digits(&p, end, 4, &y)) return NAN;
+      yy = y;
+    }
+    if (p < end && *p == '-') {
+      p++;
+      if (!scr_date_digits(&p, end, 2, &mo)) return NAN;
+      if (p < end && *p == '-') {
+        p++;
+        if (!scr_date_digits(&p, end, 2, &d)) return NAN;
+      }
+    }
+    if (p == end) return scr_date_ms_of(yy, mo, d, 0, 0, 0, 0); /* date-only: UTC */
+    if (*p++ != 'T') return NAN;
+    if (!scr_date_digits(&p, end, 2, &hh) || p >= end || *p++ != ':') return NAN;
+    if (!scr_date_digits(&p, end, 2, &mi)) return NAN;
+    if (p < end && *p == ':') {
+      p++;
+      if (!scr_date_digits(&p, end, 2, &ss)) return NAN;
+      if (p < end && *p == '.') {
+        p++;
+        if (!scr_date_digits(&p, end, 3, &ms)) return NAN;
+      }
+    }
+    if (p == end) return NAN; /* offset-less date-time: LOCAL in JS — the divergence */
+    double off = 0;
+    if (*p == 'Z') {
+      p++;
+    } else if (*p == '+' || *p == '-') {
+      bool neg = *p == '-';
+      int oh, om;
+      p++;
+      if (!scr_date_digits(&p, end, 2, &oh) || p >= end || *p++ != ':') return NAN;
+      if (!scr_date_digits(&p, end, 2, &om)) return NAN;
+      if (oh > 23 || om > 59) return NAN;
+      off = (oh * 60 + om) * 60000.0;
+      if (neg) off = -off;
+    } else {
+      return NAN;
+    }
+    if (p != end) return NAN;
+    /* MakeDate can lie just beyond the TimeClip boundary while the
+     * explicit offset brings the final UTC instant back into range. The
+     * spec clips only after that offset has been applied. */
+    double t = scr_date_make_ms(yy, mo, d, hh, mi, ss, ms);
+    return scr_date_new_ms(t - off);
+  }
+}
+
+/* Date.UTC(year, month, date, hours, minutes, seconds, ms) — the spec's
+ * MakeDay/MakeTime/TimeClip pipeline over ALREADY-NUMBER arguments (tsc
+ * pins them; the frontend completes omitted trailing arguments with the
+ * spec's defaults: month 0, date 1, time parts 0). ToIntegerOrInfinity is
+ * trunc on finite values; any non-finite part is NaN. Years 0–99 map to
+ * 1900+year (the spec's MakeFullYear), out-of-range months ROLL into the
+ * year (Date.UTC(2017, 13) is Feb 2018) and any integer date offsets from
+ * day 1 of that month — days_from_civil extrapolates linearly, so both
+ * rollovers fall out. V8 bounds MakeDay's input year to ±1e6 and input
+ * month to ±1e7 before normalizing the month (kMaxYear/kMinYear and
+ * kMaxMonth/kMinMonth, date.h); Node answers NaN past either bound even
+ * when the two inputs would normalize back into range. Never throws. */
+static double scr_date_components_ms(double y, double mo, double d,
+                    double h, double mi, double s, double ms) {
+  if (!isfinite(y) || !isfinite(mo) || !isfinite(d) || !isfinite(h) ||
+      !isfinite(mi) || !isfinite(s) || !isfinite(ms)) {
+    return NAN;
+  }
+  y = trunc(y);
+  mo = trunc(mo);
+  d = trunc(d);
+  h = trunc(h);
+  mi = trunc(mi);
+  s = trunc(s);
+  ms = trunc(ms);
+  if (fabs(y) > 1000000.0 || fabs(mo) > 10000000.0) return NAN;
+  if (y >= 0 && y <= 99) y += 1900;
+  double ym = y + floor(mo / 12.0);
+  int mn = (int)(mo - floor(mo / 12.0) * 12.0); /* 0..11 */
+  double days = scr_days_from_civil((long long)ym, mn + 1, 1) + (d - 1.0);
+  double t = days * 86400000.0 + h * 3600000.0 + mi * 60000.0 + s * 1000.0 + ms;
+  return t;
+}
+
+/* ── Date calendar getters ────────────────────────────────────────────
+ * UTC fields use the same proleptic-Gregorian walk as toISOString, so the
+ * whole Date range is portable. Local fields use the host timezone via
+ * localtime, exactly the environment the sibling Node process observes;
+ * a libc that cannot represent an extreme instant answers NaN rather than
+ * inventing a zone. */
+
+typedef struct ScrDateParts {
+  long long year;
+  int month, date, day, hours, minutes, seconds, milliseconds;
+  double timezone_offset;
+} ScrDateParts;
+
+/* Calendar decomposition itself also serves LocalTime(t), which can lie
+ * just outside TimeClip's UTC interval after applying a zone offset at an
+ * endpoint. The checked wrapper is the public UTC-getter gate; the inner
+ * walk accepts those bounded local-time values too. */
+static void scr_date_utc_parts_unchecked(double t, ScrDateParts *out) {
+  double dayd = floor(t / 86400000.0);
+  long long msday = (long long)(t - dayd * 86400000.0);
+  long long z = (long long)dayd + 719468;
+  long long era = (z >= 0 ? z : z - 146096) / 146097;
+  unsigned long long doe = (unsigned long long)(z - era * 146097);
+  unsigned long long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  long long y = (long long)yoe + era * 400;
+  unsigned long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  unsigned long long mp = (5 * doy + 2) / 153;
+  unsigned long long d = doy - (153 * mp + 2) / 5 + 1;
+  unsigned long long m = mp < 10 ? mp + 3 : mp - 9;
+  if (m <= 2) y++;
+  long long wday = ((long long)dayd + 4) % 7;
+  if (wday < 0) wday += 7;
+  out->year = y;
+  out->month = (int)m - 1;
+  out->date = (int)d;
+  out->day = (int)wday;
+  out->hours = (int)(msday / 3600000);
+  out->minutes = (int)(msday / 60000 % 60);
+  out->seconds = (int)(msday / 1000 % 60);
+  out->milliseconds = (int)(msday % 1000);
+  out->timezone_offset = 0;
+}
+
+static bool scr_date_utc_parts(double ms, ScrDateParts *out) {
+  if (!isfinite(ms) || fabs(ms) > 8640000000000000.0) return false;
+  scr_date_utc_parts_unchecked(trunc(ms), out);
+  return true;
+}
+
+static bool scr_date_localtime(double secd, struct tm *out) {
+  time_t sec = (time_t)secd;
+  if ((double)sec != secd) return false;
+#ifdef _WIN32
+  return localtime_s(out, &sec) == 0;
+#else
+  return localtime_r(&sec, out) != NULL;
+#endif
+}
+
+static bool scr_date_local_offset(double secd, double *out) {
+  struct tm tmv;
+  double basis_secd = secd;
+  if (!scr_date_localtime(basis_secd, &tmv)) {
+    /* Windows' _localtime64_s rejects pre-epoch instants and years after
+     * 3001 even though both are valid ECMAScript Dates. Query the host's
+     * zone rule at a calendar-equivalent surrogate year in 2000..2399:
+     * Gregorian weekdays/leap years repeat every 400 years. This keeps
+     * every valid Date finite; the OS-vs-Node historical-rule difference
+     * remains the documented timezone-data divergence. */
+    ScrDateParts utc;
+    scr_date_utc_parts_unchecked(secd * 1000.0, &utc);
+    long long cycle_year = (utc.year - 2000) % 400;
+    if (cycle_year < 0) cycle_year += 400;
+    long long surrogate_year = 2000 + cycle_year;
+    basis_secd =
+      scr_days_from_civil(surrogate_year, utc.month + 1, utc.date) * 86400.0 +
+      utc.hours * 3600.0 + utc.minutes * 60.0 + utc.seconds;
+    if (!scr_date_localtime(basis_secd, &tmv)) return false;
+  }
+  /* Treat the local broken-down fields as UTC. Its distance from the real
+   * (or surrogate) epoch second is the zone offset. Apply that offset to
+   * the original instant and use the portable Gregorian walk for its
+   * fields; Date#getTimezoneOffset uses the
+   * opposite sign (UTC - local), in whole minutes. Historical local-mean
+   * offsets can contain seconds, which JavaScript truncates toward zero. */
+  double local_as_utc =
+    scr_days_from_civil((long long)tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday) * 86400.0 +
+    tmv.tm_hour * 3600.0 + tmv.tm_min * 60.0 + tmv.tm_sec;
+  *out = local_as_utc - basis_secd;
+  return true;
+}
+
+static bool scr_date_local_parts(double ms, ScrDateParts *out) {
+  if (!isfinite(ms) || fabs(ms) > 8640000000000000.0) return false;
+  double clipped = trunc(ms), local_offset;
+  if (!scr_date_local_offset(floor(clipped / 1000.0), &local_offset)) return false;
+  scr_date_utc_parts_unchecked(clipped + local_offset * 1000.0, out);
+  double timezone_offset = trunc(-local_offset / 60.0);
+  out->timezone_offset = timezone_offset == 0 ? 0 : timezone_offset;
+  return true;
+}
+
+double scr_date_utc(double y, double mo, double d, double h, double mi, double sec, double ms) {
+  return scr_date_new_ms(scr_date_components_ms(y, mo, d, h, mi, sec, ms));
+}
+
+double scr_date_new_components(double y, double mo, double d, double h, double mi, double sec, double ms) {
+  double local = scr_date_components_ms(y, mo, d, h, mi, sec, ms);
+  const double window = 172800000.0;
+  if (!isfinite(local) || fabs(local) > 8640000000000000.0 + window) return NAN;
+  double earliest = INFINITY, after_gap = INFINITY, gap = INFINITY;
+  for (int i = -1; i <= 1; i++) {
+    double offset, actual;
+    if (!scr_date_local_offset(floor((local + i * window) / 1000.0), &offset)) continue;
+    double candidate = local - offset * 1000.0;
+    if (!scr_date_local_offset(floor(candidate / 1000.0), &actual)) continue;
+    double displacement = (actual - offset) * 1000.0;
+    if (displacement == 0) earliest = fmin(earliest, candidate);
+    else if (displacement > 0 && displacement < gap) {
+      gap = displacement;
+      after_gap = candidate;
+    }
+  }
+  return scr_date_new_ms(isfinite(earliest) ? earliest : after_gap);
+}
+
+static bool scr_date_parts(double ms, bool utc, ScrDateParts *out) {
+  return utc ? scr_date_utc_parts(ms, out) : scr_date_local_parts(ms, out);
+}
+
+#define SCR_DATE_PART_GETTER(name, field)                                    \
+  double scr_date_get_##name(double ms, bool utc) {                          \
+    ScrDateParts p;                                                           \
+    return scr_date_parts(ms, utc, &p) ? (double)p.field : NAN;              \
+  }                                                                           \
+  double scr_date_get_##name##_local(double ms) {                            \
+    return scr_date_get_##name(ms, false);                                    \
+  }                                                                           \
+  double scr_date_get_##name##_utc(double ms) {                              \
+    return scr_date_get_##name(ms, true);                                     \
+  }
+
+SCR_DATE_PART_GETTER(full_year, year)
+SCR_DATE_PART_GETTER(month, month)
+SCR_DATE_PART_GETTER(date, date)
+SCR_DATE_PART_GETTER(day, day)
+SCR_DATE_PART_GETTER(hours, hours)
+SCR_DATE_PART_GETTER(minutes, minutes)
+SCR_DATE_PART_GETTER(seconds, seconds)
+
+#undef SCR_DATE_PART_GETTER
+
+double scr_date_get_milliseconds(double ms) {
+  ScrDateParts p;
+  return scr_date_utc_parts(ms, &p) ? (double)p.milliseconds : NAN;
+}
+
+double scr_date_get_timezone_offset(double ms) {
+  ScrDateParts p;
+  return scr_date_local_parts(ms, &p) ? p.timezone_offset : NAN;
+}
+
+/* ── Number statics ────────────────────────────────────────────────────
+ * JS-exact: the ES2015 Number statics never coerce (unlike the global
+ * isNaN/isFinite), and the compiler routes only number-typed arguments
+ * here, so plain C predicates are the whole story. */
+
+bool scr_num_is_finite(double x) { return isfinite(x) != 0; }
+
+/* Number.prototype.toExponential() with fractionDigits UNDEFINED — the
+ * spec's "as many digits as necessary": the shortest correctly-rounded
+ * mantissa that round-trips, formatted d[.ddd]e±X with no zero-padding of
+ * the exponent ("7e+0", "1.5e-7"). NaN → "NaN", ±Infinity → its text,
+ * ±0 → "0e+0" (the spec's x = +0 arm — the sign of -0 is dropped because
+ * -0 < 0 is false). Verified differentially against Node. */
+ScrStr *scr_num_to_exponential(double x) {
+  if (isnan(x)) return scr_str_new("NaN", 3);
+  if (isinf(x)) return x < 0 ? scr_str_new("-Infinity", 9) : scr_str_new("Infinity", 8);
+  if (x == 0) return scr_str_new("0e+0", 4);
+  char buf[64];
+  int len = 0;
+  for (int prec = 0; prec <= 17; prec++) {
+    len = snprintf(buf, sizeof buf, "%.*e", prec, x);
+    if (strtod(buf, NULL) == x) break;
+  }
+  /* Normalize C's exponent ("e+05" / "e-123") to JS's ("e+5"/"e-123"):
+   * drop leading zeros after the sign, keeping at least one digit. */
+  char out[64];
+  int o = 0;
+  const char *e = memchr(buf, 'e', (size_t)len);
+  const char *p = buf;
+  while (p < e) out[o++] = *p++;
+  out[o++] = 'e';
+  p++; /* past 'e' */
+  out[o++] = *p++; /* the sign — %e always emits one */
+  while (*p == '0' && p[1] >= '0' && p[1] <= '9') p++;
+  while (p < buf + len) out[o++] = *p++;
+  return scr_str_new(out, (size_t)o);
+}
+
+/* Number.prototype.toFixed() with fractionDigits UNDEFINED (= 0 digits) —
+ * the spec's pick of the integer n closest to x with ties toward the
+ * LARGER n on the magnitude ((2.5).toFixed() = "3", (-2.5).toFixed() =
+ * "-3" — printf's half-even would answer "2"), the "-0" result for
+ * negative fractions rounding to zero, and ToString fallback at
+ * |x| ≥ 1e21 (NaN and ±Infinity ride that arm's texts via ToString too,
+ * matching the spec's early answers). */
+ScrStr *scr_num_to_fixed0(double x) {
+  if (isnan(x)) return scr_str_new("NaN", 3);
+  if (fabs(x) >= 1e21) return scr_f64_to_scrstr(x);
+  double a = fabs(x);
+  double fl = floor(a);
+  double n = (a - fl >= 0.5) ? fl + 1 : fl; /* exact: a < 2^70, and below
+                                             * 2^52 the fraction is exact;
+                                             * at/above it a - fl == 0 */
+  ScrStr *digits = scr_f64_to_scrstr(n); /* n < 1e21 → never exponent form */
+  if (!(x < 0)) return digits;
+  size_t len = digits->len;
+  char buf[64];
+  buf[0] = '-';
+  memcpy(buf + 1, digits->data, len);
+  ScrStr *r = scr_str_new(buf, len + 1);
+  scr_str_release(digits);
+  return r;
+}
+
+/* The explicit-fraction-digits toFixed needs the exact binary value, not
+ * the shortest decimal that round-trips to it: (1.005).toFixed(2) is
+ * "1.00", for example. Represent abs(x) * 10^f as
+ *
+ *     mantissa * 5^f * 2^(binary_exponent + f)
+ *
+ * in a tiny base-2^32 integer, then shift right with the spec's
+ * round-half-up rule. The largest value handled here is below 1e21 with
+ * f=100, so the rounded integer is below 1e121 (402 bits); sixteen limbs
+ * leave comfortable headroom without heap allocation. */
+#define SCR_FIXED_LIMBS 16
+typedef struct {
+  uint32_t limb[SCR_FIXED_LIMBS]; /* little-endian */
+  int len;
+} ScrFixedInt;
+
+static void scr_fixed_normalize(ScrFixedInt *v) {
+  while (v->len > 1 && v->limb[v->len - 1] == 0) v->len--;
+}
+
+static void scr_fixed_mul5(ScrFixedInt *v) {
+  uint64_t carry = 0;
+  for (int i = 0; i < v->len; i++) {
+    uint64_t p = (uint64_t)v->limb[i] * 5 + carry;
+    v->limb[i] = (uint32_t)p;
+    carry = p >> 32;
+  }
+  if (carry != 0) v->limb[v->len++] = (uint32_t)carry;
+}
+
+static bool scr_fixed_bit(const ScrFixedInt *v, int bit) {
+  int word = bit / 32;
+  return word < v->len && ((v->limb[word] >> (bit % 32)) & 1u) != 0;
+}
+
+static void scr_fixed_shr(ScrFixedInt *v, int bits) {
+  int words = bits / 32;
+  int rem = bits % 32;
+  if (words >= v->len) {
+    v->limb[0] = 0;
+    v->len = 1;
+    return;
+  }
+  int n = v->len - words;
+  for (int i = 0; i < n; i++) {
+    uint32_t lo = v->limb[i + words] >> rem;
+    uint32_t hi =
+        rem != 0 && i + words + 1 < v->len
+            ? v->limb[i + words + 1] << (32 - rem)
+            : 0;
+    v->limb[i] = lo | hi;
+  }
+  v->len = n;
+  scr_fixed_normalize(v);
+}
+
+static void scr_fixed_shl(ScrFixedInt *v, int bits) {
+  uint32_t out[SCR_FIXED_LIMBS] = {0};
+  int words = bits / 32;
+  int rem = bits % 32;
+  for (int i = 0; i < v->len; i++) {
+    int at = i + words;
+    out[at] |= v->limb[i] << rem;
+    if (rem != 0) out[at + 1] |= v->limb[i] >> (32 - rem);
+  }
+  int n = v->len + words + (rem != 0 ? 1 : 0);
+  memcpy(v->limb, out, sizeof out);
+  v->len = n;
+  scr_fixed_normalize(v);
+}
+
+static void scr_fixed_inc(ScrFixedInt *v) {
+  uint64_t carry = 1;
+  for (int i = 0; i < v->len && carry != 0; i++) {
+    uint64_t s = (uint64_t)v->limb[i] + carry;
+    v->limb[i] = (uint32_t)s;
+    carry = s >> 32;
+  }
+  if (carry != 0) v->limb[v->len++] = (uint32_t)carry;
+}
+
+/* Divide in place by 1e9; each quotient limb still fits uint32_t because
+ * the carried remainder is below the divisor. Returns the remainder. */
+static uint32_t scr_fixed_div1e9(ScrFixedInt *v) {
+  uint64_t rem = 0;
+  for (int i = v->len - 1; i >= 0; i--) {
+    uint64_t cur = (rem << 32) | v->limb[i];
+    v->limb[i] = (uint32_t)(cur / 1000000000u);
+    rem = cur % 1000000000u;
+  }
+  scr_fixed_normalize(v);
+  return (uint32_t)rem;
+}
+
+/* Number.prototype.toFixed(fractionDigits), with the argument already
+ * number-typed by the frontend. ToIntegerOrInfinity validation precedes
+ * the receiver's non-finite arm, as ECMA-262 requires. Invalid precision
+ * raises V8's catchable RangeError text; otherwise the result is +1. */
+ScrStr *scr_num_to_fixed(double x, double fraction_digits) {
+  double fd = isnan(fraction_digits) ? 0 : trunc(fraction_digits);
+  if (!(fd >= 0 && fd <= 100)) {
+    static const char msg[] =
+        "toFixed() digits argument must be between 0 and 100";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  int f = (int)fd;
+  if (!isfinite(x) || fabs(x) >= 1e21) return scr_f64_to_scrstr(x);
+
+  bool neg = x < 0; /* false for -0, exactly like the spec's sign arm */
+  double a = neg ? -x : x;
+  uint64_t bits;
+  memcpy(&bits, &a, sizeof bits);
+  uint64_t mantissa = bits & ((1ull << 52) - 1);
+  int ieee_exp = (int)((bits >> 52) & 0x7ffu);
+  int binary_exp;
+  if (ieee_exp == 0) {
+    binary_exp = -1074;
+  } else {
+    mantissa |= 1ull << 52;
+    binary_exp = ieee_exp - 1023 - 52;
+  }
+
+  ScrFixedInt n = {{(uint32_t)mantissa, (uint32_t)(mantissa >> 32)}, 2};
+  scr_fixed_normalize(&n);
+  for (int i = 0; i < f; i++) scr_fixed_mul5(&n);
+  int shift = binary_exp + f;
+  if (shift >= 0) {
+    scr_fixed_shl(&n, shift);
+  } else {
+    int right = -shift;
+    bool round_up = scr_fixed_bit(&n, right - 1);
+    scr_fixed_shr(&n, right);
+    if (round_up) scr_fixed_inc(&n);
+  }
+
+  /* Render the exact rounded integer through base-1e9 chunks, then place
+   * the decimal point f digits from the right (padding through zero). */
+  uint32_t chunks[SCR_FIXED_LIMBS];
+  int chunk_count = 0;
+  do {
+    chunks[chunk_count++] = scr_fixed_div1e9(&n);
+  } while (!(n.len == 1 && n.limb[0] == 0));
+
+  char digits[128];
+  int dlen = snprintf(digits, sizeof digits, "%u", chunks[chunk_count - 1]);
+  for (int i = chunk_count - 2; i >= 0; i--) {
+    dlen += snprintf(digits + dlen, sizeof digits - (size_t)dlen,
+                     "%09u", chunks[i]);
+  }
+
+  char out[128];
+  int o = 0;
+  if (neg) out[o++] = '-';
+  int padded = dlen > f + 1 ? dlen : f + 1;
+  int integer_digits = padded - f;
+  int leading_zeros = padded - dlen;
+  for (int i = 0; i < padded; i++) {
+    if (f != 0 && i == integer_digits) out[o++] = '.';
+    out[o++] = i < leading_zeros ? '0' : digits[i - leading_zeros];
+  }
+  return scr_str_new(out, (size_t)o);
+}
+
+/* Increment a decimal digit string in place. Returns true on overflow —
+ * the value becomes 1 followed by len zeros (the caller folds the zeros
+ * into its scale); an EMPTY string increments to "1" the same way (the
+ * round-up-from-nothing case: 0.0005 at 3 fraction digits). */
+static bool scr_dec_inc(char *d, int len) {
+  for (int i = len - 1; i >= 0; i--) {
+    if (d[i] != '9') {
+      d[i]++;
+      return false;
+    }
+    d[i] = '0';
+  }
+  d[0] = '1';
+  return true;
+}
+
+/* Intl.NumberFormat("en-US").format(x) / x.toLocaleString("en-US") with
+ * DEFAULT options: decimal notation, minimum 0 / maximum 3 fraction
+ * digits, "," grouping every three integer digits, "∞"/"NaN" texts, and
+ * "-0" whenever the input is negative or negative zero even after
+ * rounding to zero. Rounding is half-up ON THE SHORTEST ROUND-TRIPPING
+ * DECIMAL — ICU's rounding input, probed against Node: format(1.0005) is
+ * "1.001" although the double is 1.000499... and toFixed(3) answers
+ * "1.000"; format(1e23) prints the shortest form's trailing zeros, not
+ * the double's exact expansion. The en-US/latn symbols (",", ".", "∞",
+ * "NaN", group size 3) are the whole embedded locale surface. Verified
+ * differentially against Node. Result +1; never throws. */
+ScrStr *scr_intl_num_format_en_us(double x) {
+  if (isnan(x)) return scr_str_new("NaN", 3);
+  if (isinf(x)) {
+    return x < 0 ? scr_str_new("-\xE2\x88\x9E", 4) : scr_str_new("\xE2\x88\x9E", 3);
+  }
+  bool neg = signbit(x) != 0;
+  if (x == 0) return neg ? scr_str_new("-0", 2) : scr_str_new("0", 1);
+  double a = neg ? -x : x;
+
+  /* Shortest digits: value = 0.d × 10^n (no trailing zeros, k ≤ 17). */
+  char d[18];
+  int n;
+  int k = scr_f64_digits(a, d, &n);
+
+  /* Round at 3 fraction digits: fraction position p is digit index
+   * n+p-1, so index n+3 is the first DROPPED digit. Half-up on the
+   * decimal digits — the shortest string ends right after them, so
+   * "first dropped digit ≥ 5" IS the whole decision. */
+  int keep = n + 3;
+  if (keep < k) {
+    bool up = keep >= 0 && d[keep] >= '5';
+    k = keep < 0 ? 0 : keep;
+    if (up && scr_dec_inc(d, k)) {
+      /* Carried out (all nines, or the round-up-from-nothing 0.0005
+       * case): one leading 1, the dropped nines fold into the scale. */
+      k = 1;
+      n += 1;
+    } else if (k == 0) {
+      /* Everything rounded away: ±0 with the sign preserved. */
+      return neg ? scr_str_new("-0", 2) : scr_str_new("0", 1);
+    }
+  }
+
+  /* Assemble: integer digits (indices [0, n)), zero-padded past k, then
+   * the ≤ 3 fraction digits (indices n..n+2, '0' outside [0, k)) with
+   * trailing zeros trimmed, then commas every three integer digits. */
+  char frac[3];
+  int flen = 0;
+  for (int p = 1; p <= 3; p++) {
+    int idx = n + p - 1;
+    frac[flen++] = (idx >= 0 && idx < k) ? d[idx] : '0';
+  }
+  while (flen > 0 && frac[flen - 1] == '0') flen--;
+
+  char out[512];
+  int o = 0;
+  if (neg) out[o++] = '-';
+  if (n <= 0) {
+    out[o++] = '0';
+  } else {
+    for (int i = 0; i < n; i++) {
+      if (i > 0 && (n - i) % 3 == 0) out[o++] = ',';
+      out[o++] = (i < k) ? d[i] : '0';
+    }
+  }
+  if (flen > 0) {
+    out[o++] = '.';
+    memcpy(out + o, frac, (size_t)flen);
+    o += flen;
+  }
+  return scr_str_new(out, (size_t)o);
+}
+
+/* Object.is over two numbers — the spec's SameValue on doubles: NaN
+ * equals NaN, +0 differs from -0, everything else is ==. */
+bool scr_num_same_value(double a, double b) {
+  if (a != a) return b != b;
+  if (a == 0 && b == 0) return signbit(a) == signbit(b);
+  return a == b;
+}
+
+bool scr_num_is_nan(double x) { return isnan(x) != 0; }
+
+bool scr_num_is_safe_integer(double x) {
+  return isfinite(x) && trunc(x) == x && fabs(x) <= 9007199254740991.0;
+}
+
+/* ── bitwise operators ─────────────────────────────────────────────────
+ * JS-exact (scr_runtime.h has the contract). ToUint32 is the primitive —
+ * ToInt32 and the Int32-typed results are the same 32 bits reinterpreted
+ * as two's complement, spelled portably (no implementation-defined
+ * narrowing casts, no UB shifts of signed values).
+ */
+
+/* The 32 bits as a SIGNED (Int32) JS number. */
+static double scr_bits_as_int32(uint32_t u) {
+  return u >= UINT32_C(0x80000000)
+             ? (double)(int32_t)(u - UINT32_C(0x80000000)) + (double)INT32_MIN
+             : (double)u;
+}
+
+double scr_bit_and(double a, double b) {
+  return scr_bits_as_int32(scr_to_uint32(a) & scr_to_uint32(b));
+}
+
+double scr_bit_or(double a, double b) {
+  return scr_bits_as_int32(scr_to_uint32(a) | scr_to_uint32(b));
+}
+
+double scr_bit_xor(double a, double b) {
+  return scr_bits_as_int32(scr_to_uint32(a) ^ scr_to_uint32(b));
+}
+
+double scr_bit_shl(double a, double b) {
+  return scr_bits_as_int32(scr_to_uint32(a) << (scr_to_uint32(b) & 31u));
+}
+
+double scr_bit_shr(double a, double b) {
+  uint32_t u = scr_to_uint32(a);
+  uint32_t s = scr_to_uint32(b) & 31u;
+  uint32_t r = u >> s;
+  if ((u & UINT32_C(0x80000000)) != 0 && s != 0) {
+    r |= ~(UINT32_C(0xffffffff) >> s); /* arithmetic shift: sign-fill */
+  }
+  return scr_bits_as_int32(r);
+}
+
+double scr_bit_ushr(double a, double b) {
+  /* The one Uint32-typed result: (-1 >>> 0) === 4294967295. */
+  return (double)(scr_to_uint32(a) >> (scr_to_uint32(b) & 31u));
+}
+
+double scr_bit_not(double a) {
+  return scr_bits_as_int32(~scr_to_uint32(a));
+}
+
+/* ── checked catch-binding cast (`e as C`) ────────────────────────────
+ * The caught analog of the dyn boundary's checked casts: an OBJ payload
+ * inside the class's preorder interval extracts (retained, +1); every
+ * other payload throws a catchable TypeError naming the class. Node's
+ * `as` is erasure — the runtime check is the documented trust-but-verify
+ * stance for dynamic values, extended to exception payloads. */
+void *scr_caught_check_obj(const ScrCaught *c, size_t pre, size_t post,
+                            const char *cls) {
+  if (scr_caught_instanceof(c, pre, post)) return c->retain_fn(c->payload);
+  char msg[160];
+  int len = snprintf(msg, sizeof msg,
+                     "caught value is not an instance of %s (checked cast)",
+                     cls);
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)len);
+  return NULL; /* callers are compiler-emitted pending checks */
+}
+
+/* ── Set → array drain ([...set]) ─────────────────────────────────────
+ * The live entries in insertion order (tombstones skipped — the forEach
+ * walk folded into one call; no user code runs mid-drain, so the
+ * live-iteration rules are moot). Borrows the set; the array is +1,
+ * string elements retained into it by the iter_key read. */
+ScrArr *scr_set_to_arr_f64(const ScrMap *s) {
+  size_t n = (size_t)scr_map_iter_count(s);
+  ScrArr *out = scr_arr_new(SCR_ELEM_F64, (size_t)scr_map_size(s));
+  for (size_t i = 0; i < n; i++) {
+    if (!scr_map_iter_live(s, (double)i)) continue;
+    scr_arr_push_f64(out, scr_map_iter_key_f64(s, (double)i));
+  }
+  return out;
+}
+
+ScrArr *scr_set_to_arr_str(const ScrMap *s) {
+  size_t n = (size_t)scr_map_iter_count(s);
+  ScrArr *out = scr_arr_new(SCR_ELEM_STR, (size_t)scr_map_size(s));
+  for (size_t i = 0; i < n; i++) {
+    if (!scr_map_iter_live(s, (double)i)) continue;
+    scr_arr_push_ref(out, scr_map_iter_key_str(s, (double)i));
+  }
+  return out;
+}
+
+ScrArr *scr_set_to_arr_ref(const ScrMap *s) {
+  size_t n = (size_t)scr_map_iter_count(s);
+  /* The element adapters ride from the set. Callback elements carry their
+   * trace adapter into the fresh array so a snapshot can join a cycle. */
+  ScrArr *out = scr_arr_new_ref(
+      s->key_retain, s->key_release, s->key_trace, (size_t)scr_map_size(s));
+  for (size_t i = 0; i < n; i++) {
+    if (!scr_map_iter_live(s, (double)i)) continue;
+    scr_arr_push_ref(out, scr_map_iter_key_ref(s, (double)i));
+  }
+  return out;
+}

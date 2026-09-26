@@ -845,6 +845,14 @@ export interface GenericInstance {
     ) {
       return;
     }
+    if (
+      target === undefined &&
+      contextual !== null &&
+      (ts.isArrowFunction(contextual) || ts.isFunctionExpression(contextual)) &&
+      npmStaticPackageOfPath(contextual.getSourceFile().fileName) !== null
+    ) {
+      return;
+    }
     lowerer.unsupported(
       "SC1090",
       blame,
@@ -5427,8 +5435,10 @@ function lowerOptionalStringNumber(
       arrayReceiver &&
       ((lowerer.checker.getTypeArguments(recvTs as ts.TypeReference)[0]?.flags ?? 0) &
         (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+    const checkerUntyped =
+      (recvTs.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 || anyArray;
     let recv: IrExpr;
-    if (recvTs.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown) || anyArray) {
+    if (checkerUntyped) {
       recv = lowerer.lowerExpr(access.expression);
     } else {
       // A checker-TYPED spelling whose VALUE is still checked-dynamic (an
@@ -5511,7 +5521,15 @@ function lowerOptionalStringNumber(
     // member models. Order note: JS reads the callee before evaluating
     // arguments — dynKeyGet's undefined-receiver TypeError fires first,
     // exactly Node.
-    if (DYN_PROTO_METHOD_NAMES.has(access.name.text)) return null;
+    const ownCallable = !checkerUntyped && (() => {
+      const prop = lowerer.checker.getPropertyOfType(recvTs, access.name.text);
+      if (prop === undefined) return false;
+      const authored = lowerer.checker.declarationsOf(prop).some(
+        (decl) => !lowerer.isStdlibFile(decl.getSourceFile()),
+      );
+      return authored && lowerer.checker.getCallSignatures(lowerer.checker.getTypeOfSymbol(prop)).length > 0;
+    })();
+    if (DYN_PROTO_METHOD_NAMES.has(access.name.text) && !ownCallable) return null;
     // Optional forms (`obj.cb?.()`, `obj?.cb()`) belong to the chain
     // machinery's short-circuit semantics — not modeled here yet.
     if (call.questionDotToken || access.questionDotToken) return null;

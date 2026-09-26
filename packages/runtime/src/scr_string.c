@@ -903,6 +903,156 @@ static const char *scr_byte_find(const char *hay, size_t hay_len,
   return NULL;
 }
 
+/* UTF-16 builder for replacement templates. Keeping code units until the
+ * final conversion preserves JavaScript's surrogate-boundary behavior. */
+typedef struct {
+  uint16_t *data;
+  size_t len;
+  size_t cap;
+} ScrU16Buf;
+
+static void scr_u16_reserve(ScrU16Buf *b, size_t extra) {
+  if (extra > SIZE_MAX - b->len) scr_oom();
+  size_t need = b->len + extra;
+  if (need <= b->cap) return;
+  size_t cap = b->cap ? b->cap : 16;
+  while (cap < need) {
+    if (cap > SIZE_MAX / 2) { cap = need; break; }
+    cap *= 2;
+  }
+  if (cap > SIZE_MAX / sizeof(uint16_t)) scr_oom();
+  uint16_t *data = realloc(b->data, cap * sizeof(uint16_t));
+  if (!data) scr_oom();
+  b->data = data;
+  b->cap = cap;
+}
+
+static void scr_u16_append(ScrU16Buf *b, const uint16_t *data, size_t len) {
+  scr_u16_reserve(b, len);
+  if (len) memcpy(b->data + b->len, data, len * sizeof(uint16_t));
+  b->len += len;
+}
+
+static ScrU16Buf scr_u16_from_str(const ScrStr *s) {
+  ScrU16Buf out = {0};
+  scr_u16_reserve(&out, scr_utf16_units_span(s->data, s->len, NULL));
+  size_t offset = 0;
+  while (offset < s->len) {
+    size_t advance;
+    uint32_t cp = scr_utf8_decode(s->data + offset, &advance);
+    if (cp < 0x10000) {
+      out.data[out.len++] = (uint16_t)cp;
+    } else {
+      cp -= 0x10000;
+      out.data[out.len++] = (uint16_t)(0xd800 + (cp >> 10));
+      out.data[out.len++] = (uint16_t)(0xdc00 + (cp & 0x3ff));
+    }
+    offset += advance;
+  }
+  return out;
+}
+
+static size_t scr_utf8_width(uint32_t cp) {
+  return cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+}
+
+static char *scr_utf8_put(char *out, uint32_t cp) {
+  if (cp < 0x80) {
+    *out++ = (char)cp;
+  } else if (cp < 0x800) {
+    *out++ = (char)(0xc0 | (cp >> 6));
+    *out++ = (char)(0x80 | (cp & 0x3f));
+  } else if (cp < 0x10000) {
+    *out++ = (char)(0xe0 | (cp >> 12));
+    *out++ = (char)(0x80 | ((cp >> 6) & 0x3f));
+    *out++ = (char)(0x80 | (cp & 0x3f));
+  } else {
+    *out++ = (char)(0xf0 | (cp >> 18));
+    *out++ = (char)(0x80 | ((cp >> 12) & 0x3f));
+    *out++ = (char)(0x80 | ((cp >> 6) & 0x3f));
+    *out++ = (char)(0x80 | (cp & 0x3f));
+  }
+  return out;
+}
+
+static ScrStr *scr_str_from_u16_lossy(const uint16_t *units, size_t len) {
+  if (len == 0) return scr_str_empty();
+  size_t byte_len = 0;
+  for (size_t i = 0; i < len; i++) {
+    uint32_t cp = units[i];
+    if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < len &&
+        units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff) {
+      cp = 0x10000 + ((cp - 0xd800) << 10) + (units[++i] - 0xdc00);
+    } else if (cp >= 0xd800 && cp <= 0xdfff) {
+      cp = 0xfffd;
+    }
+    size_t width = scr_utf8_width(cp);
+    if (width > SIZE_MAX - byte_len) scr_oom();
+    byte_len += width;
+  }
+  ScrStr *out = scr_str_alloc_raw(byte_len, byte_len);
+  char *cursor = out->data;
+  for (size_t i = 0; i < len; i++) {
+    uint32_t cp = units[i];
+    if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < len &&
+        units[i + 1] >= 0xdc00 && units[i + 1] <= 0xdfff) {
+      cp = 0x10000 + ((cp - 0xd800) << 10) + (units[++i] - 0xdc00);
+    } else if (cp >= 0xd800 && cp <= 0xdfff) {
+      cp = 0xfffd;
+    }
+    cursor = scr_utf8_put(cursor, cp);
+  }
+  out->data[byte_len] = '\0';
+  return out;
+}
+
+static size_t scr_u16_find(const uint16_t *source, size_t source_len,
+                           const uint16_t *search, size_t search_len,
+                           size_t start) {
+  if (start > source_len) return SIZE_MAX;
+  if (search_len == 0) return start;
+  if (search_len > source_len - start) return SIZE_MAX;
+  for (size_t i = start; i + search_len <= source_len; i++) {
+    if (source[i] == search[0] &&
+        memcmp(source + i, search, search_len * sizeof(uint16_t)) == 0)
+      return i;
+  }
+  return SIZE_MAX;
+}
+
+static void scr_u16_substitution(ScrU16Buf *out,
+                                 const ScrU16Buf *source,
+                                 const ScrU16Buf *matched,
+                                 size_t position,
+                                 const ScrU16Buf *replacement) {
+  size_t i = 0;
+  while (i < replacement->len) {
+    uint16_t unit = replacement->data[i];
+    if (unit != '$' || i + 1 == replacement->len) {
+      scr_u16_append(out, &unit, 1);
+      i++;
+      continue;
+    }
+    uint16_t next = replacement->data[i + 1];
+    if (next == '$') {
+      scr_u16_append(out, &unit, 1);
+    } else if (next == '&') {
+      scr_u16_append(out, matched->data, matched->len);
+    } else if (next == '`') {
+      scr_u16_append(out, source->data, position);
+    } else if (next == '\'') {
+      size_t tail = position + matched->len;
+      scr_u16_append(out, tail < source->len ? source->data + tail : NULL,
+                     source->len - tail);
+    } else {
+      scr_u16_append(out, &unit, 1);
+      i++;
+      continue;
+    }
+    i += 2;
+  }
+}
+
 /* Search backwards from a clamped UTF-16 position. A low-surrogate position
  * maps to its scalar's first byte, so that scalar remains searchable. */
 double scr_str_last_index_of_from(ScrStr *s, ScrStr *needle, double position) {
@@ -1012,28 +1162,15 @@ bool scr_str_includes(ScrStr *s, ScrStr *needle) {
   return scr_byte_find(s->data, s->len, needle->data, needle->len) != NULL;
 }
 
-bool scr_str_starts_with(ScrStr *s, ScrStr *needle, double position) {
-  double pos = scr_to_integer_or_infinity(position);
-  double len16 = scr_str_utf16_len(s);
-  double start16 = pos <= 0 ? 0 : pos >= len16 ? len16 : pos;
-  return scr_str_index_of(s, needle, start16) == start16;
+bool scr_str_starts_with(ScrStr *s, ScrStr *needle) {
+  return needle->len <= s->len &&
+         memcmp(s->data, needle->data, needle->len) == 0;
 }
 
-bool scr_str_ends_with(ScrStr *s, ScrStr *needle, double endPosition) {
-  double pos = scr_to_integer_or_infinity(endPosition);
-  ScrSidx *e = scr_sidx(s);
-  size_t len16 = scr_sidx_len(s, e);
-  size_t end16 = pos <= 0             ? 0
-                 : pos >= (double)len16 ? len16
-                                        : (size_t)pos;
-  size_t needle16 = (size_t)scr_str_utf16_len(needle);
-  if (needle16 > end16) return false;
-  if (needle16 == 0) return true;
-  bool start_mid, end_mid;
-  size_t start_b = scr_u16_to_byte_c(s, e, end16 - needle16, &start_mid);
-  size_t end_b = scr_u16_to_byte_c(s, e, end16, &end_mid);
-  return !start_mid && !end_mid && end_b - start_b == needle->len &&
-         memcmp(s->data + start_b, needle->data, needle->len) == 0;
+bool scr_str_ends_with(ScrStr *s, ScrStr *needle) {
+  return needle->len <= s->len &&
+         memcmp(s->data + (s->len - needle->len), needle->data,
+                needle->len) == 0;
 }
 
 static size_t scr_str_clamp_u16_position(double position, size_t len16) {

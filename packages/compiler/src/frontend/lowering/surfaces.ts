@@ -1497,28 +1497,45 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * nothing. Only the globals with lowered member surfaces alias this
    * way; aliasing, say, `Math` would change nothing (its members lower
    * by receiver too). Returns true when recognized. */
-  export function stdlibGlobalAliasDecl(lowerer: Lowerer, nameNode: ts.Node, init: ts.Expression | undefined): boolean {
-    if (!init || !ts.isIdentifier(nameNode)) return false;
+  export function stdlibGlobalAliasNameOf(lowerer: Lowerer, init: ts.Expression | undefined): string | null {
+    if (!init) return null;
+    let aliasExpr = init;
+    while (ts.isParenthesizedExpression(aliasExpr)) aliasExpr = aliasExpr.expression;
+    if (
+      ts.isBinaryExpression(aliasExpr) &&
+      aliasExpr.operatorToken.kind === ts.SyntaxKind.BarBarToken &&
+      stdlibGlobalNameOf(lowerer, aliasExpr.left) !== null
+    ) {
+      aliasExpr = aliasExpr.left;
+    }
     // `const process = require('node:process')`: Node's process MODULE is
     // the global process object (module.exports === globalThis.process),
     // so the binding aliases the global exactly like `const process =
     // globalThis.process`. Preflight admits exactly this shape
     // (processModuleAliasRequire7); commander's lib/command.js opens with
     // it.
-    const requireSpec = requireSpecOf(init);
+    const requireSpec = requireSpecOf(aliasExpr);
     const name =
       requireSpec === "process" || requireSpec === "node:process"
         ? "process"
-        : umdGlobalThisSelector(lowerer, init)
+        : umdGlobalThisSelector(lowerer, aliasExpr)
         ? "globalThis"
-        : stdlibGlobalNameOf(lowerer, init);
-    if (name === null) return false;
+        : stdlibGlobalNameOf(lowerer, aliasExpr);
+    if (name === null) return null;
     // Only alias OBJECT-shaped globals whose members lower by receiver
     // identity (process, console, globalThis itself, and perf_hooks'
     // performance — the mockable-clock idiom snapshots it). Function-valued
     // globals (setTimeout) taken as values are a different story — the
     // ordinary value paths (and their fences) apply.
-    if (name !== "process" && name !== "console" && name !== "globalThis" && name !== "performance") return false;
+    return name === "process" || name === "console" || name === "globalThis" || name === "performance"
+      ? name
+      : null;
+  }
+
+  export function stdlibGlobalAliasDecl(lowerer: Lowerer, nameNode: ts.Node, init: ts.Expression | undefined): boolean {
+    if (!ts.isIdentifier(nameNode)) return false;
+    const name = stdlibGlobalAliasNameOf(lowerer, init);
+    if (name === null) return false;
     const symbol = lowerer.checker.getSymbolAtLocation(nameNode);
     if (!symbol) return false;
     lowerer.stdlibGlobalAliases.set(symbol, name);

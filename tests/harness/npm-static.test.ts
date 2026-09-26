@@ -39,18 +39,29 @@ const oracleExecutable = primaryOracleExecutable(NODE_COMPAT_MATRIX);
 
 interface RunResult {
   stdout: Buffer;
+  stderr: Buffer;
   exitCode: number;
 }
 
 async function runBinary(cmd: string, args: string[]): Promise<RunResult> {
   try {
-    const { stdout } = await execFileAsync(cmd, args, { encoding: "buffer" });
-    return { stdout, exitCode: 0 };
+    const { stdout, stderr } = await execFileAsync(cmd, args, { encoding: "buffer" });
+    return { stdout, stderr, exitCode: 0 };
   } catch (err) {
-    const e = err as { code?: unknown; stdout?: Buffer };
-    if (typeof e.code !== "number" || !Buffer.isBuffer(e.stdout)) throw err;
-    return { stdout: e.stdout, exitCode: e.code };
+    const e = err as { code?: unknown; stdout?: Buffer; stderr?: Buffer };
+    if (typeof e.code !== "number" || !Buffer.isBuffer(e.stdout) || !Buffer.isBuffer(e.stderr)) throw err;
+    return { stdout: e.stdout, stderr: e.stderr, exitCode: e.code };
   }
+}
+
+function comparableStderr(stderr: Buffer): Buffer {
+  if (!sanitize) return stderr;
+  const kept = stderr.toString("utf8").split("\n").filter(
+    (line) =>
+      !line.startsWith("scriptc RC audit skipped:") &&
+      !/^==\d+==WARNING: ASan doesn't fully support makecontext\/swapcontext/.test(line),
+  );
+  return Buffer.from(kept.join("\n"), "utf8");
 }
 
 /** Compile one pilot statically (no --dynamic — the whole point) with the

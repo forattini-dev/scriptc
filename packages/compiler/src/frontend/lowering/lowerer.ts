@@ -847,7 +847,21 @@ export function dynFallbackType(lowerer: Lowerer, node: ts.Node, t: ts.Type): Ir
   if (sig) {
     const params = sig.getParameters().map((p): IrType => {
       const pt = lowerer.checker.getTypeOfSymbolAtLocation(p, node);
-      return lowerer.mapTypeOf(pt) ?? DYN;
+      let mapped = lowerer.mapTypeOf(pt) ?? DYN;
+      const decl = lowerer.checker.valueDeclarationOf(p);
+      const optional =
+        decl !== undefined &&
+        ts.isParameter(decl) &&
+        (decl.questionToken !== undefined || decl.initializer !== undefined);
+      if (
+        optional &&
+        mapped.kind !== "dyn" &&
+        mapped.kind !== "jsval" &&
+        !lowerer.bareUndefinedArmedUnion(mapped)
+      ) {
+        mapped = lowerer.withUndefinedArm(mapped);
+      }
+      return mapped;
     });
     const retT = lowerer.checker.getReturnTypeOfSignature(sig);
     const ret: IrType =
@@ -2299,6 +2313,7 @@ export class Lowerer {
       // =` statement itself; table/Proxy replacements share that
       // declaration node, so only scalar RHS reads as a single value.
       if (d && ts.isBinaryExpression(d)) {
+        if (this.globalsByDeclNode.has(d)) return false;
         let r: ts.Expression = d.right;
         while (ts.isParenthesizedExpression(r)) r = r.expression;
         const scalar =

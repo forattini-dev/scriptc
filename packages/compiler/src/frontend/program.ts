@@ -61,8 +61,8 @@ import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import { ADOPTED_OPTIONS, isJsSourceFileName, isRuntimeSourceFileName } from "./tsc-codes.js";
 import { BUN_MODULE_MEMBER_ALIASES, canonicalBuiltinModule, SUPPORTED_NODE_MODULES, isTrapRuntimeModule, unsupportedModuleFeatureOf } from "./builtin-modules.js";
 import { ambientDtsPath, fallbackDtsPath, isNodeTypesPath, overridesDtsPath, tsgoPath } from "./dts-paths.js";
-import { clearWorkspacePackages, isRelativeSpecifier, isWorkspacePackageName, registerWorkspacePackage } from "./workspace-registry.js";
-import { trackedFileExists } from "./input-tracker.js";
+import { clearWorkspacePackages, isRelativeSpecifier, isWorkspacePackageName, npmPackageNameOf, registerWorkspacePackage } from "./workspace-registry.js";
+import { trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { setEmbedJsxOptions } from "./npm-typescript.js";
 import { checkPreflightTypes, isIslandJsFile } from "./preflight-types.js";
@@ -272,6 +272,80 @@ export interface LoadResult {
    * declaration surface. */
   externalTypeSpecifiersByFile: ReadonlyMap<string, readonly string[]>;
   withProjectWorld: <T>(action: (program: ts.Program) => T) => T;
+}
+
+function declarationReexportTarget(fromFile: string, specifier: string): string | null {
+  const base = resolve(dirname(fromFile), specifier);
+  const candidates: string[] = [];
+  const extension = /\.(mjs|cjs|js)$/.exec(base)?.[1];
+  if (extension !== undefined) {
+    const stem = base.slice(0, -(extension.length + 1));
+    if (extension === "mjs") candidates.push(`${stem}.d.mts`, `${stem}.d.ts`);
+    else if (extension === "cjs") candidates.push(`${stem}.d.cts`, `${stem}.d.ts`);
+    else candidates.push(`${stem}.d.ts`, `${stem}.d.mts`, `${stem}.d.cts`);
+  } else {
+    candidates.push(base, `${base}.d.ts`, `${base}.d.mts`, `${base}.d.cts`);
+  }
+  candidates.push(resolve(base, "index.d.ts"), resolve(base, "index.d.mts"), resolve(base, "index.d.cts"));
+  return candidates.find((candidate) => trackedFileExists(candidate)) ?? null;
+}
+
+function runtimeReexportTarget(fromFile: string, specifier: string): string | null {
+  const base = resolve(dirname(fromFile), specifier);
+  const candidates = [
+    base, `${base}.js`, `${base}.mjs`, `${base}.cjs`,
+    resolve(base, "index.js"), resolve(base, "index.mjs"), resolve(base, "index.cjs"),
+  ];
+  const target = candidates.find((candidate) => trackedFileExists(candidate) && isJsSourceFileName(candidate));
+  return target === undefined ? null : (trackedRealpath(target) ?? target);
+}
+
+function visitNpmStaticDeclarationClosure(
+  entryPath: string,
+  onSource: (path: string, source: string) => void,
+): void {
+  const seen = new Set<string>();
+  const packageJson = nearestPkgJsonPath(entryPath);
+  const packageRoot = (packageJson === null ? dirname(entryPath) : dirname(packageJson)).split("\\").join("/");
+  const visit = (path: string): void => {
+    path = resolve(path);
+    const normalized = path.split("\\").join("/");
+    if (normalized !== packageRoot && !normalized.startsWith(packageRoot + "/")) return;
+    if (seen.has(path)) return;
+    seen.add(path);
+    const source = trackedReadFile(path);
+    if (source === null) return;
+    onSource(path, source);
+    for (const specifier of npmStaticDeclarationReexports(path, source)) {
+      const target = declarationReexportTarget(path, specifier);
+      if (target !== null) visit(target);
+    }
+  };
+  visit(entryPath);
+}
+
+function npmStaticDeclarationOverloadsOf(entryPath: string): NpmStaticDeclarationOverloads {
+  const classes = new Map<string, Map<string, readonly NpmStaticOverloadSignature[]>>();
+  visitNpmStaticDeclarationClosure(entryPath, (path, source) => {
+    for (const [className, methods] of parseNpmStaticDeclarationOverloads(path, source)) {
+      const target = classes.get(className) ?? new Map<string, readonly NpmStaticOverloadSignature[]>();
+      classes.set(className, target);
+      for (const [methodName, signatures] of methods) if (!target.has(methodName)) target.set(methodName, signatures);
+    }
+  });
+  return classes;
+}
+
+function npmStaticDeclarationPropertiesOf(entryPath: string): NpmStaticDeclarationProperties {
+  const classes = new Map<string, Map<string, string>>();
+  visitNpmStaticDeclarationClosure(entryPath, (path, source) => {
+    for (const [className, properties] of parseNpmStaticDeclarationProperties(path, source)) {
+      const target = classes.get(className) ?? new Map<string, string>();
+      classes.set(className, target);
+      for (const [propertyName, type] of properties) if (!target.has(propertyName)) target.set(propertyName, type);
+    }
+  });
+  return classes;
 }
 
 /** See LoadResult.startupCrash: Node's exact error message, the IR error
@@ -556,7 +630,46 @@ export function loadProgram(
     }
     externalTypes.set(specifier, declarationPath);
   }
-  setNpmStaticPackages(opts?.npmStatic ?? []);
+  const npmStaticPackages = [...new Set(opts?.npmStatic ?? [])];
+  const declarationOverloads = new Map<string, NpmStaticDeclarationOverloads>();
+  const declarationProperties = new Map<string, NpmStaticDeclarationProperties>();
+  for (const pkg of npmStaticPackages) {
+    const resolved = resolveBareModule(entryPath, pkg, "types-only");
+    if (resolved === null || resolved.packageName !== pkg || !/\.d\.(?:ts|mts|cts)$/.test(resolved.typesFile)) continue;
+    const overloads = npmStaticDeclarationOverloadsOf(resolved.typesFile);
+    const properties = npmStaticDeclarationPropertiesOf(resolved.typesFile);
+    const classNames = new Set([...overloads.keys(), ...properties.keys()]);
+    if (classNames.size === 0) continue;
+    const runtime = resolveBareModule(entryPath, pkg, "js-only");
+    if (runtime === null || !isJsSourceFileName(runtime.typesFile)) continue;
+    const runtimeSource = trackedReadFile(runtime.typesFile);
+    if (runtimeSource === null) continue;
+    const targets = npmStaticRuntimeClassTargets(runtime.typesFile, runtimeSource, classNames);
+    for (const [className, specifier] of targets) {
+      const methods = overloads.get(className);
+      const fields = properties.get(className);
+      if (methods === undefined && fields === undefined) continue;
+      const target = specifier === null ? runtime.typesFile : runtimeReexportTarget(runtime.typesFile, specifier);
+      if (target === null) continue;
+      const targetPackage = npmPackageNameOf(target);
+      const targetNorm = target.split("\\").join("/");
+      const insideWorkspace = runtime.workspaceDir !== undefined &&
+        targetNorm.startsWith(runtime.workspaceDir.split("\\").join("/") + "/");
+      if (targetPackage !== pkg && !insideWorkspace) continue;
+      if (methods !== undefined) {
+        const byClass = new Map(declarationOverloads.get(targetNorm) ?? []);
+        byClass.set(className, methods);
+        declarationOverloads.set(targetNorm, byClass);
+      }
+      if (fields !== undefined) {
+        const byClass = new Map(declarationProperties.get(targetNorm) ?? []);
+        byClass.set(className, fields);
+        declarationProperties.set(targetNorm, byClass);
+      }
+    }
+  }
+  setNpmStaticPackages(npmStaticPackages);
+  setNpmStaticDeclarationOverloads(declarationOverloads, declarationProperties);
   // Workspace-package registrations reset per load (same discipline as the
   // npm-static set), then the opted-in names are probed UP FRONT: a
   // workspace-linked opt-in resolves to files whose realpaths carry no
@@ -1696,6 +1809,12 @@ function processModuleAliasRequire7(spec: string, decl: ts.VariableDeclaration |
   return decl === null || ts.isIdentifier(decl.name);
 }
 
+function processModuleAliasImport7(spec: string, stmt: ts.ImportDeclaration): boolean {
+  if (spec !== "process" && spec !== "node:process") return false;
+  const clause = stmt.importClause;
+  return clause !== undefined && clause.name !== undefined && clause.namedBindings === undefined;
+}
+
 /** The whole TS7-lane lifecycle for one entry: spawn (or share) a tsgo
  * host, build the lowering-world program, run the ported preflight, and
  * dispose EVERYTHING before returning — the CLI process must exit promptly,
@@ -2123,6 +2242,7 @@ function preflight7(load: LoadResult): {
           // validation and the kind classification ride the shared clause
           // walk below (the `assetPath` it computes answers the same).
           if (resolveBareAsset(sf.fileName, spec) !== null) continue;
+          if (processModuleAliasImport7(spec, stmt)) continue;
           const nodeBuiltin = spec.startsWith("node:") || nodeBuiltinNames.has(spec);
           if (nodeBuiltin) {
             diags.push(unsupportedDiag("SC1010", locOf7(stmt), unsupportedModuleFeatureOf(spec)));

@@ -12,12 +12,17 @@ type IrFuncType = Extract<IrType, { kind: "func" }>;
  * hide it from params and receive it from the boxed call thunk. */
 export function functionAbi(shapes: readonly ParamShape[], ret: IrType, usesArguments = false): IrFuncType {
   const tail = shapes.at(-1);
+  const argumentsAll = usesArguments || shapes.some((shape) => shape.mode === "arguments");
   const restAbi = tail?.mode === "islandRest" ? "jsval"
     : tail?.mode === "rest" && tail.type.kind === "array" ? "array" : undefined;
-  const rest = restAbi !== undefined || usesArguments || tail?.mode === "dynRest";
+  const rest = restAbi !== undefined || argumentsAll || tail?.mode === "dynRest";
   return {
-    kind: "func", params: shapes.filter(s => s.mode !== "dynRest").map(s => s.type), ret,
-    ...(rest ? { rest: true } : {}), ...(restAbi ? { restAbi } : {}),
+    kind: "func",
+    params: shapes.filter((shape) => shape.mode !== "dynRest" && shape.mode !== "arguments").map((shape) => shape.type),
+    ret,
+    ...(rest ? { rest: true } : {}),
+    ...(argumentsAll ? { argumentsAll: true } : {}),
+    ...(restAbi ? { restAbi } : {}),
   };
 }
 

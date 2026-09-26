@@ -83,8 +83,9 @@ export function detectAutoPackages(
     const checked = new Set<string>();
     let reason: string | null = null;
     for (const { typesFile, fromFile, specifier } of entries) {
-      const jsEntry = resolveBareModule(fromFile, specifier, "js-only");
-      const runtime = jsEntry !== null && isRuntimeSourceFileName(jsEntry.typesFile) ? jsEntry.typesFile : null;
+      const runtimeEntry = resolveBareModule(fromFile, specifier, "runtime-source") ??
+        resolveBareModule(fromFile, specifier, "js-only");
+      const runtime = runtimeEntry !== null && isRuntimeSourceFileName(runtimeEntry.typesFile) ? runtimeEntry.typesFile : null;
       const identity = `${runtime}\0${typesFile}`;
       if (checked.has(identity)) continue;
       checked.add(identity);

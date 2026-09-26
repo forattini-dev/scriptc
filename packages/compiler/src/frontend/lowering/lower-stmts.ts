@@ -26,6 +26,7 @@ import { enforceLibBoundary } from "./lib-boundary.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
+import { npmStaticPackageOfPath } from "../npm-static.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsAliasVarDeclOf, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
 import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfSearchParams, lowerForOfSet, lowerSafeIndexRead, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
@@ -230,9 +231,38 @@ function pureAnnotatedDeadConst(stmt: ts.Statement, sf: ts.SourceFile): boolean 
  * shape. */
 export function provenanceElidedConstDecl(lowerer: Lowerer, decl: ts.VariableDeclaration): boolean {
   const sf = decl.getSourceFile();
-  if (!isProvenanceSourceFile(sf.fileName)) return false;
   const stmt = decl.parent.parent;
   if (!ts.isVariableStatement(stmt) || !pureAnnotatedDeadConst(stmt, sf)) return false;
+  if (npmStaticPackageOfPath(sf.fileName) !== null && ts.isIdentifier(decl.name)) {
+    const bindingName = decl.name.text;
+    const symbol = lowerer.checker.getSymbolAtLocation(decl.name);
+    if (symbol !== undefined) {
+      let used = false;
+      for (const file of lowerer.program.getSourceFiles()) {
+        if (used || file.isDeclarationFile) continue;
+        ts.walkPreorder(file, (node) => {
+          if (!ts.isIdentifier(node) || node.text !== bindingName) return undefined;
+          const parent = node.parent;
+          if (
+            parent === decl ||
+            parent !== undefined && (
+              ts.isImportSpecifier(parent) ||
+              ts.isImportClause(parent) ||
+              ts.isNamespaceImport(parent) ||
+              ts.isExportSpecifier(parent)
+            )
+          ) return undefined;
+          if (lowerer.resolveValueSymbol(node) === symbol) {
+            used = true;
+            return "stop";
+          }
+          return undefined;
+        });
+      }
+      if (!used) return true;
+    }
+  }
+  if (!isProvenanceSourceFile(sf.fileName)) return false;
   const diagsBefore = lowerer.diags.length;
   let mapped = false;
   try {

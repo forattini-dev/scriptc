@@ -539,7 +539,7 @@ static ScrDyn *scr_dyn_invoke_impl(
       }
       ScrDyn *r;
       if (last) {
-        r = scr_dyn_new_num(scr_str_last_index_of(s, needle, pos));
+        r = scr_dyn_new_num(scr_str_last_index_of_from(s, needle, pos));
       } else if (dyn_name_is(method, "includes")) {
         /* scr_str_includes takes no position; indexOf IS includes with one. */
         r = scr_dyn_new_bool(scr_str_index_of(s, needle, pos) >= 0);

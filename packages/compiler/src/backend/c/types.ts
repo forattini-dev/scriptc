@@ -310,7 +310,6 @@ export function elemKindC(elem: IrType): string {
     // Symbols (symbol[] — heterogeneous sentinel lists): refcounted
     // identity pointers holding only strings — no trace, no cycles ever.
     case "symbol":
-    case "bigint":
     // Class objects ((typeof Shape)[] — the registry idiom): immortal
     // statics behind no-op RC adapters — no trace, no cycles ever;
     // indexOf/includes/=== are the REF kind's pointer identity, exactly

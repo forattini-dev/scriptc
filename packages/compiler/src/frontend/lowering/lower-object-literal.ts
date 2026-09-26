@@ -165,11 +165,9 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       // Shorthand methods are closure-valued fields. Their `this` is the
       // literal itself, bound below through a hidden %self local the methods
       // capture (JS binds it at the CALL, so fieldGetExpr refuses reading
-      // such a method as a value). A JS literal keeps the old refusal: there
-      // `this` already lowers to the ambient receiver (libCall dyn.this).
-      if (ts.isMethodDeclaration(prop) && isJsSourceFile(expr.getSourceFile())) {
-        lowerer.rejectThisInObjectMethod(prop.body ?? prop);
-      }
+      // such a method as a value). JavaScript methods are probed below so an
+      // unsupported receiver becomes a call-time fence instead of aborting
+      // construction of an otherwise unused object literal.
     }
     // The methods whose bodies name `this`: only these need the receiver.
     const thisMethods = new Set(

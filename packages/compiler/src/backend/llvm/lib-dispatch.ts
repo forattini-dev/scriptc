@@ -285,9 +285,8 @@ export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
       case "layer":
       case "schema":
       case "option":
-      case "module": case "promise":
+      case "promise":
       case "util":
-      case "bigint":
       case "crypto":
       case "buffer":
       case "bytes":

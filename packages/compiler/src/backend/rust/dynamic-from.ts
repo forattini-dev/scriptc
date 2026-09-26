@@ -120,13 +120,16 @@ export class RustDynamicFromEmitter {
         const arms = union.arms.map((arm, tag) => {
           const variant = `${this.context.unionName(union.id)}::${this.context.unionVariant(tag)}`;
           if (this.context.isUnit(arm)) return `${variant} => ${this.emit(arm, "()", loc, "", liveRef)}`;
+          if (arm.kind === "object" && !RUNTIME_ERROR_CLASSES.has(arm.className)) {
+            return `${variant}(..) => runtime::throw_error_code(${rustJsString(`dynamic boxing from object '${arm.className}' is not supported yet`, text => this.context.rustString(text))}, "SC3001")`;
+          }
           return `${variant}(payload) => ${this.emit(arm, "payload", loc, "", liveRef)}`;
         }).join(", ");
         return `{ let ${unionValue} = ${value}; match ${unionValue} { ${arms} } }`;
       }
       case "object": {
         if (!RUNTIME_ERROR_CLASSES.has(type.className)) {
-          this.context.unsupported(`dynamic boxing from object '${type.className}'`, loc);
+          return `runtime::throw_error_code(${rustJsString(`dynamic boxing from object '${type.className}' is not supported yet`, text => this.context.rustString(text))}, "SC3001")`;
         }
         const error = this.context.nextTemporary();
         return `{ let ${error} = ${value}; sc_dyn_error_box(&${error}) }`;

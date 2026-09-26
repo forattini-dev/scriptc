@@ -5819,7 +5819,6 @@ function isJsonSafeAt(
     // Symbols are DROPPED by Node's stringify (undefined at the top level,
     // omitted as object values) — silent divergence banned; rejected.
     case "symbol":
-    case "bigint":
     // Typed arrays stringify as index-keyed objects ({"0":1,...}) and
     // Buffers as {type:"Buffer",data:[...]} in Node — neither shape is
     // representable type-directedly; rejected like Maps.
