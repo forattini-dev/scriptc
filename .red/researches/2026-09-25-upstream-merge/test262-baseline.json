@@ -1,0 +1,73 @@
+{
+  "counts": {
+    "excluded": 85,
+    "runtime-refusal": 49,
+    "pass": 26,
+    "fail": 2,
+    "compiler-error": 4,
+    "build-error": 4
+  },
+  "refusalExpectations": 49,
+  "bugs": [
+    {
+      "id": "test/built-ins/Array/prototype/indexOf/15.4.4.14-9-9.js#strict",
+      "status": "fail",
+      "reason": "exit 1; completion marker required",
+      "stderr": "Uncaught Error: writing an array element far past its stored elements is not supported yet\n"
+    },
+    {
+      "id": "test/built-ins/Array/prototype/indexOf/15.4.4.14-9-b-ii-1.js#strict",
+      "status": "fail",
+      "reason": "exit 1; completion marker required",
+      "stderr": "Uncaught TypeError: a 'boolean' value is not representable in the target union (a value narrowed or asserted past it still held it)\n"
+    },
+    {
+      "id": "test/built-ins/String/prototype/charAt/pos-coerce-string.js#strict",
+      "status": "compiler-error",
+      "reason": null,
+      "stderr": ""
+    },
+    {
+      "id": "test/built-ins/String/prototype/charAt/S9.4_A1.js#strict",
+      "status": "compiler-error",
+      "reason": null,
+      "stderr": ""
+    },
+    {
+      "id": "test/built-ins/String/prototype/charCodeAt/pos-coerce-string.js#strict",
+      "status": "compiler-error",
+      "reason": null,
+      "stderr": ""
+    },
+    {
+      "id": "test/built-ins/String/prototype/includes/coerced-values-of-position.js#strict",
+      "status": "compiler-error",
+      "reason": null,
+      "stderr": ""
+    },
+    {
+      "id": "test/language/statements/const/dstr/ary-ptrn-elem-id-init-fn-name-arrow.js#strict",
+      "status": "build-error",
+      "reason": "compiler process failed",
+      "stderr": "InternalCompilerError: compiling the generated Rust program failed: Command failed: rustc /tmp/scriptc-test262-fRVpMF/main.rs --crate-name scriptc_program --edition 2024 --extern scriptc_runtime=/home/cyber/Work/reddb.io/scriptc/node_modules/.cache/scriptc-test262/cas/rust-runtime-v2/f85ac293417a4418/release/libscriptc_runtime.rlib -L dependency=/home/cyber/Work/reddb.io/scriptc/node_modules/.cach"
+    },
+    {
+      "id": "test/language/statements/let/dstr/ary-ptrn-elem-id-init-fn-name-arrow.js#strict",
+      "status": "build-error",
+      "reason": "compiler process failed",
+      "stderr": "InternalCompilerError: compiling the generated Rust program failed: Command failed: rustc /tmp/scriptc-test262-2tPL2Q/main.rs --crate-name scriptc_program --edition 2024 --extern scriptc_runtime=/home/cyber/Work/reddb.io/scriptc/node_modules/.cache/scriptc-test262/cas/rust-runtime-v2/f85ac293417a4418/release/libscriptc_runtime.rlib -L dependency=/home/cyber/Work/reddb.io/scriptc/node_modules/.cach"
+    },
+    {
+      "id": "test/language/statements/variable/dstr/ary-ptrn-elem-id-init-fn-name-arrow.js#strict",
+      "status": "build-error",
+      "reason": "compiler process failed",
+      "stderr": "InternalCompilerError: compiling the generated Rust program failed: Command failed: rustc /tmp/scriptc-test262-tD5LpN/main.rs --crate-name scriptc_program --edition 2024 --extern scriptc_runtime=/home/cyber/Work/reddb.io/scriptc/node_modules/.cache/scriptc-test262/cas/rust-runtime-v2/f85ac293417a4418/release/libscriptc_runtime.rlib -L dependency=/home/cyber/Work/reddb.io/scriptc/node_modules/.cach"
+    },
+    {
+      "id": "test/staging/sm/JSON/stringify-missing-arguments.js#strict",
+      "status": "build-error",
+      "reason": "compiler process failed",
+      "stderr": "TypeError: Cannot read properties of undefined (reading 'getSourceFile')\n    at locOf7 (/home/cyber/Work/reddb.io/scriptc/packages/compiler/src/frontend/program.ts:1618:19)\n    at lowerExprInner (/home/cyber/Work/reddb.io/scriptc/packages/compiler/src/frontend/lowering/lower-exprs.ts:413:17)\n    at lowerExpr (/home/cyber/Work/reddb.io/scriptc/packages/compiler/src/frontend/lowering/lower-exprs.ts:"
+    }
+  ]
+}

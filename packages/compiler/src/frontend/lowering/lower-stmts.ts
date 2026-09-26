@@ -38,6 +38,7 @@ import { lowerHttpResPropertyAssignment, lowerHttpServerTimeoutAssignment, lower
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, isReadlineTyped, textCodecBindingDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, isMatchSliceType, lowerAbsenceProbe, lowerGroupsProjection, lowerOptionalNumber, matchResultNamedGroupsOf, probeLower, pureReemittable, runtimeOptionalTrueIds, symbolFieldInfo, withRuntimeOptionalNarrowed } from "./lower-exprs.js";
+import { lowerElementCompound } from "./lower-element-compound.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isParseArgsDynTypeName, isUnitOnlyTsType, unitOnlyUnion } from "../type-mapper.js";
 import { canonicalBuiltinModule } from "../builtin-modules.js";
@@ -5116,7 +5117,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           if (symbolFieldInfo(lowerer, expr.left)) {
             return lowerer.lowerFieldCompound(expr.left, compound, expr.right, locOf(expr));
           }
-          lowerer.unsupported("SC1090", expr.left, "compound array-element assignment (a[i] += v)");
+          return { kind: "exprStmt", expr: lowerElementCompound(lowerer, expr, compound), loc: locOf(expr) };
         }
         if (ts.isPropertyAccessExpression(expr.left)) {
           // `N.x += v` — the namespace-qualified spelling of a module-

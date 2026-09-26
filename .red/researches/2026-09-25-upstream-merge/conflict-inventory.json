@@ -1,0 +1,933 @@
+{
+  "base": "16de852347ebff31ceee7586d77818b86be7899b",
+  "ourRef": "main",
+  "upstreamRef": "upstream/main",
+  "conflictEntries": 113,
+  "byArea": {
+    "tests": 32,
+    "frontend": 22,
+    "compiler-other": 12,
+    "runtime-c": 10,
+    "packages-other": 8,
+    "llvm-npm": 7,
+    "backend-llvm": 6,
+    "backend-c": 4,
+    "other": 3,
+    "docs": 3,
+    "cli": 3,
+    "internal": 2,
+    "ci": 1
+  },
+  "conflicts": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "f7bad5b3|2026-09-25|Run Test262 regression cases across all CI shards (#420)",
+      "ourCommitsSinceBase": 9,
+      "upstreamCommitsSinceBase": 5
+    },
+    {
+      "path": "README.md",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "9f48bc72|2026-09-24|Preserve artifacts when switching build modes (#415)",
+      "ourCommitsSinceBase": 13,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "docs/src/app/cli/page.mdx",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "0c109d93|2026-09-25|Add opt-in executable stripping (#425)",
+      "ourCommitsSinceBase": 3,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "docs/src/generated/node-v24-compatibility-meta.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "0b8b5d5b|2026-09-24|feat(http): expand the static Node HTTP surface (#410)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 23
+    },
+    {
+      "path": "docs/src/generated/node-v24-compatibility.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "0b8b5d5b|2026-09-24|feat(http): expand the static Node HTTP surface (#410)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 23
+    },
+    {
+      "path": "internal/compatibility/generated/node-v24-backlog.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "0b8b5d5b|2026-09-24|feat(http): expand the static Node HTTP surface (#410)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 28
+    },
+    {
+      "path": "internal/compatibility/generated/node-v24-internal.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "0b8b5d5b|2026-09-24|feat(http): expand the static Node HTTP surface (#410)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 28
+    },
+    {
+      "path": "package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "5c557d8e|2026-09-24|Fix static JavaScript edge cases and add Test262 coverage (#414)",
+      "ourCommitsSinceBase": 13,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "packages/cli/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/cli/src/main.ts",
+      "conflict": "content",
+      "ours": "757640b6|2026-09-13|feat: acquire missing package types with verified offline locks",
+      "upstream": "0c109d93|2026-09-25|Add opt-in executable stripping (#425)",
+      "ourCommitsSinceBase": 9,
+      "upstreamCommitsSinceBase": 4
+    },
+    {
+      "path": "packages/cli/test/source-output.test.ts",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "9f48bc72|2026-09-24|Preserve artifacts when switching build modes (#415)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "packages/compiler/ambient/scriptc-node-fallback.d.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "0b8b5d5b|2026-09-24|feat(http): expand the static Node HTTP surface (#410)",
+      "ourCommitsSinceBase": 40,
+      "upstreamCommitsSinceBase": 27
+    },
+    {
+      "path": "packages/compiler/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 4,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/compiler/src/backend/c/c-emitter.ts",
+      "conflict": "content",
+      "ours": "987a581e|2026-09-14|feat(rust): let schema error classes shadow message with a getter",
+      "upstream": "3596f4ab|2026-09-24|Optimize proven integer arithmetic (#409)",
+      "ourCommitsSinceBase": 5,
+      "upstreamCommitsSinceBase": 13
+    },
+    {
+      "path": "packages/compiler/src/backend/c/exprs.ts",
+      "conflict": "content",
+      "ours": "6a93e549|2026-09-15|feat(rust): lower bun:sqlite natively under --target bun",
+      "upstream": "93af3308|2026-09-25|Handle positioned string affix calls in static mode (#421)",
+      "ourCommitsSinceBase": 11,
+      "upstreamCommitsSinceBase": 35
+    },
+    {
+      "path": "packages/compiler/src/backend/c/types.ts",
+      "conflict": "content",
+      "ours": "6a93e549|2026-09-15|feat(rust): lower bun:sqlite natively under --target bun",
+      "upstream": "edc95464|2026-09-23|feat: support static Float64Array (#391)",
+      "ourCommitsSinceBase": 3,
+      "upstreamCommitsSinceBase": 6
+    },
+    {
+      "path": "packages/compiler/src/backend/c/walkers.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "16009354|2026-09-18|Add static-native BigInt support (#346)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 4
+    },
+    {
+      "path": "packages/compiler/src/backend/llvm/emitter.ts",
+      "conflict": "content",
+      "ours": "04901371|2026-09-14|fix(rust): keep Redcode analysis from crashing after the upstream merge",
+      "upstream": "3596f4ab|2026-09-24|Optimize proven integer arithmetic (#409)",
+      "ourCommitsSinceBase": 44,
+      "upstreamCommitsSinceBase": 16
+    },
+    {
+      "path": "packages/compiler/src/backend/llvm/expr-bytes.ts",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "3596f4ab|2026-09-24|Optimize proven integer arithmetic (#409)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 4
+    },
+    {
+      "path": "packages/compiler/src/backend/llvm/expr-containers.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "93af3308|2026-09-25|Handle positioned string affix calls in static mode (#421)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 4
+    },
+    {
+      "path": "packages/compiler/src/backend/llvm/expr-primitives.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "379bfd04|2026-09-24|Optimize LLVM numeric remainder (#412)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 6
+    },
+    {
+      "path": "packages/compiler/src/backend/llvm/lib-filesystem.ts",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "9bff5367|2026-09-23|feat: statically lower remaining Math functions (#397)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 4
+    },
+    {
+      "path": "packages/compiler/src/backend/llvm/lib-shared.ts",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "858f0002|2026-09-25|Handle positioned lastIndexOf calls in static mode (#417)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 20
+    },
+    {
+      "path": "packages/compiler/src/backend/native-codegen.test.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "2bd2e6f5|2026-09-14|Refactor container lowering into focused modules (#325)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "packages/compiler/src/backend/native-toolchain.test.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "888c79e2|2026-09-17|fix: preserve library section granularity (#345)",
+      "ourCommitsSinceBase": 4,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "packages/compiler/src/backend/native-toolchain.ts",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "0c109d93|2026-09-25|Add opt-in executable stripping (#425)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 6
+    },
+    {
+      "path": "packages/compiler/src/coverage/surface-manifest.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "7482bc77|2026-09-23|feat(math): add static support for analytic functions (#395)",
+      "ourCommitsSinceBase": 7,
+      "upstreamCommitsSinceBase": 4
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-builtins.ts",
+      "conflict": "content",
+      "ours": "6a93e549|2026-09-15|feat(rust): lower bun:sqlite natively under --target bun",
+      "upstream": "665f0fe6|2026-09-25|Handle omitted and primitive string lastIndexOf search values (#429)",
+      "ourCommitsSinceBase": 33,
+      "upstreamCommitsSinceBase": 23
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-calls.ts",
+      "conflict": "content",
+      "ours": "2ad6cfb5|2026-09-16|feat(rust): adapt a closure family value to a kernel slot's concrete signature",
+      "upstream": "b5c0d78d|2026-09-25|Fix Buffer.from on narrowed callback unions (#422)",
+      "ourCommitsSinceBase": 67,
+      "upstreamCommitsSinceBase": 19
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-classes.ts",
+      "conflict": "content",
+      "ours": "bc3e8791|2026-09-16|feat(rust): effect/unstable/sql SqlError as a kernel error handle",
+      "upstream": "edc95464|2026-09-23|feat: support static Float64Array (#391)",
+      "ourCommitsSinceBase": 25,
+      "upstreamCommitsSinceBase": 7
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-containers.ts",
+      "conflict": "content",
+      "ours": "af1a70c0|2026-09-15|refactor(compiler): extract the lowering's lexical environment into ScopeEnv",
+      "upstream": "965f8b72|2026-09-25|Handle omitted Array.includes search values in static mode (#427)",
+      "ourCommitsSinceBase": 22,
+      "upstreamCommitsSinceBase": 12
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-event-emitter.ts",
+      "conflict": "content",
+      "ours": "af1a70c0|2026-09-15|refactor(compiler): extract the lowering's lexical environment into ScopeEnv",
+      "upstream": "1b2b39f5|2026-09-23|Support scoped computed EventEmitter names (#389)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-exprs.ts",
+      "conflict": "content",
+      "ours": "72b133de|2026-09-16|feat(rust): bind an object literal's own methods to it as 'this'",
+      "upstream": "58bd6749|2026-09-25|Fix String conversion after union narrowing (#423)",
+      "ourCommitsSinceBase": 78,
+      "upstreamCommitsSinceBase": 25
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-inspect.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "f2c81630|2026-09-20|Add static loose equality (#364)",
+      "ourCommitsSinceBase": 4,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-island.ts",
+      "conflict": "content",
+      "ours": "af1a70c0|2026-09-15|refactor(compiler): extract the lowering's lexical environment into ScopeEnv",
+      "upstream": "5c557d8e|2026-09-24|Fix static JavaScript edge cases and add Test262 coverage (#414)",
+      "ourCommitsSinceBase": 15,
+      "upstreamCommitsSinceBase": 5
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-modules.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "9ff5ed16|2026-09-22|feat(child_process): support static fork IPC (#386)",
+      "ourCommitsSinceBase": 23,
+      "upstreamCommitsSinceBase": 7
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-namespaces.ts",
+      "conflict": "content",
+      "ours": "9028f836|2026-09-14|fix: preserve typed rest function value calling conventions",
+      "upstream": "69977b9f|2026-09-20|Add static literal dynamic imports (#363)",
+      "ourCommitsSinceBase": 8,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-server.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "0b8b5d5b|2026-09-24|feat(http): expand the static Node HTTP surface (#410)",
+      "ourCommitsSinceBase": 9,
+      "upstreamCommitsSinceBase": 6
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-stmts.ts",
+      "conflict": "content",
+      "ours": "af1a70c0|2026-09-15|refactor(compiler): extract the lowering's lexical environment into ScopeEnv",
+      "upstream": "2bc25905|2026-09-23|feat: support indexed compound assignments (#396)",
+      "ourCommitsSinceBase": 24,
+      "upstreamCommitsSinceBase": 13
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lower-stream.ts",
+      "conflict": "content",
+      "ours": "af1a70c0|2026-09-15|refactor(compiler): extract the lowering's lexical environment into ScopeEnv",
+      "upstream": "1b2b39f5|2026-09-23|Support scoped computed EventEmitter names (#389)",
+      "ourCommitsSinceBase": 3,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/lowerer.ts",
+      "conflict": "content",
+      "ours": "72b133de|2026-09-16|feat(rust): bind an object literal's own methods to it as 'this'",
+      "upstream": "0b8b5d5b|2026-09-24|feat(http): expand the static Node HTTP surface (#410)",
+      "ourCommitsSinceBase": 41,
+      "upstreamCommitsSinceBase": 18
+    },
+    {
+      "path": "packages/compiler/src/frontend/lowering/surfaces.ts",
+      "conflict": "content",
+      "ours": "bc3398e7|2026-09-13|feat(rust): lower global WebCrypto UUID calls natively",
+      "upstream": "9282ed54|2026-09-25|Implement static array lastIndexOf search (#426)",
+      "ourCommitsSinceBase": 25,
+      "upstreamCommitsSinceBase": 25
+    },
+    {
+      "path": "packages/compiler/src/frontend/npm-static-declarations.ts",
+      "conflict": "add/add",
+      "ours": "0dacfa5a|2026-09-13|feat: admit matched third-party types in native npm auto builds",
+      "upstream": "1b2b39f5|2026-09-23|Support scoped computed EventEmitter names (#389)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 4
+    },
+    {
+      "path": "packages/compiler/src/frontend/npm-static.ts",
+      "conflict": "content",
+      "ours": "cc591870|2026-09-14|fix: complete static JS graphs without inferring external implementations",
+      "upstream": "1b2b39f5|2026-09-23|Support scoped computed EventEmitter names (#389)",
+      "ourCommitsSinceBase": 7,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/compiler/src/frontend/npm.test.ts",
+      "conflict": "add/add",
+      "ours": "100f7a64|2026-08-29|feat: unlock more real-world Node patterns",
+      "upstream": "8a12d34a|2026-09-22|fix(compiler): resolve package imports in npm graphs (#375)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "packages/compiler/src/frontend/npm.ts",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "8a12d34a|2026-09-22|fix(compiler): resolve package imports in npm graphs (#375)",
+      "ourCommitsSinceBase": 18,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/compiler/src/frontend/program.ts",
+      "conflict": "content",
+      "ours": "64b71696|2026-09-15|feat(bun): trap the bare bun module's runtime APIs at their use sites",
+      "upstream": "9ff5ed16|2026-09-22|feat(child_process): support static fork IPC (#386)",
+      "ourCommitsSinceBase": 18,
+      "upstreamCommitsSinceBase": 6
+    },
+    {
+      "path": "packages/compiler/src/frontend/resolve.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "8a12d34a|2026-09-22|fix(compiler): resolve package imports in npm graphs (#375)",
+      "ourCommitsSinceBase": 10,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/compiler/src/frontend/type-mapper.ts",
+      "conflict": "content",
+      "ours": "dc9960b5|2026-09-15|refactor(compiler): gather kernel and platform type recognition into kernel-type-map",
+      "upstream": "0b8b5d5b|2026-09-24|feat(http): expand the static Node HTTP surface (#410)",
+      "ourCommitsSinceBase": 16,
+      "upstreamCommitsSinceBase": 12
+    },
+    {
+      "path": "packages/compiler/src/index.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "0c109d93|2026-09-25|Add opt-in executable stripping (#425)",
+      "ourCommitsSinceBase": 35,
+      "upstreamCommitsSinceBase": 6
+    },
+    {
+      "path": "packages/compiler/src/ir/ir.test.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "5ae6705e|2026-09-19|Add static builtin function values (#353)",
+      "ourCommitsSinceBase": 3,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "packages/compiler/src/ir/ir.ts",
+      "conflict": "content",
+      "ours": "eec0b5df|2026-09-15|feat(rust): fiber context, references, and explicit scopes in the effect kernel",
+      "upstream": "858f0002|2026-09-25|Handle positioned lastIndexOf calls in static mode (#417)",
+      "ourCommitsSinceBase": 15,
+      "upstreamCommitsSinceBase": 33
+    },
+    {
+      "path": "packages/compiler/src/ir/validate.ts",
+      "conflict": "content",
+      "ours": "9da98a89|2026-09-15|feat(rust): decorated SqlClient values (Object.assign onto a native client)",
+      "upstream": "93af3308|2026-09-25|Handle positioned string affix calls in static mode (#421)",
+      "ourCommitsSinceBase": 83,
+      "upstreamCommitsSinceBase": 32
+    },
+    {
+      "path": "packages/compiler/surface-manifest.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "9282ed54|2026-09-25|Implement static array lastIndexOf search (#426)",
+      "ourCommitsSinceBase": 32,
+      "upstreamCommitsSinceBase": 25
+    },
+    {
+      "path": "packages/compiler/test/ts7/baselines/order-parity.json",
+      "conflict": "content",
+      "ours": "82218aa0|2026-09-16|test(compiler): re-record order-parity baselines for corpus 3253-3271",
+      "upstream": "665f0fe6|2026-09-25|Handle omitted and primitive string lastIndexOf search values (#429)",
+      "ourCommitsSinceBase": 15,
+      "upstreamCommitsSinceBase": 54
+    },
+    {
+      "path": "packages/llvm-darwin-arm64/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/llvm-darwin-x64/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/llvm-linux-arm64-gnu/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/llvm-linux-arm64-musl/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/llvm-linux-x64-gnu/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/llvm-linux-x64-musl/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/llvm-win32-x64-msvc/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime-darwin-arm64/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime-darwin-x64/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime-linux-arm64-gnu/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime-linux-arm64-musl/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime-linux-x64-gnu/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime-linux-x64-musl/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime-wasm32-wasi/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime-win32-x64-msvc/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime/package.json",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 3,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime/src/scr_child.c",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "af3f357f|2026-09-23|chore(release): prepare v0.1.4 (#390)",
+      "ourCommitsSinceBase": 4,
+      "upstreamCommitsSinceBase": 7
+    },
+    {
+      "path": "packages/runtime/src/scr_http.c",
+      "conflict": "content",
+      "ours": "307841b3|2026-09-03|fix: abort incomplete incoming requests on peer EOF",
+      "upstream": "0b8b5d5b|2026-09-24|feat(http): expand the static Node HTTP surface (#410)",
+      "ourCommitsSinceBase": 5,
+      "upstreamCommitsSinceBase": 4
+    },
+    {
+      "path": "packages/runtime/src/scr_island.c",
+      "conflict": "content",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "edc95464|2026-09-23|feat: support static Float64Array (#391)",
+      "ourCommitsSinceBase": 12,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "packages/runtime/src/scr_json.c",
+      "conflict": "content",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "e42ee19e|2026-09-20|Add static CommonJS factory exports (#360)",
+      "ourCommitsSinceBase": 9,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "packages/runtime/src/scr_lib.c",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "7482bc77|2026-09-23|feat(math): add static support for analytic functions (#395)",
+      "ourCommitsSinceBase": 14,
+      "upstreamCommitsSinceBase": 9
+    },
+    {
+      "path": "packages/runtime/src/scr_runtime.h",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "93af3308|2026-09-25|Handle positioned string affix calls in static mode (#421)",
+      "ourCommitsSinceBase": 42,
+      "upstreamCommitsSinceBase": 30
+    },
+    {
+      "path": "packages/runtime/src/scr_string.c",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "93af3308|2026-09-25|Handle positioned string affix calls in static mode (#421)",
+      "ourCommitsSinceBase": 4,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime/src/scr_url.c",
+      "conflict": "content",
+      "ours": "c6aef3e3|2026-09-01|feat: compile URL pathname mutations",
+      "upstream": "b9d55037|2026-09-22|Support static URL credentials and descriptor operations (#385)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "packages/runtime/src/scr_zlib.c",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "d6657921|2026-09-20|Add static zlib callback codecs (#356)",
+      "ourCommitsSinceBase": 3,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "conflict": "content",
+      "ours": "757640b6|2026-09-13|feat: acquire missing package types with verified offline locks",
+      "upstream": "5c557d8e|2026-09-24|Fix static JavaScript edge cases and add Test262 coverage (#414)",
+      "ourCommitsSinceBase": 5,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/corpus/766-any-union-boundary.ts",
+      "conflict": "content",
+      "ours": "23826d74|2026-08-27|feat(rust): preserve typed arrays across dynamic boundaries",
+      "upstream": "edc95464|2026-09-23|feat: support static Float64Array (#391)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/coverage-fixtures/dynamic-mix.ts",
+      "conflict": "content",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "7482bc77|2026-09-23|feat(math): add static support for analytic functions (#395)",
+      "ourCommitsSinceBase": 3,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "tests/diagnostics/component-fences.ts",
+      "conflict": "content",
+      "ours": "9028f836|2026-09-14|fix: preserve typed rest function value calling conventions",
+      "upstream": "5ae6705e|2026-09-19|Add static builtin function values (#353)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/diagnostics/dataview.ts",
+      "conflict": "content",
+      "ours": "6bf9cfd2|2026-09-13|feat(rust): compile native BigInt values and Effect size unions",
+      "upstream": "16009354|2026-09-18|Add static-native BigInt support (#346)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/diagnostics/dynamic-surface.ts",
+      "conflict": "modify/delete",
+      "deletedIn": "main",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "9bff5367|2026-09-23|feat: statically lower remaining Math functions (#397)",
+      "ourCommitsSinceBase": 4,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "tests/diagnostics/function-forms.ts",
+      "conflict": "content",
+      "ours": "9028f836|2026-09-14|fix: preserve typed rest function value calling conventions",
+      "upstream": "5ae6705e|2026-09-19|Add static builtin function values (#353)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/diagnostics/import-meta-dynamic.ts",
+      "conflict": "modify/delete",
+      "deletedIn": "upstream/main",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "2ac8743d|2026-09-14|feat(compiler): add Node module resolution introspection (#322)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/diagnostics/node-fallback-fence.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "d6657921|2026-09-20|Add static zlib callback codecs (#356)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "tests/diagnostics/ns-import-object/main.ts",
+      "conflict": "modify/delete",
+      "deletedIn": "main",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "69977b9f|2026-09-20|Add static literal dynamic imports (#363)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/diagnostics/stdlib-fence.ts",
+      "conflict": "content",
+      "ours": "d9db33a5|2026-09-14|fix(rust): default join separator, explain nested type blockers, fence unregistered instanceof classes",
+      "upstream": "5c557d8e|2026-09-24|Fix static JavaScript edge cases and add Test262 coverage (#414)",
+      "ourCommitsSinceBase": 7,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "tests/fixtures/node-types/fenced.ts",
+      "conflict": "content",
+      "ours": "c6e8cb8c|2026-09-07|feat(rust): implement native default Web Streams",
+      "upstream": "b9d55037|2026-09-22|Support static URL credentials and descriptor operations (#385)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 5
+    },
+    {
+      "path": "tests/harness/__snapshots__/child-process.ts.txt",
+      "conflict": "content",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "e334ae44|2026-09-23|feat(child_process): support inline execFile callback options (#387)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 5
+    },
+    {
+      "path": "tests/harness/__snapshots__/component-fences.ts.txt",
+      "conflict": "content",
+      "ours": "9028f836|2026-09-14|fix: preserve typed rest function value calling conventions",
+      "upstream": "5ae6705e|2026-09-19|Add static builtin function values (#353)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/harness/__snapshots__/coverage-dynamic-mix-dynamic.txt",
+      "conflict": "content",
+      "ours": "4fb6b1b4|2026-08-25|feat(runtime): add precision and radix number formatting",
+      "upstream": "9bff5367|2026-09-23|feat: statically lower remaining Math functions (#397)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/harness/__snapshots__/coverage-dynamic-mix.txt",
+      "conflict": "content",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "9bff5367|2026-09-23|feat: statically lower remaining Math functions (#397)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "tests/harness/__snapshots__/dataview.ts.txt",
+      "conflict": "content",
+      "ours": "6bf9cfd2|2026-09-13|feat(rust): compile native BigInt values and Effect size unions",
+      "upstream": "edc95464|2026-09-23|feat: support static Float64Array (#391)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "tests/harness/__snapshots__/dynamic-surface.ts.txt",
+      "conflict": "modify/delete",
+      "deletedIn": "main",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "9bff5367|2026-09-23|feat: statically lower remaining Math functions (#397)",
+      "ourCommitsSinceBase": 4,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "tests/harness/__snapshots__/function-forms.ts.txt",
+      "conflict": "content",
+      "ours": "9028f836|2026-09-14|fix: preserve typed rest function value calling conventions",
+      "upstream": "5ae6705e|2026-09-19|Add static builtin function values (#353)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/harness/__snapshots__/import-meta-dynamic.ts.txt",
+      "conflict": "modify/delete",
+      "deletedIn": "upstream/main",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "2ac8743d|2026-09-14|feat(compiler): add Node module resolution introspection (#322)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/harness/__snapshots__/json-dyn.ts.txt",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "280fe1a8|2026-09-15|feat: preserve class and child handles through unknown (#331)",
+      "ourCommitsSinceBase": 3,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "tests/harness/__snapshots__/node-fallback-fence.ts.txt",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "d6657921|2026-09-20|Add static zlib callback codecs (#356)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 2
+    },
+    {
+      "path": "tests/harness/__snapshots__/node-types-fenced.txt",
+      "conflict": "content",
+      "ours": "7ee8ece5|2026-09-13|test: isolate native cache fixtures and refresh bigint diagnostics",
+      "upstream": "b9d55037|2026-09-22|Support static URL credentials and descriptor operations (#385)",
+      "ourCommitsSinceBase": 3,
+      "upstreamCommitsSinceBase": 7
+    },
+    {
+      "path": "tests/harness/__snapshots__/ns-import-object/main.ts.txt",
+      "conflict": "modify/delete",
+      "deletedIn": "main",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "69977b9f|2026-09-20|Add static literal dynamic imports (#363)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/harness/__snapshots__/overload-fences.ts.txt",
+      "conflict": "content",
+      "ours": "ec5fdacf|2026-09-04|test(diagnostics): reconcile snapshots with merged frontend surfaces",
+      "upstream": "a11fd6c8|2026-09-18|Add static callable specialization (#350)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/harness/__snapshots__/sets.ts.txt",
+      "conflict": "content",
+      "ours": "34321e88|2026-09-13|feat(rust): materialize native collections with live iteration",
+      "upstream": "cc44afb4|2026-09-22|fix: accept readonly tuples as Set seeds (#384)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 1
+    },
+    {
+      "path": "tests/harness/__snapshots__/stdlib-fence.ts.txt",
+      "conflict": "content",
+      "ours": "d9db33a5|2026-09-14|fix(rust): default join separator, explain nested type blockers, fence unregistered instanceof classes",
+      "upstream": "5c557d8e|2026-09-24|Fix static JavaScript edge cases and add Test262 coverage (#414)",
+      "ourCommitsSinceBase": 9,
+      "upstreamCommitsSinceBase": 4
+    },
+    {
+      "path": "tests/harness/library-mode.test.ts",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "9bff5367|2026-09-23|feat: statically lower remaining Math functions (#397)",
+      "ourCommitsSinceBase": 3,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "tests/harness/library-profile.test.ts",
+      "conflict": "content",
+      "ours": "6794178f|2026-09-12|Merge upstream compiler updates while preserving Rust native execution",
+      "upstream": "9bff5367|2026-09-23|feat: statically lower remaining Math functions (#397)",
+      "ourCommitsSinceBase": 2,
+      "upstreamCommitsSinceBase": 4
+    },
+    {
+      "path": "tests/harness/npm-static.test.ts",
+      "conflict": "content",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "1b2b39f5|2026-09-23|Support scoped computed EventEmitter names (#389)",
+      "ourCommitsSinceBase": 6,
+      "upstreamCommitsSinceBase": 9
+    },
+    {
+      "path": "tests/harness/project-config.test.ts",
+      "conflict": "content",
+      "ours": "54f08faf|2026-09-14|merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+      "upstream": "e12856c1|2026-09-22|fix: support static URL port and hash getters (#383)",
+      "ourCommitsSinceBase": 6,
+      "upstreamCommitsSinceBase": 3
+    },
+    {
+      "path": "tests/harness/surface-manifest.test.ts",
+      "conflict": "content",
+      "ours": "bc3398e7|2026-09-13|feat(rust): lower global WebCrypto UUID calls natively",
+      "upstream": "9bff5367|2026-09-23|feat: statically lower remaining Math functions (#397)",
+      "ourCommitsSinceBase": 11,
+      "upstreamCommitsSinceBase": 5
+    },
+    {
+      "path": "tests/harness/wasi-differential.test.ts",
+      "conflict": "content",
+      "ours": "aa57877e|2026-09-10|feat(rust): checkpoint native compatibility and Redwall optimizations",
+      "upstream": "16009354|2026-09-18|Add static-native BigInt support (#346)",
+      "ourCommitsSinceBase": 1,
+      "upstreamCommitsSinceBase": 2
+    }
+  ]
+}
