@@ -184,7 +184,7 @@
             assert!(!url_can_parse_base(&string(input), &string(base)));
             let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 url_new_base(&string(input), &string(base))
-            })).err().expect("invalid input or base must throw");
+            })).expect_err("invalid input or base must throw");
             let caught = caught_from_panic(payload);
             assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
             assert_eq!(caught_error_message(&caught).as_ref(), "Invalid URL");

@@ -302,7 +302,7 @@ pub fn fs_lchmod(path: &JsString, mode: f64) {
     {
         use std::os::unix::fs::PermissionsExt;
         let permissions = std::fs::Permissions::from_mode(mode as u32);
-        if let Err(error) = std::fs::set_permissions(path.as_ref(), permissions) {
+        if let Err(error) = std::fs::set_permissions(path.to_utf8_lossy(), permissions) {
             throw_fs_error("lchmod", path, error);
         }
     }

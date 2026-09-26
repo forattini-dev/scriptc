@@ -653,10 +653,11 @@ pub fn process_chdir(path: &JsString) {
 
 #[cfg(all(not(windows), not(target_os = "wasi")))]
 pub fn process_umask(mask: f64) -> f64 {
-    use rustix::fs::Mode;
+    use rustix::fs::{Mode, RawMode};
 
     let read_only = mask < 0.0;
-    let next = Mode::from_bits_truncate(if read_only { 0 } else { mask as u32 });
+    let raw_mode: RawMode = if read_only { 0 } else { mask as RawMode };
+    let next = Mode::from_raw_mode(raw_mode);
     let previous = rustix::process::umask(next);
     if read_only {
         rustix::process::umask(previous);

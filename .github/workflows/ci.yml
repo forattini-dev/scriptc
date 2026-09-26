@@ -391,18 +391,27 @@ jobs:
         run: echo "executable=$(command -v node)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
-          node-version: "26"
+          node-version: "26.8.1"
           cache: pnpm
+      - name: Capture Node 26 host
+        id: node26
+        shell: bash
+        run: echo "executable=$(command -v node)" >> "$GITHUB_OUTPUT"
       - run: pnpm install --frozen-lockfile
       - name: Build compiler on Node 26
         run: |
           node --version
           pnpm build
       - name: Oracle selection contract
+        env:
+          SCRIPTC_NODE_NODE24: ${{ steps.node24.outputs.executable }}
+          SCRIPTC_NODE_NODE26: ${{ steps.node26.outputs.executable }}
         run: pnpm exec vitest run tests/harness/oracle-environment.test.ts
       - name: C corpus smoke on Node 26 host
         env:
           SCRIPTC_NODE_ORACLE: ${{ steps.node24.outputs.executable }}
+          SCRIPTC_NODE_NODE24: ${{ steps.node24.outputs.executable }}
+          SCRIPTC_NODE_NODE26: ${{ steps.node26.outputs.executable }}
         run: >-
           pnpm exec vitest run tests/harness/differential.test.ts
           --testNamePattern "001-hello.ts"
@@ -410,6 +419,8 @@ jobs:
       - name: Rust Node-major semantic regression
         env:
           SCRIPTC_NODE_ORACLE: ${{ steps.node24.outputs.executable }}
+          SCRIPTC_NODE_NODE24: ${{ steps.node24.outputs.executable }}
+          SCRIPTC_NODE_NODE26: ${{ steps.node26.outputs.executable }}
         run: >-
           pnpm exec vitest run packages/compiler/test/emit-rust-stream-finished.test.ts
           --testNamePattern "Rust stream argument ladders and socket encoding match Node"
@@ -448,6 +459,15 @@ jobs:
       - name: Install pinned Rust toolchain
         working-directory: packages/runtime-rust
         run: rustup show active-toolchain || rustup toolchain install
+      - name: Install pinned LLVM development distribution
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes g++ zlib1g-dev libzstd-dev
+          curl -fL --retry 3 -o "$RUNNER_TEMP/llvm.tar.xz" https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-Linux-X64.tar.xz
+          tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/LLVM-22.1.8-Linux-X64" "$RUNNER_TEMP/llvm-22.1.8"
+          echo "LLVM_DIR=$RUNNER_TEMP/llvm-22.1.8/lib/cmake/llvm" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/llvm-22.1.8/bin" >> "$GITHUB_PATH"
       - uses: actions/cache@v4
         with:
           path: |
@@ -456,6 +476,8 @@ jobs:
             node_modules/.cache/node-api
           key: compat-gates-${{ runner.os }}-${{ hashFiles('packages/runtime-rust/Cargo.lock', 'packages/compiler/compat/inventories/*.json') }}
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @scriptc/llvm-linux-x64-gnu build:native
+      - run: CC=clang AR=llvm-ar pnpm --filter @scriptc/runtime-linux-x64-gnu build:native
       - run: pnpm build
       - name: Node API inventory is current
         run: node scripts/node-surface-inventory.mjs --check

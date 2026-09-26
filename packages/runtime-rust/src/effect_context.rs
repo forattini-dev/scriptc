@@ -94,7 +94,7 @@ fn effect_context_data(handle: &JsEffect) -> Rc<EffectContextData> {
 pub fn effect_context_get(context: &JsEffect, key: &JsEffect) -> EffectValue {
     let data = effect_context_data(context);
     let id = key_of(key);
-    if id.to_string() == EFFECT_SCOPE_KEY {
+    if id == EFFECT_SCOPE_KEY {
         return match &data.scope {
             Some(scope) => effect_box(effect_new(EffectNode::Data(KernelData::Scope(scope.clone())))),
             None => throw_error(format!("Service not found: {EFFECT_SCOPE_KEY}")),

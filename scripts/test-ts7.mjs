@@ -8,13 +8,18 @@ import { spawnSync } from "node:child_process";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const ALLOWED_TYPESCRIPT5_IMPORTS = new Set([
+  "packages/compiler/src/frontend/bun-island-rewrite.ts",
+  "packages/compiler/src/frontend/cjs-bun-exports.ts",
   "packages/compiler/src/frontend/cjs-lexer.ts",
   "packages/compiler/src/frontend/lowering/lower-comptime.ts",
   "packages/compiler/src/frontend/npm-static-rewrite.ts",
+  "packages/compiler/src/frontend/npm-static-types.ts",
+  "packages/compiler/src/frontend/npm-typescript.ts",
   "packages/compiler/src/frontend/npm.ts",
   "packages/compiler/src/frontend/provenance.ts",
   "packages/compiler/src/frontend/ts7/world-check.ts",
   "packages/compiler/src/library/semantic-source.ts",
+  "packages/compiler/test/emit-rust.test.ts",
   "packages/compiler/test/ts7/harness.ts",
   "packages/compiler/test/ts7/resolver-parity.test.ts",
 ]);
