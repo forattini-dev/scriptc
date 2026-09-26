@@ -317,6 +317,25 @@ void scr_assert_eq_bool(bool a, bool b, bool negated, bool deep,
                      has_msg);
 }
 
+/* assert.equal / assert.notEqual: the frontend supplies the completed
+ * Abstract Equality verdict (including Node v24's NaN-equals-NaN legacy
+ * exception) and util.inspect renderings of the original operands. Node's
+ * generated legacy message is one line: "actual == expected" / "actual !=
+ * expected". A supplied message, including the empty string, replaces it. */
+void scr_assert_loose_result(bool equal, bool negated, ScrStr *actual,
+                             ScrStr *expected, ScrStr *msg, bool has_msg) {
+  if ((negated && !equal) || (!negated && equal)) return;
+  if (has_msg) {
+    scr_assert_fail_msg(scr_str_retain(msg));
+    return;
+  }
+  ScrAssertBuf b = {0};
+  ab_str(&b, actual);
+  ab_cstr(&b, negated ? " != " : " == ");
+  ab_str(&b, expected);
+  scr_assert_fail_msg(ab_take(&b));
+}
+
 /* deepStrictEqual / notDeepStrictEqual over COMPOSITE values: the frontend
  * synthesized the honest structural comparison; this only turns its verdict
  * into Node's throw. The generated message is the header line alone —

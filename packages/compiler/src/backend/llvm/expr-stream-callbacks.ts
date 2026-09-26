@@ -249,6 +249,154 @@ export function fsRenameThunkFor(host: LlvmEmitterContext, cbT: IrType & { kind:
     return sym;
   }
 
+export function cryptoBytesThunkFor(host: LlvmEmitterContext, cbT: IrType & { kind: "func" }): string {
+    if (cbT.params.length > 2) throw new InternalCompilerError("llvm emitter bug: crypto callback arity");
+    const key = `cryptobytes:${typeKey(cbT)}`;
+    let sym = host.resolveThunks.get(key);
+    if (sym) return sym;
+    sym = `sc_cryptobytes_${host.resolveThunks.size}`;
+    host.resolveThunks.set(key, sym);
+    const d: string[] = [
+      `define internal void @${sym}(ptr %cb, ptr %value) ${FN_ATTRS} { ; crypto bytes callback ${typeKey(cbT)}`,
+      `entry:`,
+    ];
+    const passed = ["ptr %cb"];
+    const error = cbT.params[0];
+    if (error !== undefined) {
+      if (error.kind === "dyn") {
+        host.declare(`declare ptr @scr_dyn_new_null()`);
+        d.push(`  %error = call ptr @scr_dyn_new_null()`);
+      } else if (error.kind === "union") {
+        const def = host.unionsById.get(error.unionId);
+        const nullTag = def ? def.arms.findIndex((arm) => arm.kind === "nullT") : -1;
+        if (nullTag < 0) throw new InternalCompilerError("llvm emitter bug: crypto callback error union lacks null");
+        d.push(`  %error = getelementptr i8, ptr ${host.unitInstanceRef(error.unionId, nullTag)}, i64 0`);
+      } else {
+        throw new InternalCompilerError("llvm emitter bug: crypto callback error param");
+      }
+      passed.push("ptr %error");
+    }
+    const value = cbT.params[1];
+    if (value === undefined) {
+      host.declare(`declare void @scr_bytes_release(ptr)`);
+      d.push(`  call void @scr_bytes_release(ptr %value)`);
+    } else if (value.kind === "dyn") {
+      host.declare(`declare ptr @scr_dyn_new_bytes_copy(ptr)`);
+      host.declare(`declare void @scr_bytes_release(ptr)`);
+      d.push(
+        `  %result = call ptr @scr_dyn_new_bytes_copy(ptr %value)`,
+        `  call void @scr_bytes_release(ptr %value)`,
+      );
+      passed.push("ptr %result");
+    } else if (value.kind === "bytes" && value.elem === "u8") {
+      passed.push("ptr %value");
+    } else {
+      throw new InternalCompilerError("llvm emitter bug: crypto callback value param");
+    }
+    d.push(
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fn = load ptr, ptr %fnp`,
+      `  call void %fn(${passed.join(", ")})`,
+      `  ret void`,
+      `}`,
+      ``,
+    );
+    host.resolveThunkDefs.push(...d);
+    return sym;
+  }
+
+export function zlibBytesThunkFor(host: LlvmEmitterContext, cbT: IrType & { kind: "func" }): string {
+    if (cbT.params.length > 2) throw new InternalCompilerError("llvm emitter bug: zlib callback arity");
+    const key = `zlibbytes:${typeKey(cbT)}`;
+    let sym = host.resolveThunks.get(key);
+    if (sym) return sym;
+    sym = `sc_zlibbytes_${host.resolveThunks.size}`;
+    host.resolveThunks.set(key, sym);
+    const d: string[] = [
+      `define internal void @${sym}(ptr %cb, ptr %err, ptr %value) ${FN_ATTRS} { ; zlib bytes callback ${typeKey(cbT)}`,
+      `entry:`,
+    ];
+    const passed = ["ptr %cb"];
+    const error = cbT.params[0];
+    if (error !== undefined) {
+      d.push(
+        `  %eslot = alloca ptr`,
+        `  %haserr = icmp ne ptr %err, null`,
+        `  br i1 %haserr, label %err_yes, label %err_no`,
+        `err_yes:`,
+      );
+      if (error.kind === "dyn") {
+        host.declare(`declare ptr @scr_dyn_from_error(ptr)`);
+        d.push(`  %de = call ptr @scr_dyn_from_error(ptr %err)`, `  store ptr %de, ptr %eslot`);
+      } else if (error.kind === "union") {
+        const def = host.unionsById.get(error.unionId);
+        const errTag = def ? def.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error") : -1;
+        const nullTag = def ? def.arms.findIndex((arm) => arm.kind === "nullT") : -1;
+        if (errTag < 0 || nullTag < 0) throw new InternalCompilerError("llvm emitter bug: zlib callback error union lacks arms");
+        host.declare(`declare ptr @scr_error_retain(ptr)`);
+        host.declare(`declare ptr @scr_error_retain_v(ptr)`);
+        host.declare(`declare void @scr_error_release_v(ptr)`);
+        host.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
+        d.push(
+          `  %er = call ptr @scr_error_retain(ptr %err)`,
+          `  %eu = call ptr @scr_union_new_ref(i32 ${errTag}, ptr %er, ptr @scr_error_retain_v, ptr @scr_error_release_v, ptr null)`,
+          `  store ptr %eu, ptr %eslot`,
+        );
+      } else {
+        throw new InternalCompilerError("llvm emitter bug: zlib callback error param");
+      }
+      d.push(`  br label %err_go`, `err_no:`);
+      if (error.kind === "dyn") {
+        host.declare(`declare ptr @scr_dyn_new_null()`);
+        d.push(`  %dn = call ptr @scr_dyn_new_null()`, `  store ptr %dn, ptr %eslot`);
+      } else {
+        d.push(`  store ptr ${host.unitInstanceRef(error.unionId, host.unionsById.get(error.unionId)!.arms.findIndex((arm) => arm.kind === "nullT"))}, ptr %eslot`);
+      }
+      d.push(`  br label %err_go`, `err_go:`, `  %error = load ptr, ptr %eslot`);
+      passed.push("ptr %error");
+    }
+    const value = cbT.params[1];
+    if (value === undefined) {
+      host.declare(`declare void @scr_bytes_release(ptr)`);
+      d.push(`  call void @scr_bytes_release(ptr %value)`);
+    } else if (value.kind === "dyn") {
+      host.declare(`declare ptr @scr_dyn_new_bytes_copy(ptr)`);
+      host.declare(`declare ptr @scr_dyn_undefined()`);
+      host.declare(`declare void @scr_bytes_release(ptr)`);
+      d.push(
+        `  %rslot = alloca ptr`,
+        `  %hasvalue = icmp ne ptr %value, null`,
+        `  br i1 %hasvalue, label %value_yes, label %value_no`,
+        `value_yes:`,
+        `  %db = call ptr @scr_dyn_new_bytes_copy(ptr %value)`,
+        `  call void @scr_bytes_release(ptr %value)`,
+        `  store ptr %db, ptr %rslot`,
+        `  br label %value_go`,
+        `value_no:`,
+        `  %du = call ptr @scr_dyn_undefined()`,
+        `  store ptr %du, ptr %rslot`,
+        `  br label %value_go`,
+        `value_go:`,
+        `  %result = load ptr, ptr %rslot`,
+      );
+      passed.push("ptr %result");
+    } else if (value.kind === "bytes" && value.elem === "u8") {
+      passed.push("ptr %value");
+    } else {
+      throw new InternalCompilerError("llvm emitter bug: zlib callback value param");
+    }
+    d.push(
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fn = load ptr, ptr %fnp`,
+      `  call void %fn(${passed.join(", ")})`,
+      `  ret void`,
+      `}`,
+      ``,
+    );
+    host.resolveThunkDefs.push(...d);
+    return sym;
+  }
+
 export function streamCbThunkFor(host: LlvmEmitterContext, kind: "r" | "w" | "f" | "d" | "t" | "l" | "e", cbT: IrType): string {
     if (cbT.kind !== "func") throw new InternalCompilerError("llvm emitter bug: stream option callback not a func");
     const key = `scb:${kind}:${typeKey(cbT)}`;

@@ -3,6 +3,8 @@
  * with LlEmitter; helpers receive this structural view at delegation. */
 import type { IrBytesElem, IrExpr, IrFfiImport, IrFunction, IrLibFn, IrLocal, IrModule, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import type { FfiCallbackAdapter } from "../ffi-callbacks.js";
+import type { ConstantNumericTable } from "../../ir/constant-tables.js";
+import type { IntegerRanges } from "../../ir/integer-ranges.js";
 import type { BlockBuilder } from "./blocks.js";
 import type { LlClassMeta } from "./classes.js";
 import type { LlDyn } from "./dyn.js";
@@ -28,6 +30,7 @@ export interface LlStreamTypedRefAdapter {
 export interface LlStreamTypedRefContext {
   prefix: string;
   adapters: Map<string, LlStreamTypedRefAdapter>;
+  unions?: Map<string, string>;
 }
 
 export interface LlvmEmitterContext extends ShapeHost {
@@ -42,6 +45,9 @@ export interface LlvmEmitterContext extends ShapeHost {
   childDataThunkFor(param: IrType): string;
   childExitSignalThunkFor(codeParam: IrType, sigParam: IrType): string;
   childExitThunkFor(param: IrType): string;
+  execFileThunkFor(cbT: IrType & { kind: "func" }): string;
+  ipcMessageThunkFor(cbT: IrType & { kind: "func" }): string;
+  ipcSendThunkFor(cbT: IrType & { kind: "func" }): string;
   classFieldPtr(objName: string, className: string, field: string): { ptr: string; type: IrType };
   classMeta: Map<string, LlClassMeta>;
   classMetaOf(className: string): LlClassMeta;
@@ -50,6 +56,8 @@ export interface LlvmEmitterContext extends ShapeHost {
   closeOverrideWrapFor(cbUnion: IrType, retServer: boolean): string;
   cstr(text: string): string;
   currentGenerator: { yieldT: IrType; nextT: IrType; } | null;
+  constantNumericTables: ReadonlyMap<string, ConstantNumericTable>;
+  integerRanges: IntegerRanges;
   currentWasiCoro: { kind: "async" | "generator"; id: string; handle: string; self: string; finalLabel: string; cleanupLabel: string; suspendLabel: string; } | null;
   declare(decl: string): void;
   dyn: LlDyn;
@@ -67,8 +75,8 @@ export interface LlvmEmitterContext extends ShapeHost {
   emitBytesIndex(receiver: string, index: string, integerIndex?: boolean): string;
   emitBytesIntrinsic(e: IrExpr & { kind: "bytesIntrinsic" }): LlValue;
   emitBytesLength(elem: IrBytesElem, receiver: string, bytes: boolean): LlValue;
-  emitBytesReceiver(receiver: IrExpr, following: IrExpr[]): LlValue;
-  emitBytesU32(value: string): string;
+  emitStableReceiver(receiver: IrExpr, following: IrExpr[]): LlValue;
+  emitToUint32(value: string, expr?: IrExpr): string;
   emitCallExpr(e: ExprOf<"call" | "ffiCall" | "closure" | "callValue" | "selfRef" | "new" | "classRef" | "newValue" | "instanceOfValue" | "promiseVoidWiden" | "upcast" | "downcast" | "instanceOf" | "virtualCall">): LlValue;
   emitChildProcessLibCall(e: LibCallExpr): LlValue;
   emitContainerExpr(e: ExprOf<"arrayLit" | "arrayNewLen" | "arrayGet" | "arrayHas" | "arrayState" | "arrIntrinsic" | "bytesNew" | "bytesIntrinsic" | "mapNew" | "mapIntrinsic" | "setIntrinsic" | "setNew">): LlValue;
@@ -87,7 +95,7 @@ export interface LlvmEmitterContext extends ShapeHost {
   emitJsMarshal(e: IrExpr & { kind: "jsMarshal" }): LlValue;
   emitJsOp(e: IrExpr & { kind: "jsOp" }): LlValue;
   emitLibCall(e: LibCallExpr): LlValue;
-  emitLiteralExpr(e: ExprOf<"numLit" | "boolLit" | "strLit" | "unitLit" | "varRef">): LlValue;
+  emitLiteralExpr(e: ExprOf<"numLit" | "boolLit" | "strLit" | "moduleNsRef" | "unitLit" | "varRef">): LlValue;
   emitMapLikeIntrinsic(e: Extract<IrExpr, { kind: "mapIntrinsic" | "setIntrinsic" }>): LlValue;
   emitMapNew(e: IrExpr & { kind: "mapNew" }): LlValue;
   emitNetworkHttpLibCall(e: LibCallExpr): LlValue;
@@ -118,6 +126,8 @@ export interface LlvmEmitterContext extends ShapeHost {
   fnValues: Set<string>;
   frames: LlValue[][];
   fsRenameThunkFor(cbT: IrType & { kind: "func" }): string;
+  cryptoBytesThunkFor(cbT: IrType & { kind: "func" }): string;
+  zlibBytesThunkFor(cbT: IrType & { kind: "func" }): string;
   genResultThunkFor(genT: IrType & { kind: "generator" }, recT: IrType & { kind: "record" }): string;
   indirectMayThrow: boolean;
   integerLoopBindings: Map<string, string>;
@@ -126,6 +136,7 @@ export interface LlvmEmitterContext extends ShapeHost {
   islandTypedAdapter(fn: IrType & { kind: "func" }): string;
   keyedRecordReadInto(slot: string, join: string, objName: string, keyName: string, shapeId: string, resultType: IrType, overflowOnly: boolean, loc?: SrcLoc): void;
   liveDynRefAdapters: Map<string, LlStreamTypedRefAdapter>;
+  liveDynRefAdapter(t: IrType): LlStreamTypedRefAdapter;
   liveDynUnionRefAdapter(t: IrType & { kind: "union" }): string;
   liveDynUnionRefAdapters: Map<string, string>;
   llType(t: IrType): string;

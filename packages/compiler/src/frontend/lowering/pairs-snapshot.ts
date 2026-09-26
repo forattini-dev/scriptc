@@ -3,7 +3,8 @@ import { numLit, varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
 
 /** Intern a helper that materializes a pure string-index record from a flat
- * `[key, value, ...]` array returned by a runtime call. */
+ * `[key, value, ...]` array. Distinct HTTP records use the pair keys and
+ * look up each key's full string[] value. */
 export function pairsSnapshotHelper(
   lowerer: Lowerer,
   shapeId: string,
@@ -14,6 +15,7 @@ export function pairsSnapshotHelper(
     params?: IrParam[];
     callArgs?: IrExpr[];
     indexValueOk?: (indexValue: IrType) => boolean;
+    lookupValue?: "http.reqHeaderValues" | "http.reqTrailerValues";
   },
 ): string | null {
   const shape = lowerer.shapes.get(shapeId);
@@ -21,8 +23,11 @@ export function pairsSnapshotHelper(
   const indexValue = shape.indexValue;
   if (options.indexValueOk && !options.indexValueOk(indexValue)) return null;
   if (indexValue.kind !== "union") return null;
-  const stringTag = lowerer.armTag(indexValue.unionId, STRING);
-  if (stringTag < 0) return null;
+  const stringTag = options.lookupValue ? -1 : lowerer.armTag(indexValue.unionId, STRING);
+  if (options.lookupValue) {
+    const arrayValue = lowerer.withUndefinedArm(arrayOf(STRING));
+    if (arrayValue.kind !== "union" || indexValue.unionId !== arrayValue.unionId) return null;
+  } else if (stringTag < 0) return null;
   const key = `${options.keyPrefix}.snapshot:${shapeId}`;
   const existing = lowerer.widthHelpers.get(key);
   if (existing) return existing;
@@ -80,7 +85,9 @@ export function pairsSnapshotHelper(
           obj: varRef("out.0", recordType, loc),
           shapeId,
           key: pairAt(0),
-          value: { kind: "unionWrap", unionId: indexValue.unionId, tag: stringTag, value: pairAt(1), type: indexValue, loc },
+          value: options.lookupValue
+            ? { kind: "libCall", fn: options.lookupValue, args: [...(options.callArgs ?? []), pairAt(0)], type: indexValue, loc }
+            : { kind: "unionWrap", unionId: indexValue.unionId, tag: stringTag, value: pairAt(1), type: indexValue, loc },
           loc,
         }],
         loc,

@@ -9,7 +9,7 @@ const items = [1, 2, 3];
 const handler = (x: number) => x * 2;
 
 const anyone: unknown = score(1);
-const flags = anyone == score(2); // mixed-kind loose equality keeps the fence (same-kind == lowers)
+const flags = anyone == score(2); // unknown/object coercion keeps the fence; static primitive pairs lower
 const { length: firstItem } = items; // object patterns over arrays keep the fence (patterns and defaults compile)
 let label = "score: ";
 label += score(10);

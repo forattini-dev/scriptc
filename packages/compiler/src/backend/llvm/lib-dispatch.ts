@@ -72,6 +72,24 @@ export function emitIoLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue
 
 export function emitGenericLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
     const B = host.B;
+    if (e.fn === "crypto.randomBytesCb" || e.fn === "crypto.pbkdf2Cb") {
+      host.usesTimers = true;
+      const args = e.args.map((arg) => host.emitExpr(arg));
+      const cbIndex = e.fn === "crypto.randomBytesCb" ? 1 : 5;
+      const cbT = e.args[cbIndex]!.type;
+      if (cbT.kind !== "func") throw new InternalCompilerError("llvm emitter bug: crypto callback not a func");
+      host.moveTemp(args[cbIndex]!);
+      const adapter = host.cryptoBytesThunkFor(cbT);
+      if (e.fn === "crypto.randomBytesCb") {
+        host.declare(`declare void @scr_crypto_random_bytes_async(double, ptr, ptr)`);
+        B.line(`call void @scr_crypto_random_bytes_async(double ${args[0]!.name}, ptr ${args[1]!.name}, ptr @${adapter})`);
+      } else {
+        host.declare(`declare void @scr_crypto_pbkdf2_async(ptr, ptr, double, double, ptr, ptr, ptr)`);
+        B.line(`call void @scr_crypto_pbkdf2_async(ptr ${args[0]!.name}, ptr ${args[1]!.name}, double ${args[2]!.name}, double ${args[3]!.name}, ptr ${args[4]!.name}, ptr ${args[5]!.name}, ptr @${adapter})`);
+      }
+      host.emitPendingCheck();
+      return { name: "", type: e.type };
+    }
     if (e.fn === "http.request" || e.fn === "http.requestCb" || e.fn === "http.requestUrl" || e.fn === "http.requestUrlCb" ||
         e.fn === "http.requestAgent" || e.fn === "http.requestAgentCb" ||
         e.fn === "https.request" || e.fn === "https.requestCb" ||
@@ -222,6 +240,7 @@ export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
       case "cp":
       case "spawnRes":
       case "child":
+      case "writer":
       case "procStream":
         return host.emitChildProcessLibCall(e);
       case "tp":
@@ -234,6 +253,8 @@ export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
       case "process":
       case "stdin":
         return host.emitProcessLibCall(e);
+      case "module":
+        return host.emitGenericLibCall(e);
       case "error":
       case "regex":
       case "emitter":
@@ -266,6 +287,7 @@ export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
       case "option":
       case "module": case "promise":
       case "util":
+      case "bigint":
       case "crypto":
       case "buffer":
       case "bytes":

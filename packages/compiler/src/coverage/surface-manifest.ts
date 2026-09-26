@@ -77,6 +77,7 @@ import {
   STATIC_MATH_FNS,
   STATIC_MATH_PROPS,
   STATIC_NUMBER_METHODS,
+  STRING_INDEX_METHODS,
   STR_METHODS,
   UNSUPPORTED_EXPR,
   UNSUPPORTED_STMT,
@@ -251,6 +252,9 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
       note: arityNote(entry.minArgs, entry.maxArgs),
     });
   }
+  for (const name of STRING_INDEX_METHODS) {
+    add({ id: `stdlib.string.${name}`, kind: "stdlib", name: `string.prototype.${name}`, status: "static", note: arityNote(0, 1) });
+  }
   for (const name of [...ARRAY_METHODS]) {
     add({ id: `stdlib.array.${name}`, kind: "stdlib", name: `Array.prototype.${name}`, status: "static" });
   }
@@ -285,11 +289,12 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
         // untabled arities go there. Elsewhere untabled shapes may have
         // their own special-cased lowerings (Math.min/max over one array
         // spread), so no claim is made about them.
-        note:
-          `compiles statically at arity ${stat.arity}` +
-          (island !== undefined
-            ? "; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic)"
-            : ""),
+        note: name === "hypot"
+          ? "compiles statically at any arity, including number[] spreads"
+          : `compiles statically at arity ${stat.arity}` +
+            (island !== undefined
+              ? "; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic)"
+              : ""),
       }, [stat.fn]);
     } else {
       add({ id: `stdlib.math.${name}`, kind: "stdlib", name: `Math.${name}`, status: "dynamic-only", code: "SC2012" });
@@ -339,6 +344,7 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
     }
   }
   for (const name of Object.keys(ISLAND_SURFACE.string)) {
+    if (STRING_INDEX_METHODS.has(name)) continue;
     add({
       id: `stdlib.string.${name}`,
       kind: "stdlib",

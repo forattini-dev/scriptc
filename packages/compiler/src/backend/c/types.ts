@@ -4,7 +4,7 @@ import { InternalCompilerError } from "../../errors.js";
  * array element kinds, map key/value kinds), plus C literal spelling. Pure
  * functions of IrType/values — every emission module leans on these, so they
  * live in ONE place with no emitter state. */
-import type { IrType } from "../../ir/ir.js";
+import type { IrBytesElem, IrType } from "../../ir/ir.js";
 import { POINTER_KINDS, type PointerKind, runtimeRcStem, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/ir.js";
 import {
   mangleClassRelease,
@@ -333,136 +333,13 @@ export function elemKindC(elem: IrType): string {
 }
 
 /** The runtime's element-kind tag for a bytes (typed array) type. */
-export function bytesElemKindC(elem: "u8" | "u32" | "i32" | "f32" | "f64"): string {
-  return elem === "u8" ? "SCR_BYTES_U8" : elem === "u32" ? "SCR_BYTES_U32" : elem === "i32" ? "SCR_BYTES_I32" : elem === "f32" ? "SCR_BYTES_F32" : "SCR_BYTES_F64";
-}
-
-/** The runtime's ScrBytesNumKind tag + littleEndian flag per readNum/
- * writeNum kind token (the strLit args[0] the frontend mints). The
- * variable-width family's tokens map to sign + endian flags instead. */
-export const BYTES_NUM_KIND_C: Record<string, { kind: string; le: boolean } | undefined> = {
-  u8: { kind: "SCR_BN_U8", le: false },
-  i8: { kind: "SCR_BN_I8", le: false },
-  u16be: { kind: "SCR_BN_U16", le: false },
-  u16le: { kind: "SCR_BN_U16", le: true },
-  i16be: { kind: "SCR_BN_I16", le: false },
-  i16le: { kind: "SCR_BN_I16", le: true },
-  u32be: { kind: "SCR_BN_U32", le: false },
-  u32le: { kind: "SCR_BN_U32", le: true },
-  i32be: { kind: "SCR_BN_I32", le: false },
-  i32le: { kind: "SCR_BN_I32", le: true },
-  f32be: { kind: "SCR_BN_F32", le: false },
-  f32le: { kind: "SCR_BN_F32", le: true },
-  f64be: { kind: "SCR_BN_F64", le: false },
-  f64le: { kind: "SCR_BN_F64", le: true },
+const BYTES_ELEM_KIND_C: Record<IrBytesElem, string> = {
+  u8: "SCR_BYTES_U8",
+  u32: "SCR_BYTES_U32",
+  i32: "SCR_BYTES_I32",
+  f32: "SCR_BYTES_F32",
+  f64: "SCR_BYTES_F64",
 };
 
-/** The variable-width (read/writeUIntLE-style) kind tokens: sign + endian. */
-export const BYTES_NUM_VAR_C: Record<string, { sign: boolean; le: boolean } | undefined> = {
-  ube: { sign: false, le: false },
-  ule: { sign: false, le: true },
-  ibe: { sign: true, le: false },
-  ile: { sign: true, le: true },
-};
-
-/** The runtime's ScrDataViewGet tag per dvGet* bytesIntrinsic method. */
-export const DV_GET_KIND_C: Record<string, string> = {
-  dvGetUint8: "SCR_DV_U8",
-  dvGetInt8: "SCR_DV_I8",
-  dvGetUint16: "SCR_DV_U16",
-  dvGetInt16: "SCR_DV_I16",
-  dvGetUint32: "SCR_DV_U32",
-  dvGetInt32: "SCR_DV_I32",
-  dvGetFloat32: "SCR_DV_F32",
-  dvGetFloat64: "SCR_DV_F64",
-  dvGetBigUint64Number: "SCR_DV_BIGU64",
-  dvGetBigInt64Number: "SCR_DV_BIGI64",
-};
-
-/** The runtime's ScrDataViewGet tag per dvSet* bytesIntrinsic method (the
- * setters reuse the getter kinds; no BIG setters exist). */
-export const DV_SET_KIND_C: Record<string, string> = {
-  dvSetUint8: "SCR_DV_U8",
-  dvSetInt8: "SCR_DV_I8",
-  dvSetUint16: "SCR_DV_U16",
-  dvSetInt16: "SCR_DV_I16",
-  dvSetUint32: "SCR_DV_U32",
-  dvSetInt32: "SCR_DV_I32",
-  dvSetFloat32: "SCR_DV_F32",
-  dvSetFloat64: "SCR_DV_F64",
-};
-
-/** Runtime accessor suffix for an element type: arrays store f64 and bool
- * unboxed and everything refcounted as a pointer (`_ref`). */
-export function elemAccess(elem: IrType): "f64" | "bool" | "ref" {
-  return elem.kind === "f64" ? "f64" : elem.kind === "bool" ? "bool" : "ref";
-}
-
-/** Runtime suffix for a map/set key: scalar value equality or reference
- * identity — the first suffix of the scr_map_* two-suffix family. */
-export function mapKeyAccess(key: IrType): "f64" | "str" | "ref" {
-  if (key.kind === "f64") return "f64";
-  if (key.kind === "string") return "str";
-  // Reference-identity SET elements (isSupportedSetElem) and symbol Map keys.
-  if (key.kind === "record" || key.kind === "netServer" || key.kind === "symbol" || key.kind === "func") return "ref";
-  throw new InternalCompilerError(`emitter bug: map key of ${key.kind} (frontend rejects these)`);
-}
-
-/** The runtime's key-kind/value-kind tags for scr_map_new. */
-export function mapKeyKindC(key: IrType): string {
-  const acc = mapKeyAccess(key);
-  return acc === "str" ? "SCR_MAP_KEY_STR" : acc === "ref" ? "SCR_MAP_KEY_REF" : "SCR_MAP_KEY_F64";
-}
-
-export function mapValKindC(value: IrType): string {
-  return value.kind === "f64"
-    ? "SCR_MAP_VAL_F64"
-    : value.kind === "bool"
-      ? "SCR_MAP_VAL_BOOL"
-      : "SCR_MAP_VAL_REF";
-}
-
-/** UTF-8 bytes as an unambiguous C string literal (octal escapes are always
- * three digits, so a following digit can never extend them — unlike \xHH). */
-export function cStringLiteral(bytes: Buffer): string {
-  let out = '"';
-  for (const b of bytes) {
-    if (b === 0x22) out += '\\"';
-    else if (b === 0x5c) out += "\\\\";
-    // '?' escapes to defuse TRIGRAPHS: under -std=c11 the preprocessor
-    // rewrites `??=` (and the other eight `??x` sequences) INSIDE string
-    // literals — an embedded JS `wasmBinaryFile ??= f()` would reach the
-    // engine as `wasmBinaryFile #` and die as a SyntaxError. `\?` is
-    // standard C, exactly for this.
-    else if (b === 0x3f) out += "\\?";
-    else if (b >= 0x20 && b < 0x7f) out += String.fromCharCode(b);
-    else out += "\\" + b.toString(8).padStart(3, "0");
-  }
-  return out + '"';
-}
-
-/** JS shortest-roundtrip decimal re-parses to the identical double in C
- * (strtod is correctly rounded), so String(value) is a faithful C literal. */
-export function cNumberLiteral(value: number): string {
-  // ±Infinity and NaN numLits are real (the globals `Infinity`/`NaN`); C
-  // spells them with math.h's INFINITY/NAN macros (the emitted unit always
-  // includes math.h).
-  if (value === Infinity) return "INFINITY";
-  if (value === -Infinity) return "-INFINITY";
-  if (Number.isNaN(value)) return "NAN";
-  if (Object.is(value, -0)) return "-0.0"; // String(-0) is "0", which would lose the sign
-  const text = String(value);
-  // Integral shortest-roundtrip text ("118059162071741140000") would be a
-  // C INTEGER literal — invalid beyond unsigned long long's range, and in
-  // [2^63, 2^64) clang's unsigned-interpretation extension would let a
-  // NEGATED literal wrap modulo 2^64, a silent wrong value; the ".0" keeps
-  // every numLit a double literal (decimal parsing is correctly rounded
-  // either way).
-  return /[.eE]/.test(text) ? text : text + ".0";
-}
-
-/** `<type> <name>` with pointer types spaced C-style (`ScrStr *x`). */
-export function cDecl(type: IrType, name: string): string {
-  const t = cType(type);
-  return t.endsWith("*") ? t + name : `${t} ${name}`;
-}
+export function bytesElemKindC(elem: IrBytesElem): string {
+  return BYTES_ELEM_KIND_C[elem];

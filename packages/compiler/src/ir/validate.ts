@@ -86,6 +86,23 @@ export const REGEX_INTRINSIC_SIGS: Record<
  * surface has no optionals. readFileSync's second argument is the (always-"utf8") encoding: evaluated for JS-exact side-effect
  * order and ignored by the runtime. A `null` slot is program-dependent (a builtin-error receiver) — the libCall case checks it specially, like process.envGet's result. Exported for lib-boundary.ts. */
 export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result: IrType }> = {
+  "dyn.objectTag": { argTypes: [DYN], result: STRING },
+  "module.registryInit": { argTypes: [F64], result: VOID },
+  "module.define": { argTypes: [F64, STRING, STRING, STRING, arrayOf(STRING), BOOL], result: VOID },
+  "module.enter": { argTypes: [F64], result: VOID },
+  "module.link": { argTypes: [F64, F64], result: VOID },
+  "module.finish": { argTypes: [F64], result: VOID },
+  "module.fail": { argTypes: [F64], result: VOID },
+  "module.filename": { argTypes: [F64], result: STRING },
+  "module.id": { argTypes: [F64], result: STRING },
+  "module.path": { argTypes: [F64], result: STRING },
+  "module.paths": { argTypes: [F64], result: arrayOf(STRING) },
+  "module.children": { argTypes: [F64], result: arrayOf(F64) },
+  "module.parent": { argTypes: [F64], result: F64 },
+  "module.loaded": { argTypes: [F64], result: BOOL },
+  "module.cacheGet": { argTypes: [STRING], result: F64 },
+  "module.cacheHas": { argTypes: [STRING], result: BOOL },
+  "module.cacheKeys": { argTypes: [], result: arrayOf(STRING) },
   ...NUMERIC_COERCION_SIGS, ...JSON_REPLACER_SIGS,
   ...FS_WRITE_LIB_SIGS,
   "fetch.start": { argTypes: [STRING, DYN], result: { kind: "promise", inner: DYN } },
@@ -215,6 +232,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "os.networkInterfaces": { argTypes: [], result: VOID },
   "math.maxArr": { argTypes: [arrayOf(F64)], result: F64 },
   "math.minArr": { argTypes: [arrayOf(F64)], result: F64 },
+  "math.hypotArr": { argTypes: [arrayOf(F64)], result: F64 },
   "math.floor": { argTypes: [F64], result: F64 },
   "math.abs": { argTypes: [F64], result: F64 },
   "math.round": { argTypes: [F64], result: F64 },
@@ -367,6 +385,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "net.listenOptsReusePort": { argTypes: [NETSERVER_T, F64, STRING, BOOL, BOOL], result: VOID },
   "net.listenOptsReusePortCb": { argTypes: [NETSERVER_T, F64, STRING, BOOL, BOOL, null], result: VOID },
   "net.serverPort": { argTypes: [NETSERVER_T], result: F64 },
+  "net.serverListening": { argTypes: [NETSERVER_T], result: BOOL },
   // net.serverAddress's record result is shape-checked in the libCall case
   // (the dgram.address sentinel pattern).
   "net.serverAddress": { argTypes: [NETSERVER_T], result: VOID },
@@ -442,19 +461,44 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // union, checked like process.envGet.
   "http.createServer": { argTypes: [null], result: NETSERVER_T },
   "http.createServerEmpty": { argTypes: [], result: NETSERVER_T },
+  "http.validateHeaderName": { argTypes: [STRING, STRING], result: VOID },
+  "http.validateHeaderValue": { argTypes: [STRING, DYN], result: VOID },
   "http.serverJoinDupHeaders": { argTypes: [NETSERVER_T], result: VOID },
   "http.serverMaxHeaderSizeSet": { argTypes: [NETSERVER_T, DYN], result: VOID },
   "http.serverTimeoutGet": { argTypes: [NETSERVER_T, F64], result: F64 },
+  "http.serverSetTimeout": { argTypes: [NETSERVER_T, F64], result: VOID },
+  "http.serverSetTimeoutCb": { argTypes: [NETSERVER_T, F64, null], result: VOID },
+  "http.serverOnTimeout": { argTypes: [NETSERVER_T, null, BOOL], result: VOID },
+  "http.serverCloseAllConnections": { argTypes: [NETSERVER_T], result: VOID },
+  "http.serverCloseIdleConnections": { argTypes: [NETSERVER_T], result: VOID },
   "http.serverTimeoutSet": { argTypes: [NETSERVER_T, F64, F64], result: VOID },
   "http.serverTimeoutOptionSet": { argTypes: [NETSERVER_T, F64, DYN], result: VOID },
   "net.serverOnListening": { argTypes: [NETSERVER_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "http.resStatusGet": { argTypes: [HTTPRES_T], result: F64 },
   "http.resStatusSet": { argTypes: [HTTPRES_T, F64], result: VOID },
-  "http.resStatusMsgGet": { argTypes: [HTTPRES_T], result: STRING },
+  "http.resStatusMsgGet": { argTypes: [HTTPRES_T], result: VOID },
   "http.resStatusMsgSet": { argTypes: [HTTPRES_T, STRING], result: VOID },
+  "http.resRequest": { argTypes: [HTTPRES_T], result: HTTPREQ_T },
+  "http.resSocket": { argTypes: [HTTPRES_T], result: VOID },
+  "http.resWritableFinished": { argTypes: [HTTPRES_T], result: BOOL },
+  "http.resSendDateGet": { argTypes: [HTTPRES_T], result: BOOL },
+  "http.resSendDateSet": { argTypes: [HTTPRES_T, BOOL], result: VOID },
+  "http.resStrictContentLengthGet": { argTypes: [HTTPRES_T], result: BOOL },
+  "http.resStrictContentLengthSet": { argTypes: [HTTPRES_T, BOOL], result: VOID },
+  "http.resSetTimeout": { argTypes: [HTTPRES_T, F64], result: VOID },
+  "http.resSetTimeoutCb": { argTypes: [HTTPRES_T, F64, { kind: "func", params: [], ret: VOID }], result: VOID },
+  "http.resWritableEnded": { argTypes: [HTTPRES_T], result: BOOL },
+  "http.resFlushHeaders": { argTypes: [HTTPRES_T], result: VOID },
+  "http.resAddTrailers": { argTypes: [HTTPRES_T, arrayOf(STRING)], result: VOID },
+  "http.resCork": { argTypes: [HTTPRES_T], result: VOID },
+  "http.resUncork": { argTypes: [HTTPRES_T], result: VOID },
+  "http.resWritableCorked": { argTypes: [HTTPRES_T], result: F64 },
   // resGetHeader answers the interned `string | undefined` union — the
   // reqHeader/envGet sentinel pattern (VOID here, checked specially).
   "http.resGetHeader": { argTypes: [HTTPRES_T, STRING], result: VOID },
+  "http.resGetHeaderNames": { argTypes: [HTTPRES_T], result: arrayOf(STRING) },
+  "http.resGetRawHeaderNames": { argTypes: [HTTPRES_T], result: arrayOf(STRING) },
+  "http.resGetHeaders": { argTypes: [HTTPRES_T], result: DYN },
   "http.resHasHeader": { argTypes: [HTTPRES_T, STRING], result: BOOL },
   "http.resRemoveHeader": { argTypes: [HTTPRES_T, STRING], result: VOID },
   "http.resOnFinish": { argTypes: [HTTPRES_T, { kind: "func", params: [], ret: VOID }], result: VOID },
@@ -466,6 +510,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.resSetHeader": { argTypes: [HTTPRES_T, STRING, STRING], result: VOID },
   "http.resWriteHead": { argTypes: [HTTPRES_T, F64], result: VOID },
   "http.resWriteHeadN": { argTypes: [HTTPRES_T, F64, arrayOf(STRING), arrayOf(STRING)], result: VOID },
+  "http.resWriteContinue": { argTypes: [HTTPRES_T], result: VOID },
+  "http.resWriteProcessing": { argTypes: [HTTPRES_T], result: VOID },
+  "http.resWriteEarlyHints": { argTypes: [HTTPRES_T, arrayOf(STRING)], result: VOID },
   "http.resWrite": { argTypes: [HTTPRES_T, STRING], result: VOID },
   "http.resWriteBytes": { argTypes: [HTTPRES_T, BYTES_U8], result: VOID },
   "http.resEnd": { argTypes: [HTTPRES_T], result: VOID },
@@ -515,6 +562,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "net.sockSetTimeout": { argTypes: [NETSOCKET_T, F64], result: VOID },
   "net.sockSetEncoding": { argTypes: [NETSOCKET_T, STRING], result: VOID },
   "http.reqSetEncoding": { argTypes: [HTTPREQ_T, STRING], result: VOID },
+  "http.reqSetTimeout": { argTypes: [HTTPREQ_T, F64], result: VOID },
+  "http.reqSetTimeoutCb": { argTypes: [HTTPREQ_T, F64, { kind: "func", params: [], ret: VOID }], result: VOID },
   "net.sockOnTimeout": { argTypes: [NETSOCKET_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "net.sockRemoteAddress": { argTypes: [NETSOCKET_T], result: VOID },
   "net.sockEncrypted": { argTypes: [NETSOCKET_T], result: VOID },
@@ -671,6 +720,33 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "https.requestFn": { argTypes: [BOOL, STRING, F64, STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null], result: HTTPCLIENTREQ_T },
   "https.requestFnCb": { argTypes: [BOOL, STRING, F64, STRING, STRING, F64, arrayOf(STRING), BOOL, BOOL, null, null], result: HTTPCLIENTREQ_T },
   "http.clientWrite": { argTypes: [HTTPCLIENTREQ_T, STRING], result: VOID },
+  "http.clientSetHeader": { argTypes: [HTTPCLIENTREQ_T, STRING, STRING], result: VOID },
+  "http.clientGetHeader": { argTypes: [HTTPCLIENTREQ_T, STRING], result: VOID },
+  "http.clientHasHeader": { argTypes: [HTTPCLIENTREQ_T, STRING], result: BOOL },
+  "http.clientRemoveHeader": { argTypes: [HTTPCLIENTREQ_T, STRING], result: VOID },
+  "http.clientGetHeaderNames": { argTypes: [HTTPCLIENTREQ_T], result: arrayOf(STRING) },
+  "http.clientGetRawHeaderNames": { argTypes: [HTTPCLIENTREQ_T], result: arrayOf(STRING) },
+  "http.clientGetHeaders": { argTypes: [HTTPCLIENTREQ_T], result: DYN },
+  "http.clientFlushHeaders": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
+  "http.clientAddTrailers": { argTypes: [HTTPCLIENTREQ_T, arrayOf(STRING)], result: VOID },
+  "http.clientCork": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
+  "http.clientUncork": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
+  "http.clientWritableCorked": { argTypes: [HTTPCLIENTREQ_T], result: F64 },
+  "http.clientMethod": { argTypes: [HTTPCLIENTREQ_T], result: STRING },
+  "http.clientPath": { argTypes: [HTTPCLIENTREQ_T], result: STRING },
+  "http.clientHost": { argTypes: [HTTPCLIENTREQ_T], result: STRING },
+  "http.clientProtocol": { argTypes: [HTTPCLIENTREQ_T], result: STRING },
+  "http.clientHeadersSent": { argTypes: [HTTPCLIENTREQ_T], result: BOOL },
+  "http.clientWritableEnded": { argTypes: [HTTPCLIENTREQ_T], result: BOOL },
+  "http.clientWritableFinished": { argTypes: [HTTPCLIENTREQ_T], result: BOOL },
+  "http.clientSocket": { argTypes: [HTTPCLIENTREQ_T], result: NETSOCKET_T },
+  "http.clientReusedSocket": { argTypes: [HTTPCLIENTREQ_T], result: BOOL },
+  "http.clientSetNoDelay": { argTypes: [HTTPCLIENTREQ_T, BOOL], result: VOID },
+  "http.clientSetSocketKeepAlive": { argTypes: [HTTPCLIENTREQ_T, BOOL, F64], result: VOID },
+  "http.clientSetTimeout": { argTypes: [HTTPCLIENTREQ_T, F64], result: VOID },
+  "http.clientSetTimeoutCb": { argTypes: [HTTPCLIENTREQ_T, F64, { kind: "func", params: [], ret: VOID }], result: VOID },
+  "http.statusCodes": { argTypes: [], result: DYN },
+  "http.methods": { argTypes: [], result: arrayOf(STRING) },
   "http.clientWriteBytes": { argTypes: [HTTPCLIENTREQ_T, BYTES_U8], result: VOID },
   "http.clientEnd": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
   "http.clientEndStr": { argTypes: [HTTPCLIENTREQ_T, STRING], result: VOID },
@@ -678,11 +754,16 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.clientWriteDyn": { argTypes: [HTTPCLIENTREQ_T, DYN], result: VOID },
   "http.clientEndDyn": { argTypes: [HTTPCLIENTREQ_T, DYN], result: VOID },
   "http.clientDestroy": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
+  "http.clientAbort": { argTypes: [HTTPCLIENTREQ_T], result: VOID },
+  "http.clientAborted": { argTypes: [HTTPCLIENTREQ_T], result: BOOL },
   "http.clientDestroyed": { argTypes: [HTTPCLIENTREQ_T], result: BOOL },
   "http.clientOnResponse": { argTypes: [HTTPCLIENTREQ_T, null, BOOL], result: VOID },
+  "http.clientOnSocket": { argTypes: [HTTPCLIENTREQ_T, null, BOOL], result: VOID },
+  "http.clientOnFinish": { argTypes: [HTTPCLIENTREQ_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "http.clientOnError": { argTypes: [HTTPCLIENTREQ_T, null, BOOL], result: VOID },
   "http.clientOnTimeout": { argTypes: [HTTPCLIENTREQ_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "http.clientOnClose": { argTypes: [HTTPCLIENTREQ_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
+  "http.clientOnAbort": { argTypes: [HTTPCLIENTREQ_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "cp.execSync": {
     argTypes: [STRING, arrayOf(STRING), BOOL, STRING, BOOL, STRING, BOOL, arrayOf(STRING), F64, F64, F64],
     result: STRING,
@@ -1143,7 +1224,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // Arg 0 is a packed f64[] OR a bytes value (the spread-typed-array
   // form) — checked in the libCall case.
   "string.fromCharCode": { argTypes: [null], result: STRING },
-  "string.lastIndexOf": { argTypes: [STRING, STRING, F64], result: F64 },
+  "string.lastIndexOf": { argTypes: [STRING, STRING], result: F64 },
+  "string.lastIndexOfFrom": { argTypes: [STRING, STRING, F64], result: F64 },
   "string.raw": { argTypes: [arrayOf(STRING), arrayOf(STRING)], result: STRING },
 };
 
@@ -2526,8 +2608,10 @@ function validateFunction(
             ? { argTypes: e.args.map(() => elem), result: F64 }
             : e.method === "pushSpread" || e.method === "concatSpread" || e.method === "unshiftSpread"
               ? { argTypes: [e.receiver.type], result: F64 }
-              : e.method === "nextPresent"
+              : e.method === "nextPresent" || e.method === "getNumber"
               ? { argTypes: [F64], result: F64 }
+              : e.method === "indexEq"
+              ? { argTypes: [F64, e.receiver.type, F64], result: BOOL }
               : e.method === "pop"
               ? { argTypes: [], result: e.type } // union-checked below
               : e.method === "indexOf"
@@ -2550,9 +2634,25 @@ function validateFunction(
                           ? { argTypes: [F64], result: e.receiver.type }
                   : e.method === "splice"
                     ? { argTypes: [F64, F64], result: e.receiver.type }
+                    : e.method === "spliceInsert"
+                      ? { argTypes: [F64, F64, e.receiver.type], result: e.receiver.type }
+                      : e.method === "flatCopy" || e.method === "flatOne"
+                        ? { argTypes: [e.type], result: e.type }
                         : e.method === "shift"
                           ? { argTypes: [], result: e.type } // union-checked below
                           : { argTypes: [], result: F64 }; // length
+        if (e.method === "getNumber" && elem.kind !== "f64") {
+          err(`arrIntrinsic getNumber requires f64 elements, got ${elem.kind}`, e.loc);
+        }
+        if (e.method === "indexEq" && elem.kind !== "f64" && elem.kind !== "bool" && elem.kind !== "string") {
+          err(`arrIntrinsic indexEq requires primitive elements, got ${elem.kind}`, e.loc);
+        }
+        if (e.method === "flatCopy" && !typeEquals(e.type, e.receiver.type)) {
+          err("arrIntrinsic flatCopy result must match its receiver", e.loc);
+        }
+        if (e.method === "flatOne" && (elem.kind !== "array" || !typeEquals(e.type, elem))) {
+          err("arrIntrinsic flatOne result must match the nested array type", e.loc);
+        }
         if (
           e.method === "join" &&
           elem.kind !== "f64" && elem.kind !== "string" && elem.kind !== "bool" &&
@@ -4023,7 +4123,7 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "http.reqStatusMessage") {
+        if (e.fn === "http.reqStatusMessage" || e.fn === "http.resStatusMsgGet") {
           // Result is the interned `string | undefined` union (reqHeader's).
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
           const ok =
@@ -4032,8 +4132,16 @@ function validateFunction(
             def.arms.some((a) => a.kind === "string") &&
             def.arms.some((a) => a.kind === "undefinedT");
           if (!ok) {
-            err(`libCall http.reqStatusMessage must return the 'string | undefined' union`, e.loc);
+            err(`libCall ${e.fn} must return the 'string | undefined' union`, e.loc);
           }
+          break;
+        }
+        if (e.fn === "http.resSocket") {
+          const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
+          const ok = def && def.arms.length === 2 &&
+            def.arms.some((a) => a.kind === "netSocket") &&
+            def.arms.some((a) => a.kind === "nullT");
+          if (!ok) err(`libCall http.resSocket must return the 'Socket | null' union`, e.loc);
           break;
         }
         if (e.fn === "http.reqH2Stream") {
@@ -4044,7 +4152,7 @@ function validateFunction(
           if (!ok) err(`libCall http.reqH2Stream must return the 'Http2Stream | undefined' union`, e.loc);
           break;
         }
-        if (e.fn === "http.reqHeader" || e.fn === "http.resGetHeader") {
+        if (e.fn === "http.reqHeader" || e.fn === "http.reqTrailer" || e.fn === "http.resGetHeader" || e.fn === "http.clientGetHeader") {
           // Result is the interned `string | undefined` union (envGet's).
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
           const ok =
@@ -4059,13 +4167,15 @@ function validateFunction(
         }
         if (e.fn === "net.createServerCb" || e.fn === "net.serverOnConnection" ||
             e.fn === "net.serverOnSecureConnection" ||
+            e.fn === "http.serverSetTimeoutCb" || e.fn === "http.serverOnTimeout" ||
+            e.fn === "http.clientOnSocket" ||
             e.fn === "net.sockOnData" || e.fn === "net.serverOnError" ||
             e.fn === "net.sockOnError") {
           // The program-dependent listener shapes: a void closure with no
           // params, or exactly the one supported parameter per event
           // (socket handle / data chunk bytes / error %Error). The
           // callback slot is arg 0 for createServerCb, arg 1 otherwise.
-          const cbT = e.args[e.fn === "net.createServerCb" ? 0 : 1]?.type;
+          const cbT = e.args[e.fn === "net.createServerCb" ? 0 : e.fn === "http.serverSetTimeoutCb" ? 2 : 1]?.type;
           let ok = cbT?.kind === "func" && cbT.ret.kind === "void" && cbT.params.length <= 1;
           if (ok && cbT?.kind === "func" && cbT.params.length === 1) {
             const p = cbT.params[0]!;

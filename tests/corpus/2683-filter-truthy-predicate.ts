@@ -29,3 +29,9 @@ function pick(n: number): string | number {
   return n % 2 === 0 ? "" : n;
 }
 console.log(nums.filter((n) => pick(n)).join(","));
+
+// A checked-dynamic predicate retains the runtime value for ToBoolean.
+function asUnknown(n: number): unknown {
+  return n;
+}
+console.log(nums.filter((n) => asUnknown(n)).join(","));

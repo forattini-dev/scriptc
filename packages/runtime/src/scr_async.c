@@ -3,7 +3,7 @@
  *
  * Model (see docs/ir.md):
  * - An async function's body is ordinary compiled C, run on its own fiber
- *   (heap-allocated ucontext stack). Calling it runs the body EAGERLY until
+ *   (dedicated ucontext stack). Calling it runs the body EAGERLY until
  *   the first suspension (JS's synchronous-prefix rule), then control
  *   returns to the spawner with a +1 promise.
  * - `await` on a pending promise parks the fiber on the promise's waiter
@@ -18,6 +18,13 @@
  *   downgrades to a note in that case.
  */
 #define _XOPEN_SOURCE 700
+/* Anonymous mappings alongside the XSI ucontext API on Darwin and glibc. */
+#ifndef _DARWIN_C_SOURCE
+#define _DARWIN_C_SOURCE 1
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
 #include "scr_runtime.h"
 
 #include <errno.h>
@@ -39,6 +46,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/mman.h>
 #include <ucontext.h>
 #include <unistd.h>
 #endif
@@ -51,6 +59,7 @@
  * their empty implementation makes the absence explicit at link time
  * without weakening async/timer support. */
 bool scr_children_pending(void) { return false; }
+bool scr_children_ready(void) { return false; }
 bool scr_children_reffed_pending(void) { return false; }
 bool scr_children_failed_pending(void) { return false; }
 void scr_children_poll(void) {}
@@ -77,12 +86,63 @@ void __sanitizer_finish_switch_fiber(void *fake_stack_save, const void **bottom_
  * the measured need: an engine call costs 64–96KB there, and a real
  * embedded graph entered FROM A FIBER (a commander action awaiting
  * generateText — zod parses inside promise chains) nests dozens of engine
- * frames; the memory is malloc'd and committed lazily, so idle fibers pay
- * address space, not RSS. */
+ * frames; native POSIX stacks are mapped and committed lazily, so idle
+ * fibers pay address space, not RSS. */
 #ifdef SCR_ASAN_FIBERS
 #define SCR_FIBER_STACK (8 * 1024 * 1024)
 #else
 #define SCR_FIBER_STACK (256 * 1024)
+#endif
+
+#if !defined(_WIN32) && !defined(__wasi__)
+/* Keep stacks out of malloc's size classes. Reuse a bounded number during
+ * a burst of promise/generator work, then unmap the spares before the loop
+ * sleeps. This avoids both heap fragmentation and per-call mmap overhead.
+ * The sanitizer lane unmaps every finished stack immediately. */
+#ifndef SCR_ASAN_FIBERS
+#define SCR_FIBER_SPARES 4
+static SCR_TL void *scr_fiber_spares[SCR_FIBER_SPARES];
+static SCR_TL size_t scr_fiber_nspares;
+static SCR_TL bool scr_fiber_cleanup_registered;
+#endif
+
+static void scr_fiber_stacks_clear(void) {
+#ifndef SCR_ASAN_FIBERS
+  while (scr_fiber_nspares > 0) {
+    (void)munmap(scr_fiber_spares[--scr_fiber_nspares], SCR_FIBER_STACK);
+    scr_fiber_spares[scr_fiber_nspares] = NULL;
+  }
+#endif
+}
+
+static void *scr_fiber_stack_new(void) {
+#ifndef SCR_ASAN_FIBERS
+  if (scr_fiber_nspares > 0) {
+    void *stack = scr_fiber_spares[--scr_fiber_nspares];
+    scr_fiber_spares[scr_fiber_nspares] = NULL;
+    return stack;
+  }
+  if (!scr_fiber_cleanup_registered) {
+    scr_fiber_cleanup_registered = true;
+    scr_atexit(scr_fiber_stacks_clear);
+  }
+#endif
+  void *stack = mmap(NULL, SCR_FIBER_STACK, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANON, -1, 0);
+  if (stack == MAP_FAILED) scr_trap("scriptc: out of memory\n");
+  return stack;
+}
+
+static void scr_fiber_stack_free(void *stack) {
+  if (!stack) return;
+#ifndef SCR_ASAN_FIBERS
+  if (scr_fiber_nspares < SCR_FIBER_SPARES) {
+    scr_fiber_spares[scr_fiber_nspares++] = stack;
+    return;
+  }
+#endif
+  (void)munmap(stack, SCR_FIBER_STACK);
+}
 #endif
 
 /* ── promises ─────────────────────────────────────────────────────────── */
@@ -1204,7 +1264,11 @@ static void scr_fiber_destroy(ScrFiber *f) {
   if (f->coro != NULL) scr_wasi_coro_destroy(f->coro);
 #endif
   scr_als_ctx_release(f->als);
+#if !defined(_WIN32) && !defined(__wasi__)
+  scr_fiber_stack_free(f->stack);
+#else
   free(f->stack);
+#endif
   free(f);
 }
 
@@ -1244,8 +1308,7 @@ ScrPromise *scr_async_spawn(void (*entry)(ScrFiber *, void *), void *argpack) {
   }
   return result;
 #else
-  f->stack = malloc(SCR_FIBER_STACK);
-  if (!f->stack) scr_oom();
+  f->stack = scr_fiber_stack_new();
   getcontext(&f->ctx);
   f->ctx.uc_stack.ss_sp = f->stack;
   f->ctx.uc_stack.ss_size = SCR_FIBER_STACK;
@@ -1668,25 +1731,39 @@ ScrPromise *scr_fsp_stat(ScrStr *path) {
   return scr_promise_settled_ref(st, &scr_stats_retain_v, &scr_stats_release_v, NULL);
 }
 
+ScrPromise *scr_fsp_realpath(ScrStr *path) {
+  return scr_promise_settled_str(scr_fs_realpath_promise(path));
+}
+
+ScrPromise *scr_fsp_lstat(ScrStr *path) {
+  ScrStats *st = scr_fs_lstat(path);
+  return scr_promise_settled_ref(st, &scr_stats_retain_v, &scr_stats_release_v, NULL);
+}
+
 ScrPromise *scr_fsp_rename(ScrStr *oldpath, ScrStr *newpath) {
   scr_fs_rename(oldpath, newpath);
   return scr_promise_settled_void();
 }
 
-/* fs.rename(old, new, cb): the static callback surface. The OS operation
- * starts immediately on a native worker, matching libuv's key contract:
- * while JS/main is synchronously occupied, the filesystem request can still
- * make progress. Only immutable path bytes cross onto the worker. Error
- * construction, callback invocation, and every RC mutation stay on the main
- * runtime thread when a later loop turn observes completion.
+/* Shared native work queue, initially introduced by fs.rename and also used
+ * by node:zlib's callback codecs. Work starts immediately on a native worker,
+ * matching libuv's key contract while JS/main is synchronously occupied.
+ * Error/Buffer construction, callback invocation, and every RC mutation stay
+ * on the main runtime thread when a later loop turn observes completion.
  *
  * A compact operation queue is also the liveness handle: an outstanding
  * callback-style request keeps the loop alive. Four persistent workers mirror
- * libuv's default filesystem concurrency without creating one OS thread per
- * request. A platform mutex publishes each result and the syscall's filesystem
- * effects before the loop removes it from the completion queue. */
+ * libuv's default pool size without creating one OS thread per request. A
+ * platform mutex publishes each result before the loop removes it from the
+ * completion queue. */
 #if !defined(SCR_LIB) && !defined(__wasi__)
 typedef struct ScrFsRenameOp {
+  bool generic;
+  bool ran;
+  void *payload;
+  ScrWorkFn work;
+  ScrWorkFn after;
+  ScrWorkFn destroy;
   ScrStr *oldpath;
   ScrStr *newpath;
   ScrClosure *cb;
@@ -1729,6 +1806,11 @@ static void scr_fs_rename_broadcast(void) { (void)pthread_cond_broadcast(&scr_fs
 #endif
 
 static void scr_fs_rename_op_release(ScrFsRenameOp *op) {
+  if (op->generic) {
+    op->destroy(op->payload);
+    free(op);
+    return;
+  }
   scr_str_release(op->oldpath);
   scr_str_release(op->newpath);
   scr_closure_release(op->cb);
@@ -1748,7 +1830,9 @@ static void scr_fs_rename_worker_loop(void) {
     if (scr_fs_rename_work == NULL) scr_fs_rename_work_tail = &scr_fs_rename_work;
     scr_fs_rename_lock_leave();
 
-    op->error = scr_fs_rename_raw(op->oldpath, op->newpath);
+    if (op->generic) op->work(op->payload);
+    else op->error = scr_fs_rename_raw(op->oldpath, op->newpath);
+    op->ran = true;
 
     scr_fs_rename_lock_enter();
     op->next = NULL;
@@ -1825,6 +1909,12 @@ static bool scr_fs_renames_dispatch(void) {
   scr_fs_rename_lock_leave();
   if (op == NULL) return false;
   scr_fs_rename_pending_count--;
+  if (op->generic) {
+    if (!op->ran) op->work(op->payload);
+    op->after(op->payload);
+    scr_fs_rename_op_release(op);
+    return true;
+  }
   ScrCaught *caught = NULL;
   ScrError *err = NULL;
   if (op->error != 0) {
@@ -1839,11 +1929,65 @@ static bool scr_fs_renames_dispatch(void) {
   scr_fs_rename_op_release(op);
   return true;
 }
+
+static void scr_work_submit_op(ScrFsRenameOp *op) {
+  if (!scr_fs_rename_shutdown_registered) {
+    if (atexit(scr_fs_renames_shutdown) != 0) {
+      scr_trap("scriptc: could not register worker cleanup\n");
+    }
+    scr_fs_rename_shutdown_registered = true;
+  }
+  scr_fs_rename_pending_count++;
+  scr_fs_rename_lock_enter();
+  *scr_fs_rename_work_tail = op;
+  scr_fs_rename_work_tail = &op->next;
+  int create_error = 0;
+  if (scr_fs_rename_worker_count < 4) {
+#ifdef _WIN32
+    HANDLE worker = CreateThread(NULL, 0, scr_fs_rename_worker, NULL, 0, NULL);
+    if (worker != NULL) {
+      scr_fs_rename_workers[scr_fs_rename_worker_count] = worker;
+      scr_fs_rename_worker_count++;
+    } else {
+      create_error = EAGAIN;
+    }
+#else
+    pthread_t worker;
+    create_error = pthread_create(&worker, NULL, scr_fs_rename_worker, NULL);
+    if (create_error == 0) {
+      scr_fs_rename_workers[scr_fs_rename_worker_count] = worker;
+      scr_fs_rename_worker_count++;
+    }
+#endif
+  }
+  if (create_error != 0 && scr_fs_rename_worker_count == 0) {
+    /* Submission failure remains asynchronous. Rename preserves its
+     * resource error; generic work falls back to the main loop turn. */
+    while (scr_fs_rename_work != NULL) {
+      ScrFsRenameOp *failed = scr_fs_rename_work;
+      scr_fs_rename_work = failed->next;
+      failed->error = create_error;
+      failed->ran = !failed->generic;
+      failed->next = NULL;
+      *scr_fs_rename_done_tail = failed;
+      scr_fs_rename_done_tail = &failed->next;
+    }
+    scr_fs_rename_work_tail = &scr_fs_rename_work;
+  } else {
+    scr_fs_rename_signal();
+  }
+  scr_fs_rename_lock_leave();
+}
 #elif defined(__wasi__)
 /* WASI Preview 1 has no threads, but rename itself is available. Queue the
  * request and perform it on the next loop turn so callback timing remains
  * asynchronous and the request remains a liveness handle. */
 typedef struct ScrFsRenameOp {
+  bool generic;
+  void *payload;
+  ScrWorkFn work;
+  ScrWorkFn after;
+  ScrWorkFn destroy;
   ScrStr *oldpath;
   ScrStr *newpath;
   ScrClosure *cb;
@@ -1863,6 +2007,14 @@ static bool scr_fs_renames_dispatch(void) {
   scr_fs_rename_done = op->next;
   if (scr_fs_rename_done == NULL) scr_fs_rename_done_tail = &scr_fs_rename_done;
   scr_fs_rename_pending_count--;
+
+  if (op->generic) {
+    op->work(op->payload);
+    op->after(op->payload);
+    op->destroy(op->payload);
+    free(op);
+    return true;
+  }
 
   int error = scr_fs_rename_raw(op->oldpath, op->newpath);
   ScrCaught *caught = NULL;
@@ -1904,63 +2056,116 @@ void scr_fs_rename_async(ScrStr *oldpath, ScrStr *newpath,
   scr_fs_rename_done_tail = &op->next;
   scr_fs_rename_pending_count++;
 #else
-  if (!scr_fs_rename_shutdown_registered) {
-    if (atexit(scr_fs_renames_shutdown) != 0) {
-      scr_trap("scriptc: could not register fs.rename worker cleanup\n");
-    }
-    scr_fs_rename_shutdown_registered = true;
-  }
   ScrFsRenameOp *op = calloc(1, sizeof *op);
   if (!op) scr_trap("scriptc: out of memory\n");
   op->oldpath = scr_str_retain(oldpath);
   op->newpath = scr_str_retain(newpath);
   op->cb = cb;
   op->fn = fn;
-  scr_fs_rename_pending_count++;
-  scr_fs_rename_lock_enter();
-  *scr_fs_rename_work_tail = op;
-  scr_fs_rename_work_tail = &op->next;
-  int create_error = 0;
-  if (scr_fs_rename_worker_count < 4) {
-#ifdef _WIN32
-    HANDLE worker = CreateThread(NULL, 0, scr_fs_rename_worker, NULL, 0, NULL);
-    if (worker != NULL) {
-      scr_fs_rename_workers[scr_fs_rename_worker_count] = worker;
-      scr_fs_rename_worker_count++;
-    } else {
-      create_error = EAGAIN;
-    }
-#else
-    pthread_t worker;
-    create_error = pthread_create(&worker, NULL, scr_fs_rename_worker, NULL);
-    if (create_error == 0) {
-      scr_fs_rename_workers[scr_fs_rename_worker_count] = worker;
-      scr_fs_rename_worker_count++;
-    }
+  scr_work_submit_op(op);
 #endif
-  }
-  if (create_error != 0 && scr_fs_rename_worker_count == 0) {
-    /* Submission failure is still callback-asynchronous. No worker exists,
-     * so publish every queued request as the same resource error. */
-    while (scr_fs_rename_work != NULL) {
-      ScrFsRenameOp *failed = scr_fs_rename_work;
-      scr_fs_rename_work = failed->next;
-      failed->error = create_error;
-      failed->next = NULL;
-      *scr_fs_rename_done_tail = failed;
-      scr_fs_rename_done_tail = &failed->next;
-    }
-    scr_fs_rename_work_tail = &scr_fs_rename_work;
-  } else {
-    scr_fs_rename_signal();
-  }
-  scr_fs_rename_lock_leave();
+}
+
+void scr_work_submit(void *payload, ScrWorkFn work, ScrWorkFn after,
+                     ScrWorkFn destroy) {
+#if defined(SCR_LIB)
+  (void)work; (void)after;
+  destroy(payload);
+  scr_trap("scriptc: native worker jobs are not supported by this target\n");
+#elif defined(__wasi__)
+  ScrFsRenameOp *op = calloc(1, sizeof *op);
+  if (!op) scr_trap("scriptc: out of memory\n");
+  op->generic = true;
+  op->payload = payload;
+  op->work = work;
+  op->after = after;
+  op->destroy = destroy;
+  *scr_fs_rename_done_tail = op;
+  scr_fs_rename_done_tail = &op->next;
+  scr_fs_rename_pending_count++;
+#else
+  ScrFsRenameOp *op = calloc(1, sizeof *op);
+  if (!op) scr_trap("scriptc: out of memory\n");
+  op->generic = true;
+  op->payload = payload;
+  op->work = work;
+  op->after = after;
+  op->destroy = destroy;
+  scr_work_submit_op(op);
 #endif
 }
 
 void scr_fs_rename_thunk0(ScrClosure *cb, ScrError *err) {
   (void)err;
   ((void (*)(ScrClosure *))cb->fn)(cb);
+}
+
+/* Callback-style crypto completions. The operation validates and computes
+ * before enqueueing; delivery is a later macrotask, never synchronous with
+ * the API call. The queue owns both references and transfers the Buffer to
+ * the emitted callback adapter. */
+typedef struct ScrCryptoBytesOp {
+  ScrBytes *value;
+  ScrClosure *cb;
+  ScrCryptoBytesFn fn;
+  struct ScrCryptoBytesOp *next;
+} ScrCryptoBytesOp;
+
+static ScrCryptoBytesOp *scr_crypto_bytes_head = NULL;
+static ScrCryptoBytesOp **scr_crypto_bytes_tail = &scr_crypto_bytes_head;
+static size_t scr_crypto_bytes_pending_count = 0;
+static bool scr_crypto_bytes_cleanup_registered = false;
+
+static void scr_crypto_bytes_shutdown(void) {
+  while (scr_crypto_bytes_head != NULL) {
+    ScrCryptoBytesOp *op = scr_crypto_bytes_head;
+    scr_crypto_bytes_head = op->next;
+    scr_bytes_release(op->value);
+    scr_closure_release(op->cb);
+    free(op);
+  }
+  scr_crypto_bytes_tail = &scr_crypto_bytes_head;
+  scr_crypto_bytes_pending_count = 0;
+}
+
+static bool scr_crypto_bytes_pending(void) {
+  return scr_crypto_bytes_pending_count != 0;
+}
+
+static bool scr_crypto_bytes_dispatch(void) {
+  ScrCryptoBytesOp *op = scr_crypto_bytes_head;
+  if (op == NULL) return false;
+  scr_crypto_bytes_head = op->next;
+  if (scr_crypto_bytes_head == NULL) scr_crypto_bytes_tail = &scr_crypto_bytes_head;
+  scr_crypto_bytes_pending_count--;
+  op->fn(op->cb, op->value); /* adapter consumes value */
+  scr_closure_release(op->cb);
+  free(op);
+  return true;
+}
+
+void scr_crypto_defer_bytes(ScrBytes *value, ScrClosure *cb, ScrCryptoBytesFn fn) {
+  if (!scr_crypto_bytes_cleanup_registered) {
+    if (atexit(scr_crypto_bytes_shutdown) != 0) {
+      scr_bytes_release(value);
+      scr_closure_release(cb);
+      scr_trap("scriptc: could not register crypto callback cleanup\n");
+    }
+    scr_crypto_bytes_cleanup_registered = true;
+  }
+  ScrCryptoBytesOp *op = malloc(sizeof *op);
+  if (!op) {
+    scr_bytes_release(value);
+    scr_closure_release(cb);
+    scr_trap("scriptc: out of memory\n");
+  }
+  op->value = value;
+  op->cb = cb;
+  op->fn = fn;
+  op->next = NULL;
+  *scr_crypto_bytes_tail = op;
+  scr_crypto_bytes_tail = &op->next;
+  scr_crypto_bytes_pending_count++;
 }
 
 /* ── node:timers/promises ────────────────────────────────────────────
@@ -2331,13 +2536,18 @@ bool scr_loop_run(ScrPromise *top_level) {
      * here would walk the whole live heap every turn, which is precisely
      * what the generations exist to avoid. No-op on an empty buffer. */
     scr_cyc_collect_scheduled();
-    /* Completed callback-style filesystem work is delivered on the main
+    /* Completed callback-style worker jobs are delivered on the main
      * runtime thread. A worker may have finished while synchronous user code
      * occupied that thread. Deliver exactly one completion per checkpoint:
      * Node drains nextTicks and microtasks after each native callback before
      * invoking the next ready callback. */
     if (scr_fs_renames_pending()) {
       bool dispatched = scr_fs_renames_dispatch();
+      if (scr_exc_pending()) return false;
+      if (dispatched) continue;
+    }
+    if (scr_crypto_bytes_pending()) {
+      bool dispatched = scr_crypto_bytes_dispatch();
       if (scr_exc_pending()) return false;
       if (dispatched) continue;
     }
@@ -2416,7 +2626,7 @@ bool scr_loop_run(ScrPromise *top_level) {
           (scr_dgram_pending_fn != NULL && scr_dgram_pending_fn()) ||
           (scr_watch_pending_fn != NULL && scr_watch_pending_fn()) ||
           (scr_ffi_pending_fn != NULL && scr_ffi_pending_fn()) ||
-          scr_fs_renames_pending();
+          scr_fs_renames_pending() || scr_crypto_bytes_pending();
       if (held) {
         scr_children_poll();
         if (scr_exc_pending()) return false; /* uncaught throw in a listener */
@@ -2437,13 +2647,14 @@ bool scr_loop_run(ScrPromise *top_level) {
     bool watch = scr_watch_pending_fn != NULL && scr_watch_pending_fn();
     bool ffi = scr_ffi_pending_fn != NULL && scr_ffi_pending_fn();
     bool renames = scr_fs_renames_pending();
+    bool crypto = scr_crypto_bytes_pending();
     /* Timer liveness counts only REF'd timers: an unref'd timer stays in
      * the heap (and fires if the loop runs on for other reasons) but does
      * not by itself keep the process alive — Node's unref semantics.
      * Children follow the same rule: an unref'd child is still REAPED
      * while the loop runs (kids drives the sweeps and sleeps above) but
      * only reffed ones keep the process alive. */
-    if (scr_reffed_timers == 0 && scr_reffed_immediates == 0 && !scr_children_reffed_pending() && !io && !events && !net && !dgram && !watch && !ffi && !renames) break;
+    if (scr_reffed_timers == 0 && scr_reffed_immediates == 0 && !scr_children_reffed_pending() && !io && !events && !net && !dgram && !watch && !ffi && !renames && !crypto) break;
     /* Sleep to the earliest deadline, then run every due timer (each may
      * enqueue microtasks, which the next iteration drains first). Who
      * sleeps depends on what is pending:
@@ -2464,7 +2675,7 @@ bool scr_loop_run(ScrPromise *top_level) {
      * - timers only: plain nanosleep to the deadline. */
     double now = scr_now_ms();
     double due = scr_ntimers > 0 ? scr_timers[0].deadline_ms : now + SCR_IO_POLL_MS;
-    /* The rename worker has no platform poll handle yet. Bound the idle
+    /* The worker pool has no platform poll handle yet. Bound the idle
      * wait exactly like the portable child fallback so completion is noticed
      * promptly even when another poller owns the sleep. */
     if (renames && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
@@ -2477,6 +2688,14 @@ bool scr_loop_run(ScrPromise *top_level) {
     /* Pending immediates are always-ready work: no sleep — run due timers
      * (Node's timers phase precedes check), then the check phase below. */
     if (scr_pending_immediates > 0) due = now;
+    /* Child polling can drain a pipe into the IPC queue after its dispatch
+     * station has run. Completed sends and disconnects can also become ready
+     * during that turn. No fd will wake us for this userspace work: return to
+     * dispatch without sleeping, still allowing due timers and immediates. */
+    if (scr_children_ready()) due = now;
+#if !defined(_WIN32) && !defined(__wasi__)
+    if (due > now) scr_fiber_stacks_clear();
+#endif
     bool evw = scr_events_watching_fn != NULL && scr_events_watching_fn();
     if (io) {
       if (kids && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
@@ -3065,8 +3284,7 @@ static ScrGen *scr_gen_new_common(void (*entry)(ScrFiber *, void *), void *argpa
 #elif defined(__wasi__)
   f->ctx = 0;
 #else
-  f->stack = malloc(SCR_FIBER_STACK);
-  if (!f->stack) scr_oom();
+  f->stack = scr_fiber_stack_new();
   getcontext(&f->ctx);
   f->ctx.uc_stack.ss_sp = f->stack;
   f->ctx.uc_stack.ss_size = SCR_FIBER_STACK;

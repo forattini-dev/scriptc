@@ -14,4 +14,4 @@ multiple-errors.ts:13:13 - error SC1040: loose equality (== and !=) is not suppo
      |             ^~~~~~~~~~~
   14 | 
 
-  hint: use === / !== ('x == null' / 'x != null' — the null-or-undefined test — is supported; other loose comparisons need dynamic coercion semantics)
+  hint: object-to-primitive loose equality can call user-defined valueOf/toString methods — compare explicit primitive conversions instead

@@ -1,6 +1,6 @@
-// SC2007: values of overloaded function type — a compiled function VALUE is
-// one concrete signature. Calls of overloaded declarations resolve per call
-// site; it is the value position that fences.
+// Immutable aliases of overloaded DECLARATIONS project back onto the one
+// implementation and resolve each call per site. The structural overload
+// below remains SC2007: it has no declaration implementation to project.
 
 function pick(x: "a"): string;
 function pick(x: "b"): number;

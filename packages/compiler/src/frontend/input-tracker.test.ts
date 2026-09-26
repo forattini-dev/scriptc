@@ -8,6 +8,7 @@ import {
   trackedAccessibleEntries,
   trackedDirectoryExists,
   trackedFileExists,
+  markFrontendInputsUnstable,
   trackedReadFile,
   validFrontendInputSnapshot,
 } from "./input-tracker.js";
@@ -84,6 +85,14 @@ test("a candidate appearing during the frontend prevents cache publication", asy
   expect(snapshot.stable).toBe(false);
   expect(validFrontendInputSnapshot(snapshot)).toBe(false);
   expect(frontendInputsStillMatch(snapshot)).toBe(false);
+});
+
+test("an opaque host query can decline frontend cache publication", () => {
+  const tracker = new FrontendInputTracker();
+  tracker.run(() => markFrontendInputsUnstable());
+  const snapshot = tracker.snapshot();
+  expect(snapshot.stable).toBe(false);
+  expect(validFrontendInputSnapshot(snapshot)).toBe(false);
 });
 
 test("directory enumeration invalidates workspace discovery", async () => {

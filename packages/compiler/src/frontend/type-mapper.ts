@@ -3257,8 +3257,17 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     const armOk = (a: IrType): boolean =>
       a.kind === "f64" || a.kind === "string" || a.kind === "undefinedT" ||
       (a.kind === "array" && a.elem.kind === "string");
+    // A pure Dict<string[]> is the distinct-header shape, not a general
+    // outgoing-header slot: retain its precise string[] | undefined value
+    // so reads from a materialized headersDistinct/trailersDistinct record
+    // can use array methods without an assertion.
+    const distinctOnly = slotDef !== undefined &&
+      checker.getPropertiesOfType(widened).length === 0 &&
+      slotDef.arms.length === 2 &&
+      slotDef.arms.some((a) => a.kind === "array" && a.elem.kind === "string") &&
+      slotDef.arms.some((a) => a.kind === "undefinedT");
     if (
-      slotDef !== undefined &&
+      slotDef !== undefined && !distinctOnly &&
       slotDef.arms.some((a) => a.kind === "array" && a.elem.kind === "string") &&
       slotDef.arms.every(armOk)
     ) {

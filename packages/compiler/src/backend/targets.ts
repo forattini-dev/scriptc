@@ -23,6 +23,50 @@ export type NativeTargetName =
 export type NativeObjectFormat = "macho" | "elf" | "coff" | "wasm";
 export type NativeTargetPlatform = "darwin" | "linux" | "win32" | "wasi";
 
+export type WindowsSubsystem = "console" | "gui";
+
+/** Select the PE subsystem through either supported compiler-driver route.
+ * An omitted or explicit console selection retains the driver's default. */
+export function windowsSubsystemLinkerArgs(
+  platform: string,
+  subsystem: WindowsSubsystem | undefined,
+): string[] {
+  if (subsystem === undefined) return [];
+  if (subsystem !== "console" && subsystem !== "gui") {
+    throw new Error(`unknown Windows subsystem '${String(subsystem)}' (supported: console, gui)`);
+  }
+  if (platform !== "win32") {
+    throw new Error("--windows-subsystem requires a Windows executable target");
+  }
+  return subsystem === "gui" ? ["-Wl,--subsystem,windows"] : [];
+}
+
+/** Linker flags that belong to an optimization posture rather than the
+ * target ABI. Zig's WASI runtime objects carry DWARF custom sections even
+ * when compiled with -O2; release executables discard that non-runtime
+ * payload, while dev executables retain it for inspection and debugging. */
+export function executableOptimizationLinkerArgs(
+  platform: string,
+  optimization: "release" | "dev",
+): string[] {
+  return platform === "wasi" && optimization === "release"
+    ? ["-Wl,--strip-debug"]
+    : [];
+}
+
+/** Remove symbol/debug payload at link time so the executable cache stores
+ * the same bytes the user receives, including for cross-compiled targets. */
+export function executableStripLinkerArgs(platform: string, strip: boolean): string[] {
+  if (!strip) return [];
+  switch (platform) {
+    case "darwin": return ["-Wl,-S,-x"];
+    case "linux":
+    case "win32": return ["-Wl,-s"];
+    case "wasi": return ["-Wl,--strip-all"];
+    default: throw new Error(`--strip is not supported for the ${platform} executable target`);
+  }
+}
+
 export interface NativeTargetSpec {
   /** Stable scriptc-facing identity used in cache keys and diagnostics. */
   name: NativeTargetName;

@@ -78,16 +78,28 @@ hello.ir.json
 $ scriptc build hello.ts --emit=c >/dev/null
 $ ls .scriptc/
 hello.c
+hello.ir.json
 $ scriptc build hello.ts --emit=llvm >/dev/null
 $ ls .scriptc/
+hello.c
+hello.ir.json
 hello.ll
 $ scriptc build hello.ts --emit=asm >/dev/null
 $ ls .scriptc/
+hello.c
+hello.ir.json
+hello.ll
 hello.s
 $ scriptc build hello.ts --emit=obj >/dev/null
 $ ls .scriptc/
+hello.c
+hello.ir.json
+hello.ll
 hello.o
+hello.s
 ```
+
+Different output kinds accumulate in `.scriptc/`; rebuilding a kind updates its file.
 
 `--emit=obj` writes a relocatable program object, not a standalone library. It
 has undefined `scr_*` runtime references and a required

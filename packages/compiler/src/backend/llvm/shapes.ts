@@ -24,6 +24,7 @@ import {
   mangleRecordStruct,
   mangleRecordTrace,
 } from "../mangle.js";
+import { llvmCommentText } from "./common.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 
 /** What the tables need from the emitter: the extern-declaration ledger
@@ -301,6 +302,7 @@ export function arrNewCall(host: ShapeHost, elem: IrType, capText: string): stri
   const useRef =
     elem.kind === "record" || elem.kind === "object" || elem.kind === "union" || elem.kind === "func" ||
     elem.kind === "symbol" || // symbol identities: scr_sym_* adapters, no trace
+    elem.kind === "bigint" || // immutable numeric values: scr_bigint_* adapters
     elem.kind === "classval" || // class objects: no-op adapters, no trace (immortal statics)
     elem.kind === "promise" || // promise entries (Promise.all inputs): full REF story
     elem.kind === "child" || // spawned child handles: scr_child_* adapters, no trace
@@ -336,13 +338,13 @@ export function boxNewCall(host: ShapeHost, t: IrType): string {
   }
   if (
     t.kind === "record" || t.kind === "object" || t.kind === "classval" || t.kind === "union" ||
-    t.kind === "array" || t.kind === "map" || t.kind === "set" || t.kind === "symbol" || t.kind === "regex" ||
+    t.kind === "array" || t.kind === "map" || t.kind === "set" || t.kind === "symbol" || t.kind === "bigint" || t.kind === "regex" ||
     t.kind === "promise" || t.kind === "bytes" || t.kind === "url" || t.kind === "searchParams" ||
-    t.kind === "stats" || t.kind === "fileHandle" || t.kind === "spawnRes" || t.kind === "child" || t.kind === "childStream" ||
+    t.kind === "stats" || t.kind === "fileHandle" || t.kind === "spawnRes" || t.kind === "child" || t.kind === "childStream" || t.kind === "childWriter" ||
     t.kind === "generator" ||
     t.kind === "netServer" || t.kind === "netSocket" || t.kind === "dgramSocket" ||
     t.kind === "httpReq" || t.kind === "httpRes" || t.kind === "httpClientReq" ||
-    t.kind === "secureCtx" || t.kind === "testCtx" ||
+    t.kind === "secureCtx" || t.kind === "cryptoHash" || t.kind === "cryptoHmac" || t.kind === "testCtx" ||
     // Island handles: the box carries scr_jsval_retain_v/release_v and
     // no trace — the same stance as jsval array elements.
     t.kind === "jsval" ||
@@ -506,7 +508,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
     if (shape.indexValue) fieldTys.push("ptr"); // the overflow ScrMap *
     typeDefs.push(
       `%${struct} = type { ${host.sizeType}${fieldTys.length ? ", " + fieldTys.join(", ") : ""} } ` +
-        `; record ${shape.id} { ${shape.fields.map((f) => f.name).join("; ")}${shape.indexValue ? "; [key: string]" : ""} }`,
+        `; record ${shape.id} { ${shape.fields.map((f) => llvmCommentText(f.name)).join("; ")}${shape.indexValue ? "; [key: string]" : ""} }`,
     );
   }
 
@@ -533,7 +535,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
       freeBody.push(
         `  %f${t} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${m.index}`,
         `  %v${t} = load ptr, ptr %f${t}`,
-        `  call void ${releaseSym(host, m.type)}(ptr %v${t}) ; ${m.name}`,
+        `  call void ${releaseSym(host, m.type)}(ptr %v${t}) ; ${llvmCommentText(m.name)}`,
       );
       t++;
     }
@@ -613,7 +615,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
         }
         clone.push(
           `  %dp${i} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${index}`,
-          `  store ${fieldTy} ${stored}, ptr %dp${i} ; ${field.name}`,
+          `  store ${fieldTy} ${stored}, ptr %dp${i} ; ${llvmCommentText(field.name)}`,
         );
         i++;
       }
@@ -635,7 +637,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
         tr.push(
           `  %f${i} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${m.index}`,
           `  %v${i} = load ptr, ptr %f${i}`,
-          `  call void %visit(ptr %v${i}, ptr %ctx) ; ${m.name}`,
+          `  call void %visit(ptr %v${i}, ptr %ctx) ; ${llvmCommentText(m.name)}`,
         );
       });
       tr.push(`  ret void`, `}`, ``);
@@ -649,7 +651,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
         gf.push(
           `  %f${i} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${m.index}`,
           `  %v${i} = load ptr, ptr %f${i}`,
-          `  call void ${releaseSym(host, m.type)}(ptr %v${i}) ; ${m.name} (acyclic)`,
+          `  call void ${releaseSym(host, m.type)}(ptr %v${i}) ; ${llvmCommentText(m.name)} (acyclic)`,
         );
       });
       gf.push(`  call void @scr_obj_free_note()`, `  call void @scr_cyc_free(ptr %o)`, `  ret void`, `}`, ``);

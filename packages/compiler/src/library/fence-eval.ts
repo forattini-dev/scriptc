@@ -443,10 +443,16 @@ function surfaceMatchesDiag(
   diag: ScrDiagnostic,
 ): boolean {
   if (surface.code === undefined || surface.code !== diag.code) return false;
-  // A diagnostic-fence entry IS the code family; member entries must also
-  // appear by name in the refusal's message (SC2020/SC2012 refusals spell
-  // the surface exactly as the manifest names it).
-  return surface.kind === "diagnostic-fence" || diag.message.includes(surface.name);
+  // A diagnostic-fence entry IS the code family. Method refusals use a
+  // receiver description instead of the manifest's prototype spelling.
+  if (surface.kind === "diagnostic-fence" || diag.message.includes(surface.name)) return true;
+  for (const [prefix, receiver] of [["number.prototype.", "numbers"], ["string.prototype.", "strings"]] as const) {
+    if (surface.name.startsWith(prefix)) {
+      const method = surface.name.slice(prefix.length);
+      return diag.message.includes(`'.${method}()' on ${receiver}`);
+    }
+  }
+  return false;
 }
 
 function teachingForRefusal(profile: FenceProfileView, diag: ScrDiagnostic): string | undefined {

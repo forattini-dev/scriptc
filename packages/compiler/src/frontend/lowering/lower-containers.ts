@@ -8,7 +8,7 @@ import { InternalCompilerError } from "../../errors.js";
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, BYTES_U8, CAUGHT, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/ir.js";
+import { BOOL, BYTES_U8, CAUGHT, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/ir.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
@@ -16,10 +16,45 @@ import { isJsSourceFile, locOf } from "../program.js";
 import { islandPrimitiveExit, lowerDynDispatchMethodCall } from "./lower-calls.js";
 import { buildArraySortFn, buildBytesSortFn } from "./lower-array-sort.js";
 import { arrayValueRead, arrayValueStore, arrayValueType } from "./array-values.js";
+import { lowerArrayCopyWithin, lowerArrayFill } from "./array-indexed-mutation.js";
+import { tryLowerExpression } from "./expressions/try-lower-expression.js";
 import { provesWrittenNullishFilter } from "./nullish-filter-proof.js";
 import { typeKey } from "../type-mapper.js";
 import { dynUndefinedExpr, own, WidthLift } from "./lowerer.js";
-import { boolLit, countedFor, numLit, varRef } from "../../ir/build.js";
+import { boolLit, countedFor, numLit, strLit, varRef } from "../../ir/build.js";
+import { lowerPositionArgument, positionNumber } from "./optional-arguments.js";
+
+function primitivePositionType(lowerer: Lowerer, type: IrType): boolean {
+  if (type.kind === "union") {
+    return lowerer.unions.get(type.unionId)?.arms.every((arm) => primitivePositionType(lowerer, arm)) ?? false;
+  }
+  return type.kind === "f64" || type.kind === "string" || type.kind === "bool" ||
+    type.kind === "nullT" || type.kind === "undefinedT";
+}
+
+function lowerArrayPosition(
+  lowerer: Lowerer,
+  node: ts.Expression | undefined,
+  defaultValue: IrExpr,
+  subject: string,
+): IrExpr {
+  if (!node) return defaultValue;
+  if (ts.isSpreadElement(node)) lowerer.noLowering(`${subject} with a spread argument`, node);
+  const value = lowerPositionArgument(lowerer, node, defaultValue);
+  if (!primitivePositionType(lowerer, value.type)) {
+    lowerer.noLowering(`${subject} of '${lowerer.fmt(value.type)}' values`, node);
+  }
+  const loc = locOf(node);
+  const local = lowerer.declareHiddenLocal("%arrayPosition", value.type);
+  const ref = varRef(local.id, value.type, loc);
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: local.id, init: value, loc }],
+    result: positionNumber(lowerer, ref, defaultValue, node, subject),
+    type: F64,
+    loc,
+  };
+}
 
 /** Lower an expression whose checker type is statically `undefined`/`void`.
  * Optional builtin arguments use this before their ordinary expected-type
@@ -106,6 +141,74 @@ function lowerOptionalDefaultArg(
     }
   }
   return lowerer.coerceInto(node, value, expected);
+}
+
+function lowerArraySpreadItems(
+  lowerer: Lowerer,
+  nodes: readonly ts.Expression[],
+  elem: IrType,
+  arrType: IrType & { kind: "array" },
+  loc: SrcLoc,
+): IrExpr {
+  const out = lowerer.declareHiddenLocal("%arrayItems", arrType);
+  const outRef = varRef(out.id, arrType, loc);
+  const length = (): IrExpr => ({ kind: "arrIntrinsic", method: "length", receiver: outRef, args: [], type: F64, loc });
+  const body: IrStmt[] = [
+    { kind: "varDecl", localId: out.id, init: { kind: "arrayLit", elems: [], type: arrType, loc }, loc },
+  ];
+  for (const node of nodes) {
+    if (ts.isSpreadElement(node)) {
+      const source = lowerer.lowerExpr(node.expression);
+      if (!typeEquals(source.type, arrType)) {
+        lowerer.noLowering(`Array insertion spread from '${lowerer.fmt(source.type)}'`, node);
+      }
+      body.push({
+        kind: "exprStmt",
+        expr: { kind: "arrIntrinsic", method: "pushSpread", receiver: outRef, args: [source], type: F64, loc },
+        loc,
+      });
+    } else {
+      const value = lowerer.lowerExpr(node);
+      const stored = lowerer.runtimeOptionalWidening(value.type, elem) !== null
+        ? value : lowerer.coerceInto(node, value, elem);
+      body.push(arrayValueStore(lowerer, outRef, length(), stored, elem, loc));
+    }
+  }
+  return { kind: "seqExpr", stmts: body, result: outRef, type: arrType, loc };
+}
+
+function lowerArrayJoinSeparator(lowerer: Lowerer, node: ts.Expression | undefined, loc: SrcLoc): IrExpr {
+  const comma = strLit(",", loc);
+  if (!node) return comma;
+  const undefinedValue = lowerStaticallyUndefinedArg(lowerer, node);
+  if (undefinedValue) return defaultAfterUndefined(undefinedValue, comma);
+  const value = lowerer.lowerExpr(node);
+  if (value.type.kind === "nullT") return defaultAfterUndefined(value, strLit("null", loc));
+  if (value.type.kind === "union") {
+    const undefinedTag = lowerer.armTag(value.type.unionId, UNDEFINED_T);
+    if (undefinedTag >= 0) {
+      const local = lowerer.declareHiddenLocal("%joinSeparator", value.type);
+      const ref = varRef(local.id, value.type, loc);
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "varDecl", localId: local.id, init: value, loc }],
+        result: {
+          kind: "ternary",
+          cond: { kind: "unionIsTag", unionId: value.type.unionId, tag: undefinedTag, value: ref, negated: false, type: BOOL, loc },
+          then: comma,
+          else_: lowerer.ensureString(ref, node),
+          type: STRING,
+          loc,
+        },
+        type: STRING,
+        loc,
+      };
+    }
+  }
+  if (value.type.kind === "dyn" || value.type.kind === "jsval") {
+    lowerer.noLowering(".join separator with a runtime-dependent undefined value", node);
+  }
+  return lowerer.ensureString(value, node);
 }
 
 /** Build the argument array for a mutating/copying operation while keeping
@@ -306,24 +409,68 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
         loc,
       };
     }
+    if (name === "fill") {
+      if (call.arguments.length > 3 || call.arguments.some(ts.isSpreadElement)) {
+        lowerer.noLowering(`.fill with ${call.arguments.length} arguments`, call);
+      }
+      const value = call.arguments[0] ? lowerer.lowerExpr(call.arguments[0]) : null;
+      if (value && (value.type.kind === "dyn" || value.type.kind === "jsval") &&
+        isRefCounted(elem) && elem.kind !== "string" && !typeEquals(value.type, elem)) {
+        lowerer.noLowering(".fill of a checked-dynamic reference into a static array", call.arguments[0]!);
+      }
+      const writeUndefined = value === null || value.type.kind === "undefinedT";
+      return lowerArrayFill(
+        lowerer,
+        lowerer.lowerExpr(access.expression),
+        value,
+        writeUndefined,
+        lowerArrayPosition(lowerer, call.arguments[1], numLit(0, loc), "array fill start"),
+        lowerArrayPosition(lowerer, call.arguments[2], numLit(Infinity, loc), "array fill end"),
+        receiverIr,
+        loc,
+      );
+    }
+    if (name === "copyWithin") {
+      if (call.arguments.length > 3 || call.arguments.some(ts.isSpreadElement)) {
+        lowerer.noLowering(`.copyWithin with ${call.arguments.length} arguments`, call);
+      }
+      return lowerArrayCopyWithin(
+        lowerer,
+        lowerer.lowerExpr(access.expression),
+        lowerArrayPosition(lowerer, call.arguments[0], numLit(0, loc), "array copyWithin target"),
+        lowerArrayPosition(lowerer, call.arguments[1], numLit(0, loc), "array copyWithin start"),
+        lowerArrayPosition(lowerer, call.arguments[2], numLit(Infinity, loc), "array copyWithin end"),
+        receiverIr,
+        loc,
+      );
+    }
     if (name === "with") {
       if (call.arguments.length !== 2 || call.arguments.some(ts.isSpreadElement)) {
         lowerer.noLowering(`.with with ${call.arguments.length} arguments`, call);
       }
       const receiver = lowerer.lowerExpr(access.expression);
-      const index = lowerer.lowerExprExpecting(call.arguments[0]!, F64);
+      const index = lowerPositionArgument(lowerer, call.arguments[0]!, numLit(0, loc));
+      if (!primitivePositionType(lowerer, index.type)) {
+        lowerer.noLowering(`.with index of '${lowerer.fmt(index.type)}' values`, call.arguments[0]!);
+      }
       const value = lowerer.lowerExpr(call.arguments[1]!);
+      const receiverLocal = lowerer.declareHiddenLocal("%withRecv", receiverIr);
+      const indexLocal = lowerer.declareHiddenLocal("%withIndex", index.type);
+      const valueLocal = lowerer.declareHiddenLocal("%withValue", value.type);
+      const receiverRef = varRef(receiverLocal.id, receiverIr, loc);
+      const indexRef = varRef(indexLocal.id, index.type, loc);
+      const valueRef = varRef(valueLocal.id, value.type, loc);
+      const numericIndex = positionNumber(lowerer, indexRef, numLit(0, loc), call.arguments[0]!, "array with index");
+      const stmts: IrStmt[] = [
+        { kind: "varDecl", localId: receiverLocal.id, init: receiver, loc },
+        { kind: "varDecl", localId: indexLocal.id, init: index, loc },
+        { kind: "varDecl", localId: valueLocal.id, init: value, loc },
+      ];
       if (value.type.kind === "union" && lowerer.runtimeOptionalWidening(value.type, elem) !== null) {
         // `.with()` validates its index and returns a fresh copy. Stabilize
         // all three operands, then select the scalar replacement or the
         // present-undefined copy without evaluating a read twice.
-        const receiverLocal = lowerer.declareHiddenLocal("%withRecv", receiverIr);
-        const indexLocal = lowerer.declareHiddenLocal("%withIndex", F64);
-        const valueLocal = lowerer.declareHiddenLocal("%withValue", value.type);
         const unionId = value.type.unionId;
-        const receiverRef = varRef(receiverLocal.id, receiverIr, loc);
-        const indexRef = varRef(indexLocal.id, F64, loc);
-        const valueRef = varRef(valueLocal.id, value.type, loc);
         const undefTag = lowerer.armTag(unionId, UNDEFINED_T);
         const condition: IrExpr = {
           kind: "unionIsTag",
@@ -338,7 +485,7 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
           kind: "arrIntrinsic",
           method: "withUndefined",
           receiver: receiverRef,
-          args: [indexRef],
+          args: [numericIndex],
           type: receiverIr,
           loc,
         };
@@ -346,64 +493,46 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
           kind: "arrIntrinsic",
           method: "with",
           receiver: receiverRef,
-          args: [indexRef, lowerer.coerceToExpected(valueRef, elem)],
+          args: [numericIndex, lowerer.coerceToExpected(valueRef, elem)],
           type: receiverIr,
           loc,
         };
         return {
           kind: "seqExpr",
-          stmts: [
-            { kind: "varDecl", localId: receiverLocal.id, init: receiver, loc },
-            { kind: "varDecl", localId: indexLocal.id, init: index, loc },
-            { kind: "varDecl", localId: valueLocal.id, init: value, loc },
-          ],
+          stmts,
           result: { kind: "ternary", cond: condition, then: missing, else_: present, type: receiverIr, loc },
           type: receiverIr,
           loc,
         };
       }
-      const coercedValue = lowerer.coerceInto(call.arguments[1]!, value, elem);
+      const coercedValue = lowerer.coerceInto(call.arguments[1]!, valueRef, elem);
       return {
-        kind: "arrIntrinsic",
-        method: "with",
-        receiver,
-        args: [index, coercedValue],
+        kind: "seqExpr",
+        stmts,
+        result: { kind: "arrIntrinsic", method: "with", receiver: receiverRef, args: [numericIndex, coercedValue], type: receiverIr, loc },
         type: receiverIr,
         loc,
       };
     }
     if (name === "toSpliced") {
-      if (call.arguments.some(ts.isSpreadElement)) {
-        lowerer.unsupported("SC1090", call, "spread arguments to Array.toSpliced");
-      }
       const receiver = lowerer.lowerExpr(access.expression);
-      const start = call.arguments[0]
-        ? lowerer.lowerExprExpecting(call.arguments[0], F64)
-        : { kind: "numLit" as const, value: 0, type: F64, loc };
-      const deleteCountDefault: IrExpr = {
-        kind: "numLit",
-        value: NaN,
-        type: F64,
-        loc,
-      };
-      const deleteCount =
-        call.arguments.length === 0
-          ? { kind: "numLit" as const, value: 0, type: F64, loc }
-          : call.arguments[1]
-            ? lowerOptionalDefaultArg(
-                lowerer,
-                call.arguments[1],
-                F64,
-                deleteCountDefault,
-              )
-            : { kind: "numLit" as const, value: Infinity, type: F64, loc };
+      const start = lowerArrayPosition(lowerer, call.arguments[0], numLit(0, loc), "array toSpliced start");
+      const deleteCount = lowerArrayPosition(
+        lowerer,
+        call.arguments[1],
+        numLit(call.arguments.length === 1 ? Infinity : 0, loc),
+        "array toSpliced deleteCount",
+      );
       const itemNodes = call.arguments.slice(2);
-      const itemProbes = itemNodes.map((arg) => probeLower(lowerer, arg));
+      const hasSpread = itemNodes.some(ts.isSpreadElement);
+      const itemProbes = hasSpread ? [] : itemNodes.map((arg) => tryLowerExpression(lowerer, arg));
       const statefulItems = itemProbes.some((probe) =>
         probe !== null && lowerer.runtimeOptionalWidening(probe.type, elem) !== null);
-      const items: IrExpr = statefulItems
-        ? lowerArrayValueItems(lowerer, itemNodes.map((arg) => lowerer.lowerExpr(arg)), elem, receiverIr, loc)
-        : {
+      const items: IrExpr = hasSpread
+        ? lowerArraySpreadItems(lowerer, itemNodes, elem, receiverIr, loc)
+        : statefulItems
+          ? lowerArrayValueItems(lowerer, itemNodes.map((arg) => lowerer.lowerExpr(arg)), elem, receiverIr, loc)
+          : {
             kind: "arrayLit",
             elems: itemNodes.map((arg) => lowerer.coerceInto(arg, lowerer.lowerExpr(arg), elem)),
             type: receiverIr,
@@ -418,38 +547,32 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
         loc,
       };
     }
+    if (name === "flat") return lowerArrayFlatCall(lowerer, call, access, receiverIr);
 
-    // The lib declares wider call forms than the lowered surface —
-    // indexOf/includes take a fromIndex, join's separator is optional, the
+    // The lib declares wider call forms than the lowered surface — the
     // predicate/mapping HOFs take a thisArg. Each unlowered form is fenced
     // per site (SC2020), never silently truncated to the supported
     // arguments. push/unshift lower every declared form (variadic, 0 args
     // included — Node returns the unchanged length); reduce/reduceRight
     // lower both declared forms (with and without an initial value).
     const arity = {
-      push: [0, Number.MAX_SAFE_INTEGER], unshift: [0, Number.MAX_SAFE_INTEGER], pop: [0, 0], indexOf: [1, 1], includes: [1, 1], join: [0, 1],
+      push: [0, Number.MAX_SAFE_INTEGER], unshift: [0, Number.MAX_SAFE_INTEGER], pop: [0, 0], indexOf: [1, 2], lastIndexOf: [1, 2], includes: [0, 2], join: [0, 1],
       concat: [0, Number.MAX_SAFE_INTEGER],
-      slice: [0, 2], shift: [0, 0], splice: [1, 2], at: [1, 1],
+      slice: [0, 2], shift: [0, 0], splice: [0, Number.MAX_SAFE_INTEGER], at: [0, 1],
       map: [1, 1], filter: [1, 1], forEach: [1, 1], find: [1, 1], findIndex: [1, 1], some: [1, 1],
       findLast: [1, 1], findLastIndex: [1, 1],
       every: [1, 1], flat: [0, 0], flatMap: [1, 1], reduce: [1, 2], reduceRight: [1, 2],
     }[
       name as
-        | "push" | "unshift" | "pop" | "concat" | "indexOf" | "includes" | "join" | "slice" | "shift" | "splice" | "at" | "map" | "filter"
+        | "push" | "unshift" | "pop" | "concat" | "indexOf" | "lastIndexOf" | "includes" | "join" | "slice" | "shift" | "splice" | "at" | "map" | "filter"
         | "forEach" | "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every" | "flat" | "flatMap" | "reduce" | "reduceRight"
     ];
     if (call.arguments.length < arity[0]! || call.arguments.length > arity[1]!) {
       const hint =
-        name === "splice"
-          ? "the removal forms lower — splice(start, deleteCount?); to insert, build a new array with slice and push"
-          : name === "join"
-            ? 'pass the separator explicitly: join(",")'
-            : name === "indexOf" || name === "includes"
-              ? "the fromIndex parameter has no lowering — slice first, or loop"
-              : name === "map" || name === "filter" || name === "forEach" ||
-                  name === "find" || name === "some" || name === "every" || name === "flatMap"
-                ? "the thisArg parameter has no lowering — use an arrow function"
-                : undefined;
+        name === "map" || name === "filter" || name === "forEach" ||
+                name === "find" || name === "some" || name === "every" || name === "flatMap"
+              ? "the thisArg parameter has no lowering — use an arrow function"
+              : undefined;
       lowerer.noLowering(
         `.${name} with ${call.arguments.length} argument${call.arguments.length === 1 ? "" : "s"}`,
         call,
@@ -555,7 +678,7 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
         loc,
       };
     }
-    if (name === "indexOf" || name === "includes") {
+    if (name === "indexOf" || name === "lastIndexOf" || name === "includes") {
       return lowerArraySearchCall(lowerer, call, access, name, elem);
     }
     if (name === "concat") {
@@ -613,31 +736,38 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
       return { kind: "call", callee: helper, args: [receiver, ...args], type: receiverIr, loc };
     }
     if (name === "slice") {
-      // `a.slice(start?, end?)` — a fresh shallow copy of the index range,
-      // JS-exact index handling (ToIntegerOrInfinity, negatives from the
-      // end, clamping; omitted args are omitted from the IR — the backend
-      // fills 0 / +Infinity, the string-slice convention). Ref elements
-      // are RETAINED into the copy: the same references, exactly JS's
-      // shallow copy. Every element kind slices — the receiver's own type
-      // is the result type.
       const receiver = lowerer.lowerExpr(access.expression);
-      const args = call.arguments.map((a) => lowerer.lowerExpr(a));
-      for (let i = 0; i < args.length; i++) {
-        if (args[i]!.type.kind !== "f64") lowerer.badType(call.arguments[i]!, lowerer.typeOf(call.arguments[i]!));
-      }
+      const args = [
+        lowerArrayPosition(lowerer, call.arguments[0], numLit(0, loc), "array slice start"),
+        lowerArrayPosition(lowerer, call.arguments[1], numLit(Infinity, loc), "array slice end"),
+      ];
       return { kind: "arrIntrinsic", method: "slice", receiver, args, type: receiverIr, loc };
     }
     if (name === "splice") {
-      // The REMOVAL forms: splice(start) and splice(start, deleteCount) —
-      // Node-exact relative/clamped indices, the removed elements back in
-      // order (their ownership moves out of the receiver). Insertion
-      // (3+ args) fenced by arity above.
       const receiver = lowerer.lowerExpr(access.expression);
-      const args = call.arguments.map((a) => lowerer.lowerExpr(a));
-      for (let i = 0; i < args.length; i++) {
-        if (args[i]!.type.kind !== "f64") lowerer.badType(call.arguments[i]!, lowerer.typeOf(call.arguments[i]!));
+      const args: IrExpr[] = [
+        lowerArrayPosition(lowerer, call.arguments[0], numLit(0, loc), "array splice start"),
+        lowerArrayPosition(lowerer, call.arguments[1], numLit(call.arguments.length === 1 ? Infinity : 0, loc), "array splice deleteCount"),
+      ];
+      if (call.arguments.length <= 2) {
+        return { kind: "arrIntrinsic", method: "splice", receiver, args, type: receiverIr, loc };
       }
-      return { kind: "arrIntrinsic", method: "splice", receiver, args, type: receiverIr, loc };
+      const itemNodes = call.arguments.slice(2);
+      const hasSpread = itemNodes.some(ts.isSpreadElement);
+      const itemProbes = hasSpread ? [] : itemNodes.map((arg) => tryLowerExpression(lowerer, arg));
+      const statefulItems = itemProbes.some((probe) =>
+        probe !== null && lowerer.runtimeOptionalWidening(probe.type, elem) !== null);
+      const items: IrExpr = hasSpread
+        ? lowerArraySpreadItems(lowerer, itemNodes, elem, receiverIr, loc)
+        : statefulItems
+          ? lowerArrayValueItems(lowerer, itemNodes.map((arg) => lowerer.lowerExpr(arg)), elem, receiverIr, loc)
+          : {
+            kind: "arrayLit",
+            elems: itemNodes.map((arg) => lowerer.coerceInto(arg, lowerer.lowerExpr(arg), elem)),
+            type: receiverIr,
+            loc,
+          };
+      return { kind: "arrIntrinsic", method: "spliceInsert", receiver, args: [...args, items], type: receiverIr, loc };
     }
     if (name === "shift") {
       // JS shift exactly: undefined on an empty array, else the first
@@ -681,7 +811,7 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
         );
       }
       const receiver = lowerer.lowerExpr(access.expression);
-      const sep: IrExpr = call.arguments[0] === undefined ? { kind: "strLit", value: ",", type: STRING, loc } : lowerer.lowerExpr(call.arguments[0]);
+      const sep = lowerArrayJoinSeparator(lowerer, call.arguments[0], loc);
       return { kind: "arrIntrinsic", method: "join", receiver, args: [sep], type: STRING, loc };
     }
     if (name === "map" || name === "filter" || name === "forEach") {
@@ -700,23 +830,107 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
     return lowerArrayReduceCall(lowerer, call, access, name as "reduce" | "reduceRight", elem);
   }
 
+function literalFlatDepth(value: IrExpr): number | null {
+  if (value.kind === "numLit") return value.value;
+  if (value.kind === "strLit") return Number(value.value);
+  if (value.kind === "boolLit") return value.value ? 1 : 0;
+  if (value.kind === "unitLit") return value.unit === "undefined" ? 1 : 0;
+  if (value.kind === "unary" && value.op === "-") {
+    const operand = literalFlatDepth(value.operand);
+    return operand === null ? null : -operand;
+  }
+  return null;
+}
+
+function lowerArrayFlatCall(
+  lowerer: Lowerer,
+  call: ts.CallExpression,
+  access: ts.PropertyAccessExpression,
+  receiverType: IrType & { kind: "array" },
+): IrExpr {
+  const loc = locOf(call);
+  if (call.arguments.length > 1 || call.arguments.some(ts.isSpreadElement)) {
+    lowerer.noLowering(`.flat with ${call.arguments.length} arguments`, call);
+  }
+  const elemCouldNest = (elem: IrType): boolean =>
+    elem.kind === "array" || elem.kind === "jsval" || elem.kind === "dyn" ||
+    (elem.kind === "union" && (lowerer.unions.get(elem.unionId)?.arms.some((arm) =>
+      arm.kind === "array" || arm.kind === "jsval" || arm.kind === "dyn") ?? true));
+  if (!elemCouldNest(receiverType.elem) && call.arguments[0]) {
+    const receiver = lowerer.lowerExpr(access.expression);
+    const depth = lowerArrayPosition(lowerer, call.arguments[0], numLit(1, loc), "array flat depth");
+    const local = lowerer.declareHiddenLocal("%flatReceiver", receiverType);
+    const ref = varRef(local.id, receiverType, loc);
+    return {
+      kind: "seqExpr",
+      stmts: [
+        { kind: "varDecl", localId: local.id, init: receiver, loc },
+        { kind: "exprStmt", expr: depth, loc },
+      ],
+      result: {
+        kind: "arrIntrinsic", method: "flatCopy", receiver: ref,
+        args: [{ kind: "arrayLit", elems: [], type: receiverType, loc }],
+        type: receiverType, loc,
+      },
+      type: receiverType, loc,
+    };
+  }
+  const depth = call.arguments[0] ? literalFlatDepth(lowerer.lowerExpr(call.arguments[0])) : 1;
+  if (depth === null) lowerer.noLowering(".flat with a nonconstant depth", call);
+  let remaining = Number.isNaN(depth) || depth <= 0 ? 0 : Math.trunc(depth);
+  let result: IrExpr = lowerer.lowerExpr(access.expression);
+  let currentType = receiverType;
+  let flattened = false;
+  while (remaining > 0) {
+    const elem = currentType.elem;
+    if (elem.kind !== "array" && elemCouldNest(elem)) {
+      lowerer.noLowering(".flat over elements with runtime-dependent array shape", call);
+    }
+    if (elem.kind !== "array") break;
+    result = {
+      kind: "arrIntrinsic", method: "flatOne", receiver: result,
+      args: [{ kind: "arrayLit", elems: [], type: elem, loc }],
+      type: elem, loc,
+    };
+    currentType = elem;
+    remaining--;
+    flattened = true;
+  }
+  if (!flattened) {
+    result = {
+      kind: "arrIntrinsic", method: "flatCopy", receiver: result,
+      args: [{ kind: "arrayLit", elems: [], type: currentType, loc }],
+      type: currentType, loc,
+    };
+  }
+  return result;
+}
+
 /** `indexOf` and `includes` normally use the runtime's typed search helpers,
  * but an indexed array read is a `T | undefined` value. Keep that union
  * through a small lowered loop so the needle's missing state is observable:
- * indexOf skips holes, while includes treats holes as undefined. The same
- * loop also gives union-element arrays their value equality rather than
- * comparing the compiler's union boxes by pointer. */
+ * indexOf and lastIndexOf skip holes, while includes treats holes as
+ * undefined. The same loop also gives union-element arrays their value
+ * equality rather than comparing the compiler's union boxes by pointer. */
 function lowerArraySearchCall(
   lowerer: Lowerer,
   call: ts.CallExpression,
   access: ts.PropertyAccessExpression,
-  method: "indexOf" | "includes",
+  method: "indexOf" | "lastIndexOf" | "includes",
   elem: IrType,
 ): IrExpr {
   const loc = locOf(call);
   const receiver = lowerer.lowerExpr(access.expression);
-  const argNode = call.arguments[0]!;
-  let needle = lowerer.lowerExpr(argNode);
+  const argNode = call.arguments[0] ?? call;
+  if (call.arguments.some(ts.isSpreadElement)) lowerer.noLowering(`.${method} with spread arguments`, call);
+  let needle: IrExpr = call.arguments[0]
+    ? lowerer.lowerExpr(call.arguments[0])
+    : { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
+  const fromIndex: IrExpr = call.arguments[1]
+    ? lowerPositionArgument(lowerer, call.arguments[1], numLit(0, loc))
+    : method === "lastIndexOf"
+      ? { kind: "bin", op: "/", left: numLit(1, loc), right: numLit(0, loc), type: F64, loc }
+      : numLit(0, loc);
   // A derived CLASS VALUE against a base-classval element widens (the same
   // pointer — identity search is exact); the coercion path owns the ABI gate.
   if (needle.type.kind === "classval" && elem.kind === "classval" && !typeEquals(needle.type, elem)) {
@@ -725,37 +939,60 @@ function lowerArraySearchCall(
 
   // Preserve the existing fast path for an ordinary, non-union needle. Its
   // runtime implementation already has exact primitive/reference equality.
-  if (elem.kind !== "union" && typeEquals(needle.type, elem)) {
+  if (method !== "lastIndexOf" && call.arguments.length === 1 && elem.kind !== "union" && elem.kind !== "bigint" && typeEquals(needle.type, elem)) {
     return {
       kind: "arrIntrinsic",
       method,
       receiver,
       args: [needle],
-      type: method === "indexOf" ? F64 : BOOL,
+      type: method === "includes" ? BOOL : F64,
       loc,
     };
   }
 
-  const valueT = arrayValueType(lowerer, elem);
+  let valueT = arrayValueType(lowerer, elem);
   // jsval/dyn arrays have a single engine value representation rather than a
   // static undefined arm. Keep their existing runtime path and its explicit
   // type fence; typed static arrays take the state-aware helper below.
   if (valueT.kind !== "union") {
+    if (method === "lastIndexOf") lowerer.noLowering(".lastIndexOf on an array of engine values", call);
+    if (call.arguments.length > 1) lowerer.noLowering(`.${method} with fromIndex on '${lowerer.fmt(elem)}' elements`, call);
     if (!typeEquals(needle.type, elem)) lowerer.badType(argNode, lowerer.typeOf(argNode));
     return {
       kind: "arrIntrinsic",
       method,
       receiver,
       args: [needle],
-      type: method === "indexOf" ? F64 : BOOL,
+      type: method === "includes" ? BOOL : F64,
       loc,
     };
   }
 
-  const searchNeedle = lowerer.coerceInto(argNode, needle, valueT);
-  if (!typeEquals(searchNeedle.type, valueT)) lowerer.badType(argNode, lowerer.typeOf(argNode));
-  const helper = arraySearchHelper(lowerer, method, elem, valueT, loc);
-  return { kind: "call", callee: helper, args: [receiver, searchNeedle], type: method === "indexOf" ? F64 : BOOL, loc };
+  // Search uses strict equality, never conversion to the array's element
+  // type. Retain primitive needles of a different kind in the comparison
+  // union so a nonmatching kind returns a miss instead of throwing.
+  const needleArms = needle.type.kind === "union"
+    ? lowerer.unions.get(needle.type.unionId)!.arms
+    : [needle.type];
+  const scalarNeedle = needleArms.every((arm) =>
+    arm.kind === "f64" || arm.kind === "string" || arm.kind === "bool" ||
+    arm.kind === "bigint" || arm.kind === "symbol" || isUnitType(arm));
+  const valueArms = lowerer.unions.get(valueT.unionId)!.arms;
+  if (scalarNeedle && !valueArms.some((arm) => arm.kind === "func" || arm.kind === "set")) {
+    const arms = [...valueArms];
+    for (const arm of needleArms) if (!arms.some((existing) => typeEquals(existing, arm))) arms.push(arm);
+    if (arms.length !== valueArms.length) valueT = { kind: "union", unionId: lowerer.unions.intern(arms) };
+  }
+  const directNeedle = method === "lastIndexOf" && elem.kind !== "union" && typeEquals(needle.type, elem);
+  const searchNeedle = directNeedle ? needle : lowerer.coerceInto(argNode, needle, valueT);
+  // Checked dynamic extraction can copy a composite. Its new identity cannot
+  // be compared to an array element as though it were the original value.
+  if (method === "lastIndexOf" && searchNeedle.kind === "dynCheck" && (elem.kind === "record" || elem.kind === "array")) {
+    lowerer.noLowering(".lastIndexOf with a checked dynamic reference needle", call);
+  }
+  if (!directNeedle && !typeEquals(searchNeedle.type, valueT)) lowerer.badType(argNode, lowerer.typeOf(argNode));
+  const helper = arraySearchHelper(lowerer, method, elem, valueT, searchNeedle.type, directNeedle, fromIndex.type, call.arguments[1] ?? call, loc);
+  return { kind: "call", callee: helper, args: [receiver, searchNeedle, fromIndex], type: method === "includes" ? BOOL : F64, loc };
 }
 
 /** SameValueZero over a static value union. `unionEq` supplies strict
@@ -807,27 +1044,71 @@ function arraySearchEquality(
 
 function arraySearchHelper(
   lowerer: Lowerer,
-  method: "indexOf" | "includes",
+  method: "indexOf" | "lastIndexOf" | "includes",
   elem: IrType,
   valueT: IrType & { kind: "union" },
+  needleT: IrType,
+  directNeedle: boolean,
+  fromT: IrType,
+  fromNode: ts.Expression,
   loc: SrcLoc,
 ): string {
-  const key = `${method}:${typeKey(elem)}:${typeKey(valueT)}`;
+  const key = `${method}:${typeKey(elem)}:${typeKey(valueT)}:${typeKey(needleT)}:${directNeedle}:${typeKey(fromT)}`;
   const existing = lowerer.arrHofHelpers.get(key);
   if (existing) return existing;
   const name = `%arr.${method}.${lowerer.arrHofHelpers.size}`;
   lowerer.arrHofHelpers.set(key, name);
   const arrT = arrayOf(elem);
-  const resultT = method === "indexOf" ? F64 : BOOL;
+  const resultT = method === "includes" ? BOOL : F64;
   const arrRef = varRef("a.0", arrT, loc);
   const indexRef = varRef("i.0", F64, loc);
-  const needleRef = varRef("needle.0", valueT, loc);
+  const needleRef = varRef("needle.0", needleT, loc);
   const stateRef = varRef("state.0", F64, loc);
   const nextRef = varRef("next.0", F64, loc);
+  const fromRef = varRef("from.0", fromT, loc);
+  const numberRef = varRef("number.0", F64, loc);
+  const integerRef = varRef("integer.0", F64, loc);
+  // Snapshot length before coercing fromIndex, then apply ToIntegerOrInfinity.
+  const number = positionNumber(lowerer, fromRef, numLit(0, loc), fromNode, "array search position");
+  const integer: IrExpr = {
+    kind: "ternary",
+    cond: { kind: "libCall", fn: "num.isNaN", args: [numberRef], type: BOOL, loc },
+    then: numLit(0, loc),
+    else_: { kind: "libCall", fn: "math.trunc", args: [numberRef], type: F64, loc },
+    type: F64,
+    loc,
+  };
+  const forwardStart: IrExpr = {
+    kind: "ternary",
+    cond: { kind: "bin", op: "<", left: integerRef, right: numLit(0, loc), type: BOOL, loc },
+    then: {
+      kind: "libCall", fn: "math.max",
+      args: [{ kind: "bin", op: "+", left: varRef("n.0", F64, loc), right: integerRef, type: F64, loc }, numLit(0, loc)],
+      type: F64, loc,
+    },
+    // Adding positive zero canonicalizes a truncated negative zero.
+    else_: { kind: "bin", op: "+", left: integerRef, right: numLit(0, loc), type: F64, loc },
+    type: F64,
+    loc,
+  };
+  const start: IrExpr = method === "lastIndexOf" ? {
+    kind: "ternary",
+    cond: { kind: "bin", op: "<", left: integerRef, right: numLit(0, loc), type: BOOL, loc },
+    then: { kind: "bin", op: "+", left: varRef("n.0", F64, loc), right: integerRef, type: F64, loc },
+    else_: {
+      kind: "libCall", fn: "math.min",
+      args: [
+        { kind: "bin", op: "+", left: integerRef, right: numLit(0, loc), type: F64, loc },
+        { kind: "bin", op: "-", left: varRef("n.0", F64, loc), right: numLit(1, loc), type: F64, loc },
+      ],
+      type: F64, loc,
+    },
+    type: F64, loc,
+  } : forwardStart;
   const rawRead: IrExpr = { kind: "arrayGet", arr: arrRef, index: indexRef, type: elem, loc };
   const missing = lowerer.wrappedUndefined(valueT, loc);
   if (!missing) throw new InternalCompilerError("array search helper needs an undefined arm");
-  const value: IrExpr = {
+  const optionalValue: IrExpr = {
     kind: "ternary",
     cond: { kind: "bin", op: "===", left: stateRef, right: numLit(1, loc), type: BOOL, loc },
     then: typeEquals(elem, valueT) ? rawRead : lowerer.coerceToExpected(rawRead, valueT),
@@ -835,12 +1116,14 @@ function arraySearchHelper(
     type: valueT,
     loc,
   };
-  const equal = arraySearchEquality(lowerer, varRef("value.0", valueT, loc), needleRef, method === "includes", loc);
-  const match = method === "indexOf"
+  const value = directNeedle ? rawRead : optionalValue;
+  const readT = directNeedle ? elem : valueT;
+  const equal = arraySearchEquality(lowerer, varRef("value.0", readT, loc), needleRef, method === "includes", loc);
+  const match = method !== "includes"
     ? {
         kind: "logical" as const,
         op: "&&" as const,
-        left: { kind: "bin" as const, op: "!==" as const, left: stateRef, right: numLit(0, loc), type: BOOL, loc },
+        left: { kind: "bin" as const, op: directNeedle ? "===" as const : "!==" as const, left: stateRef, right: numLit(directNeedle ? 1 : 0, loc), type: BOOL, loc },
         right: equal,
         type: BOOL,
         loc,
@@ -848,7 +1131,7 @@ function arraySearchHelper(
     : equal;
   const undefinedTag = lowerer.armTag(valueT.unionId, UNDEFINED_T);
   if (undefinedTag < 0) throw new InternalCompilerError("array search helper needs an undefined tag");
-  const needleIsUndefined: IrExpr = {
+  const needleIsUndefined: IrExpr = directNeedle ? boolLit(false, loc) : {
     kind: "unionIsTag",
     unionId: valueT.unionId,
     tag: undefinedTag,
@@ -860,7 +1143,7 @@ function arraySearchHelper(
   const advance: IrStmt = {
     kind: "assign",
     localId: "i.0",
-    value: { kind: "bin", op: "+", left: indexRef, right: numLit(1, loc), type: F64, loc },
+    value: { kind: "bin", op: method === "lastIndexOf" ? "-" : "+", left: indexRef, right: numLit(1, loc), type: F64, loc },
     loc,
   };
   const visitPresent: IrStmt[] = [
@@ -868,13 +1151,13 @@ function arraySearchHelper(
     {
       kind: "if",
       cond: match,
-      then: [{ kind: "return", value: method === "indexOf" ? indexRef : boolLit(true, loc), loc }],
+      then: [{ kind: "return", value: method === "includes" ? boolLit(true, loc) : indexRef, loc }],
       else_: null,
       loc,
     },
     advance,
   ];
-  const skipHole: IrStmt[] = [
+  const skipHole: IrStmt[] = method === "lastIndexOf" ? [advance] : [
     {
       kind: "varDecl",
       localId: "next.0",
@@ -900,28 +1183,36 @@ function arraySearchHelper(
     name,
     params: [
       { localId: "a.0", name: "a", type: arrT },
-      { localId: "needle.0", name: "needle", type: valueT },
+      { localId: "needle.0", name: "needle", type: needleT },
+      { localId: "from.0", name: "from", type: fromT },
     ],
     returnType: resultT,
     locals: [
       { id: "a.0", name: "a", type: arrT, mutable: true },
-      { id: "needle.0", name: "needle", type: valueT, mutable: true },
+      { id: "needle.0", name: "needle", type: needleT, mutable: true },
+      { id: "from.0", name: "from", type: fromT, mutable: false },
+      { id: "number.0", name: "number", type: F64, mutable: false },
+      { id: "integer.0", name: "integer", type: F64, mutable: false },
       { id: "n.0", name: "n", type: F64, mutable: false },
       { id: "i.0", name: "i", type: F64, mutable: true },
       { id: "state.0", name: "state", type: F64, mutable: false },
       { id: "next.0", name: "next", type: F64, mutable: false },
-      { id: "value.0", name: "value", type: valueT, mutable: false },
+      { id: "value.0", name: "value", type: readT, mutable: false },
     ],
     body: [
       readLenStmt(arrT, loc),
-      { kind: "varDecl", localId: "i.0", init: numLit(0, loc), loc },
+      { kind: "varDecl", localId: "number.0", init: number, loc },
+      { kind: "varDecl", localId: "integer.0", init: integer, loc },
+      { kind: "varDecl", localId: "i.0", init: start, loc },
       {
         kind: "while",
-        cond: { kind: "bin", op: "<", left: indexRef, right: varRef("n.0", F64, loc), type: BOOL, loc },
+        cond: method === "lastIndexOf"
+          ? { kind: "bin", op: ">=", left: indexRef, right: numLit(0, loc), type: BOOL, loc }
+          : { kind: "bin", op: "<", left: indexRef, right: varRef("n.0", F64, loc), type: BOOL, loc },
         body: loopBody,
         loc,
       },
-      { kind: "return", value: method === "indexOf" ? numLit(-1, loc) : boolLit(false, loc), loc },
+      { kind: "return", value: method === "includes" ? boolLit(false, loc) : numLit(-1, loc), loc },
     ],
     loc,
   });
@@ -1366,15 +1657,8 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     return { kind: "call", callee: helper, args: [snapshot, fnArg], type: arrayOf(outElem), loc };
   }
 
-/** An OOB-SAFE indexed read: `xs[i]`
-   * answers the interned `elem | undefined` union — the element when `i`
-   * is an integer in [0, len), JS's property-miss undefined otherwise —
-   * instead of the trap divergence 4 documents for program code.
-   * Package JS is inference-typed, guard-style code (`registeredArguments
-   * .slice(-1)[0]`, commander's last-element probe), and the trap would
-   * fire on working Node idioms; program files keep the documented trap
-   * (their annotations can prove bounds). Existing element unions retag
-   * into the canonical union with an added undefined arm. */
+/** An ordinary indexed read: values retain their element type, while
+ * holes, missing properties, and present undefined yield undefined. */
   export function lowerSafeIndexRead(
     lowerer: Lowerer,
     arr: IrExpr & { type: { kind: "array" } },
@@ -1407,6 +1691,20 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     }
     return { kind: "call", callee: name, args: [arr, index], type: resultT, loc };
   }
+
+/** Fuse only our own f64-array read helper with immediate ToNumber.
+ * Reuse its arguments verbatim so the receiver and index still evaluate
+ * exactly once, in order, before the read. Do not specialize user calls,
+ * union-element arrays, or optional values stored in locals. */
+export function tryLowerNumericIndexRead(lowerer: Lowerer, operand: IrExpr, loc: SrcLoc): IrExpr | null {
+  if (operand.kind !== "call" || operand.callee !== lowerer.arrHofHelpers.get(`idxOr:${typeKey(F64)}`)) return null;
+  const [arr, index] = operand.args;
+  if (operand.args.length !== 2 || arr?.type.kind !== "array" || arr.type.elem.kind !== "f64" || index?.type.kind !== "f64") return null;
+  // The intrinsic owns the evaluated receiver through index evaluation,
+  // then borrows it for one slot lookup. No extra helper parameter or
+  // separate state/getter expressions need to retain the array again.
+  return { kind: "arrIntrinsic", method: "getNumber", receiver: arr, args: [index], type: F64, loc };
+}
 
   /** Backward-compatible name for the npm-static probe path. */
   export const lowerNpmStaticSafeIndexRead = lowerSafeIndexRead;
@@ -2487,13 +2785,15 @@ function getElemExpr(arrT: IrType, elem: IrType, loc: SrcLoc): IrExpr {
     access: ts.PropertyAccessExpression,
     elem: IrType,): IrExpr {
     const loc = locOf(call);
+    if (call.arguments.some(ts.isSpreadElement)) lowerer.noLowering(".at with spread arguments", call);
     const receiver = lowerer.lowerExpr(access.expression);
-    const index = lowerer.lowerExprExpecting(call.arguments[0]!, F64);
+    const indexNode = call.arguments[0];
+    const index = lowerPositionArgument(lowerer, indexNode, numLit(0, loc));
     const resultT = lowerer.irTypeOf(call);
     if (resultT.kind !== "union") lowerer.badType(call, lowerer.typeOf(call)); // defensive: T | undefined always maps to a union
     const undefTag = lowerer.armTag(resultT.unionId, UNDEFINED_T);
     if (undefTag < 0) lowerer.badType(call, lowerer.typeOf(call));
-    const key = `at:${typeKey(elem)}:${typeKey(resultT)}`;
+    const key = `at:${typeKey(elem)}:${typeKey(resultT)}:${typeKey(index.type)}`;
     let name = lowerer.arrHofHelpers.get(key);
     if (!name) {
       name = `%arr.at.${lowerer.arrHofHelpers.size}`;
@@ -2501,7 +2801,8 @@ function getElemExpr(arrT: IrType, elem: IrType, loc: SrcLoc): IrExpr {
       const arrT = arrayOf(elem);
 
       const t = varRef("t.0", F64, loc);
-      const i = varRef("i.0", F64, loc);
+      const i = varRef("i.0", index.type, loc);
+      const number = varRef("number.0", F64, loc);
       const n = varRef("n.0", F64, loc);
       const found = lowerer.coerceToExpected(arrayValueRead(lowerer, varRef("a.0", arrT, loc), t, elem, loc), resultT);
       const miss: IrExpr = {
@@ -2516,20 +2817,21 @@ function getElemExpr(arrT: IrType, elem: IrType, loc: SrcLoc): IrExpr {
       const lt = (l: IrExpr, r: IrExpr): IrExpr => ({ kind: "bin", op: "<", left: l, right: r, type: BOOL, loc });
       const body: IrStmt[] = [
         readLenStmt(arrT, loc),
+        { kind: "varDecl", localId: "number.0", init: positionNumber(lowerer, i, numLit(0, loc), indexNode ?? call, "array at position"), loc },
         // ToIntegerOrInfinity: floor is trunc for i >= 0; negatives mirror
         // (trunc(i) = -floor(-i)); NaN becomes 0. ±Infinity floors to
         // itself and falls out of range below, exactly the spec.
-        { kind: "varDecl", localId: "t.0", init: floorOf(i), loc },
+        { kind: "varDecl", localId: "t.0", init: floorOf(number), loc },
         {
           kind: "if",
-          cond: lt(i, numLit(0, loc)),
-          then: [{ kind: "assign", localId: "t.0", value: { kind: "bin", op: "-", left: numLit(0, loc), right: floorOf({ kind: "bin", op: "-", left: numLit(0, loc), right: i, type: F64, loc }), type: F64, loc }, loc }],
+          cond: lt(number, numLit(0, loc)),
+          then: [{ kind: "assign", localId: "t.0", value: { kind: "bin", op: "-", left: numLit(0, loc), right: floorOf({ kind: "bin", op: "-", left: numLit(0, loc), right: number, type: F64, loc }), type: F64, loc }, loc }],
           else_: null,
           loc,
         },
         {
           kind: "if",
-          cond: { kind: "libCall", fn: "num.isNaN", args: [i], type: BOOL, loc },
+          cond: { kind: "libCall", fn: "num.isNaN", args: [number], type: BOOL, loc },
           then: [{ kind: "assign", localId: "t.0", value: numLit(0, loc), loc }],
           else_: null,
           loc,
@@ -2561,13 +2863,14 @@ function getElemExpr(arrT: IrType, elem: IrType, loc: SrcLoc): IrExpr {
         name,
         params: [
           { localId: "a.0", name: "a", type: arrT },
-          { localId: "i.0", name: "i", type: F64 },
+          { localId: "i.0", name: "i", type: index.type },
         ],
         returnType: resultT,
         locals: [
           { id: "a.0", name: "a", type: arrT, mutable: true },
-          { id: "i.0", name: "i", type: F64, mutable: true },
+          { id: "i.0", name: "i", type: index.type, mutable: false },
           { id: "n.0", name: "n", type: F64, mutable: false },
+          { id: "number.0", name: "number", type: F64, mutable: false },
           { id: "t.0", name: "t", type: F64, mutable: true },
         ],
         body,
@@ -2577,7 +2880,132 @@ function getElemExpr(arrT: IrType, elem: IrType, loc: SrcLoc): IrExpr {
     return { kind: "call", callee: name, args: [receiver, index], type: resultT, loc };
   }
 
+/** The Array constructor's element and count forms, shared by calls and new. */
+export function lowerArrayConstructor(lowerer: Lowerer,
+  expr: ts.CallExpression | ts.NewExpression,
+  args: readonly ts.Expression[],): IrExpr {
+  const loc = locOf(expr);
+  if (args.some(ts.isSpreadElement)) {
+    lowerer.noLowering("Array constructor with spread arguments", expr);
+  }
+  let result = lowerer.mapTypeOf(lowerer.typeOf(expr));
+  if (result?.kind !== "array") {
+    const contextual = lowerer.checker.getContextualType(expr);
+    if (contextual) result = lowerer.mapTypeOf(contextual);
+  }
+  if (result?.kind !== "array" || !isSupportedArrayElem(result.elem)) {
+    lowerer.badType(expr, lowerer.typeOf(expr));
+  }
+  const argType = args.length === 1 ? lowerer.mapTypeOf(lowerer.typeOf(args[0]!)) : null;
+  if (argType?.kind === "dyn" || argType?.kind === "jsval") {
+    lowerer.noLowering("Array constructor with a dynamically typed sole argument", args[0]!);
+  }
+  if (args.length === 1 && (argType?.kind === "f64" ||
+      (argType?.kind === "union" && lowerer.armTag(argType.unionId, F64) >= 0))) {
+    const count = lowerer.lowerExpr(args[0]!);
+    const numberTag = count.type.kind === "union" ? lowerer.armTag(count.type.unionId, F64) : -1;
+    if (count.type.kind !== "f64" && numberTag < 0) {
+      lowerer.noLowering("Array constructor length with a value that may be missing", args[0]!);
+    }
+    const input = count.type.kind === "union" ? lowerer.declareHiddenLocal("%arrayCtorArg", count.type) : null;
+    const inputRef = input ? varRef(input.id, count.type, loc) : null;
+    const local = lowerer.declareHiddenLocal("%arrayLengthCtor", result);
+    const ref = varRef(local.id, result, loc);
+    const length: IrExpr = inputRef && count.type.kind === "union"
+      ? { kind: "unionNarrow", unionId: count.type.unionId, tag: numberTag, value: inputRef, type: F64, loc }
+      : count;
+    const resize: IrStmt = { kind: "arraySetLength", arr: ref, length, loc };
+    return {
+      kind: "seqExpr",
+      stmts: [
+        ...(input ? [{ kind: "varDecl" as const, localId: input.id, init: count, loc }] : []),
+        { kind: "varDecl", localId: local.id, init: { kind: "arrayLit", elems: [], type: result, loc }, loc },
+        ...(inputRef && count.type.kind === "union"
+          ? [{ kind: "if" as const,
+            cond: { kind: "unionIsTag" as const, unionId: count.type.unionId, tag: numberTag, value: inputRef, negated: false, type: BOOL, loc },
+            then: [resize],
+            else_: [arrayValueStore(lowerer, ref, numLit(0, loc), lowerer.coerceInto(args[0]!, inputRef, result.elem), result.elem, loc)],
+            loc }]
+          : [resize]),
+      ],
+      result: ref,
+      type: result,
+      loc,
+    };
+  }
+  return { kind: "arrayLit", elems: args.map((arg) => lowerer.lowerExprExpecting(arg, result.elem)), type: result, loc };
+}
+
+/** `Array.of` creates an array of its arguments, including a lone number. */
+export function lowerArrayOfCall(lowerer: Lowerer, call: ts.CallExpression,
+  access: ts.PropertyAccessExpression,): IrExpr | null {
+  if (call.questionDotToken || access.questionDotToken || access.name.text !== "of" ||
+      !lowerer.isStdlibGlobal(access.expression, "Array")) return null;
+  let result = lowerer.mapTypeOf(lowerer.typeOf(call));
+  if (result?.kind !== "array") {
+    const contextual = lowerer.checker.getContextualType(call);
+    if (contextual) result = lowerer.mapTypeOf(contextual);
+  }
+  if (result?.kind !== "array" || !isSupportedArrayElem(result.elem)) {
+    lowerer.badType(call, lowerer.typeOf(call));
+  }
+  if (call.arguments.some(ts.isSpreadElement)) {
+    return lowerArraySpreadItems(lowerer, call.arguments, result.elem, result, locOf(call));
+  }
+  return {
+    kind: "arrayLit",
+    elems: call.arguments.map((arg) => lowerer.lowerExprExpecting(arg, result.elem)),
+    type: result,
+    loc: locOf(call),
+  };
+}
+
 export { lowerArrayFromCall } from "./lower-array-from.js";
+
+/** Map an array iterator to a fresh dense array. The source length remains
+ * live so mapper mutations affect which later indexes are visited. */
+function buildArrayFromArrayFn(lowerer: Lowerer, name: string, elem: IrType,
+  outElem: IrType, fnRet: IrType, arity: number, loc: SrcLoc): IrFunction {
+  const arrT = arrayOf(elem);
+  const outT = arrayOf(outElem);
+  const fnT = funcOf([arrayValueType(lowerer, elem), F64].slice(0, arity), fnRet);
+  const a = varRef("a.0", arrT, loc);
+  const i = varRef("i.0", F64, loc);
+  const out = varRef("out.0", outT, loc);
+  const mapped: IrExpr = {
+    kind: "callValue",
+    callee: varRef("f.0", fnT, loc),
+    args: [arrayValueRead(lowerer, a, i, elem, loc), i].slice(0, arity),
+    type: fnRet,
+    loc,
+  };
+  return {
+    name,
+    params: [{ localId: "a.0", name: "a", type: arrT }, { localId: "f.0", name: "f", type: fnT }],
+    returnType: outT,
+    locals: [
+      { id: "a.0", name: "a", type: arrT, mutable: true },
+      { id: "f.0", name: "f", type: fnT, mutable: true },
+      { id: "out.0", name: "out", type: outT, mutable: false },
+      { id: "i.0", name: "i", type: F64, mutable: true },
+    ],
+    body: [
+      { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
+      { kind: "varDecl", localId: "i.0", init: numLit(0, loc), loc },
+      {
+        kind: "while",
+        cond: { kind: "bin", op: "<", left: i, right: { kind: "arrIntrinsic", method: "length", receiver: a, args: [], type: F64, loc }, type: BOOL, loc },
+        body: [
+          arrayValueStore(lowerer, out, i, mapped, outElem, loc),
+          { kind: "assign", localId: "i.0", value: { kind: "bin", op: "+", left: i, right: numLit(1, loc), type: F64, loc }, loc },
+        ],
+        loc,
+      },
+      { kind: "return", value: out, loc },
+    ],
+    loc,
+  };
+}
 
 /** `Array.from(s)` / `[...s]` on a STRING: the code-point split into a
    * fresh string[], through one interned helper per module. */
@@ -6208,6 +6636,683 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
   }
 
 export { objectIterOverIndexShape } from "./lower-object-index-iteration.js";
+
+/** `Object.fromEntries(pairs)` over a `[string, V][]` VALUE into the
+   * checker's own index-signature result shape (`{ [k: string]: V }` —
+   * always declared-field-free from the lib signature): an interned helper
+   * loops the pairs and keyed-writes each into a fresh record's overflow —
+   * later duplicates overwrite in place (first insertion position wins for
+   * ORDER, last value wins — exactly JS). Values flow into the signature's
+   * value slot (dyn slots convert JSON-safe values, identity otherwise).
+   * The `as ModelPricing` reshape AFTER it is the width-coercion capture
+   * (lowerRecordOvfCaptureHelper). Null when the argument or result shape
+   * is outside this (Maps, richer iterables → the SC2020 fence). */
+  export function lowerObjectFromEntriesCall(lowerer: Lowerer, call: ts.CallExpression,
+    callee: ts.Expression,): IrExpr | null {
+    if (!ts.isPropertyAccessExpression(callee)) return null;
+    if (call.questionDotToken || callee.questionDotToken) return null;
+    if (!lowerer.isStdlibGlobal(callee.expression, "Object")) return null;
+    if (callee.name.text !== "fromEntries") return null;
+    if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) return null;
+    const argNode = call.arguments[0]!;
+    const argIr = lowerer.mapTypeOf(lowerer.typeOf(argNode));
+    if (argIr?.kind !== "array") return null;
+    // `Object.fromEntries(rows)` over a `string[][]` VALUE — the env-line
+    // idiom (`envArray.map((env) => env.split('='))`). The checker has no
+    // tuple to type here (string[] misses the lib's [PropertyKey, T]
+    // overload, so the Iterable<readonly any[]> one answers `any`), but
+    // the honest static result IS typable: the index-signature record over
+    // the row's read positions — key ToPropertyKey(row[0]) ("undefined"
+    // when the row is empty, exactly Node), value row[1] as the
+    // `string | undefined` union (a 1-element row's [1] read IS undefined
+    // in Node; 'A=B=C'.split('=') takes 'B' and drops the tail). Later
+    // duplicates overwrite in place — first insertion position wins for
+    // ORDER, last value wins, the tuple path's rule.
+    if (argIr.elem.kind === "array" && argIr.elem.elem.kind === "string") {
+      return lowerFromEntriesStringRows(lowerer, call, argNode, argIr as IrType & { kind: "array" });
+    }
+    if (argIr.elem.kind !== "record") return null;
+    const tupleShape = lowerer.shapes.get(argIr.elem.shapeId);
+    if (!tupleShape?.tuple || tupleShape.fields.length !== 2) return null;
+    const keyT = tupleShape.fields.find((f) => f.name === "0")!.type;
+    const valT = tupleShape.fields.find((f) => f.name === "1")!.type;
+    if (keyT.kind !== "string") return null;
+    // The result shape is interned directly — the lib's `{ [k: string]: T }`
+    // return type is lib-declared and deliberately does not map through
+    // provenance; the PURE index-signature shape over the tuple's value
+    // type IS that type (structurally identical to Record<string, T>, so
+    // it interns to the same shape a user annotation would).
+    if (!isSupportedIndexValue(valT)) return null;
+    const resultT: IrType & { kind: "record" } = {
+      kind: "record",
+      shapeId: lowerer.shapes.intern([], false, valT, []),
+    };
+    const iv = valT;
+    const loc = locOf(call);
+    // The tuple's value position must flow into the index-value slot.
+    const convertible =
+      typeEquals(valT, iv) || (iv.kind === "dyn" && lowerer.dynConvertible(valT));
+    const convert = (v: IrExpr): IrExpr =>
+      typeEquals(valT, iv) ? v : { kind: "dynFrom", value: v, type: DYN, loc };
+    if (!convertible) {
+      lowerer.unsupported(
+        "SC1090",
+        call,
+        `Object.fromEntries over '${lowerer.fmt(argIr)}' (the tuple's '${lowerer.fmt(valT)}' value cannot flow into the '${lowerer.fmt(iv)}' signature slot)`,
+      );
+    }
+    const receiver = lowerer.lowerExpr(argNode);
+    const key = `obj.fromEntries:${argIr.elem.shapeId}:${resultT.shapeId}`;
+    let helper = lowerer.arrHofHelpers.get(key);
+    if (!helper) {
+      helper = `%obj.fromEntries.${lowerer.arrHofHelpers.size}`;
+
+      const tupleT = argIr.elem as IrType & { kind: "record" };
+      const tRef = varRef("t.0", tupleT, loc);
+      const body: IrStmt[] = [
+        { kind: "varDecl", localId: "out.0", init: { kind: "recordLit", fields: [], type: resultT, loc }, loc },
+        countedFor(
+          loc,
+          { kind: "arrIntrinsic", method: "length", receiver: varRef("a.0", argIr, loc), args: [], type: F64, loc },
+          () => [
+            { kind: "varDecl", localId: "t.0", init: { kind: "arrayGet", arr: varRef("a.0", argIr, loc), index: varRef("i.0", F64, loc), type: tupleT, loc }, loc },
+            {
+              kind: "recordKeySet",
+              obj: varRef("out.0", resultT, loc),
+              shapeId: resultT.shapeId,
+              key: { kind: "recordGet", obj: tRef, shapeId: tupleT.shapeId, field: "0", type: STRING, loc },
+              value: convert({ kind: "recordGet", obj: tRef, shapeId: tupleT.shapeId, field: "1", type: valT, loc })!,
+              loc,
+            },
+          ],
+        ),
+        { kind: "return", value: varRef("out.0", resultT, loc), loc },
+      ];
+      lowerer.arrHofHelpers.set(key, helper);
+      lowerer.liftedFns.push({
+        name: helper,
+        params: [{ localId: "a.0", name: "a", type: argIr }],
+        returnType: resultT,
+        locals: [
+          { id: "a.0", name: "a", type: argIr, mutable: true },
+          { id: "out.0", name: "out", type: resultT, mutable: false },
+          { id: "i.0", name: "i", type: F64, mutable: true },
+          { id: "t.0", name: "t", type: tupleT, mutable: false },
+        ],
+        body,
+        loc,
+      });
+    }
+    return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
+  }
+
+/** The string-rows half of lowerObjectFromEntriesCall (see the caller's
+   * comment): an interned helper loops the `string[][]` rows and
+   * keyed-writes ToPropertyKey(row[0]) → row[1] into a fresh
+   * `{ [k: string]: string | undefined }` record. Row reads are lazy
+   * ternaries over the row's length — a static string[] read past the end
+   * would trap, but Node's fromEntries reads entry[0]/entry[1] as plain
+   * (possibly-undefined) gets: the empty row keys "undefined", the
+   * 1-element row's value is the union's undefined arm. */
+  function lowerFromEntriesStringRows(lowerer: Lowerer, call: ts.CallExpression,
+    argNode: ts.Expression, argIr: IrType & { kind: "array" },): IrExpr {
+    const loc = locOf(call);
+    const rowT = argIr.elem; // string[]
+    const valT: IrType = { kind: "union", unionId: lowerer.unions.intern([STRING, UNDEFINED_T]) };
+    const strTag = lowerer.armTag(valT.unionId, STRING);
+    const resultT: IrType & { kind: "record" } = {
+      kind: "record",
+      shapeId: lowerer.shapes.intern([], false, valT, []),
+    };
+    const receiver = lowerer.lowerExpr(argNode);
+    const key = `obj.fromEntries:strrows:${resultT.shapeId}`;
+    let helper = lowerer.arrHofHelpers.get(key);
+    if (!helper) {
+      helper = `%obj.fromEntries.${lowerer.arrHofHelpers.size}`;
+
+      const tRef = varRef("t.0", rowT, loc);
+      const rowLen: IrExpr = { kind: "arrIntrinsic", method: "length", receiver: tRef, args: [], type: F64, loc };
+      const lenAtLeast = (n: number): IrExpr =>
+        ({ kind: "bin", op: ">=", left: rowLen, right: numLit(n, loc), type: BOOL, loc });
+      const body: IrStmt[] = [
+        { kind: "varDecl", localId: "out.0", init: { kind: "recordLit", fields: [], type: resultT, loc }, loc },
+        countedFor(
+          loc,
+          { kind: "arrIntrinsic", method: "length", receiver: varRef("a.0", argIr, loc), args: [], type: F64, loc },
+          () => [
+            { kind: "varDecl", localId: "t.0", init: { kind: "arrayGet", arr: varRef("a.0", argIr, loc), index: varRef("i.0", F64, loc), type: rowT, loc }, loc },
+            {
+              kind: "recordKeySet",
+              obj: varRef("out.0", resultT, loc),
+              shapeId: resultT.shapeId,
+              key: {
+                kind: "ternary",
+                cond: lenAtLeast(1),
+                then: { kind: "arrayGet", arr: tRef, index: numLit(0, loc), type: STRING, loc },
+                else_: { kind: "strLit", value: "undefined", type: STRING, loc },
+                type: STRING,
+                loc,
+              },
+              value: {
+                kind: "ternary",
+                cond: lenAtLeast(2),
+                then: {
+                  kind: "unionWrap",
+                  unionId: valT.unionId,
+                  tag: strTag,
+                  value: { kind: "arrayGet", arr: tRef, index: numLit(1, loc), type: STRING, loc },
+                  type: valT,
+                  loc,
+                },
+                else_: lowerer.wrappedUndefined(valT, loc)!,
+                type: valT,
+                loc,
+              },
+              loc,
+            },
+          ],
+        ),
+        { kind: "return", value: varRef("out.0", resultT, loc), loc },
+      ];
+      lowerer.arrHofHelpers.set(key, helper);
+      lowerer.liftedFns.push({
+        name: helper,
+        params: [{ localId: "a.0", name: "a", type: argIr }],
+        returnType: resultT,
+        locals: [
+          { id: "a.0", name: "a", type: argIr, mutable: true },
+          { id: "out.0", name: "out", type: resultT, mutable: false },
+          { id: "i.0", name: "i", type: F64, mutable: true },
+          { id: "t.0", name: "t", type: rowT, mutable: false },
+        ],
+        body,
+        loc,
+      });
+    }
+    return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
+  }
+
+/** Interned `%rec.capture.<n>(s)` — the INDEX-SIGNATURE reshape behind
+   * `Object.fromEntries(entries) as ModelPricing` (hybrid→hybrid width
+   * coercion) and `const r: Record<string, number> = { a: 1, b: 2 }`
+   * (a DECLARED-fields shape narrowing into a pure overflow shape — the
+   * record becomes width-free key/value storage), both called from
+   * widthCoerce after recordWidthHelper declines: builds the target shape
+   * fresh — declared fields default to their undefined arms — then
+   * keyed-writes every source key into it, declared fields first in the
+   * source's DECLARATION order (skipping ones holding the undefined arm,
+   * the unset convention — insertion order is what Object.keys/JSON
+   * answer, stance 37), then the source overflow in JS own-key order. A
+   * key colliding with a target DECLARED field validates through the
+   * keyed write's dynCheck (a mismatch throws the catchable TypeError —
+   * divergence 34), which is exactly what makes the `as` honest. The
+   * result is a COPY (divergence 36's stance). Null when the pair is
+   * outside the supported matrix: the target needs an index signature,
+   * every source value (declared fields, and the overflow slot when the
+   * source carries one) must enter the target's value slot (identity, a
+   * width lift — arm wrap/re-tag/nested reshape, or JSON-safe into a dyn
+   * slot), and every target field must either be initialized directly by
+   * a same-named source declared field (the rule that admits REQUIRED
+   * declared members) or be optional-flavored (the fresh record's
+   * default) and writable at runtime. */
+  export function lowerRecordOvfCaptureHelper(lowerer: Lowerer, fromId: string, toId: string, loc: SrcLoc,): string | null {
+    const from = lowerer.shapes.get(fromId);
+    const to = lowerer.shapes.get(toId);
+    if (!from || !to?.indexValue || from.tuple || to.tuple) return null;
+    const fIv = from.indexValue ?? null;
+    const tIv = to.indexValue;
+    // How a source value enters the target's value slot: identity, the
+    // dyn conversion, or a width lift (wrap/retag/nested reshape).
+    const slotLift = (t: IrType): WidthLift | "dyn" | null => {
+      if (typeEquals(t, tIv)) return { how: "copy" };
+      if (tIv.kind === "dyn" && (t.kind === "dyn" || lowerer.dynConvertible(t))) return "dyn";
+      return lowerer.widthLiftPlan(t, tIv);
+    };
+    // The overflow value slot must line up (sources without an index
+    // signature have no overflow to carry over).
+    if (fIv && slotLift(fIv) === null) return null;
+    // Target declared fields initialize one of two ways. A same-named
+    // SOURCE declared field whose type lifts initializes the slot DIRECTLY
+    // (consumed — no keyed write below): the declared half of a width flow
+    // into a hybrid target (`{ a: 1, b: 2 }` into `{ a: number;
+    // [k: string]: number }`), which is also what admits REQUIRED declared
+    // target fields — tsc guarantees the source declares them (an index
+    // signature alone never satisfies a required member), and an
+    // index-signature source's OVERFLOW can never collide with them (its
+    // own declared name owns the key). Every other target field defaults
+    // to its undefined arm (fresh record), so it must be optional-flavored
+    // and must accept a runtime collision (dyn slots validate via dynCheck
+    // — fields must be dyn-convertible; typed slots write through
+    // directly).
+    type FieldInit =
+      | { name: string; kind: "undef"; unionId: string; utag: number }
+      | { name: string; kind: "direct"; src: IrType; lift: WidthLift };
+    const inits: FieldInit[] = [];
+    const consumed = new Set<string>();
+    for (const tf of to.fields) {
+      const sf = from.fields.find((f) => f.name === tf.name);
+      const directLift = sf ? lowerer.widthLiftPlan(sf.type, tf.type) : null;
+      if (sf && directLift) {
+        inits.push({ name: tf.name, kind: "direct", src: sf.type, lift: directLift });
+        consumed.add(tf.name);
+        continue;
+      }
+      if (tf.type.kind !== "union") return null;
+      const utag = lowerer.armTag(tf.type.unionId, UNDEFINED_T);
+      if (utag < 0) return null;
+      if (tIv.kind === "dyn" ? !lowerer.dynConvertible(tf.type) : !typeEquals(tf.type, tIv)) return null;
+      inits.push({ name: tf.name, kind: "undef", unionId: tf.type.unionId, utag });
+    }
+    // Every source declared field must flow into the keyed-write slot —
+    // in DECLARATION order (insertion order below; declaredOrder omits
+    // internal '%'-fields, which never enter the copy).
+    const orderedFields = from.declaredOrder
+      ? from.declaredOrder.flatMap((n) => {
+          const f = from.fields.find((x) => x.name === n);
+          return f ? [f] : [];
+        })
+      : from.fields;
+    const fieldLifts = new Map<string, WidthLift | "dyn">();
+    for (const ff of orderedFields) {
+      if (consumed.has(ff.name)) continue; // direct-initialized above
+      const lift = slotLift(ff.type);
+      if (lift === null) return null;
+      fieldLifts.set(ff.name, lift);
+    }
+    // DISPATCH writes — keys that can hit a declared target slot: the
+    // overflow loop's runtime keys, and a literal source-field name the
+    // target also declares. Non-dyn slots store THROUGH on a collision, so
+    // such writes need every declared field to BE the slot type (the
+    // validator's recordKeySet rule); dyn slots validate per field
+    // (dynCheck), so each field must be dyn-convertible. Writes to
+    // literal names the target does NOT declare are overflowOnly and
+    // exempt — which is what lets a direct-initialized required field
+    // (`id: number` beside a `number | undefined` slot) coexist with a
+    // declared-only source, while an index-signature source declines.
+    const dispatchWrites =
+      fIv !== undefined ||
+      orderedFields.some((ff) => !consumed.has(ff.name) && to.fields.some((f) => f.name === ff.name));
+    if (dispatchWrites) {
+      if (tIv.kind === "dyn" ? !to.fields.every((f) => lowerer.dynConvertible(f.type)) : !to.fields.every((f) => typeEquals(f.type, tIv))) {
+        return null;
+      }
+    }
+    const key = `ovf:${fromId}:${toId}`;
+    const existing = lowerer.widthHelpers.get(key);
+    if (existing) return existing;
+    const name = `%rec.capture.${lowerer.widthHelpers.size}`;
+    lowerer.widthHelpers.set(key, name);
+    const fromT: IrType = { kind: "record", shapeId: fromId };
+    const toT: IrType = { kind: "record", shapeId: toId };
+
+    const sRef = varRef("s.0", fromT, loc);
+    const outRef = varRef("out.0", toT, loc);
+    const intoSlot = (v: IrExpr, lift: WidthLift | "dyn"): IrExpr =>
+      lift === "dyn"
+        ? { kind: "dynFrom", value: v, type: DYN, loc }
+        : lowerer.applyWidthLift(lift, v, tIv, loc);
+    const body: IrStmt[] = [
+      {
+        kind: "varDecl",
+        localId: "out.0",
+        init: {
+          kind: "recordLit",
+          fields: inits.map((d) => ({
+            name: d.name,
+            value:
+              d.kind === "direct"
+                ? lowerer.applyWidthLift(
+                    d.lift,
+                    { kind: "recordGet", obj: sRef, shapeId: fromId, field: d.name, type: d.src, loc },
+                    to.fields.find((f) => f.name === d.name)!.type,
+                    loc,
+                  )
+                : ({
+                    kind: "unionWrap",
+                    unionId: d.unionId,
+                    tag: d.utag,
+                    value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+                    type: to.fields.find((f) => f.name === d.name)!.type,
+                    loc,
+                  } satisfies IrExpr),
+          })),
+          type: toT,
+          loc,
+        },
+        loc,
+      },
+    ];
+    const fieldStmts = new Map<string, IrStmt>();
+    // Source declared fields in declaration order, skipping unset
+    // optionals (stance 37) and the direct-initialized (consumed) names.
+    for (const ff of orderedFields) {
+      if (consumed.has(ff.name)) continue;
+      const raw: IrExpr = { kind: "recordGet", obj: sRef, shapeId: fromId, field: ff.name, type: ff.type, loc };
+      const utag = ff.type.kind === "union" ? lowerer.armTag(ff.type.unionId, UNDEFINED_T) : -1;
+      const write: IrStmt = {
+        kind: "recordKeySet",
+        obj: outRef,
+        shapeId: toId,
+        key: { kind: "strLit", value: ff.name, type: STRING, loc },
+        value: intoSlot(raw, fieldLifts.get(ff.name)!),
+        // A literal name the target does not declare can only land in the
+        // overflow — skip the declared dispatch (and its validator gate).
+        ...(to.fields.some((f) => f.name === ff.name) ? {} : { overflowOnly: true as const }),
+        loc,
+      };
+      const fieldStmt: IrStmt =
+        utag >= 0 && ff.type.kind === "union"
+          ? {
+              kind: "if",
+              cond: { kind: "unionIsTag", unionId: ff.type.unionId, tag: utag, negated: true, value: raw, type: BOOL, loc },
+              then: [write],
+              else_: null,
+              loc,
+            }
+          : write;
+      fieldStmts.set(ff.name, fieldStmt);
+      body.push(fieldStmt);
+    }
+    // The source overflow, in JS own-key order (only index-signature
+    // sources carry one).
+    const ksT = arrayOf(STRING);
+    if (fIv) {
+      const ovfLift = slotLift(fIv)!;
+      body.push(
+        { kind: "varDecl", localId: "ks.0", init: { kind: "recordOvfKeys", obj: sRef, shapeId: fromId, type: ksT, loc }, loc },
+        countedFor(
+          loc,
+          { kind: "arrIntrinsic", method: "length", receiver: varRef("ks.0", ksT, loc), args: [], type: F64, loc },
+          () => [
+            { kind: "varDecl", localId: "k.0", init: { kind: "arrayGet", arr: varRef("ks.0", ksT, loc), index: varRef("i.0", F64, loc), type: STRING, loc }, loc },
+            {
+              kind: "recordKeySet",
+              obj: outRef,
+              shapeId: toId,
+              key: varRef("k.0", STRING, loc),
+              value: intoSlot({ kind: "recordKeyGet", obj: sRef, shapeId: fromId, key: varRef("k.0", STRING, loc), overflowOnly: true, type: fIv, loc }, ovfLift),
+              loc,
+            },
+          ],
+        ),
+      );
+    }
+    body.push({ kind: "return", value: outRef, loc });
+    const suffix = body.slice(1 + fieldStmts.size);
+    const fn: IrFunction = {
+      name,
+      params: [{ localId: "s.0", name: "s", type: fromT }],
+      returnType: toT,
+      locals: [
+        { id: "s.0", name: "s", type: fromT, mutable: true },
+        { id: "out.0", name: "out", type: toT, mutable: false },
+        ...(fIv
+          ? [
+              { id: "ks.0", name: "ks", type: ksT, mutable: false },
+              { id: "i.0", name: "i", type: F64, mutable: true },
+              { id: "k.0", name: "k", type: STRING, mutable: false },
+            ]
+          : []),
+      ],
+      body,
+      loc,
+    };
+    lowerer.shapeOrderHelperFinalizers.push(() => {
+      const current = lowerer.shapes.get(fromId) ?? from;
+      const currentOrder = current.declaredOrder ?? current.fields.map((f) => f.name);
+      fn.body = [body[0]!, ...currentOrder.flatMap((field) => {
+        const stmt = fieldStmts.get(field);
+        return stmt ? [stmt] : [];
+      }), ...suffix];
+    });
+    lowerer.liftedFns.push(fn);
+    return name;
+  }
+
+/** `Object.assign(target, ...sources)` into an INDEX-SIGNATURE record:
+   * the capture helper's keyed-write walk aimed at the EXISTING target —
+   * each source's declared fields write in declaration order (unset
+   * optionals skip, stance 37), then its overflow in JS own-key order,
+   * and the result IS the target (identity, like JS — later reads through
+   * the target see every merged key). One interned `%obj.assign.<n>(t, s)`
+   * per (target shape, source shape) pair; multiple sources chain. Null
+   * when outside the matrix: the target needs an index signature, every
+   * source value must enter its value slot (identity, a width lift, or
+   * the dyn conversion), and tsc's `T & U` result type must collapse back
+   * to the target's own record shape (the self-shaped merges init-config
+   * patterns spell). */
+   * record shape: declared fields answer first from the compile-time field
+   * list (declaration order, undefined-valued fields skipped — exactly the
+   * fixed-shape lowering and SEMANTICS.md 37), then the overflow map's live
+   * keys in JS OWN-KEY order (canonical array indices ascending, then
+   * insertion order — recordOvfKeys). For a PURE index-signature shape
+   * (Record<string, T> — no declared fields, the typical CLI config patterns) the
+   * result order is Node-exact; hybrids inherit the documented
+   * declared-then-overflow divergence. Values surface as the checker's
+   * result element type: identity, an arm-into-union wrap, or (dyn
+   * results) the dyn conversion — recordKeyGet's own surfacing rules for
+   * the overflow, mirrored statically for declared fields. */
+  export function lowerObjectIterOverIndexShape(lowerer: Lowerer, call: ts.CallExpression,
+    member: "keys" | "values" | "entries",
+    argIr: IrType & { kind: "record" },
+    shape: IrRecordShape,): IrExpr {
+    const resultT = lowerer.irTypeOf(call);
+    if (resultT.kind !== "array") lowerer.badType(call, lowerer.typeOf(call)); // defensive
+    return objectIterOverIndexShape(lowerer, call, member, argIr, shape, lowerer.lowerExpr(call.arguments[0]!), resultT, locOf(call));
+  }
+
+  /** The construction core, receiver/result pre-resolved — `node` anchors
+   * the fences. for-in reuses the "keys" arm directly (it iterates exactly
+   * the keys Object.keys answers; same intern key, one helper). */
+  export function objectIterOverIndexShape(lowerer: Lowerer, node: ts.Node,
+    member: "keys" | "values" | "entries",
+    argIr: IrType & { kind: "record" },
+    shape: IrRecordShape,
+    receiver: IrExpr,
+    resultT: IrType & { kind: "array" },
+    loc: SrcLoc,): IrExpr {
+    const iv = shape.indexValue!;
+
+    // The result-element type values flow into (string for keys, the
+    // checker's element for values, the [string, V] tuple's "1" for
+    // entries).
+    let valueT: IrType | null = null;
+    let tupleT: (IrType & { kind: "record" }) | null = null;
+    if (member === "values") valueT = resultT.elem;
+    if (member === "entries") {
+      if (resultT.elem.kind !== "record") lowerer.badType(node, lowerer.typeOf(node as ts.Expression));
+      tupleT = resultT.elem;
+      const tupleShape = lowerer.shapes.get(resultT.elem.shapeId);
+      if (!tupleShape?.tuple || tupleShape.fields.length !== 2) lowerer.badType(node, lowerer.typeOf(node as ts.Expression));
+      valueT = tupleShape.fields.find((f) => f.name === "1")!.type;
+    }
+
+    // JS lists integer-like OWN keys first regardless of where they live;
+    // the declared-then-overflow order can only honor that when no
+    // DECLARED field name is integer-like (the overflow walk handles its
+    // own). Shapes that mix one in keep a fence, not a silent reorder.
+    const arrayIndexRe = /^(0|[1-9][0-9]{0,9})$/;
+    if (shape.fields.some((f) => arrayIndexRe.test(f.name) && Number(f.name) <= 4294967294)) {
+      lowerer.unsupported(
+        "SC1090",
+        node,
+        `Object.${member} over '${lowerer.fmt(argIr)}' (a declared field name is integer-like — JS orders integer keys first, across declared and overflow keys)`,
+      );
+    }
+    // The overflow value must surface as the element type (identity, an
+    // arm of a union element, or a dyn element over a dyn signature).
+    if (valueT) {
+      const ivSurfaces =
+        typeEquals(iv, valueT) ||
+        (valueT.kind === "union" && lowerer.armTag(valueT.unionId, iv) >= 0) ||
+        (valueT.kind === "dyn" && iv.kind === "dyn");
+      if (!ivSurfaces) {
+        lowerer.unsupported(
+          "SC1090",
+          node,
+          `Object.${member} over '${lowerer.fmt(argIr)}' (the index signature's '${lowerer.fmt(iv)}' value cannot flow into the '${lowerer.fmt(valueT)}' result element)`,
+        );
+      }
+    }
+
+    const key = `obj.${member}:ovf:${argIr.shapeId}:${typeKey(resultT)}`;
+    let helper = lowerer.arrHofHelpers.get(key);
+    if (!helper) {
+      helper = `%obj.${member}.${lowerer.arrHofHelpers.size}`;
+
+      const outRef = varRef("out.0", resultT, loc);
+      const rRef = varRef("r.0", argIr, loc);
+      const push = (value: IrExpr): IrStmt => ({
+        kind: "exprStmt",
+        expr: { kind: "arrIntrinsic", method: "push", receiver: outRef, args: [value], type: F64, loc },
+        loc,
+      });
+      const body: IrStmt[] = [
+        { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc },
+      ];
+      const fieldStmts = new Map<string, IrStmt>();
+
+      // Declared fields, in declaration order. Undefined-valued fields
+      // skip at runtime (the unset-optional convention); values surface
+      // into the element type or the site fences with the field named.
+      const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
+      for (const name of order) {
+        const f = shape.fields.find((x) => x.name === name)!;
+        const raw: IrExpr = { kind: "recordGet", obj: rRef, shapeId: argIr.shapeId, field: f.name, type: f.type, loc };
+        const utag = f.type.kind === "union" ? lowerer.armTag(f.type.unionId, UNDEFINED_T) : -1;
+        // The pushed value per member; null when the field cannot surface.
+        const surfaced = (): IrExpr | null => {
+          if (!valueT) return null;
+          if (typeEquals(f.type, valueT)) return raw;
+          if (valueT.kind === "dyn") {
+            return lowerer.dynConvertible(f.type) ? { kind: "dynFrom", value: raw, type: DYN, loc } : null;
+          }
+          if (valueT.kind === "union") {
+            const tag = lowerer.armTag(valueT.unionId, f.type);
+            if (tag >= 0) return { kind: "unionWrap", unionId: valueT.unionId, tag, value: raw, type: valueT, loc };
+            // An undefined-armed field union whose ONE other arm is an
+            // element arm: narrow (the undefined case is guard-skipped),
+            // then wrap.
+            if (utag >= 0 && f.type.kind === "union") {
+              const others = (lowerer.unions.get(f.type.unionId)?.arms ?? []).filter((a) => a.kind !== "undefinedT");
+              if (others.length === 1) {
+                const otherTag = lowerer.armTag(valueT.unionId, others[0]!);
+                const narrowTag = lowerer.armTag(f.type.unionId, others[0]!);
+                if (otherTag >= 0 && narrowTag >= 0) {
+                  const other = others[0]!;
+                  // A UNIT other arm pushes the unit LITERAL (undefined
+                  // was filtered above, so the unit is null; units carry
+                  // no payload and narrowing to a unit arm is malformed
+                  // IR) — the fixed-shape helper's rule exactly.
+                  const narrowed: IrExpr = isUnitType(other)
+                    ? { kind: "unitLit", unit: "null", type: other, loc }
+                    : { kind: "unionNarrow", unionId: f.type.unionId, tag: narrowTag, value: raw, type: other, loc };
+                  return { kind: "unionWrap", unionId: valueT.unionId, tag: otherTag, value: narrowed, type: valueT, loc };
+                }
+              }
+            }
+          }
+          return null;
+        };
+        let pushed: IrExpr;
+        if (member === "keys") {
+          pushed = { kind: "strLit", value: f.name, type: STRING, loc };
+        } else {
+          const s = surfaced();
+          if (!s) {
+            lowerer.unsupported(
+              "SC1090",
+              node,
+              `Object.${member} over '${lowerer.fmt(argIr)}' (field '${f.name}' of type '${lowerer.fmt(f.type)}' cannot flow into the '${lowerer.fmt(valueT!)}' result element — read the fields directly)`,
+            );
+          }
+          pushed =
+            member === "values"
+              ? s
+              : {
+                  kind: "recordLit",
+                  fields: [
+                    { name: "0", value: { kind: "strLit", value: f.name, type: STRING, loc } },
+                    { name: "1", value: s },
+                  ],
+                  type: tupleT!,
+                  loc,
+                };
+        }
+        const fieldStmt: IrStmt =
+          utag >= 0 && f.type.kind === "union"
+            ? {
+                kind: "if",
+                cond: { kind: "unionIsTag", unionId: f.type.unionId, tag: utag, negated: true, value: raw, type: BOOL, loc },
+                then: [push(pushed)],
+                else_: null,
+                loc,
+              }
+            : push(pushed);
+        fieldStmts.set(f.name, fieldStmt);
+        body.push(fieldStmt);
+      }
+
+      // The overflow walk: a fresh key snapshot in JS own-key order, each
+      // value read back through the overflow-only keyed read (declared
+      // names never live in the overflow map).
+      const ksT = arrayOf(STRING);
+      const ksRef = varRef("ks.0", ksT, loc);
+      const kRef = varRef("k.0", STRING, loc);
+      const readValue: IrExpr | null = valueT
+        ? { kind: "recordKeyGet", obj: rRef, shapeId: argIr.shapeId, key: kRef, overflowOnly: true, type: valueT, loc }
+        : null;
+      const loopPushed: IrExpr =
+        member === "keys"
+          ? kRef
+          : member === "values"
+            ? readValue!
+            : {
+                kind: "recordLit",
+                fields: [
+                  { name: "0", value: kRef },
+                  { name: "1", value: readValue! },
+                ],
+                type: tupleT!,
+                loc,
+              };
+      body.push(
+        { kind: "varDecl", localId: "ks.0", init: { kind: "recordOvfKeys", obj: rRef, shapeId: argIr.shapeId, type: ksT, loc }, loc },
+        countedFor(loc, { kind: "arrIntrinsic", method: "length", receiver: ksRef, args: [], type: F64, loc }, () => [
+            { kind: "varDecl", localId: "k.0", init: { kind: "arrayGet", arr: ksRef, index: varRef("i.0", F64, loc), type: STRING, loc }, loc },
+            push(loopPushed),
+          ],
+        ),
+        { kind: "return", value: outRef, loc },
+      );
+      const suffix = body.slice(1 + fieldStmts.size);
+      lowerer.arrHofHelpers.set(key, helper);
+      const fn: IrFunction = {
+        name: helper,
+        params: [{ localId: "r.0", name: "r", type: argIr }],
+        returnType: resultT,
+        locals: [
+          { id: "r.0", name: "r", type: argIr, mutable: true },
+          { id: "out.0", name: "out", type: resultT, mutable: false },
+          { id: "ks.0", name: "ks", type: ksT, mutable: false },
+          { id: "i.0", name: "i", type: F64, mutable: true },
+          { id: "k.0", name: "k", type: STRING, mutable: false },
+        ],
+        body,
+        loc,
+      };
+      lowerer.shapeOrderHelperFinalizers.push(() => {
+        const current = lowerer.shapes.get(argIr.shapeId) ?? shape;
+        const currentOrder = current.declaredOrder ?? current.fields.map((f) => f.name);
+        fn.body = [body[0]!, ...currentOrder.flatMap((name) => {
+          const stmt = fieldStmts.get(name);
+          return stmt ? [stmt] : [];
+        }), ...suffix];
+      });
+      lowerer.liftedFns.push(fn);
+    }
+    return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
+  }
 
 /** `Object.fromEntries(pairs)` over a `[string, V][]` VALUE into the
    * checker's own index-signature result shape (`{ [k: string]: V }` —

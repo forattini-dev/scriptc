@@ -3,6 +3,7 @@ import {
   DYN_HANDLE_KINDS,
   RUNTIME_STREAM_CLASSES,
   type IrExpr,
+  type IrLibFn,
   type IrRecordShape,
   type IrStmt,
   type IrType,
@@ -49,6 +50,7 @@ export function dynDesc(
 ): string {
   switch (t.kind) {
     case "f64": return "number";
+    case "bigint": return "bigint";
     case "string": return "string";
     case "bool": return "boolean";
     case "record": return recordsById.get(t.shapeId)?.tuple ? "array" : "object";
@@ -74,9 +76,21 @@ export function dynDesc(
   }
 }
 
-/** Whether evaluating an index/value expression can overwrite a bytes
- * receiver binding. Deliberately conservative: uncertain shapes are false. */
-export function isStableBytesOperand(e: IrExpr, receiverLocalId: string): boolean {
+// These scalar lowerings borrow no references and cannot invoke user code,
+// suspend, or release an owner. Keep this explicit: array folds and future
+// Math operations must not inherit the guarantee from their name alone.
+const BORROW_SAFE_MATH = new Set<IrLibFn>([
+  "math.floor", "math.ceil", "math.trunc", "math.round", "math.abs",
+  "math.min", "math.max", "math.sqrt", "math.pow",
+  "math.sin", "math.cos", "math.tan", "math.asin", "math.acos", "math.atan",
+  "math.atan2", "math.cbrt", "math.sign", "math.exp", "math.log", "math.log2", "math.log10",
+]);
+
+/** Whether an operand preserves a direct receiver binding until its last
+ * borrowed use. No user calls or suspension may intervene. This does not
+ * prove the operation itself safe to borrow; callers must establish that
+ * separately. Deliberately conservative: uncertain shapes are false. */
+export function isStableReceiverOperand(e: IrExpr, receiverLocalId: string): boolean {
   switch (e.kind) {
     case "numLit":
     case "boolLit":
@@ -84,22 +98,25 @@ export function isStableBytesOperand(e: IrExpr, receiverLocalId: string): boolea
     case "incDec":
       return true;
     case "assignExpr":
-      return e.localId !== receiverLocalId && isStableBytesOperand(e.value, receiverLocalId);
+      return e.localId !== receiverLocalId && isStableReceiverOperand(e.value, receiverLocalId);
     case "bin":
     case "logical":
-      return isStableBytesOperand(e.left, receiverLocalId) &&
-        isStableBytesOperand(e.right, receiverLocalId);
+      return isStableReceiverOperand(e.left, receiverLocalId) &&
+        isStableReceiverOperand(e.right, receiverLocalId);
     case "unary":
     case "toBool":
-      return isStableBytesOperand(e.operand, receiverLocalId);
+      return isStableReceiverOperand(e.operand, receiverLocalId);
     case "ternary":
-      return isStableBytesOperand(e.cond, receiverLocalId) &&
-        isStableBytesOperand(e.then, receiverLocalId) &&
-        isStableBytesOperand(e.else_, receiverLocalId);
+      return isStableReceiverOperand(e.cond, receiverLocalId) &&
+        isStableReceiverOperand(e.then, receiverLocalId) &&
+        isStableReceiverOperand(e.else_, receiverLocalId);
     case "bytesIntrinsic":
       return (e.method === "get" || e.method === "length" || e.method === "byteLength") &&
         e.receiver.kind === "varRef" &&
-        e.args.every((arg) => isStableBytesOperand(arg, receiverLocalId));
+        e.args.every((arg) => isStableReceiverOperand(arg, receiverLocalId));
+    case "libCall":
+      return BORROW_SAFE_MATH.has(e.fn) && e.type.kind === "f64" &&
+        e.args.every((arg) => arg.type.kind === "f64" && isStableReceiverOperand(arg, receiverLocalId));
     default:
       return false;
   }

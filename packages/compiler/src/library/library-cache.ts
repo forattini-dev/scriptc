@@ -45,6 +45,7 @@ interface EarlyLibraryCacheStamp {
     assert: boolean;
     inspect: boolean;
     symbol: boolean;
+    bigint: boolean;
     searchParams: boolean;
     emitter: boolean;
     zlib: boolean;
@@ -60,6 +61,7 @@ export interface EarlyLibraryNativeFeatures {
   assert: boolean;
   inspect: boolean;
   symbol: boolean;
+  bigint: boolean;
   searchParams: boolean;
   emitter: boolean;
   zlib: boolean;
@@ -116,6 +118,7 @@ const BOOLEAN_NATIVE_KEYS = [
   "assert",
   "inspect",
   "symbol",
+  "bigint",
   "searchParams",
   "emitter",
   "zlib",
@@ -256,7 +259,6 @@ export async function readEarlyLibraryCache(
 
     const paths = outputPaths(options, stamp.native.backend);
     await installBytes(translationUnit, paths.cPath);
-    await rm(paths.staleCPath, { force: true });
     if (ir !== null) await installBytes(ir, paths.irPath);
     let sidecarPath: string | undefined;
     if (sidecar !== null) {

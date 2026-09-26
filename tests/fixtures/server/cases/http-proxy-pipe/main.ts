@@ -24,8 +24,10 @@ const proxy = http.createServer((req: http.IncomingMessage, res: http.ServerResp
   if (req.url === "/quit") {
     res.writeHead(200, { "content-type": "text/plain" });
     res.end("bye");
-    proxy.close(() => console.log("proxy closed"));
-    backend.close(() => console.log("backend closed"));
+    proxy.close(() => {
+      console.log("proxy closed");
+      backend.close(() => console.log("backend closed"));
+    });
     return;
   }
   const proxyReq = http.request(

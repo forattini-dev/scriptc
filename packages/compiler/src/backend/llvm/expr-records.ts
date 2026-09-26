@@ -5,7 +5,7 @@ import { undefinedArmTag } from "../../ir/analysis.js";
 import { IrExpr, IrType, isRefCounted, SrcLoc, typeEquals } from "../../ir/ir.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { LlvmEmitterContext, LlValue } from "./expr-context.js";
-import { f64Lit } from "./common.js";
+import { f64Lit, llvmCommentText } from "./common.js";
 
 export function emitRegexIntrinsic(host: LlvmEmitterContext, e: IrExpr & { kind: "regexIntrinsic" }): LlValue {
     const B = host.B;
@@ -129,7 +129,7 @@ export function keyedRecordReadInto(host: LlvmEmitterContext,
       for (const f of overflowOnly ? [] : shape.fields) {
         const lit = host.internLiteral(f.name);
         const hit = B.tmp();
-        B.line(`${hit} = call zeroext i1 @scr_str_eq(ptr ${keyName}, ptr ${lit}) ; ${f.name}`);
+        B.line(`${hit} = call zeroext i1 @scr_str_eq(ptr ${keyName}, ptr ${lit}) ; ${llvmCommentText(f.name)}`);
         const lh = B.newLabel("rkg.h");
         const ln = B.newLabel("rkg.n");
         B.condBr(hit, lh, ln);
@@ -244,7 +244,7 @@ export function keyedRecordReadInto(host: LlvmEmitterContext,
     for (const f of overflowOnly ? [] : shape.fields) {
       const lit = host.internLiteral(f.name);
       const hit = B.tmp();
-      B.line(`${hit} = call zeroext i1 @scr_str_eq(ptr ${keyName}, ptr ${lit}) ; ${f.name}`);
+      B.line(`${hit} = call zeroext i1 @scr_str_eq(ptr ${keyName}, ptr ${lit}) ; ${llvmCommentText(f.name)}`);
       const lh = B.newLabel("rkg.h");
       const ln = B.newLabel("rkg.n");
       B.condBr(hit, lh, ln);

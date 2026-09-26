@@ -67,11 +67,13 @@ jobs:
             helper: llvm-linux-x64-gnu
             runtime: runtime-linux-x64-gnu
             llvm_asset: LLVM-22.1.8-Linux-X64
+            use_zig: true
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
             helper: llvm-linux-arm64-gnu
             runtime: runtime-linux-arm64-gnu
             llvm_asset: LLVM-22.1.8-Linux-ARM64
+            use_zig: true
           - platform: windows-x64
             runner: windows-2022
             helper: llvm-win32-x64-msvc
@@ -298,6 +300,11 @@ jobs:
               tarball=$(cd "$dir" && pnpm pack --silent | tail -1)
               packed="$dir/$tarball"
             fi
+            case "$dir" in
+              packages/llvm-darwin-*|packages/llvm-linux-*)
+                node scripts/verify-llvm-package-mode.mjs "$packed" "$name"
+                ;;
+            esac
             if npm publish "$packed" $PROVENANCE --access public --tag "$DIST_TAG"; then
               return 0
             else

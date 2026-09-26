@@ -12,7 +12,10 @@ import {
   RUNTIME_ABI_MARKER,
   RUNTIME_ABI_VERSION,
 } from "./runtime-abi.js";
-import type { NativeTargetSpec } from "./targets.js";
+import {
+  executableOptimizationLinkerArgs,
+  type NativeTargetSpec,
+} from "./targets.js";
 import { LRE_SOURCES, QJS_ENGINE_SOURCES } from "./vendor-archives.js";
 
 export interface NativeLinkFeatures {
@@ -32,6 +35,7 @@ export interface NativeLinkFeatures {
   events: boolean;
   emitter: boolean;
   symbol: boolean;
+  bigint: boolean;
   searchParams: boolean;
   qs: boolean;
   parseArgs: boolean;
@@ -155,6 +159,8 @@ function runtimeSourceRecipe(
     ...(features.emitter ? ["scr_events_emitter.c"] : []),
     ...(features.emitter || net ? ["scr_dyn_handle.c"] : []),
     ...(features.symbol ? ["scr_symbol.c"] : []),
+    ...(features.bigint ? ["scr_bigint.c"] : []),
+    ...(features.assert && features.bigint ? ["scr_bigint_assert.c"] : []),
     ...(features.searchParams ? ["scr_url_params.c"] : []),
     ...(features.qs ? ["scr_qs.c"] : []),
     ...(features.parseArgs ? ["scr_util.c"] : []),
@@ -274,6 +280,7 @@ function runtimeSourceRecipe(
     systemLibraries,
     driverFlags: [
       ...target.executableLinkerArgs,
+      ...executableOptimizationLinkerArgs(target.platform, optimization),
     ],
   };
 }

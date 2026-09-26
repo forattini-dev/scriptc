@@ -559,76 +559,12 @@ export function emitPrimitiveLibCall(host: LlvmEmitterContext, e: LibCallExpr): 
     }
     if (e.fn === "math.sign") {
       const v = host.emitExpr(e.args[0]!);
-      const zero = B.tmp();
-      const nan = B.tmp();
-      const preserve = B.tmp();
-      const sign = B.tmp();
-      const result = B.tmp();
-      B.line(`${zero} = fcmp oeq double ${v.name}, ${f64Lit(0)}`);
-      B.line(`${nan} = fcmp uno double ${v.name}, ${f64Lit(0)}`);
-      B.line(`${preserve} = or i1 ${zero}, ${nan}`);
-      host.declare("declare double @llvm.copysign.f64(double, double)");
-      B.line(`${sign} = call double @llvm.copysign.f64(double ${f64Lit(1)}, double ${v.name})`);
-      B.line(`${result} = select i1 ${preserve}, double ${v.name}, double ${sign}`);
-      return { name: result, type: e.type };
-    }
-    if (e.fn === "math.pow") {
-      const base = host.emitExpr(e.args[0]!);
-      const exponent = host.emitExpr(e.args[1]!);
-      host.declare("declare double @llvm.fabs.f64(double)");
-      const absBase = B.tmp();
-      const baseIsOne = B.tmp();
-      const absExponent = B.tmp();
-      const exponentIsInfinite = B.tmp();
-      const special = B.tmp();
-      const computed = B.tmp();
-      const result = B.tmp();
-      B.line(`${absBase} = call double @llvm.fabs.f64(double ${base.name})`);
-      B.line(`${baseIsOne} = fcmp oeq double ${absBase}, ${f64Lit(1)}`);
-      B.line(`${absExponent} = call double @llvm.fabs.f64(double ${exponent.name})`);
-      B.line(`${exponentIsInfinite} = fcmp oeq double ${absExponent}, ${F64_INF}`);
-      B.line(`${special} = and i1 ${baseIsOne}, ${exponentIsInfinite}`);
-      host.declare("declare double @pow(double, double)");
-      B.line(`${computed} = call double @pow(double ${base.name}, double ${exponent.name})`);
-      B.line(`${result} = select i1 ${special}, double ${F64_NAN}, double ${computed}`);
-      return { name: result, type: e.type };
-    }
-    if (e.fn === "num.isNaN") {
-      const v = host.emitExpr(e.args[0]!);
+      const positive = B.tmp();
+      B.line(`${positive} = fcmp ogt double ${v.name}, ${f64Lit(0)}`);
+      const negative = B.tmp();
+      B.line(`${negative} = fcmp olt double ${v.name}, ${f64Lit(0)}`);
+      const nonPositive = B.tmp();
+      B.line(`${nonPositive} = select i1 ${negative}, double ${f64Lit(-1)}, double ${v.name}`);
       const t = B.tmp();
-      B.line(`${t} = fcmp uno double ${v.name}, ${f64Lit(0)}`);
+      B.line(`${t} = select i1 ${positive}, double ${f64Lit(1)}, double ${nonPositive}`);
       return { name: t, type: e.type };
-    }
-    if (e.fn === "sym.newAnon") {
-      host.declare(`declare ptr @scr_sym_new(ptr)`);
-      const t = B.tmp();
-      B.line(`${t} = call ptr @scr_sym_new(ptr null)`);
-      return host.own({ name: t, type: e.type });
-    }
-    if (e.fn === "sym.desc" || e.fn === "sym.keyFor") {
-      // `string | undefined` — the runtime answers a +1 string or NULL;
-      // the union construction is type-directed here (envGet convention).
-      if (e.type.kind !== "union") throw new InternalCompilerError(`llvm emitter bug: ${e.fn} result is not a union`);
-      const def = host.unionsById.get(e.type.unionId);
-      const strTag = def ? def.arms.findIndex((a) => a.kind === "string") : -1;
-      const undefTag = undefinedArmTag(e.type, host.unionsById);
-      if (strTag < 0 || undefTag < 0) throw new InternalCompilerError(`llvm emitter bug: ${e.fn} union lacks its arms`);
-      const v = host.emitExpr(e.args[0]!);
-      const sym = e.fn === "sym.desc" ? "scr_sym_desc" : "scr_sym_key_for";
-      host.declare(`declare ptr @${sym}(ptr)`);
-      const raw = B.tmp();
-      B.line(`${raw} = call ptr @${sym}(ptr ${v.name})`);
-      return host.wrapNullable(raw, raw, STRING, strTag, e.type, undefTag);
-    }
-    if (e.fn === "string.fromCharCode") {
-      // One packed f64[] (the frontend built it) or one bytes value (the
-      // spread-typed-array form); +1 string.
-      const sym = e.args[0]!.type.kind === "bytes" ? "scr_str_from_char_code_bytes" : "scr_str_from_char_code";
-      const v = host.emitExpr(e.args[0]!);
-      host.declare(`declare ptr @${sym}(ptr)`);
-      const t = B.tmp();
-      B.line(`${t} = call ptr @${sym}(ptr ${v.name})`);
-      return host.own({ name: t, type: e.type });
-    }
-    return host.emitGenericLibCall(e);
-  }

@@ -1,6 +1,18 @@
 import { describe, expect, test } from "vitest";
 import { RUNTIME_EMITTER_CLASS } from "../../ir/ir.js";
-import { releaseCallC, retainCallC, vAdapters } from "./types.js";
+import { cCommentText, releaseCallC, retainCallC, vAdapters } from "./types.js";
+
+describe("C comment text", () => {
+  test("preserves ordinary text and neutralizes delimiters and controls", () => {
+    expect(cCommentText('quote" slash\\ unicode-é-😀')).toBe('quote" slash\\ unicode-é-😀');
+    expect(cCommentText("open/*close*/overlap/*/block/**/end")).toBe(
+      "open/ *close* /overlap/ * /block/ ** /end",
+    );
+    expect(cCommentText("nul\0line\nunit\u001fdel\u007fnext\u0085sep\u2028")).toBe(
+      "nul\\u0000line\\u000aunit\\u001fdel\\u007fnext\\u0085sep\\u2028",
+    );
+  });
+});
 
 describe("runtime RC symbols", () => {
   test("derives typed and adapter symbols from the shared stems", () => {

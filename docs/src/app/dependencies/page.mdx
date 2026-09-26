@@ -38,6 +38,8 @@ What happened, step by step:
 
 Your own code — the `.action` callback body, the functions it calls — still compiles statically. The engine runs only what must be dynamic, and [`scriptc coverage --dynamic`](/coverage) shows the exact split, including which Node builtins the embedded packages import and whether each is shimmed.
 
+Workspace packages whose executable entry is TypeScript compile automatically as part of your program, including package-internal `.js` import spellings that resolve to `.ts` source. Workspace packages that ship executable JavaScript keep the normal dependency policy: use `--dynamic` for the island or opt them into `--npm-static`.
+
 ## What the island is
 
 - **It's quickjs-ng, not V8.** Embedded dependency code runs correctly but slower than under Node for CPU-bound work. The win is startup, size, memory, and deployment shape — not raw dependency throughput.

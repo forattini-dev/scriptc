@@ -1,10 +1,8 @@
-// Dynamic import() in a STATIC build: every site is its own SC2012 — the
-// module's execution home is the embedded engine, so the honest story is
-// the requires---dynamic diagnostic, per site, poison-recovered.
-async function run(): Promise<void> {
-  const fs = await import("fs");
-  console.log(fs ? "y" : "n");
-  const p = await import("node:path");
-  console.log(p ? "y" : "n");
+// Static import() embeds a fixed graph, so a runtime-computed specifier
+// remains an explicit refusal even though literal program/builtin modules
+// now compile without the dynamic engine.
+async function run(specifier: string): Promise<void> {
+  const module = await import(specifier);
+  console.log(module);
 }
-run();
+run("node:path");

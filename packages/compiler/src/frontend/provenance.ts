@@ -299,16 +299,21 @@ function publishedTargetOf(pkgJson: Record<string, unknown>, subpath: string): s
 }
 
 /** dist target → source file, heuristically: the built path's leading
- * dist/lib/build segment rewrites to src (or drops), extensions rewrite
- * to their TypeScript twins, and the root entry falls back to the
+ * dist/lib/build segment rewrites to src (or drops), an esm/cjs/dts flavor
+ * segment is skipped for a shared TypeScript source tree, extensions
+ * rewrite to TypeScript twins, and the root entry falls back to the
  * conventional src/index.ts homes. First existing candidate wins. */
 function mapEntryToSource(pkgDir: string, target: string, subpath: string): string | null {
   const rel = target.replace(/^\.\//, "");
   const stems = new Set<string>([rel]);
   const distRe = /^(dist|lib|build|out|output|dist-node|dist-src)\//;
   if (distRe.test(rel)) {
+    const withoutDist = rel.replace(distRe, "");
+    if (/^(esm|cjs|dts)\//.test(withoutDist)) {
+      stems.add(`src/${withoutDist.replace(/^(esm|cjs|dts)\//, "")}`);
+    }
     stems.add(rel.replace(distRe, "src/"));
-    stems.add(rel.replace(distRe, ""));
+    stems.add(withoutDist);
   } else {
     stems.add(`src/${rel}`);
   }

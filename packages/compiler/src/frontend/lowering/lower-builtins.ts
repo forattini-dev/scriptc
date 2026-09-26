@@ -33,6 +33,7 @@ import {
   isChildSurfaceMember,
 } from "./surfaces.js";
 import { conditionalSpreadOf, droppableStatic, lowerAbsenceProbe, lowerDynObjectLiteral } from "./lower-exprs.js";
+import { lowerOptionalArgument, lowerStringSearchArgument } from "./optional-arguments.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "./crypto-tables.js";
 import { generatorMeta, timerStyleCallback } from "./lower-calls.js";
@@ -7172,7 +7173,7 @@ const DATE_METHOD_HINT =
     if (name === "toISOString") {
       return { kind: "libCall", fn: "date.toISOStringValue", args: [receiver], type: STRING, loc };
     }
-    const fn = DATE_GETTER_FNS[name];
+    const fn = own(DATE_GETTER_FNS, name);
     if (fn !== undefined) {
       return { kind: "libCall", fn, args: [receiver], type: F64, loc };
     }
@@ -7576,9 +7577,9 @@ function staticTextDecoderEncoding(label: string): StaticTextDecoderEncoding | n
     return { kind: "libCall", fn: "string.fromCharCode", args: [packed], type: STRING, loc };
   }
 
-/** `s.lastIndexOf(needle, fromIndex?)` on string receivers — a libCall
-   * (scr_lib.c) rather than a strIntrinsic, but the same UTF-16 index
-   * semantics as indexOf. Null for non-string receivers / other members. */
+/** `s.lastIndexOf(searchValue?, position?)` on string receivers, using UTF-16
+ * indices. Omitted search values become "undefined" and omitted or undefined
+ * positions clamp to the end of every representable string. */
   export function lowerStringLastIndexOfCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
@@ -7586,19 +7587,22 @@ function staticTextDecoderEncoding(label: string): StaticTextDecoderEncoding | n
     if (lowerer.mapTypeOf(lowerer.typeOf(access.expression))?.kind !== "string") return null;
     if (!lowerer.isStdlibMember(access)) return null;
     const loc = locOf(call);
-    if (call.arguments.length < 1 || call.arguments.length > 2) {
+    if (call.arguments.length > 2 || call.arguments.some(ts.isSpreadElement)) {
       lowerer.noLowering(
-        "lastIndexOf arity",
+        "lastIndexOf with this argument shape",
         call,
-        "lastIndexOf(needle, fromIndex?) lowers",
+        "pass no arguments, or a search value with an optional numeric position",
       );
     }
     const receiver = lowerer.lowerExprExpecting(access.expression, STRING);
+    const positionNode = call.arguments[1];
+    if (!positionNode) {
+      const needle = lowerStringSearchArgument(lowerer, call.arguments[0], loc);
+      return { kind: "libCall", fn: "string.lastIndexOf", args: [receiver, needle], type: F64, loc };
+    }
     const needle = lowerer.lowerExprExpecting(call.arguments[0]!, STRING);
-    const position = call.arguments[1] === undefined
-      ? { kind: "numLit" as const, value: Infinity, type: F64, loc }
-      : lowerer.lowerExprExpecting(call.arguments[1], F64);
-    return { kind: "libCall", fn: "string.lastIndexOf", args: [receiver, needle, position], type: F64, loc };
+    const position = lowerOptionalArgument(lowerer, positionNode, F64, numLit(Number.MAX_SAFE_INTEGER, loc));
+    return { kind: "libCall", fn: "string.lastIndexOfFrom", args: [receiver, needle, position], type: F64, loc };
   }
 
 /** `Promise.race([...])` on THE Promise global: the entries lower

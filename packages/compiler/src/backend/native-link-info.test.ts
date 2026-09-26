@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { loadFfiProfile } from "../ffi/ffi-manifest.js";
 import { createNativeLinkInfo, type NativeLinkFeatures } from "./native-link-info.js";
-import { MACOS_ARM64_TARGET } from "./targets.js";
+import { MACOS_ARM64_TARGET, WASM32_WASI_TARGET } from "./targets.js";
 
 const BASE: NativeLinkFeatures = {
   dynamic: false,
@@ -23,6 +23,7 @@ const BASE: NativeLinkFeatures = {
   events: false,
   emitter: false,
   symbol: false,
+  bigint: false,
   searchParams: false,
   qs: false,
   parseArgs: false,
@@ -47,7 +48,9 @@ describe("native link info recipes", () => {
         ...BASE,
         dynamic: true,
         regex: true,
+        assert: true,
         inspect: true,
+        bigint: true,
         zlib: true,
         tls: true,
       },
@@ -58,6 +61,8 @@ describe("native link info recipes", () => {
       "src/scr_regex.c",
       "src/scr_assert.c",
       "src/scr_inspect.c",
+      "src/scr_bigint.c",
+      "src/scr_bigint_assert.c",
       "src/scr_zlib.c",
       "src/scr_zlib_island.c",
       "src/scr_tls.c",
@@ -98,6 +103,25 @@ describe("native link info recipes", () => {
       ffi: null,
     });
     expect(info.link.driver_flags).toContain("-Wl,-dead_strip");
+  });
+
+  test("WASI external link recipes strip DWARF only in release mode", async () => {
+    const release = await createNativeLinkInfo({
+      programObject: "/out/app.o",
+      target: WASM32_WASI_TARGET,
+      features: BASE,
+      ffi: null,
+      optimization: "release",
+    });
+    const dev = await createNativeLinkInfo({
+      programObject: "/out/app.o",
+      target: WASM32_WASI_TARGET,
+      features: BASE,
+      ffi: null,
+      optimization: "dev",
+    });
+    expect(release.link.driver_flags).toContain("-Wl,--strip-debug");
+    expect(dev.link.driver_flags).not.toContain("-Wl,--strip-debug");
   });
 
   test("FFI symbols and resolved inputs remain ordered before the runtime", async () => {

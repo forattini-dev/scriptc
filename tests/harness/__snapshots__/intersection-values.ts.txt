@@ -1,35 +1,24 @@
-intersection-values.ts:9:10 - error SC2008: values of type 'Branded' cannot be compiled: this intersection resolves to no runtime shape
+intersection-values.ts:9:10 - error SC2008: values of type 'RuntimeDecorated' cannot be compiled: this intersection resolves to no runtime shape
 
-   8 | type Branded = number & { __brand: "id" };
-   9 | function mint(): Branded {
-     |          ^~~~
-  10 |   return 1 as Branded;
-
-  hint: restate the intersection as a single interface or type literal with the combined members; mixin-produced intersections compile where the mixin chain pins one instantiation
-
-intersection-values.ts:12:7 - error SC2008: values of type 'Branded' cannot be compiled: this intersection resolves to no runtime shape
-
-  11 | }
-  12 | const kept = mint();
-     |       ^~~~
-  13 | console.log(kept);
+   8 | type RuntimeDecorated = number & { value: number };
+   9 | function decorate(): RuntimeDecorated {
+     |          ^~~~~~~~
+  10 |   return 1 as RuntimeDecorated;
 
   hint: restate the intersection as a single interface or type literal with the combined members; mixin-produced intersections compile where the mixin chain pins one instantiation
 
-intersection-values.ts:12:14 - error SC2004: uses of 'mint' inherit the blocker on its declaration
+intersection-values.ts:12:13 - error SC2004: uses of 'decorate' inherit the blocker on its declaration
 
   11 | }
-  12 | const kept = mint();
-     |              ^~~~
-  13 | console.log(kept);
+  12 | console.log(decorate());
+     |             ^~~~~~~~
+  13 | // Literal markers have no runtime slot after primitive-brand erasure. A use
 
-  hint: the declaration of 'mint' did not compile — fix the diagnostic reported there and these sites clear with it
+  hint: the declaration of 'decorate' did not compile — fix the diagnostic reported there and these sites clear with it
 
-intersection-values.ts:13:13 - error SC2004: uses of 'kept' inherit the blocker on its declaration
+intersection-values.ts:17:13 - error SC1090: reading '__brand' from a value of type 'VisibleBrand' is not supported yet
 
-  12 | const kept = mint();
-  13 | console.log(kept);
-     |             ^~~~
-  14 | 
-
-  hint: the declaration of 'kept' did not compile — fix the diagnostic reported there and these sites clear with it
+  16 | const visible = "value" as VisibleBrand;
+  17 | console.log(visible.__brand);
+     |             ^~~~~~~~~~~~~~~
+  18 | // The primitive representation never manufactures this field.

@@ -1,0 +1,14 @@
+// BigInt itself is static; these adjacent representation boundaries remain
+// explicit refusals until their own coherent families land.
+const typed = new BigInt64Array(4);
+const dynamicValue: unknown = 1n;
+const keyed = new Map<bigint, string>();
+keyed.set(1n, "one");
+console.log(JSON.stringify(1n));
+
+import { statSync } from "node:fs";
+const stats = statSync(".", { bigint: true });
+console.log(stats.size);
+
+void typed;
+void dynamicValue;

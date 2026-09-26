@@ -1,21 +1,3 @@
-overloaded-function-values.ts:10:7 - error SC2007: values of type '{ (x: "a"): string; (x: "b"): number; }' cannot be compiled: the type declares multiple call signatures (overloads), and a compiled function value is always one concrete signature
-
-   9 | }
-  10 | const stored = pick;
-     |       ^~~~~~
-  11 | console.log(stored("a"));
-
-  hint: annotate the slot with the ONE signature the program actually calls (e.g. '(x: number) => string'), or wrap the overloaded function in a single-signature arrow
-
-overloaded-function-values.ts:11:13 - error SC2004: uses of 'stored' inherit the blocker on its declaration
-
-  10 | const stored = pick;
-  11 | console.log(stored("a"));
-     |             ^~~~~~
-  12 | 
-
-  hint: the declaration of 'stored' did not compile — fix the diagnostic reported there and these sites clear with it
-
 overloaded-function-values.ts:16:7 - error SC2007: values of type '{ (event: "exit", code: number): void; (event: "error", err: string): void; }' cannot be compiled: the type declares multiple call signatures (overloads), and a compiled function value is always one concrete signature
 
   15 | // compile to Node's ReferenceError at the root instead).

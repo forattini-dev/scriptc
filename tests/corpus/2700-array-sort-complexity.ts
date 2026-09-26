@@ -15,6 +15,14 @@ function checkBudget(label: string, input: number[], budget: number): void {
   console.log(label, sorted.length, sorted[0], sorted[sorted.length - 1]);
 }
 
+// The comparison budget makes a quadratic implementation fail quickly on
+// this large descending input.
+const largeDescending: number[] = [];
+for (let i = 0; i < 100000; i++) {
+  largeDescending.push(i * -2);
+}
+checkBudget("large-descending", largeDescending, largeDescending.length * 32);
+
 const size = 4096;
 const ascending: number[] = [];
 const descending: number[] = [];

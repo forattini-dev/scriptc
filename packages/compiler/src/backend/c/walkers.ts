@@ -1807,7 +1807,7 @@ export function jsonWriteHelper(emitter: CEmitter, t: IrType): string {
       d.push(`  if (!rest) { ${undo.join(" ")}${undo.length > 0 ? " " : ""}return NULL; }`);
     } else if (t.rest) {
       d.push(`  ScrDyn *rest = scr_dyn_new_arr();`);
-      d.push(`  for (size_t ri = ${t.params.length}; ri < argc; ri++) {`);
+      d.push(`  for (size_t ri = ${t.argumentsAll ? 0 : t.params.length}; ri < argc; ri++) {`);
       d.push(`    scr_dyn_arr_push(rest, scr_dyn_retain((ScrDyn *)args[ri]));`);
       d.push(`  }`);
     }

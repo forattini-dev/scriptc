@@ -232,14 +232,14 @@ export function lowerGenMethodCall(
  * re-tags through the retag helper with the non-channel arms marked
  * trappable (the same proved-away contract, proved here by the desugar's
  * own done test). Null when no extraction exists. */
-function extractYieldValue(
+export function extractIteratorValue(
   lowerer: Lowerer,
-  genT: GenType,
+  yieldT: IrType,
   valueT: IrType,
   read: IrExpr,
   loc: SrcLoc,
 ): IrExpr | null {
-  const yt = genT.yieldT;
+  const yt = yieldT;
   if (valueT.kind === "dyn") return read; // the dyn channel: V IS the value
   if (valueT.kind !== "union") return null;
   if (typeEquals(valueT, yt)) return read;
@@ -328,7 +328,7 @@ export function lowerForOfGenerator(
     const gRef = (): IrExpr => ({ kind: "varRef", localId: g.id, type: genT, loc });
     const rRef = (): IrExpr => ({ kind: "varRef", localId: r.id, type: recT, loc });
     const valueRead: IrExpr = { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "value", type: valueT, loc };
-    const extracted = extractYieldValue(lowerer, genT, valueT, valueRead, loc);
+    const extracted = extractIteratorValue(lowerer, genT.yieldT, valueT, valueRead, loc);
     if (!extracted) {
       lowerer.unsupported(
         "SC1090",
@@ -470,7 +470,7 @@ export function lowerForAwaitGenerator(
     const gRef = (): IrExpr => ({ kind: "varRef", localId: g.id, type: genT, loc });
     const rRef = (): IrExpr => ({ kind: "varRef", localId: r.id, type: recT, loc });
     const valueRead: IrExpr = { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "value", type: valueT, loc };
-    const extracted = extractYieldValue(lowerer, genT, valueT, valueRead, loc);
+    const extracted = extractIteratorValue(lowerer, genT.yieldT, valueT, valueRead, loc);
     if (!extracted) {
       lowerer.unsupported(
         "SC1090",
@@ -594,7 +594,7 @@ export function lowerYieldStarStatement(lowerer: Lowerer, expr: ts.Expression): 
     const dRef = (): IrExpr => ({ kind: "varRef", localId: d.id, type: dT, loc });
     const rRef = (): IrExpr => ({ kind: "varRef", localId: r.id, type: recT, loc });
     const valueRead: IrExpr = { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "value", type: valueT, loc };
-    const inner = extractYieldValue(lowerer, dT, valueT, valueRead, loc);
+    const inner = extractIteratorValue(lowerer, dT.yieldT, valueT, valueRead, loc);
     if (!inner) {
       lowerer.unsupported(
         "SC1071",

@@ -1,0 +1,7 @@
+scriptc coverage tests/coverage-fixtures/js-builtin-callable-alias.js
+
+  statements analyzed   3
+  compile statically    2  (66%)
+
+  deferred to runtime   1 site (JS statements that throw their fence if executed)
+      ×1  a builtin function alias as an escaping value (call 'ext' directly)  SC1090

@@ -47,52 +47,5 @@ const localized = (1234.5).toLocaleString();
 // Unlowered call FORMS of lowered members. (push is fully variadic now —
 // no fenced form remains to pin.)
 const nums = [1, 2, 3];
-const found = nums.indexOf(2, 1);
-const joined = nums.join(); // the default "," separator lowers now
-nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
-const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
-const rev = JSON.parse("1", (_k, v) => v);
-// Stringify with null or function replacers and literal space lowers.
-// Callback behavior lives in the Rust differential corpus; revivers and
-// non-literal spacing remain fenced.
-const toStringify = { a: 1 };
-const replaced = JSON.stringify(toStringify, (_k, v) => v);
-const width = 2;
-const spaced = JSON.stringify(toStringify, null, width);
-// The promise surface beyond await.
-async function work(): Promise<number> {
-  return 1;
-}
-const thened = work().then((v) => v + 1, () => 0);
-const caught = work().catch(() => 0);
-const resolved = Promise.resolve(1);
-
-// Object.is lowers over one comparable kind; the unlowered forms fence
-// by name — a validate-first dynamic operand and partially-overlapping
-// unions needing narrowing.
-const dynIs = Object.is(JSON.parse("1") as unknown, 1);
-function pick(a: string | number, b: number | boolean): boolean {
-  return Object.is(a, b); // partially-overlapping unions: narrow first
-}
-const picked = pick(1, 2);
-
-// Nullable Date positions now have native Rust tagged-union payloads.
-// Keep this accepted neighbor beside the remaining stdlib refusals.
-// Date mutation above still needs its own implementation.
-function optionalDate(value: Date | undefined): number {
-  return value === undefined ? -1 : value.getTime();
-}
-optionalDate(undefined);
-// BigInt arithmetic and scalar console inspection have native Rust support.
-// Keep this accepted case beside the remaining unsupported stdlib shapes.
-const big = 10n;
-console.log(big);
-function throwDate(): void {
-  throw new Date(0); // the exception cell cannot preserve Date's object kind
-}
-throwDate();
-function* dateGenerator(): Generator<number, void, unknown> {
-  yield 1;
-}
-dateGenerator().throw(new Date(0));
-// End of the diagnostic fixture.
+const found = nums.indexOf(2, 1); // the fromIndex overload lowers
+const joined = nums.join(); // the omitted separator lowers

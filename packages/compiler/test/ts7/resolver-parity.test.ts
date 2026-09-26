@@ -28,6 +28,11 @@ import { options5 } from "./harness.js";
 const repoRoot = join(import.meta.dirname, "../../../..");
 const OPTS = options5();
 
+function belongsToProjectSweep(file: string): boolean {
+  const portable = file.replaceAll("\\", "/");
+  return !portable.includes("/node_modules/") && !portable.includes("/store/");
+}
+
 /** Every source file under tests/ that scriptc's preflight could scan —
  * node_modules excluded (preflight never collects edges inside packages;
  * npm.ts's runtime resolver owns that world and has its own suite). */
@@ -43,14 +48,20 @@ function sweepFiles(): string[] {
   for (const root of roots) {
     for (const ext of ["ts", "tsx", "js", "mjs", "cjs", "jsx"]) {
       files.push(
-        ...globSync(join(repoRoot, root, `**/*.${ext}`)).filter(
-          (f) => !f.includes("/node_modules/") && !f.includes("/store/"),
-        ),
+        ...globSync(join(repoRoot, root, `**/*.${ext}`)).filter(belongsToProjectSweep),
       );
     }
   }
   return files.sort();
 }
+
+test("the project sweep excludes package runtime trees on every path separator", () => {
+  expect(belongsToProjectSweep("/repo/tests/fixtures/npm/node_modules/pkg/index.js")).toBe(false);
+  expect(belongsToProjectSweep("D:\\repo\\tests\\fixtures\\npm\\node_modules\\pkg\\index.js")).toBe(false);
+  expect(belongsToProjectSweep("/repo/tests/fixtures/provenance/store/pkg/index.js")).toBe(false);
+  expect(belongsToProjectSweep("D:\\repo\\tests\\fixtures\\provenance\\store\\pkg\\index.js")).toBe(false);
+  expect(belongsToProjectSweep("D:\\repo\\tests\\fixtures\\npm\\cases\\main.ts")).toBe(true);
+});
 
 /** All module specifiers of one file: import/export declarations, dynamic
  * import("lit"), require("lit") — the same shapes preflight edges. The walk

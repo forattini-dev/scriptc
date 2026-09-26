@@ -3,10 +3,11 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { availableParallelism, tmpdir } from "node:os";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { createRuntimePackMatrix } from "../runtime-pack-matrix.mjs";
+import { assertArtifactsExcludeStrings } from "./artifact-policy.mjs";
 import { createDeterministicArchive } from "./archive.mjs";
 import { installRuntimePack, withBuildLock } from "./build-state.mjs";
 
@@ -35,7 +36,7 @@ async function build() {
   const archiver = process.env.AR ?? config.archiver ?? "ar";
   const archiverArgs = config.archiverArgs ?? [];
   const commonFlags = [
-    ...config.targetArgs, "-std=c11", ...(config.threadArgs ?? []), "-fno-math-errno", "-fno-strict-aliasing",
+    ...config.targetArgs, ...(config.compilerFlags ?? []), "-std=c11", ...(config.threadArgs ?? []), "-fno-math-errno", "-fno-strict-aliasing",
     ...matrix.executable_section_elimination.compile_flags, "-Wno-deprecated-declarations", "-I", runtimeSrc,
     ...(config.runtimeDefines ?? []).map((define) => `-D${define}`),
   ];
@@ -57,6 +58,7 @@ async function build() {
     for (let i = 0; i < items.length; i += width) await Promise.all(items.slice(i, i + width).map(task));
   };
   const archive = async (id, sources, sourceRoot, flags) => {
+    process.stdout.write(`building ${packageManifest.name} ${id} archive\n`);
     const root = join(stagedOutputRoot, "vendor", id);
     const objectRoot = join(root, "objects");
     await parallel(sources, async (source) => compile(join(sourceRoot, source), join(objectRoot, source.replace(/\.c$/, ".o")), flags));
@@ -82,6 +84,7 @@ async function build() {
     }
     const flavors = {};
     for (const [flavor, flavorSpec] of Object.entries(matrix.flavors)) {
+      process.stdout.write(`building ${packageManifest.name} ${flavor} runtime\n`);
       const units = [];
       for (const unit of matrix.runtime_units) {
         const variants = [];
@@ -105,6 +108,7 @@ async function build() {
     // selected, so vendor sources inherit the target's runtime defines too.
     const vendorTarget = [
       ...config.targetArgs,
+      ...(config.compilerFlags ?? []),
       ...(config.runtimeDefines ?? []).map((define) => `-D${define}`),
     ];
     const requestedArchives = new Set(matrix.archives.map((entry) => entry.id));
@@ -114,6 +118,7 @@ async function build() {
       ...(requestedArchives.has("zlib") ? [await archive("zlib", zlibSources, zlib, [...vendorTarget, "-std=c11", "-Os", "-I", zlib])] : []),
       ...(requestedArchives.has("mbedtls") ? [await archive("mbedtls", mbedtlsSources, join(mbedtls, "library"), [...vendorTarget, "-std=c11", "-Os", "-I", join(mbedtls, "include"), "-I", join(mbedtls, "library")])] : []),
     ];
+    await assertArtifactsExcludeStrings(stagedOutputRoot, config.forbiddenArtifactStrings ?? []);
     const archiveSpecs = new Map(matrix.archives.map((entry) => [entry.id, entry]));
     const licensed = [[join(runtimeRoot, "LICENSE"), "artifacts/licenses/scriptc-runtime.txt", "Apache-2.0"], [join(quickjs, "LICENSE"), "artifacts/licenses/quickjs-ng.txt", "MIT"], [join(vendorRoot, "ryu", "LICENSE-Boost"), "artifacts/licenses/ryu.txt", "BSL-1.0"], [join(zlib, "LICENSE"), "artifacts/licenses/zlib.txt", "Zlib"], [join(mbedtls, "LICENSE"), "artifacts/licenses/mbedtls.txt", "Apache-2.0"]];
     await Promise.all(licensed.map(async ([source, destination]) => { const output = join(buildRoot, destination); await mkdir(dirname(output), { recursive: true }); await copyFile(source, output); }));

@@ -559,6 +559,121 @@ function emitArgPackAndTrampolinePrologue(
     return sym;
   }
 
+/** Callback adapter for randomBytes/pbkdf2. The runtime transfers one
+ * owned Buffer; the adapter materializes the callback's Error | null (or
+ * checked-dynamic null) first argument and either transfers or boxes the
+ * Buffer according to the program-specific callback signature. */
+  export function cryptoBytesThunkFor(emitter: CEmitter, cbT: IrType): string {
+    if (cbT.kind !== "func" || cbT.params.length > 2) {
+      throw new InternalCompilerError("emitter bug: crypto bytes callback shape");
+    }
+    const key = `crypto:${typeKey(cbT)}`;
+    let sym = emitter.fsRenameThunks.get(key);
+    if (sym) return sym;
+    sym = `sc_cryptobytes_${emitter.fsRenameThunks.size}`;
+    emitter.fsRenameThunks.set(key, sym);
+    emitter.walkerProtos.push(`static void ${sym}(ScrClosure *sc_cb, ScrBytes *sc_value);`);
+    const lines = [`static void ${sym}(ScrClosure *sc_cb, ScrBytes *sc_value) {`];
+    const callTypes = ["ScrClosure *"];
+    const callArgs = ["sc_cb"];
+    const error = cbT.params[0];
+    if (error !== undefined) {
+      if (error.kind === "dyn") {
+        lines.push(`  ScrDyn *sc_error = scr_dyn_new_null();`);
+        callTypes.push("ScrDyn *");
+      } else if (error.kind === "union") {
+        const def = emitter.unionsById.get(error.unionId);
+        const nullTag = def ? def.arms.findIndex((arm) => arm.kind === "nullT") : -1;
+        if (nullTag < 0) throw new InternalCompilerError("emitter bug: crypto callback error union lacks null");
+        lines.push(`  ScrUnion *sc_error = ${emitter.unitInstanceRef(error.unionId, nullTag)};`);
+        callTypes.push("ScrUnion *");
+      } else {
+        throw new InternalCompilerError("emitter bug: crypto callback error param");
+      }
+      callArgs.push("sc_error");
+    }
+    const value = cbT.params[1];
+    if (value === undefined) {
+      lines.push(`  scr_bytes_release(sc_value);`);
+    } else if (value.kind === "dyn") {
+      lines.push(`  ScrDyn *sc_result = scr_dyn_new_bytes_copy(sc_value);`, `  scr_bytes_release(sc_value);`);
+      callTypes.push("ScrDyn *");
+      callArgs.push("sc_result");
+    } else if (value.kind === "bytes" && value.elem === "u8") {
+      callTypes.push("ScrBytes *");
+      callArgs.push("sc_value");
+    } else {
+      throw new InternalCompilerError("emitter bug: crypto callback value param");
+    }
+    lines.push(
+      `  ((void (*)(${callTypes.join(", ")}))sc_cb->fn)(${callArgs.join(", ")});`,
+      `}`,
+    );
+    emitter.walkerDefs.push(...lines);
+    return sym;
+  }
+
+/** Error-first Buffer callback adapter for worker-backed zlib operations.
+ * The runtime transfers the success Buffer and borrows the failure Error;
+ * exactly one is non-NULL. */
+  export function zlibBytesThunkFor(emitter: CEmitter, cbT: IrType): string {
+    if (cbT.kind !== "func" || cbT.params.length > 2) {
+      throw new InternalCompilerError("emitter bug: zlib bytes callback shape");
+    }
+    const key = `zlib:${typeKey(cbT)}`;
+    let sym = emitter.fsRenameThunks.get(key);
+    if (sym) return sym;
+    sym = `sc_zlibbytes_${emitter.fsRenameThunks.size}`;
+    emitter.fsRenameThunks.set(key, sym);
+    emitter.walkerProtos.push(`static void ${sym}(ScrClosure *sc_cb, ScrError *sc_err, ScrBytes *sc_value);`);
+    const lines = [`static void ${sym}(ScrClosure *sc_cb, ScrError *sc_err, ScrBytes *sc_value) {`];
+    const callTypes = ["ScrClosure *"];
+    const callArgs = ["sc_cb"];
+    const error = cbT.params[0];
+    if (error !== undefined) {
+      if (error.kind === "dyn") {
+        lines.push(`  ScrDyn *sc_error = sc_err ? scr_dyn_from_error(sc_err) : scr_dyn_new_null();`);
+        callTypes.push("ScrDyn *");
+      } else if (error.kind === "union") {
+        const def = emitter.unionsById.get(error.unionId);
+        const errTag = def ? def.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error") : -1;
+        const nullTag = def ? def.arms.findIndex((arm) => arm.kind === "nullT") : -1;
+        if (errTag < 0 || nullTag < 0) throw new InternalCompilerError("emitter bug: zlib callback error union lacks arms");
+        lines.push(
+          `  ScrUnion *sc_error = sc_err`,
+          `      ? scr_union_new_ref(${errTag}, scr_error_retain(sc_err), &scr_error_retain_v, &scr_error_release_v, NULL)`,
+          `      : ${emitter.unitInstanceRef(error.unionId, nullTag)};`,
+        );
+        callTypes.push("ScrUnion *");
+      } else {
+        throw new InternalCompilerError("emitter bug: zlib callback error param");
+      }
+      callArgs.push("sc_error");
+    }
+    const value = cbT.params[1];
+    if (value === undefined) {
+      lines.push(`  scr_bytes_release(sc_value);`);
+    } else if (value.kind === "dyn") {
+      lines.push(
+        `  ScrDyn *sc_result = sc_value ? scr_dyn_new_bytes_copy(sc_value) : scr_dyn_undefined();`,
+        `  scr_bytes_release(sc_value);`,
+      );
+      callTypes.push("ScrDyn *");
+      callArgs.push("sc_result");
+    } else if (value.kind === "bytes" && value.elem === "u8") {
+      callTypes.push("ScrBytes *");
+      callArgs.push("sc_value");
+    } else {
+      throw new InternalCompilerError("emitter bug: zlib callback value param");
+    }
+    lines.push(
+      `  ((void (*)(${callTypes.join(", ")}))sc_cb->fn)(${callArgs.join(", ")});`,
+      `}`,
+    );
+    emitter.walkerDefs.push(...lines);
+    return sym;
+  }
+
 /** Interned CONNECT-listener adapter for a UNION socket slot — the h2
    * compat listener (`(req, resOrSocket: Http2ServerResponse | net.Socket)
    * => void`): the runtime fires (cb, req, sock, head) like an upgrade;
@@ -996,6 +1111,139 @@ export function emitterInvokeThunkFor(emitter: CEmitter, cbT: IrType): string {
         : [`  (void)${invoke};`]),
     `}`,
     ``,
+  );
+  return sym;
+}
+
+/** child_process.execFile's error-first callback adapter. The runtime owns
+ * one +1 callback plus +1 error/output values at settlement; the adapter
+ * wraps the nullable error with this program's union tags, transfers every
+ * declared argument into the compiled closure, and releases ignored suffix
+ * values for callbacks that declare fewer than three parameters. */
+export function execFileThunkFor(emitter: CEmitter, cbT: IrType & { kind: "func" }): string {
+  const key = `exec:${typeKey(cbT)}`;
+  let sym = emitter.childExitThunks.get(key);
+  if (sym) return sym;
+  sym = mangleChildExitThunk(emitter.childExitThunks.size);
+  emitter.childExitThunks.set(key, sym);
+  const errorParam = cbT.params[0];
+  let errorExpr: string | null = null;
+  if (errorParam !== undefined) {
+    if (errorParam.kind !== "union") throw new InternalCompilerError("emitter bug: execFile error param not a union");
+    const def = emitter.unionsById.get(errorParam.unionId);
+    const errorTag = def ? def.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error") : -1;
+    const nullTag = def ? def.arms.findIndex((arm) => arm.kind === "nullT") : -1;
+    const errorArm = errorTag >= 0 ? def?.arms[errorTag] : undefined;
+    if (nullTag < 0 || !errorArm) throw new InternalCompilerError("emitter bug: execFile error union lacks its arms");
+    errorExpr = `sc_err ? scr_union_new_ref(${errorTag}, sc_err, &scr_error_retain_v, &scr_error_release_v, ${emitter.traceArgC(errorArm)}) : ${emitter.unitInstanceRef(errorParam.unionId, nullTag)}`;
+  }
+  const callbackArgs = [
+    "sc_cb",
+    ...(errorExpr === null ? [] : ["sc_e"]),
+    ...(cbT.params.length >= 2 ? ["sc_out"] : []),
+    ...(cbT.params.length >= 3 ? ["sc_stderr"] : []),
+  ];
+  const callbackTypes = [
+    "ScrClosure *",
+    ...(errorExpr === null ? [] : ["ScrUnion *"]),
+    ...(cbT.params.length >= 2 ? ["ScrStr *"] : []),
+    ...(cbT.params.length >= 3 ? ["ScrStr *"] : []),
+  ];
+  emitter.walkerProtos.push(
+    `static void ${sym}(ScrClosure *sc_cb, ScrError *sc_err, ScrStr *sc_out, ScrStr *sc_stderr);`,
+  );
+  emitter.walkerDefs.push(
+    `static void ${sym}(ScrClosure *sc_cb, ScrError *sc_err, ScrStr *sc_out, ScrStr *sc_stderr) {`,
+    ...(errorExpr === null ? [`  scr_error_release(sc_err);`] : [`  ScrUnion *sc_e = ${errorExpr};`]),
+    ...(cbT.params.length < 2 ? [`  scr_str_release(sc_out);`] : []),
+    ...(cbT.params.length < 3 ? [`  scr_str_release(sc_stderr);`] : []),
+    `  ((void (*)(${callbackTypes.join(", ")}))sc_cb->fn)(${callbackArgs.join(", ")});`,
+    `}`,
+  );
+  return sym;
+}
+
+/** Fork IPC message adapter: parse results arrive as a borrowed dyn tree,
+ * then validate into the listener's static JSON shape. Async listener
+ * promises are deliberately released without attaching a handler, matching
+ * EventEmitter's ignored return value. */
+export function ipcMessageThunkFor(emitter: CEmitter, cbT: IrType & { kind: "func" }): string {
+  const key = `ipcmsg:${typeKey(cbT)}`;
+  let sym = emitter.childExitThunks.get(key);
+  if (sym) return sym;
+  sym = mangleChildExitThunk(emitter.childExitThunks.size);
+  emitter.childExitThunks.set(key, sym);
+  const param = cbT.params[0];
+  const body: string[] = [];
+  const callbackTypes = ["ScrClosure *"];
+  const callbackArgs = ["sc_cb"];
+  if (param !== undefined) {
+    const value = param.kind === "dyn"
+      ? "scr_dyn_retain(sc_message)"
+      : `${emitter.dynCheckHelper(param)}(sc_message, NULL)`;
+    body.push(`  ${cDecl(param, "sc_value")} = ${value};`);
+    if (param.kind !== "dyn") {
+      body.push(
+        `  if (scr_exc_pending()) {`,
+        ...(isRefCounted(param) ? [`    ${releaseCallC(param, "sc_value")};`] : []),
+        `    return;`,
+        `  }`,
+      );
+    }
+    callbackTypes.push(cType(param).trim());
+    callbackArgs.push("sc_value");
+  } else {
+    body.push(`  (void)sc_message;`);
+  }
+  const invoke = `((` + cType(cbT.ret).trim() + ` (*)(${callbackTypes.join(", ")}))sc_cb->fn)(${callbackArgs.join(", ")})`;
+  if (cbT.ret.kind === "void") body.push(`  ${invoke};`);
+  else body.push(`  ${cDecl(cbT.ret, "sc_result")} = ${invoke};`, `  ${releaseCallC(cbT.ret, "sc_result")};`);
+  emitter.walkerProtos.push(`static void ${sym}(ScrClosure *sc_cb, ScrDyn *sc_message);`);
+  emitter.walkerDefs.push(
+    `static void ${sym}(ScrClosure *sc_cb, ScrDyn *sc_message) {`,
+    ...body,
+    `}`,
+  );
+  return sym;
+}
+
+/** Fork IPC send completion adapter. The nullable +1 runtime Error moves
+ * into the callback's Error|null union, or is released for a zero-argument
+ * callback. */
+export function ipcSendThunkFor(emitter: CEmitter, cbT: IrType & { kind: "func" }): string {
+  const key = `ipcsend:${typeKey(cbT)}`;
+  let sym = emitter.childExitThunks.get(key);
+  if (sym) return sym;
+  sym = mangleChildExitThunk(emitter.childExitThunks.size);
+  emitter.childExitThunks.set(key, sym);
+  const param = cbT.params[0];
+  const body: string[] = [];
+  if (param === undefined) {
+    body.push(
+      `  scr_error_release(sc_error);`,
+      `  ((void (*)(ScrClosure *))sc_cb->fn)(sc_cb);`,
+    );
+  } else {
+    if (param.kind !== "union") throw new InternalCompilerError("emitter bug: IPC send callback param not a union");
+    const def = emitter.unionsById.get(param.unionId);
+    const errorTag = def ? def.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error") : -1;
+    const nullTag = def ? def.arms.findIndex((arm) => arm.kind === "nullT") : -1;
+    const errorArm = errorTag >= 0 ? def?.arms[errorTag] : undefined;
+    if (errorTag < 0 || nullTag < 0 || !errorArm) {
+      throw new InternalCompilerError("emitter bug: IPC send callback union lacks Error|null");
+    }
+    body.push(
+      `  ScrUnion *sc_value = sc_error`,
+      `      ? scr_union_new_ref(${errorTag}, sc_error, &scr_error_retain_v, &scr_error_release_v, ${emitter.traceArgC(errorArm)})`,
+      `      : ${emitter.unitInstanceRef(param.unionId, nullTag)};`,
+      `  ((void (*)(ScrClosure *, ScrUnion *))sc_cb->fn)(sc_cb, sc_value);`,
+    );
+  }
+  emitter.walkerProtos.push(`static void ${sym}(ScrClosure *sc_cb, ScrError *sc_error);`);
+  emitter.walkerDefs.push(
+    `static void ${sym}(ScrClosure *sc_cb, ScrError *sc_error) {`,
+    ...body,
+    `}`,
   );
   return sym;
 }

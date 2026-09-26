@@ -1,3 +1,12 @@
+create-require.ts:13:7 - error SC2011: values of type 'ScriptcRequire' have no static representation but run in the embedded dynamic engine, which this build does not include
+
+  12 | // The base names some OTHER file: unrecognized — the member fence.
+  13 | const req = createRequire("/tmp/parent.js");
+     |       ^~~
+  14 | console.log(String(req("./config.cjs")));
+
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+
 create-require.ts:13:13 - error SC2020: 'module.createRequire' is part of the standard library types but has no scriptc lowering yet
 
   12 | // The base names some OTHER file: unrecognized — the member fence.
@@ -5,7 +14,16 @@ create-require.ts:13:13 - error SC2020: 'module.createRequire' is part of the st
      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   14 | console.log(String(req("./config.cjs")));
 
-  hint: the lowered shape is a const binding over createRequire(import.meta.url) (or __filename) whose require calls take STATIC string literals — builtins, relative .json documents, and installed npm packages (under --dynamic) resolve at build time; dynamic specifiers cannot exist in a compiled binary's fixed module graph
+  hint: the lowered shape is a const binding over createRequire(import.meta.url) (or __filename) whose require calls take STATIC string literals — builtins, project modules (including #imports), relative .json documents, --npm-static packages, and installed npm packages under --dynamic resolve at build time; dynamic specifiers cannot exist in a compiled binary's fixed module graph
+
+create-require.ts:14:20 - error SC2004: uses of 'req' inherit the blocker on its declaration
+
+  13 | const req = createRequire("/tmp/parent.js");
+  14 | console.log(String(req("./config.cjs")));
+     |                    ^~~
+  15 | // The supported base still fences dynamic requests and unresolved modules.
+
+  hint: the declaration of 'req' did not compile — fix the diagnostic reported there and these sites clear with it
 
 create-require.ts:20:1 - error SC2020: 'createRequire's require with this argument shape' is part of the standard library types but has no scriptc lowering yet
 
@@ -18,9 +36,9 @@ create-require.ts:20:1 - error SC2020: 'createRequire's require with this argume
 
 create-require.ts:23:1 - error SC2020: 'createRequire's require of './helper.js'' is part of the standard library types but has no scriptc lowering yet
 
-  22 | // A relative non-.json target: program modules are static imports.
+  22 | // An unresolved relative target.
   23 | require("./helper.js");
      | ^~~~~~~~~~~~~~~~~~~~~~
   24 | 
 
-  hint: relative requires lower for .json documents only — a program module is a static import
+  hint: relative program modules lower when they resolve into the compiled graph; relative .json documents bake at build time

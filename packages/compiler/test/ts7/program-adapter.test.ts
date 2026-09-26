@@ -68,6 +68,26 @@ test("retains source-file BOM stripping", () => {
   }
 });
 
+test("fallback ambient resolves RequestInfo during preflight", () => {
+  const tempRoot = process.platform === "win32" ? tmpdir() : "/tmp";
+  const dir = mkdtempSync(join(tempRoot, "scriptc-request-info-"));
+  const entry = join(dir, "entry.ts");
+  writeFileSync(entry, [
+    'const target: RequestInfo = "https://example.invalid/";',
+    "console.log(typeof target);",
+  ].join("\n"));
+
+  const load = loadProgram(entry);
+  try {
+    const diagnostics = checkPreflight(load);
+    expect(diagnostics, diagnostics.map((diag) => `${diag.code}: ${diag.message}`).join("\n"))
+      .toEqual([]);
+  } finally {
+    load.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("preflight batches symbols in deferred TDZ-analysis roots", () => {
   const tempRoot = process.platform === "win32" ? tmpdir() : "/tmp";
   const dir = mkdtempSync(join(tempRoot, "scriptc-preflight-batch-"));

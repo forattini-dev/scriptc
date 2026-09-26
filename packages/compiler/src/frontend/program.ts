@@ -52,7 +52,10 @@ import {
 } from "../diagnostics/diagnostic.js";
 import { isNodeModulesPath, nearestInvalidPackageJsonPath, nearestPackageType, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareAsset, resolveBareModule, resolveProjectImport, resolveProjectModule, resolveRelativeAsset, resolveTsPathsMapping, resolveTypeDirective, setEmbedPathAliases, setProjectPathMappings, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
-import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
+import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, reportNpmStaticOffender, setNpmStaticDeclarationOverloads, setNpmStaticPackages } from "./npm-static.js";
+import { isPrunedNpmReexport, planNpmStaticReexports } from "./npm-static-prune.js";
+import { npmStaticDeclarationReexports, npmStaticRuntimeClassTargets, parseNpmStaticDeclarationOverloads, parseNpmStaticDeclarationProperties } from "./npm-static-declarations.js";
+import type { NpmStaticDeclarationOverloads, NpmStaticDeclarationProperties, NpmStaticOverloadSignature } from "./npm-static-declarations.js";
 import { provenanceEntryFor, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import { ADOPTED_OPTIONS, isJsSourceFileName, isRuntimeSourceFileName } from "./tsc-codes.js";
@@ -398,20 +401,16 @@ function loadProgram7(
   // .d.ts-internal errors. Fence discipline never depended on it: the
   // lowerer checks provenance and forms at every use site.
   let options: ts.Ts7CompilerOptions = nodeTypes || bunTypes ? { ...config.options, skipLibCheck: true } : { ...config.options };
-  // The runtime target's conditions (node24/node26: "node"; bun: "bun",
-  // "node"; plus --conditions) reach tsgo as customConditions, so the
-  // checker's bundler resolution lands on the SAME package branch the
-  // runtime graph embeds; the project's own customConditions (adopted)
-  // join for type resolution. "import"/"default"/"types" are implicit.
+  // Keep tsgo's package branch aligned with the runtime graph. The project's
+  // adopted custom conditions join the target conditions; import/default are
+  // implicit in bundler resolution and must not be duplicated here.
   {
     const projectConditions = (config.options.customConditions as readonly string[] | undefined) ?? [];
-    const conditions = [...activeRuntimeConditions().filter((c) => c !== "import" && c !== "default"), ...projectConditions];
+    const conditions = [...activeRuntimeConditions().filter((condition) => condition !== "import" && condition !== "default"), ...projectConditions];
     if (conditions.length > 0) options = { ...options, customConditions: [...new Set(conditions)] };
   }
-  // Admitted JS needs its complete type graph: a finite depth cutoff can
-  // omit shared descendants depending on which declaration path TS7 visits
-  // first. Use the largest exact JS integer; cycles terminate by file identity.
-  // Package admission still belongs to npmStaticFsShadow, not graph depth.
+  // Admitted package JS needs its complete finite graph. Package admission
+  // remains owned by npmStaticFsShadow; file identity terminates cycles.
   if (npmStaticActive()) options.maxNodeModuleJsDepth = Number.MAX_SAFE_INTEGER;
   // --provenance-sources: the registered entries become tsconfig "paths"
   // so tsgo's OWN resolution of the bare specifiers lands on the same
@@ -1715,15 +1714,22 @@ function preflight7(load: LoadResult): {
         (!isNodeModulesPath(sf.fileName) || npmStaticPackageOfPath(sf.fileName) !== null) &&
         !isIslandJsFile(sf.fileName),
     );
-  program.getTypeChecker().prefetchSourceFileStructures(programFiles);
+  const userFiles = npmStaticActive()
+    ? planNpmStaticReexports(
+        program,
+        entry,
+        programFiles,
+        [...createRequireProgramRoots7(program), ...forkTargetPaths(program, program.getSourceFiles())],
+        (sf, spec) => resolveImport7(program, sf, spec) ?? npmStaticDepSf7(program, sf, spec),
+      )
+    : programFiles;
+  program.getTypeChecker().prefetchSourceFileStructures(userFiles);
 
   // node_modules JS that no --npm-static opt-in claims is NOT program
   // source even when maxNodeModuleJsDepth pulled it into the checker's
   // program (see nodeModulesJsSuppressed above): its execution home is the
   // island, so preflight's statement walks skip it — no import fences, no
   // module edges, no statement counts from files the lowering never lowers.
-  const userFiles = programFiles;
-
   // Node stops at the nearest package.json even when it is malformed, and
   // an explicit CommonJS scope (or .cjs/.cts extension) disables ambiguous-
   // file syntax detection entirely. TypeScript's bundler checker models
@@ -1837,7 +1843,7 @@ function preflight7(load: LoadResult): {
         continue;
       }
       if (ts.isExportDeclaration(stmt)) {
-        if (stmt.isTypeOnly || erasedTypeOnlyReexport(stmt)) continue;
+        if (stmt.isTypeOnly || erasedTypeOnlyReexport(stmt) || isPrunedNpmReexport(program, stmt)) continue;
         if (!stmt.moduleSpecifier) continue;
         const fromSpec = ts.isStringLiteral(stmt.moduleSpecifier) ? stmt.moduleSpecifier.text : "";
         if (load.externalTypes.has(fromSpec)) {
@@ -2632,6 +2638,7 @@ function cjsNamedImportLinkCheck(
     visited.add(sf);
     for (const stmt of sf.statements) {
       if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly)) continue;
+      if (ts.isExportDeclaration(stmt) && isPrunedNpmReexport(program, stmt)) continue;
       if (ts.isImportDeclaration(stmt) && stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
       const specNode = stmt.moduleSpecifier;
       if (specNode === undefined || !ts.isStringLiteral(specNode)) continue;
@@ -2879,6 +2886,7 @@ function analyzeEsmNamedImportLinks(
     visited.add(sf);
     for (const stmt of sf.statements) {
       if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly)) continue;
+      if (ts.isExportDeclaration(stmt) && isPrunedNpmReexport(program, stmt)) continue;
       if (ts.isImportDeclaration(stmt) && stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
       const moduleSpecifier = stmt.moduleSpecifier;
       if (moduleSpecifier === undefined || !ts.isStringLiteral(moduleSpecifier)) continue;
@@ -3110,6 +3118,7 @@ export function orderedImportsOf(
 ): { stmt: ts.Statement; dep: ts.SourceFile | null }[] {
   const out: { stmt: ts.Statement; dep: ts.SourceFile | null }[] = [];
   for (const stmt of sf.statements) {
+    if (ts.isExportDeclaration(stmt) && isPrunedNpmReexport(program, stmt)) continue;
     if (ts.isExportDeclaration(stmt) && (stmt.isTypeOnly || erasedTypeOnlyReexport(stmt) || !stmt.moduleSpecifier)) continue;
     if (!ts.isImportDeclaration(stmt) && !ts.isExportDeclaration(stmt)) continue;
     if (ts.isImportDeclaration(stmt) && erasedTypeOnlyImport(stmt)) continue;

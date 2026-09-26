@@ -88,7 +88,7 @@ async function main(): Promise<number> {
   }
   if (command === "cache") {
     if (inputArg !== "warm") fail(`unknown cache command "${inputArg ?? ""}" (supported: warm)\n\n${USAGE}`);
-    if (values.emit !== undefined || values.print !== undefined || values.lib || values.dynamic || values.backend !== undefined || values.target !== undefined || (values.conditions ?? []).length > 0 || values["from-c"] || values.ffi !== undefined || values.profile !== undefined || (values["npm-static"] ?? []).length > 0 || values["provenance-sources"] || externalTypeArgs.length > 0 || values.out !== undefined || values["emit-ir"] || !values["keep-c"]) {
+    if (values.emit !== undefined || values.print !== undefined || values.lib || values.dynamic || values.backend !== undefined || values.target !== undefined || (values.conditions ?? []).length > 0 || values["from-c"] || values.ffi !== undefined || values.profile !== undefined || values.strip || values["windows-subsystem"] !== undefined || (values["npm-static"] ?? []).length > 0 || values["provenance-sources"] || externalTypeArgs.length > 0 || values.out !== undefined || values["emit-ir"] || !values["keep-c"]) {
       fail(`scriptc cache warm takes only native optimization/sanitizer options and profile names\n\n${USAGE}`);
     }
     const optimization = values.optimization;
@@ -136,9 +136,9 @@ async function main(): Promise<number> {
     if (inputArg) {
       fail("scriptc build --lib takes no input positional: the profile names the entry module");
     }
-    if (values.dynamic || values.backend !== undefined || values.emit !== undefined || values.print !== undefined || values.optimization !== undefined || values.ffi !== undefined || (values["npm-static"] ?? []).length > 0 || externalTypeArgs.length > 0) {
+    if (values.dynamic || values.backend !== undefined || values.emit !== undefined || values.print !== undefined || values.optimization !== undefined || values.strip || values.ffi !== undefined || values["windows-subsystem"] !== undefined || (values["npm-static"] ?? []).length > 0 || externalTypeArgs.length > 0) {
       fail(
-        "scriptc build --lib takes no --dynamic/--backend/--emit/--print/--optimization/--npm-static/--ffi/--external-types: the profile pins the emission and optimization, npm imports are judged automatically, outbound FFI belongs to executable builds, and external type mappings belong to coverage",
+        "scriptc build --lib takes no --dynamic/--backend/--emit/--print/--optimization/--strip/--windows-subsystem/--npm-static/--ffi/--external-types: the profile pins the emission and optimization, npm imports are judged automatically, outbound FFI belongs to executable builds, and external type mappings belong to coverage",
       );
     }
     if (values.target !== undefined || (values.conditions ?? []).length > 0 || (values["island-module"] ?? []).length > 0) {
@@ -174,6 +174,9 @@ async function main(): Promise<number> {
   const input = resolve(inputArg);
   if (command === "coverage" && values.emit !== undefined) {
     fail(`--emit is a build/run option\n\n${USAGE}`);
+  }
+  if (command === "coverage" && values.strip) {
+    fail(`--strip is a build/run option\n\n${USAGE}`);
   }
   if (values.print !== undefined && values.print !== "native-link-info") {
     fail(`unknown print kind "${values.print}" (supported: native-link-info)\n\n${USAGE}`);
@@ -255,6 +258,13 @@ async function main(): Promise<number> {
     const file = writeProjectTiers();
     process.stderr.write(`tiers: wrote ${file}\n`);
   };
+  const windowsSubsystem = values["windows-subsystem"];
+  if (windowsSubsystem !== undefined && windowsSubsystem !== "console" && windowsSubsystem !== "gui") {
+    fail(`unknown Windows subsystem "${windowsSubsystem}" (supported: console, gui)\n\n${USAGE}`);
+  }
+  if (windowsSubsystem !== undefined && command === "coverage") {
+    fail(`--windows-subsystem is only supported for executable builds\n\n${USAGE}`);
+  }
   const output = command === "coverage"
     ? null
     : resolveOutputOptions(command, {
@@ -267,6 +277,8 @@ async function main(): Promise<number> {
         keepC: values["keep-c"],
         sanitize: values.sanitize,
         ...(values.optimization === undefined ? {} : { optimization: values.optimization }),
+        strip: values.strip,
+        ...(windowsSubsystem === undefined ? {} : { windowsSubsystem }),
         ...(values.ffi === undefined ? {} : { ffi: values.ffi }),
       });
   if (output !== null && !output.ok) fail(`${output.message}\n\n${USAGE}`);
@@ -319,7 +331,10 @@ async function main(): Promise<number> {
   }
 
   if (output === null || !output.ok) throw new Error("internal output-option state");
-  const { outDir, outPath, defaultOutputPath } = selectOutputPaths(input, output.cliOutputKind, values.out);
+  if (windowsSubsystem !== undefined && sourceTargetPlatform() !== "win32") {
+    fail(`--windows-subsystem requires a Windows executable target\n\n${USAGE}`);
+  }
+  const { outDir, outPath } = selectOutputPaths(input, output.cliOutputKind, values.out);
 
   // SCRIPTC_CC remains a migration escape hatch for explicit C, sanitizer,
   // and comparison builds. The normal LLVM executable route is controlled by
@@ -345,6 +360,8 @@ async function main(): Promise<number> {
         sanitize: values.sanitize,
         dynamic: values.dynamic,
         ...(optimization !== undefined ? { optimization } : {}),
+        ...(values.strip ? { strip: true } : {}),
+        ...(windowsSubsystem !== undefined ? { windowsSubsystem } : {}),
       });
       return outPath;
     }
@@ -357,12 +374,13 @@ async function main(): Promise<number> {
       outPath,
       outDir,
       outputKind: output.outputKind,
-      defaultOutputPath,
       emitIr: output.emitIr,
       sanitize: values.sanitize,
       dynamic: values.dynamic,
       ...(output.outputKind !== "ir" && backend !== undefined ? { backend } : {}),
       ...(optimization !== undefined ? { optimization } : {}),
+      ...(values.strip ? { strip: true } : {}),
+      ...(windowsSubsystem !== undefined ? { windowsSubsystem } : {}),
       ...(npmStatic !== undefined ? { npmStatic } : {}),
       typeAcquisition,
       ...(ffiProfilePath !== undefined ? { ffiProfilePath } : {}),

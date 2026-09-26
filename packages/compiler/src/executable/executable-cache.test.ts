@@ -36,6 +36,7 @@ const native: EarlyExecutableNativeFeatures = {
   events: false,
   emitter: false,
   symbol: false,
+  bigint: false,
   searchParams: false,
   qs: false,
   parseArgs: false,
@@ -113,15 +114,15 @@ test("early executable cache restores the emitted TU, IR, and native feature gat
     frontend: tracker.snapshot(),
   });
   await Promise.all([rm(f.cPath), rm(f.irPath)]);
-  const staleC = join(f.options.outDir, "entry.c");
-  await writeFile(staleC, "/* stale C backend */\n");
+  const alternateC = join(f.options.outDir, "entry.c");
+  await writeFile(alternateC, "/* saved C backend */\n");
 
   const hit = await readEarlyExecutableCache(f.root, f.options);
   expect(hit?.native).toEqual(native);
   expect(hit?.executableRestored).toBe(false);
   expect(await readFile(f.cPath, "utf8")).toBe("; generated llvm\n");
   expect(await readFile(f.irPath, "utf8")).toContain("irVersion");
-  await expect(readFile(staleC, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readFile(alternateC, "utf8")).toBe("/* saved C backend */\n");
 });
 
 test("early executable cache misses on source and resolution changes", async () => {

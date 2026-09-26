@@ -1,6 +1,15 @@
 import { InternalCompilerError } from "../../errors.js";
 import type { IrFfiCallbackParamClass, IrFfiReturnClass, IrFfiValueParamClass } from "../../ir/ir.js";
 
+/** User-controlled text embedded after an LLVM `;` comment marker. Preserve
+ * ordinary output byte-for-byte, but encode control and line-separator code
+ * units so a property name can never inject a line or invalid source byte. */
+export function llvmCommentText(text: string): string {
+  return text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, (char) =>
+    `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
+  );
+}
+
 export function ffiNativeTypeLl(
   cls: IrFfiCallbackParamClass | IrFfiValueParamClass | IrFfiReturnClass,
 ): string {

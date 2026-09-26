@@ -36,16 +36,28 @@ fib.ir.json
 $ scriptc build fib.ts --emit=c >/dev/null
 $ ls .scriptc/
 fib.c
+fib.ir.json
 $ scriptc build fib.ts --emit=llvm >/dev/null
 $ ls .scriptc/
+fib.c
+fib.ir.json
 fib.ll
 $ scriptc build fib.ts --emit=asm >/dev/null
 $ ls .scriptc/
+fib.c
+fib.ir.json
+fib.ll
 fib.s
 $ scriptc build fib.ts --emit=obj >/dev/null
 $ ls .scriptc/
+fib.c
+fib.ir.json
+fib.ll
 fib.o
+fib.s
 ```
+
+Different output kinds accumulate in `.scriptc/`; rebuilding a kind updates its file.
 
 The four source outputs (<code>ir</code>, <code>rust</code>, <code>c</code>, and <code>llvm</code>) require only Node. Assembly and object outputs use the matching native helper on supported macOS, Linux, and Windows hosts and for WASI, without invoking an external compiler, archiver, linker, or SDK. The object is a
 relocatable program object with undefined <code>scr_*</code> runtime symbols
@@ -98,6 +110,12 @@ Prebuilds release runtime objects and native TLS/dynamic-engine archives for tar
 
   <dt><code>--backend &lt;c|llvm|rust&gt;</code></dt>
   <dd>Code generator: <code>rust</code> is the primary and default backend. It emits memory-safe Rust and builds with Cargo/rustc. <code>llvm</code> and <code>c</code> require explicit selection. Unsupported constructs report diagnostics instead of changing backend. Rust currently targets native builds; cross-compilation, WASI and sanitizer builds require an explicitly selected compatible C/LLVM backend. Library profiles name their emission backend explicitly.</dd>
+
+  <dt><code>--strip</code></dt>
+  <dd>Remove symbol and debug payload when linking an executable, including cross-compiled targets. This opt-in flag works with either backend and <code>--from-c</code> without changing code optimization.</dd>
+
+  <dt><code>--windows-subsystem &lt;console|gui&gt;</code></dt>
+  <dd>Select the subsystem of a Windows executable. <code>console</code> is the default; <code>gui</code> prevents Windows from opening a console window for the app. Valid only for executable builds targeting Windows, including <code>--from-c</code>.</dd>
 
   <dt><code>--npm-static &lt;pkg[,pkg…]|auto&gt;</code></dt>
   <dd>EXPERIMENTAL. Compile the named npm packages' shipped JS statically as program modules instead of embedding them for the engine (repeatable; <code>auto</code> opts in every eligible direct import). A package the preflight refuses falls back to the island with a coverage-report note. See <a href="/dependencies">npm Dependencies</a> for maturity notes.</dd>

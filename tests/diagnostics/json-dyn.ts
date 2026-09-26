@@ -16,8 +16,9 @@ switch (JSON.parse("5")) {
 // JSON-safe typed values convert INTO 'unknown' slots now (dynFrom, a deep
 // copy — differential corpus), and FUNCTIONS box as the checked-dynamic tree's callable
 // kind (the checked-dynamic function boundary — corpus 1650-1654, so no
-// fence for them here); what keeps the SC1101 fence is a type with no
-// dyn representation (Maps, classes, bytes).
+// fence for them here); program class instances and native handles now
+// preserve identity through typed-reference boxes. Maps remain outside the
+// dyn representation.
 const typedIntoUnknown: unknown = new Map<string, number>();
 function wantsUnknown(x: unknown): void {}
 wantsUnknown(new Map<string, number>());
@@ -25,6 +26,9 @@ const stringifyClosure = JSON.stringify((x: number) => x + 1);
 class Point {
   x: number = 0;
 }
+// This now compiles to a checked class-brand test. If reached, the plain
+// parsed object throws instead of impersonating a Point; dyncheck.test.ts
+// pins that scriptc-only failure behavior.
 const intoClass = JSON.parse("{}") as Point;
 // (casts of unknown to ADAPTABLE function types compile now — the kind
 // check throws at runtime on non-function values; dyncheck.test.ts.
@@ -57,3 +61,4 @@ localCapture();
 // Reached: collection defers its diagnostics until a reference makes
 // them relevant; these references are what makes them count.
 new Holder();
+// End with a nonblank context line so diagnostic snapshots carry no trailing whitespace.

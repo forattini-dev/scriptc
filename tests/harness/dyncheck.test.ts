@@ -123,6 +123,20 @@ console.log("unreachable", n);
     expect(r.stderr).toContain("Uncaught TypeError: expected number at $, got null");
   });
 
+  test("a plain dynamic object cannot acquire a class brand", async () => {
+    const r = await compileAndRun(
+      "class-brand",
+      `class Point {
+  x: number = 0;
+}
+const point = JSON.parse("{}") as Point;
+console.log("unreachable", point.x);
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("Uncaught TypeError: expected Point at $, got object");
+  });
+
   test("JSON null misses a null-armed union's OTHER arm with the arms named", async () => {
     // (JSON null MATCHING a null arm is corpus-tested differentially —
     // 1008-json-null-arms; this covers the failure wording.)

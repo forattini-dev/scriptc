@@ -39,7 +39,7 @@ import { nativeRecordCheckSupported } from "../../ir/native-record.js";
  * cleanly before. The validator stays the backstop for anything else. */
 import type { Lowerer } from "./lowerer.js";
 import { PoisonError } from "./lowerer.js";
-import { canAdaptDynFuncTo, canMarshalTypedFuncIntoIsland, DYN, IrExpr, IrType, JSVAL, SrcLoc, STRING, isUnitType, typeEquals } from "../../ir/ir.js";
+import { canAdaptDynFuncTo, canMarshalTypedFuncIntoIsland, DYN, DYN_HANDLE_KINDS, IrExpr, IrType, JSVAL, SrcLoc, STRING, isDynTypedRefType, isUnitType, typeEquals } from "../../ir/ir.js";
 import { LIB_FN_SIGS, REGEX_INTRINSIC_SIGS, STR_INTRINSIC_SIGS } from "../../ir/validate.js";
 import { unionMismatchDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 
@@ -52,12 +52,19 @@ function dynCheckable(lowerer: Lowerer, want: IrType): boolean {
   if (lowerer.jsonSafe(want) || nativeRecordCheckSupported(want, id => lowerer.shapes.get(id), id => lowerer.unions.get(id))) return true;
   if (want.kind === "bytes" && want.elem === "u8") return true;
   if (want.kind === "object" && want.className === "%Error") return true;
+  if (isDynTypedRefType(want) || DYN_HANDLE_KINDS.has(want.kind)) return true;
   if (want.kind === "func") {
     return canAdaptDynFuncTo(want, (id) => lowerer.shapes.get(id), (id) => lowerer.unions.get(id));
   }
   if (want.kind === "union") {
     const def = lowerer.unions.get(want.unionId);
-    return !!def && def.arms.every((a) => a.kind === "undefinedT" || lowerer.jsonSafe(a));
+    return !!def && def.arms.every(
+      (a) =>
+        a.kind === "undefinedT" ||
+        lowerer.jsonSafe(a) ||
+        isDynTypedRefType(a) ||
+        DYN_HANDLE_KINDS.has(a.kind),
+    );
   }
   return false;
 }

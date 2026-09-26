@@ -34,7 +34,6 @@ export function defaultOutputName(
 export interface OutputPaths {
   outDir: string;
   outPath: string;
-  defaultOutputPath: boolean;
 }
 
 /** One authority for explicit and default primary artifact paths. */
@@ -54,7 +53,6 @@ export function selectOutputPaths(
     outPath: explicitOut === undefined
       ? join(outDir, defaultOutputName(stem, kind, platform))
       : resolve(explicitOut),
-    defaultOutputPath: explicitOut === undefined,
   };
 }
 

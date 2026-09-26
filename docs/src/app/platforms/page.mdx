@@ -41,6 +41,8 @@ fib.exe: PE32+ executable (console) x86-64, for MS Windows
 
 The full corpus runs in a differential lane against Windows Node, including `--dynamic` programs and `child_process`. The Windows fixture lanes also exercise real loopback traffic through `net`, `http`, `https`, `tls`, `http2`, `dgram`, and `dns`, plus the native `fetch` implementation (including redirects, streaming bodies, compression, cancellation, and proxy handling).
 
+Windows executable builds use the console subsystem by default. Set <code>--windows-subsystem=gui</code> for an application that owns its own window so Windows does not open an extra console window. This selects the PE subsystem at link time and works with either backend.
+
 ### iOS and Android (arm64, library mode)
 
 Three mobile triples build **library-mode static archives** for an embedding app to link — a mobile app is the executable, so `scriptc build` without `--lib` rejects these targets with `SC3002`:

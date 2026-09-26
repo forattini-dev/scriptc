@@ -236,7 +236,7 @@ export const UNSUPPORTED: Record<string, UnsupportedEntry> = {
   SC1040: {
     feature: "loose equality (== and !=)",
     milestone: "M4",
-    hint: "use === / !== ('x == null' / 'x != null' — the null-or-undefined test — is supported; other loose comparisons need dynamic coercion semantics)",
+    hint: "primitive and primitive-union coercions plus the x == null / x != null idiom compile statically; object-to-primitive comparisons can execute valueOf/toString — convert the object explicitly first",
   },
   // SC1041 (bitwise operators, ToInt32 semantics) shipped — code retired,
   // do not reuse.
@@ -283,7 +283,7 @@ export const UNSUPPORTED: Record<string, UnsupportedEntry> = {
   SC1101: {
     feature: "converting typed values to 'unknown'",
     milestone: "later",
-    hint: "numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value never aliases the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet",
+    hint: "numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy), functions, program class instances, and supported native handles convert into 'unknown' slots; functions, exact-class round trips, and handles preserve identity, while this value's type has no dynamic representation yet",
   },
   // Regex fences. SC1120 is the shared code for regex features outside the
   // supported slice (the rejection site names the construct); SC1121 is
@@ -318,7 +318,7 @@ export const FENCE_CODES: Record<string, { name: string; status: "unsupported" |
   // signatures, SC2007 overloads, SC2008 intersections, SC2009 component
   // fences; standard-library types with no lowering report SC2020). What
   // remains here is the remainder the name enumerates.
-  SC2001: { name: "values of types outside the compilable set (bigint and symbol primitives, constructor objects, and library-derived or unresolved generic shapes)", status: "unsupported" },
+  SC2001: { name: "values of types outside the compilable set (constructor objects and library-derived or unresolved generic shapes)", status: "unsupported" },
   SC2002: { name: "record shape flows outside the width-copy rules (shapes must match exactly or width-coerce)", status: "unsupported" },
   SC2003: { name: "union-to-union conversions outside the re-tagging rule", status: "unsupported" },
   SC2004: { name: "uses of a binding whose declaration did not compile (cascade marker)", status: "unsupported" },
@@ -471,8 +471,8 @@ export function unsupportedTypeDiag(typeText: string, loc: SrcLoc): ScrDiagnosti
   // SC2005, index signatures — SC2006, overloads — SC2007, intersections —
   // SC2008, component fences — SC2009, standard-library types — SC2020)
   // all speak before badType reaches for this, so what lands here is the
-  // remainder the registry entry enumerates: bigint/symbol primitives,
-  // constructor objects, and library-derived or unresolved generic shapes.
+  // remainder the registry entry enumerates: constructor objects and
+  // library-derived or unresolved generic shapes.
   return {
     code: "SC2001",
     message:
@@ -554,11 +554,12 @@ export function overloadedSignatureTypeDiag(typeText: string, loc: SrcLoc): ScrD
 
 /** An intersection type that resolved to no lowering. The intersections
  * that DO compile never reach this: object-member intersections resolve
- * through the record path (`A & B` interns the combined shape),
- * function-with-properties hybrids map to `%call` records, and
- * mixin-instantiation intersections resolve by chain structure to their
- * pinned instantiation. What lands here is the remainder — an intersection
- * part outside those rules, or a mixin intersection no chain pins. */
+ * through the record path (`A & B` interns the combined shape), branded
+ * primitives erase their literal marker shapes, function-with-properties
+ * hybrids map to `%call` records, and mixin-instantiation intersections
+ * resolve by chain structure to their pinned instantiation. What lands here
+ * is the remainder — an intersection part outside those rules, or a mixin
+ * intersection no chain pins. */
 export function intersectionTypeDiag(typeText: string, loc: SrcLoc): ScrDiagnostic {
   return {
     code: "SC2008",

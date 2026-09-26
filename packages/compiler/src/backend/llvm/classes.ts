@@ -37,6 +37,7 @@ import {
   mangleVtInstance,
   mangleVtStruct,
 } from "../mangle.js";
+import { llvmCommentText } from "./common.js";
 import { FN_ATTRS, llFieldType, releaseBody, releaseSym, retainBody, traceAdapter, type ShapeHost } from "./shapes.js";
 
 /** One virtual method slot of a hierarchy: the ROOT-MOST declaring class
@@ -224,7 +225,7 @@ function undefFieldInits(host: ClassHost, meta: LlClassMeta): string[] {
       out.push(
         `  %ufv${i} = call ptr @scr_jsval_undefined()`,
         `  %uf${i} = getelementptr inbounds %${mangleClassStruct(meta.def.name)}, ptr %o, i64 0, i32 ${index}`,
-        `  store ptr %ufv${i}, ptr %uf${i} ; ${f.name} starts undefined`,
+        `  store ptr %ufv${i}, ptr %uf${i} ; ${llvmCommentText(f.name)} starts undefined`,
       );
       return;
     }
@@ -233,7 +234,7 @@ function undefFieldInits(host: ClassHost, meta: LlClassMeta): string[] {
     if (tag < 0) return;
     out.push(
       `  %uf${i} = getelementptr inbounds %${mangleClassStruct(meta.def.name)}, ptr %o, i64 0, i32 ${index}`,
-      `  store ptr ${host.unitInstanceRef(f.type.unionId, tag)}, ptr %uf${i} ; ${f.name} starts undefined`,
+      `  store ptr ${host.unitInstanceRef(f.type.unionId, tag)}, ptr %uf${i} ; ${llvmCommentText(f.name)} starts undefined`,
     );
   });
   return out;
@@ -271,7 +272,7 @@ export function emitClassShapes(
     const members = [...prefix, ...fieldTys];
     typeDefs.push(
       `%${mangleClassStruct(cls.name)} = type { ${host.sizeType}${members.length ? ", " + members.join(", ") : ""} } ` +
-        `; class ${cls.name}${meta.hierarchy ? " (vt at 1)" : ""}${streamRooted(meta) ? " (ScrStream prefix at 2)" : emitterRooted(meta) ? " (ScrEmitter prefix at 2)" : ""} { ${cls.fields.map((f) => f.name).join("; ")} }`,
+        `; class ${cls.name}${meta.hierarchy ? " (vt at 1)" : ""}${streamRooted(meta) ? " (ScrStream prefix at 2)" : emitterRooted(meta) ? " (ScrEmitter prefix at 2)" : ""} { ${cls.fields.map((f) => llvmCommentText(f.name)).join("; ")} }`,
     );
   }
 
@@ -284,7 +285,7 @@ export function emitClassShapes(
     const slotPtrs = root.slots.map(() => "ptr").join(", ");
     typeDefs.push(
       `%${mangleVtStruct(root.def.name)} = type { %ScrVt${root.slots.length ? ", " + slotPtrs : ""} } ` +
-        `; vtable: hierarchy rooted at ${root.def.name}${root.slots.length ? ` [${root.slots.map((s) => s.method).join(", ")}]` : ""}`,
+        `; vtable: hierarchy rooted at ${root.def.name}${root.slots.length ? ` [${root.slots.map((s) => llvmCommentText(s.method)).join(", ")}]` : ""}`,
     );
   }
 
@@ -350,7 +351,7 @@ export function emitClassShapes(
         lines.push(
           `  %f${t} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${f.index}`,
           `  %v${t} = load ptr, ptr %f${t}`,
-          `  call void ${releaseSym(host, f.type)}(ptr %v${t}) ; ${f.name}`,
+          `  call void ${releaseSym(host, f.type)}(ptr %v${t}) ; ${llvmCommentText(f.name)}`,
         );
       });
       if (isEmitterRooted) lines.push(...regCall("td", "scr_emitter_reg_drop", ""));
@@ -491,7 +492,7 @@ export function emitClassShapes(
         tr.push(
           `  %f${i} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${f.index}`,
           `  %v${i} = load ptr, ptr %f${i}`,
-          `  call void %visit(ptr %v${i}, ptr %ctx) ; ${f.name}`,
+          `  call void %visit(ptr %v${i}, ptr %ctx) ; ${llvmCommentText(f.name)}`,
         );
       });
       tr.push(`  ret void`, `}`, ``);
@@ -507,7 +508,7 @@ export function emitClassShapes(
         gf.push(
           `  %f${i} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${f.index}`,
           `  %v${i} = load ptr, ptr %f${i}`,
-          `  call void ${releaseSym(host, f.type)}(ptr %v${i}) ; ${f.name} (acyclic)`,
+          `  call void ${releaseSym(host, f.type)}(ptr %v${i}) ; ${llvmCommentText(f.name)} (acyclic)`,
         );
       });
       host.declare(`declare void @scr_cyc_free(ptr)`);

@@ -44,6 +44,7 @@ export function emitExpr(host: LlvmEmitterContext, e: IrExpr): LlValue {
       case "numLit":
       case "boolLit":
       case "strLit":
+      case "moduleNsRef":
       case "unitLit":
       case "varRef":
         return host.emitLiteralExpr(e);

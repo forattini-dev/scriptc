@@ -46,6 +46,21 @@ const nn = maybe!; void nn;
 void (x satisfies number);
 void typeof tpl;
 const neg = -x; const post = ys.length; void [neg, post];
+class UnionLeft {
+  leftOnly(): string { return "left"; }
+  common(prefix: string): string { return prefix + ":left"; }
+}
+class UnionRight {
+  rightOnly(): string { return "right"; }
+  common(prefix: string): string { return prefix + ":right"; }
+}
+function unionCalls(items: UnionLeft[] | UnionRight[], value: UnionLeft | UnionRight): string[] {
+  items.forEach((item) => void item.common("each"));
+  const mapped = items.map((item, index, array) => item.common(String(index + array.length)));
+  mapped.push(value.common("value"));
+  return mapped;
+}
+void unionCalls;
 export default over;
 `,
 };

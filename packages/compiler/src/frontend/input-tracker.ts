@@ -118,6 +118,16 @@ export class FrontendInputTracker {
     }
   }
 
+  /** Prevent this frontend result from entering a persistent cache.
+   *
+   * Some host APIs perform semantic filesystem discovery internally and do
+   * not expose the candidates they inspected. Callers may still use their
+   * exact answer for the current build, but must decline cache publication
+   * rather than pretend the observation set is complete. */
+  markUnstable(): void {
+    this.stable = false;
+  }
+
   snapshot(): FrontendInputSnapshot {
     return {
       version: 1,
@@ -131,6 +141,12 @@ export class FrontendInputTracker {
 
 function record(probe: FrontendInputProbe): void {
   activeTracker.getStore()?.record(probe);
+}
+
+/** Mark the active frontend as unsafe to persist because an exact host query
+ * bypassed the tracked filesystem wrappers. No-op outside a frontend run. */
+export function markFrontendInputsUnstable(): void {
+  activeTracker.getStore()?.markUnstable();
 }
 
 export function trackedReadFile(path: string): string | null {

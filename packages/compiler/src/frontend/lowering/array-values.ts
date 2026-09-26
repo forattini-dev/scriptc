@@ -3,6 +3,26 @@ import { varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
 import { dynUndefinedExpr } from "./lowerer.js";
 
+/** Test whether one array index contains a value rather than a hole. */
+export function arrayIndexPresent(arr: IrExpr, index: IrExpr, loc: SrcLoc): IrExpr {
+  return {
+    kind: "arrayHas",
+    arr,
+    index,
+    type: BOOL,
+    loc,
+  };
+}
+
+/** Test the conventional `a.0[i.0]` slot used by synthesized array loops. */
+export function currentArrayIndexPresent(arrType: IrType, loc: SrcLoc): IrExpr {
+  return arrayIndexPresent(
+    varRef("a.0", arrType, loc),
+    varRef("i.0", F64, loc),
+    loc,
+  );
+}
+
 /** The value yielded by a JavaScript array read, independent of its slot's storage type. */
 export function arrayValueType(lowerer: Lowerer, elem: IrType): IrType {
   if (elem.kind === "jsval" || elem.kind === "dyn") return elem;
@@ -19,10 +39,12 @@ export function arrayValueRead(lowerer: Lowerer, arr: IrExpr, index: IrExpr, ele
   return {
     kind: "ternary",
     cond: {
-      kind: "bin", op: "===",
+      kind: "bin",
+      op: "===",
       left: { kind: "arrayState", arr, index, type: F64, loc },
       right: { kind: "numLit", value: 1, type: F64, loc },
-      type: BOOL, loc,
+      type: BOOL,
+      loc,
     },
     then: typeEquals(elem, type) ? read : lowerer.coerceToExpected(read, type),
     else_: missing,

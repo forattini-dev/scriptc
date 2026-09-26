@@ -3,6 +3,7 @@ FROM ubuntu:24.04
 
 ARG NODE_VERSION
 ARG PNPM_VERSION=11.1.3
+ARG ZIG_VERSION=0.16.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -44,6 +45,10 @@ RUN curl --fail --silent --show-error --location \
         | sha256sum --check --strict - \
     && tar -xJf /tmp/node.tar.xz --directory /usr/local --strip-components=1 \
     && rm /tmp/node.tar.xz /tmp/SHASUMS256.txt
+
+COPY scripts/install-zig.sh /tmp/install-zig.sh
+RUN sh /tmp/install-zig.sh "$ZIG_VERSION" \
+    && rm /tmp/install-zig.sh
 
 RUN npm install --global "pnpm@${PNPM_VERSION}"
 

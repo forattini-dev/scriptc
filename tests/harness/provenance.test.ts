@@ -35,13 +35,13 @@ const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance", fl
 
 const EXPECTED = "hello, world\nHELLO, COMPILER!\nhello, chain!\n";
 
-async function buildAndRun(name: string, dynamic: boolean): Promise<string> {
+async function buildAndRun(name: string, dynamic: boolean, program = entry): Promise<string> {
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, name);
   // Pinned: the provenance thesis compares a source-static binary against
   // a dist-island binary — holding both on the C lane keeps that byte
   // comparison about PROVENANCE, never about which backend each build drew.
-  const result = await compile(entry, { outPath, outDir, dynamic, backend: "c" });
+  const result = await compile(program, { outPath, outDir, dynamic, backend: "c" });
   if (!result.ok) {
     throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
   }
@@ -74,6 +74,16 @@ describe("provenance sources", () => {
     setProvenanceSources(sources);
     const fromSource = await buildAndRun("greet-static", false);
     expect(fromSource).toBe(island);
+  });
+
+  test("maps a published dist/esm subpath to its unmodified TypeScript source", async () => {
+    const subpathEntry = join(fixtureDir, "cases/echo/main.ts");
+    const node = await execFileAsync("node", [subpathEntry], { encoding: "utf8" });
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = join(fixtureDir, "manifest.json");
+    const sources = await resolveProvenanceSources(subpathEntry);
+    expect(sources.packages[0]?.entries["greeter/echo"]).toMatch(/attested-src\/greeter\/src\/echo\.ts$/);
+    setProvenanceSources(sources);
+    expect(await buildAndRun("echo-static", false, subpathEntry)).toBe(node.stdout);
   });
 
   test("per-package attribution counts the source static; the @__PURE__ dead const elides", async () => {

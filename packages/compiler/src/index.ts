@@ -269,9 +269,7 @@ export interface CompileBaseOptions {
   outPath: string;
   /** Where generated intermediates and compatibility side artifacts land. */
   outDir: string;
-  /** True only when outPath was selected by scriptc's default-path policy.
-   * This authorizes cleanup of stale generated siblings; explicit paths must
-   * leave neighboring caller-owned files untouched. */
+  /** @deprecated This option no longer controls output cleanup; sibling artifacts are retained. */
   defaultOutputPath?: boolean;
   /** Compatibility-only additive IR side artifact for executable builds.
    * The CLI's deprecated --emit-ir flag supplies this option. */
@@ -292,6 +290,11 @@ export interface CompileBaseOptions {
   /** Native optimization posture. Release is the shipped -O2 default; dev
    * uses -O0 and stable multi-TU object caching for large LLVM programs. */
   optimization?: "release" | "dev";
+  /** Remove symbol/debug payload from an executable at link time. */
+  strip?: boolean;
+  /** Windows PE executable subsystem. Console is the default; GUI suppresses
+   * automatic console-window creation. Only valid for Windows executables. */
+  windowsSubsystem?: WindowsSubsystem;
   /** --npm-static: package names whose shipped, unminified JS compiles
    * STATICALLY as program modules (inference types the bodies; statements
    * the lowering cannot prove become runtime fences). "auto" opts in every
@@ -898,6 +901,239 @@ export async function compile(entryPath: string, opts: CompileRequestOptions): P
     diagnostic => ({ ok: false, diagnostics: [diagnostic], sourceTexts: new Map() }));
 }
 
+/** Build-time API compatibility fence: a caller's existing CompileOptions
+ * variable must retain the executable result aliases without narrowing. */
+async function assertCompileOptionsCompatibility(
+  entryPath: string,
+  opts: CompileOptions,
+): Promise<void> {
+  const result = await compile(entryPath, opts);
+  if (result.ok) {
+    const binaryPath: string = result.binaryPath;
+    void binaryPath;
+  }
+}
+void assertCompileOptionsCompatibility;
+
+/** The historical exported CompileResult itself remains executable-shaped. */
+function assertCompileResultCompatibility(result: CompileResult): void {
+  if (result.ok) {
+    const binaryPath: string = result.binaryPath;
+    void binaryPath;
+  }
+}
+void assertCompileResultCompatibility;
+
+function executableNativeFeatures(
+  mod: IrModule,
+  backend: "c" | "llvm",
+  dynamic: boolean,
+  optimization: "release" | "dev",
+  llvmRefusal?: string,
+): EarlyExecutableNativeFeatures {
+  return {
+    backend,
+    ...(optimization === "dev" ? { optimization: "dev" as const } : {}),
+    ...(llvmRefusal === undefined ? {} : { llvmRefusal }),
+    dynamic,
+    regex: moduleUsesRegex(mod),
+    copying: moduleUsesCopying(mod),
+    textDecoderLegacy: moduleUsesLegacyTextDecoder(mod),
+    fileHandle: moduleUsesFileHandle(mod),
+    fetch: moduleUsesFetch(mod),
+    netIsland:
+      moduleEmbedsBuiltin(mod, "node:http") ||
+      moduleEmbedsBuiltin(mod, "node:https") ||
+      moduleEmbedsBuiltin(mod, "node:net") ||
+      moduleEmbedsBuiltin(mod, "node:tls"),
+    zlib: moduleUsesZlib(mod) || moduleEmbedsCompressedNpm(mod),
+    assert: moduleUsesAssert(mod),
+    inspect: moduleUsesInspect(mod),
+    dynInvoke: moduleUsesDynInvoke(mod),
+    dc: moduleUsesDc(mod),
+    dynAsync: moduleUsesDynAsync(mod),
+    events: moduleUsesProcessEvents(mod),
+    emitter: moduleUsesEmitter(mod),
+    symbol: moduleUsesSymbol(mod),
+    bigint: moduleUsesBigInt(mod),
+    searchParams: moduleUsesSearchParams(mod),
+    qs: moduleUsesQs(mod),
+    parseArgs: moduleUsesParseArgs(mod),
+    stream: moduleUsesStream(mod),
+    net: moduleUsesNet(mod),
+    http: moduleUsesHttpServer(mod),
+    http2: moduleUsesHttp2(mod),
+    dgram: moduleUsesDgram(mod),
+    watch: moduleUsesFsWatch(mod),
+    foreignFfi: hasForeignFfiCallback(mod.ffiImports ?? []),
+    nodeTest: moduleUsesNodeTest(mod),
+    tls: moduleUsesTls(mod),
+    tlsCa: moduleUsesTlsCa(mod),
+  };
+}
+
+async function compileExecutableNative(
+  features: EarlyExecutableNativeFeatures,
+  cPath: string,
+  outPath: string,
+  sanitize: boolean,
+  ffi: FfiProfile | null,
+  windowsSubsystem?: WindowsSubsystem,
+  strip?: boolean,
+  programSplit: ReturnType<typeof splitLlvmProgram> = null,
+  programObjectDependencies: readonly NativeArtifactDependency[] = [],
+  onArtifactReady?: NonNullable<Parameters<typeof compileExternalC>[0]["onArtifactReady"]>,
+): Promise<void> {
+  const programIsObject = /\.(?:o|obj)$/.test(cPath);
+  const runtimePackTarget = programIsObject && !sanitize && process.env["SCRIPTC_RUNTIME_PACK"] !== "0"
+    ? nativeCodegenTarget()
+    : null;
+  if (runtimePackTarget !== null) {
+    const plan = await createNativeLinkPlan({
+      target: runtimePackTarget,
+      programObject: cPath,
+      outPath,
+      features,
+      ffi,
+      optimization: features.optimization ?? "release",
+      ...(strip ? { strip: true } : {}),
+      ...(windowsSubsystem === undefined ? {} : { windowsSubsystem }),
+      programObjectDependencies,
+    });
+    const cacheableLinker =
+      onArtifactReady !== undefined && ffi === null && platformLinkerSupportsPersistentCache(
+        process.env,
+        runtimePackTarget,
+      );
+    await linkNativeExecutable(plan, {
+      // A caller-selected linker can be a mutable wrapper with hidden inputs,
+      // and a PATH-selected `clang` can be one too. FFI profiles and mutable
+      // linker search environments likewise name transitive files that the
+      // top-level dependency snapshot cannot prove. Only a direct driver in a
+      // stable link environment may publish a reusable final executable.
+      ...(cacheableLinker ? { onArtifactReady } : {}),
+    });
+    return;
+  }
+  const effectiveProgramSplit =
+    programSplit ??
+    (!programIsObject && features.optimization === "dev" && features.backend === "llvm" && !sanitize
+      ? splitLlvmProgram(await readFile(cPath, "utf8"))
+      : null);
+  const objectLinkDir = programIsObject
+    ? await mkdtemp(join(tmpdir(), "scriptc-object-link-"))
+    : null;
+  const linkDriverSource = objectLinkDir === null
+    ? cPath
+    : join(objectLinkDir, "driver.c");
+  if (objectLinkDir !== null) await writeFile(linkDriverSource, "/* scriptc object link driver */\n");
+  try {
+    assertLegacyCExecutablePipelineEnabled();
+    await compileExternalC({
+      cPath: linkDriverSource,
+      outPath,
+      cacheIdentity: "scriptc-generated-v1",
+      ...(features.optimization === "dev" ? { optimization: "dev" as const } : {}),
+      ...(strip ? { strip: true } : {}),
+      ...(windowsSubsystem === undefined ? {} : { windowsSubsystem }),
+      ...(effectiveProgramSplit === null
+        ? {}
+        : {
+            programShards: effectiveProgramSplit.shards,
+            programPublicSymbols: effectiveProgramSplit.publicSymbols,
+          }),
+      sanitize,
+      dynamic: features.dynamic,
+      regex: features.regex,
+      copying: features.copying,
+      textDecoderLegacy: features.textDecoderLegacy,
+      fileHandle: features.fileHandle,
+      fetch: features.fetch,
+      netIsland: features.netIsland,
+      zlib: features.zlib,
+      assert: features.assert,
+      inspect: features.inspect,
+      dynInvoke: features.dynInvoke,
+      dc: features.dc,
+      dynAsync: features.dynAsync,
+      events: features.events,
+      emitter: features.emitter,
+      symbol: features.symbol,
+      bigint: features.bigint,
+      searchParams: features.searchParams,
+      qs: features.qs,
+      parseArgs: features.parseArgs,
+      stream: features.stream,
+      net: features.net,
+      http: features.http,
+      http2: features.http2,
+      dgram: features.dgram,
+      watch: features.watch,
+      foreignFfi: features.foreignFfi,
+      nodeTest: features.nodeTest,
+      tls: features.tls,
+      tlsCa: features.tlsCa,
+      ...(onArtifactReady === undefined ? {} : { onArtifactReady }),
+      ...(ffi === null && !programIsObject
+        ? {}
+        : {
+            linkInputs: [
+              ...(programIsObject ? [cPath] : []),
+              ...(ffi?.libraries ?? []),
+            ],
+            ...(ffi === null ? {} : { systemLibraries: ffi.systemLibraries }),
+          }),
+    });
+  } finally {
+    if (objectLinkDir !== null) {
+      await rm(objectLinkDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+}
+
+async function emitNativeProgramObject(
+  entryPath: string,
+  opts: CompileRequestOptions,
+  llvm: string,
+): Promise<{ linkPath: string; artifactPath: string; dependencies: NativeArtifactDependency[] }> {
+  const stem = basename(entryPath).replace(/\.(ts|mts|cts|js|mjs|cjs)$/, "");
+  const artifactPath = join(opts.outDir, `${stem}.helper.o`);
+  // compileExecutableNative recognizes object inputs by suffix. The random
+  // private name isolates concurrent builds; retain .o so the driver links
+  // it rather than attempting to compile it as source.
+  const linkPath = `${privateSiblingPath(artifactPath, "native-program-object")}.o`;
+  try {
+    const artifact = await emitNativeArtifact({
+      outputPath: linkPath,
+      llvm,
+      outputKind: "obj",
+      sourcePath: entryPath,
+      optimization: opts.optimization === "dev" ? "0" : "2",
+      ...(opts.sanitize === undefined ? {} : { sanitize: opts.sanitize }),
+    });
+    return { linkPath, artifactPath, dependencies: artifact.dependencies };
+  } catch (error) {
+    await rm(linkPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+function usesPrecompiledRuntimePack(
+  opts: CompileRequestOptions,
+  backend: "c" | "llvm",
+): boolean {
+  if (
+    backend !== "llvm" || opts.sanitize === true ||
+    process.env["SCRIPTC_RUNTIME_PACK"] === "0" ||
+    process.env["SCRIPTC_FETCH_CURL"] === "1" || legacyCExecutablePathRequested()
+  ) return false;
+  return nativeCodegenTarget() !== null;
+}
+
+function runtimePackDiagnostic(error: RuntimePackError, entryPath: string): ScrDiagnostic {
+  return nativeCodegenDiag(error.code === "unsupported" ? "SC3002" : "SC3003", error.message, entryPath);
+}
+
 async function compileTracked(
   entryPath: string,
   opts: CompileRequestOptions,
@@ -908,6 +1144,20 @@ async function compileTracked(
   setIslandModules(opts.islandModules ?? [], entryPath);
   const rustBackend = opts.backend === "rust";
   const outputKind = opts.outputKind ?? "exe";
+  if (opts.windowsSubsystem !== undefined && outputKind !== "exe") {
+    return {
+      ok: false,
+      diagnostics: [nativeCodegenDiag("SC3002", "--windows-subsystem is only supported for executable output", entryPath)],
+      sourceTexts: new Map(),
+    };
+  }
+  if (opts.strip === true && outputKind !== "exe") {
+    return {
+      ok: false,
+      diagnostics: [nativeCodegenDiag("SC3002", "--strip is only supported for executable output", entryPath)],
+      sourceTexts: new Map(),
+    };
+  }
   if (opts.nativeLinkInfo === true && outputKind !== "obj") {
     return {
       ok: false,
@@ -1044,6 +1294,8 @@ async function compileTracked(
       dynamic: opts.dynamic ?? false,
       backend: opts.backend ?? "auto",
       ...(opts.optimization === "dev" ? { optimization: "dev" as const } : {}),
+      ...(opts.strip ? { strip: true as const } : {}),
+      ...(opts.windowsSubsystem === "gui" ? { windowsSubsystem: "gui" as const } : {}),
       npmStatic: opts.npmStatic ?? null,
       typeAcquisition: opts.typeAcquisition?.mode ?? "local",
       ffiProfile:
@@ -1082,10 +1334,6 @@ async function compileTracked(
       throw new InternalCompilerError("executable cache hit without executable cache options");
     }
     const executableCacheOptions = earlyCacheOptions;
-    if (!opts.emitIr) {
-      const stem = basename(entryPath).replace(/\.(ts|mts|cts|js|mjs|cjs)$/, "");
-      await rm(join(opts.outDir, `${stem}.ir.json`), { force: true });
-    }
     // Route/proof metadata is independently evictable. A full-compiler
     // fallback that still finds the validated payload repairs that lightweight
     // index so the next identical CLI invocation can avoid this module graph.
@@ -1150,6 +1398,8 @@ async function compileTracked(
         opts.outPath,
         opts.sanitize ?? false,
         ffi,
+        opts.windowsSubsystem,
+        opts.strip,
         null,
         nativeProgramObject?.dependencies,
         opts.nativeProgramObject === true ? undefined : async ({ dependencies }) => {
@@ -1282,36 +1532,11 @@ async function compileTracked(
     ir: join(opts.outDir, `${stem}.ir.json`),
     c: join(opts.outDir, `${stem}.c`),
     llvm: join(opts.outDir, `${stem}.ll`),
-    rust: join(opts.outDir, `${stem}.rs`),
-    asm: join(opts.outDir, `${stem}.s`),
-    obj: join(opts.outDir, `${stem}.o`),
   } as const;
-  const defaultExecutablePaths = [
-    join(opts.outDir, stem),
-    join(opts.outDir, `${stem}.exe`),
-    join(opts.outDir, `${stem}.wasm`),
-  ];
-  const removeStaleSourceArtifacts = async (keep: readonly string[]): Promise<void> => {
-    const kept = new Set(keep.map((path) => resolve(path)));
-    const candidates = outputKind === "exe"
-      // Executable builds can generate only these compatibility/translation
-      // unit siblings. Assembly and object outputs are independent primary
-      // artifacts, so an executable build must never claim or delete them.
-      ? [defaultSourcePaths.ir, defaultSourcePaths.c, defaultSourcePaths.llvm]
-      : opts.defaultOutputPath === true
-        ? [...Object.values(defaultSourcePaths), ...defaultExecutablePaths]
-        : [];
-    await Promise.all(
-      candidates
-        .filter((path) => !kept.has(resolve(path)))
-        .map((path) => rm(path, { force: true })),
-    );
-  };
 
   if (outputKind === "ir") {
     await mkdir(dirname(opts.outPath), { recursive: true });
     await writeFile(opts.outPath, serializeModule(lowered.module));
-    await removeStaleSourceArtifacts([opts.outPath]);
     return { ok: true, artifact: { kind: "ir", path: opts.outPath } };
   }
 
@@ -1324,14 +1549,12 @@ async function compileTracked(
     }
     await mkdir(dirname(opts.outPath), { recursive: true });
     await writeFile(opts.outPath, source);
-    await removeStaleSourceArtifacts([opts.outPath]);
     return { ok: true, artifact: { kind: "rust", path: opts.outPath } };
   }
 
   if (outputKind === "c") {
     await mkdir(dirname(opts.outPath), { recursive: true });
     await writeFile(opts.outPath, emitCModule(lowered.module, entryText));
-    await removeStaleSourceArtifacts([opts.outPath]);
     return { ok: true, artifact: { kind: "c", path: opts.outPath } };
   }
 
@@ -1369,7 +1592,6 @@ async function compileTracked(
         };
       }
     }
-    await removeStaleSourceArtifacts([opts.outPath]);
     if (outputKind === "obj" && opts.nativeLinkInfo === true) {
       const target = nativeCodegenTarget();
       if (target === null) {
@@ -1509,19 +1731,11 @@ async function compileTracked(
   if (backend === "c") {
     await writeFile(cPath, emitCModule(lowered.module!, entryText));
   }
-  // Kept-TU honesty: outDir persists across builds (the CLI's .scriptc/),
-  // so a lane change would leave the PREVIOUS lane's TU beside the fresh
-  // one — remove the loser so the surviving TU is always the one the
-  // binary below was linked from.
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = defaultSourcePaths.ir;
     await writeFile(irPath, serializeModule(lowered.module));
   }
-  await removeStaleSourceArtifacts([
-    cPath,
-    ...(irPath === undefined ? [] : [irPath]),
-  ]);
 
   const nativeFeatures = executableNativeFeatures(
     lowered.module,
@@ -1569,6 +1783,8 @@ async function compileTracked(
       opts.outPath,
       opts.sanitize ?? false,
       ffi,
+      opts.windowsSubsystem,
+      opts.strip,
       programSplit,
       nativeProgramObject?.dependencies,
       opts.nativeProgramObject === true ? undefined : async ({ dependencies }) => {
@@ -1833,7 +2049,6 @@ async function emitSemanticLibraryHit(
     await writeFile(cPath, translationUnit);
   }
   timing("semantic-tu-restore", { output_bytes: Buffer.byteLength(translationUnit) });
-  await rm(join(opts.outDir, `${stem}.lib.${profile.emission === "llvm" ? "c" : "ll"}`), { force: true });
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = join(opts.outDir, `${stem}.lib.ir.json`);
@@ -2361,7 +2576,6 @@ async function compileLibraryTracked(
     cPath = join(opts.outDir, `${stem}.lib.c`);
     await writeFile(cPath, emitCModule(mod, entryText));
   }
-  await rm(join(opts.outDir, `${stem}.lib.${profile.emission === "llvm" ? "c" : "ll"}`), { force: true });
 
   let irPath: string | undefined;
   if (opts.emitIr) {

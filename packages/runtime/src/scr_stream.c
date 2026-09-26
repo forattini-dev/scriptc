@@ -2838,6 +2838,24 @@ ScrStream *scr_stream_destroy(ScrStream *s, ScrError *err) {
   return scr_stream_retain(s);
 }
 
+ScrStream *scr_stream_iterator_close(ScrStream *s) {
+  ScrStreamState *st = s->st;
+  if (st->destroyed) return scr_stream_retain(s);
+  ScrStr *message = scr_str_new("The operation was aborted", 25);
+  ScrError *error = scr_error_new(SCR_ERR_ERROR, message);
+  scr_str_release(message);
+  scr_str_release(error->name);
+  error->name = scr_str_new("AbortError", 10);
+  scr_error_set_code(error, "ABORT_ERR");
+  /* Node's iterator registers an internal error listener: the AbortError is
+   * still observable through stream.errored and user listeners, but it does
+   * not become an unhandled 'error' event when nobody subscribed. */
+  st->next_err_consumed = true;
+  scr_stream_do_destroy(s, error);
+  scr_error_release(error);
+  return scr_stream_retain(s);
+}
+
 ScrError *scr_stream_errored(ScrStream *s) {
   return s->st->errored ? scr_error_retain(s->st->errored) : NULL;
 }

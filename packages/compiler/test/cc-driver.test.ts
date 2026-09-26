@@ -417,7 +417,7 @@ exit 99
       expect(invocations.some((line) => /^cc .*vendor.*zlib/.test(line))).toBe(true);
       expect(invocations.some((line) => /^ar rcs .*libqjs\.a/.test(line))).toBe(true);
       expect(invocations.some((line) => /^ar rcs .*libmbedtls\.a/.test(line))).toBe(true);
-      expect(invocations.some((line) => line.includes("-lz"))).toBe(false);
+      expect(invocations.some((line) => /(?:^|\s)-lz(?:\s|$)/.test(line))).toBe(false);
       expect(await readFile(unexpectedToolPath).catch(() => "")).toBe("");
     } finally {
       if (oldPath === undefined) delete process.env["PATH"];

@@ -1,0 +1,26 @@
+module-resolution-introspection.ts:4:33 - error SC2020: 'import.meta.resolve with a runtime-computed specifier' is part of the standard library types but has no scriptc lowering yet
+
+  3 | const specifier = process.env.MODULE_NAME ?? "./fallback.mjs";
+  4 | console.log(import.meta.resolve(specifier));
+    |                                 ^~~~~~~~~
+  5 | // createRequire uses the same static-literal boundary.
+
+  hint: a compiled binary has a fixed module graph — pass a string literal
+
+module-resolution-introspection.ts:7:29 - error SC2020: 'require.resolve with a runtime-computed request' is part of the standard library types but has no scriptc lowering yet
+
+  6 | const require = createRequire(import.meta.url);
+  7 | console.log(require.resolve(specifier));
+    |                             ^~~~~~~~~
+  8 | console.log(require.resolve("./fallback.mjs", { paths: process.argv }));
+
+  hint: a compiled binary has a fixed module graph — pass a string literal
+
+module-resolution-introspection.ts:8:47 - error SC2020: 'require.resolve with runtime-computed options' is part of the standard library types but has no scriptc lowering yet
+
+  7 | console.log(require.resolve(specifier));
+  8 | console.log(require.resolve("./fallback.mjs", { paths: process.argv }));
+    |                                               ^~~~~~~~~~~~~~~~~~~~~~~
+  9 | // Dynamic requests and dynamic search paths remain explicit refusals.
+
+  hint: omit options or pass { paths: ["<static directory>", ...] }

@@ -45,6 +45,7 @@ export interface EarlyExecutableNativeFeatures {
   events: boolean;
   emitter: boolean;
   symbol: boolean;
+  bigint: boolean;
   searchParams: boolean;
   qs: boolean;
   parseArgs: boolean;
@@ -84,6 +85,10 @@ export interface EarlyExecutableCacheOptions {
   backend: "auto" | "c" | "llvm";
   /** Omitted is the historical release posture and preserves v1 keys. */
   optimization?: "dev";
+  /** Omitted retains the unstripped executable's historical cache key. */
+  strip?: true;
+  /** Omitted for the default Windows console subsystem. */
+  windowsSubsystem?: "gui";
   npmStatic: readonly string[] | "auto" | null;
   typeAcquisition?: "local" | "auto" | "offline";
   /** Raw manifest identity: path and bytes. Native archives remain under the
@@ -153,6 +158,7 @@ const BOOLEAN_NATIVE_KEYS = [
   "events",
   "emitter",
   "symbol",
+  "bigint",
   "searchParams",
   "qs",
   "parseArgs",
@@ -191,6 +197,8 @@ function cacheKey(options: EarlyExecutableCacheOptions): string {
     options.dynamic ? "dynamic" : "static",
     options.backend,
     ...(options.optimization === "dev" ? ["optimization-dev"] : []),
+    ...(options.strip ? ["strip"] : []),
+    ...(options.windowsSubsystem === "gui" ? ["windows-subsystem-gui"] : []),
     options.npmStatic === null
       ? "<npm-static-off>"
       : options.npmStatic === "auto"
@@ -222,6 +230,8 @@ function routeKey(options: EarlyExecutableRouteOptions): string {
     .update(options.dynamic ? "dynamic" : "static").update("\0")
     .update(options.backend).update("\0");
   if (options.optimization === "dev") hash.update("optimization-dev\0");
+  if (options.strip) hash.update("strip\0");
+  if (options.windowsSubsystem === "gui") hash.update("windows-subsystem-gui\0");
   hash
     .update(options.npmStatic === null
       ? "<npm-static-off>"
@@ -397,7 +407,6 @@ export async function readEarlyExecutableCache(
     if (!(await fileMatches(paths.cPath, stamp.files.translationUnit.digest))) {
       await installBytes(translationUnit, paths.cPath);
     }
-    await rm(paths.staleCPath, { force: true });
     if (
       ir !== null && stamp.files.ir !== null &&
       !(await fileMatches(paths.irPath, stamp.files.ir.digest))

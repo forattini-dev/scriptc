@@ -41,11 +41,14 @@ struct ScrStats {
   bool is_file;
   bool is_dir;
   bool is_symlink;
+  double dev;
+  double ino;
   double size;
   double blocks;
   double nlink;
   double atime_ms;
   double mtime_ms;
+  double ctime_ms;
 };
 
 #ifdef _WIN32
@@ -404,19 +407,33 @@ ScrStats *scr_file_handle_stat(ScrFileHandle *h) {
   out->is_file = S_ISREG(st.st_mode);
   out->is_dir = S_ISDIR(st.st_mode);
   out->is_symlink = false; /* fstat follows the open descriptor. */
+  out->dev = (double)st.st_dev;
+  out->ino = (double)st.st_ino;
   out->size = (double)st.st_size;
 #if defined(_WIN32)
   out->blocks = st.st_size <= 0 ? 0.0 : (double)(((uint64_t)st.st_size + 511) >> 9);
   out->nlink = (double)st.st_nlink;
   out->atime_ms = (double)st.st_atime * 1000.0;
   out->mtime_ms = (double)st.st_mtime * 1000.0;
+  out->ctime_ms = (double)st.st_ctime * 1000.0;
   HANDLE os_handle = (HANDLE)_get_osfhandle(h->fd);
   if (os_handle != INVALID_HANDLE_VALUE) {
     BY_HANDLE_FILE_INFORMATION basic;
     if (GetFileInformationByHandle(os_handle, &basic)) {
+      out->dev = (double)basic.dwVolumeSerialNumber;
+      out->ino = (double)basic.nFileIndexHigh * 4294967296.0 +
+        (double)basic.nFileIndexLow;
       out->nlink = (double)basic.nNumberOfLinks;
       out->atime_ms = scr_file_handle_filetime_ms(basic.ftLastAccessTime);
       out->mtime_ms = scr_file_handle_filetime_ms(basic.ftLastWriteTime);
+    }
+    FILE_BASIC_INFO times;
+    if (GetFileInformationByHandleEx(
+          os_handle, FileBasicInfo, &times, sizeof times)) {
+      FILETIME changed;
+      changed.dwLowDateTime = times.ChangeTime.LowPart;
+      changed.dwHighDateTime = times.ChangeTime.HighPart;
+      out->ctime_ms = scr_file_handle_filetime_ms(changed);
     }
     FILE_STANDARD_INFO standard;
     if (GetFileInformationByHandleEx(
@@ -432,6 +449,8 @@ ScrStats *scr_file_handle_stat(ScrFileHandle *h) {
                   (double)st.st_atimespec.tv_nsec / 1e6;
   out->mtime_ms = (double)st.st_mtimespec.tv_sec * 1000.0 +
                   (double)st.st_mtimespec.tv_nsec / 1e6;
+  out->ctime_ms = (double)st.st_ctimespec.tv_sec * 1000.0 +
+                  (double)st.st_ctimespec.tv_nsec / 1e6;
 #else
   out->blocks = (double)st.st_blocks;
   out->nlink = (double)st.st_nlink;
@@ -439,6 +458,8 @@ ScrStats *scr_file_handle_stat(ScrFileHandle *h) {
                   (double)st.st_atim.tv_nsec / 1e6;
   out->mtime_ms = (double)st.st_mtim.tv_sec * 1000.0 +
                   (double)st.st_mtim.tv_nsec / 1e6;
+  out->ctime_ms = (double)st.st_ctim.tv_sec * 1000.0 +
+                  (double)st.st_ctim.tv_nsec / 1e6;
 #endif
   return out;
 }

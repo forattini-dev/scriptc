@@ -148,6 +148,7 @@ async function tryFastPath(): Promise<number | null> {
     dynamic: values.dynamic,
     backend,
     ...(optimization === "dev" ? { optimization: "dev" as const } : {}),
+    ...(values.strip ? { strip: true as const } : {}),
     npmStatic,
     typeAcquisition: values["types-mode"] === "local" ? "local" : "auto",
     ffiProfile: ffiPath === null ? null : { path: ffiPath, bytes: ffiBytes! },
@@ -177,10 +178,6 @@ async function tryFastPath(): Promise<number | null> {
   if (hit.native.llvmRefusal !== undefined) {
     process.stderr.write(`scriptc: backend c (llvm refused: ${hit.native.llvmRefusal})\n`);
   }
-  // Source-primary invocations can replace a previously cached executable.
-  // A routed hit restores that executable without loading the full compiler,
-  // so mirror its output-kind cleanup before returning from the fast path.
-  await rm(join(outDir, `${stem}.ir.json`), { force: true });
   if (!values["keep-c"]) await rm(hit.cPath, { force: true });
   if (command === "build") {
     process.stdout.write(`${outPath}\n`);

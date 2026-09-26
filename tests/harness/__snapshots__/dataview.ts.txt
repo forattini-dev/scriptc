@@ -48,4 +48,4 @@ dataview.ts:16:29 - error SC2020: 'new DataView over this buffer expression' is 
      |                             ^~
   17 | 
 
-  hint: views compile over a typed array's own storage — new DataView(x.buffer, byteOffset?, byteLength?) where x is a Uint8Array/Uint32Array/Float32Array/Buffer value — or a fresh buffer erased into the view: new DataView(new ArrayBuffer(n), ...); free-standing ArrayBuffers have no representation
+  hint: views compile over a typed array's own storage — new DataView(x.buffer, byteOffset?, byteLength?) where x is a Uint8Array/Uint32Array/Float32Array/Float64Array/Buffer value — or a fresh buffer erased into the view: new DataView(new ArrayBuffer(n), ...); free-standing ArrayBuffers have no representation

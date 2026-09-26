@@ -13,7 +13,7 @@ const BASE_RUNTIME_SOURCES = [
   "scr_bytes_io.c", "scr_map.c", "scr_closure.c", "scr_ffi.c",
   "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c",
   "scr_console.c", "scr_lib.c", "scr_path.c", "scr_url.c", "scr_json.c",
-  "scr_async.c", "scr_child.c", "scr_cycle.c",
+  "scr_async.c", "scr_crypto_async.c", "scr_child.c", "scr_cycle.c",
 ];
 
 // ld64 dead-strips Mach-O symbol subsections without an ELF-style compile
@@ -40,6 +40,8 @@ const optional = [
   ["scr_events_emitter.c", "emitter"],
   ["scr_dyn_handle.c", any("emitter", "netEffective")],
   ["scr_symbol.c", "symbol"],
+  ["scr_bigint.c", "bigint"],
+  ["scr_bigint_assert.c", all("assert", "bigint")],
   ["scr_url_params.c", "searchParams"],
   ["scr_qs.c", "qs"],
   ["scr_util.c", "parseArgs"],

@@ -41,7 +41,7 @@ import { trapUseThrowExpr } from "./lowerer.js";
 import { trapModuleOf } from "./lower-builtins.js"; import { lowerEffectProperty, lowerServiceKeyRef } from "./lower-effect.js";
 import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLibFn, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, canExitIslandToType, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/ir.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
-import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
+import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STRING_INDEX_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import {
   UNSUPPORTED,
   blockedBindingUseDiag,
@@ -49,8 +49,9 @@ import {
   unsupportedDiag,
 } from "../../diagnostics/diagnostic.js";
 import { PoisonError, jsFuncNameOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
-import { lowerNpmStaticSafeIndexRead, lowerSafeIndexRead, strCharsCall } from "./lower-containers.js";
-import { arrayValueStore } from "./array-values.js";
+import { lowerNpmStaticSafeIndexRead, lowerSafeIndexRead, strCharsCall, tryLowerNumericIndexRead } from "./lower-containers.js";
+import { arrayValueRead, arrayValueStore } from "./array-values.js";
+import { tryLowerIndexedComparison } from "./indexed-comparison.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../builtin-modules.js";
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
@@ -78,6 +79,7 @@ import { lowerDynamicRequestInstanceOf } from "./lower-instanceof-island.js";
 import { lowerBuiltinTypeof, lowerBuiltinTypeofTest } from "./lower-typeof.js";
 import { lowerDynamicGlobalIdentifier } from "../ambient-values.js";
 import { templateRawTextOf } from "./lower-templates.js";
+import { coerceStringSearchValue, defaultAfterUndefined, lowerStaticallyUndefinedArgument } from "./optional-arguments.js";
 export {
   type FieldTarget,
   fieldGetExpr,
@@ -1219,6 +1221,12 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
           // string[] per read.
           if (bi.module === "module" && bi.member === "builtinModules") {
             return builtinModulesArrayLit(loc);
+          }
+          if (bi.module === "http" && bi.member === "METHODS") {
+            return { kind: "libCall", fn: "http.methods", args: [], type: arrayOf(STRING), loc };
+          }
+          if (bi.module === "http" && bi.member === "STATUS_CODES") {
+            return { kind: "libCall", fn: "http.statusCodes", args: [], type: DYN, loc };
           }
           // tls.rootCertificates: a runtime-valued module constant (the
           // cached bundled-CA array) — the one member read that lowers
@@ -4271,7 +4279,7 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
     }
     if (
       kind === "string"
-        ? own(STR_METHODS, name) !== undefined || own(ISLAND_SURFACE.string, name) !== undefined
+        ? own(STR_METHODS, name) !== undefined || STRING_INDEX_METHODS.has(name) || own(ISLAND_SURFACE.string, name) !== undefined
         : ARRAY_METHODS.has(name)
     ) {
       lowerer.unsupported("SC1090", expr, `${kind} methods as values (call '${name}' directly)`);
@@ -4954,6 +4962,10 @@ export function lowerOptionalNumber(
 ): IrExpr {
   if (operand.type.kind !== "union" || lowerer.armTag(operand.type.unionId, UNDEFINED_T) < 0) return operand;
   const directNumber = lowerer.stripUndefinedArm(operand.type).kind === "f64";
+  if (directNumber) {
+    const scalarRead = tryLowerNumericIndexRead(lowerer, operand, loc);
+    if (scalarRead) return scalarRead;
+  }
   const checkerNumber = narrowedNode !== undefined && lowerer.mapTypeOf(lowerer.typeOf(narrowedNode))?.kind === "f64";
   if (!directNumber && (!checkerNumber || lowerer.armTag(operand.type.unionId, F64) < 0)) return operand;
   const undefTag = lowerer.armTag(operand.type.unionId, UNDEFINED_T);
@@ -5939,6 +5951,75 @@ export function fenceClosureProbe(
     return Number.isInteger(n) && n >= 0 ? n : null;
   }
 
+/** `a[i] op= rhs` over native arrays and byte views. A compound assignment
+ * evaluates the receiver and index, reads the old element, evaluates rhs,
+ * then writes. Capture each stage so a call in the index or rhs cannot
+ * change the target or the value used by the operator. The expression yields
+ * the computed value before a typed array or Buffer coerces it for storage. */
+export function lowerElementCompound(lowerer: Lowerer, expr: ts.BinaryExpression, op: CompoundOp): IrExpr {
+  const target = expr.left as ts.ElementAccessExpression;
+  fenceNodeModuleMutation(lowerer, target, "assignment");
+  const loc = locOf(expr);
+  const receiverType = lowerer.mapTypeOf(lowerer.typeOf(target.expression));
+  if (receiverType?.kind !== "array" && receiverType?.kind !== "bytes") {
+    lowerer.unsupported("SC1090", target, "compound assignment to non-array elements");
+  }
+  let receiver = lowerer.lowerExpr(target.expression);
+  if (receiver.type.kind === "union" && lowerer.armTag(receiver.type.unionId, UNDEFINED_T) >= 0) {
+    const present = lowerer.stripUndefinedArm(receiver.type);
+    const helper = present.kind === receiverType.kind
+      ? lowerer.narrowedArmHelper(receiver.type.unionId, present, locOf(target.expression))
+      : null;
+    if (helper) receiver = { kind: "call", callee: helper, args: [receiver], type: present, loc: locOf(target.expression) };
+  }
+  if (receiver.type.kind !== receiverType.kind) {
+    lowerer.unsupported("SC1090", target.expression, "compound assignment through a non-native array or byte view");
+  }
+  const index = lowerer.lowerExpr(target.argumentExpression);
+  if (index.type.kind !== "f64") lowerer.unsupported("SC1090", target.argumentExpression, "indexing with non-number keys");
+  const receiverLocal = lowerer.declareHiddenLocal("%compoundArray", receiver.type);
+  const indexLocal = lowerer.declareHiddenLocal("%compoundIndex", F64);
+  const receiverRef = (): IrExpr => varRef(receiverLocal.id, receiver.type, loc);
+  const indexRef = (): IrExpr => varRef(indexLocal.id, F64, loc);
+  const oldValue: IrExpr = receiver.type.kind === "array"
+    ? arrayValueRead(lowerer, receiverRef(), indexRef(), receiver.type.elem, locOf(target))
+    : { kind: "bytesIntrinsic", method: "get", receiver: receiverRef(), args: [indexRef()], type: F64, loc: locOf(target) };
+  const oldLocal = lowerer.declareHiddenLocal("%compoundOld", oldValue.type);
+  const oldRef = (): IrExpr => varRef(oldLocal.id, oldValue.type, loc);
+  const rhs = lowerer.lowerExpr(expr.right);
+  const numericRhs = lowerOptionalNumber(lowerer, rhs, loc);
+  const elementType = receiver.type.kind === "array" ? receiver.type.elem : F64;
+  const valueType = elementType.kind === "union" && lowerer.armTag(elementType.unionId, UNDEFINED_T) >= 0
+    ? lowerer.stripUndefinedArm(elementType)
+    : elementType;
+  let computed: IrExpr;
+  if (op === "+" && valueType.kind === "string") {
+    computed = { kind: "strConcat", left: lowerer.ensureString(oldRef(), target), right: lowerer.ensureString(rhs, expr.right), type: STRING, loc };
+  } else if (valueType.kind === "f64" && numericRhs.type.kind === "f64") {
+    computed = { kind: "bin", op, left: lowerOptionalNumber(lowerer, oldRef(), loc), right: numericRhs, type: F64, loc };
+  } else {
+    lowerer.unsupported("SC1043", expr);
+  }
+  const resultLocal = lowerer.declareHiddenLocal("%compoundResult", computed.type);
+  const resultRef = (): IrExpr => varRef(resultLocal.id, computed.type, loc);
+  const write: IrStmt = receiver.type.kind === "array"
+    ? arrayValueStore(lowerer, receiverRef(), indexRef(), resultRef(), receiver.type.elem, loc)
+    : { kind: "bytesSet", arr: receiverRef(), index: indexRef(), value: resultRef(), loc };
+  return {
+    kind: "seqExpr",
+    stmts: [
+      { kind: "varDecl", localId: receiverLocal.id, init: receiver, loc },
+      { kind: "varDecl", localId: indexLocal.id, init: index, loc },
+      { kind: "varDecl", localId: oldLocal.id, init: oldValue, loc },
+      { kind: "varDecl", localId: resultLocal.id, init: computed, loc },
+      write,
+    ],
+    result: resultRef(),
+    type: computed.type,
+    loc,
+  };
+}
+
 /** `a[i] = v` in statement position → arraySet (element writes, like local
    * assignment, produce no value in our subset). */
   export function lowerElementWrite(lowerer: Lowerer, expr: ts.BinaryExpression): IrStmt {
@@ -6426,7 +6507,7 @@ export function ensureString(lowerer: Lowerer, e: IrExpr, node: ts.Node): IrExpr
    * neither is observable where the value immediately stringifies — so the
    * span lowers as the argument's own ToString (`new String()` is "").
    * Every other position keeps the wrapper-object constructor fence. */
-  function stringWrapperToString(lowerer: Lowerer, node: ts.Expression): IrExpr | null {
+  export function stringWrapperToString(lowerer: Lowerer, node: ts.Expression): IrExpr | null {
     let e = node;
     while (ts.isParenthesizedExpression(e)) e = e.expression;
     if (!ts.isNewExpression(e) || !ts.isIdentifier(e.expression)) return null;
@@ -6435,7 +6516,10 @@ export function ensureString(lowerer: Lowerer, e: IrExpr, node: ts.Node): IrExpr
     const args = e.arguments ?? [];
     if (args.length > 1 || args.some(ts.isSpreadElement)) return null;
     if (args.length === 0) return { kind: "strLit", value: "", type: STRING, loc: locOf(e) };
-    return lowerer.caughtToString(args[0]!) ?? lowerer.ensureString(lowerer.lowerExpr(args[0]!), args[0]!);
+    const undefinedArg = lowerStaticallyUndefinedArgument(lowerer, args[0]!);
+    if (undefinedArg) return defaultAfterUndefined(undefinedArg, { kind: "strLit", value: "undefined", type: STRING, loc: locOf(e) });
+    return lowerer.caughtToString(args[0]!) ??
+      coerceStringSearchValue(lowerer, lowerer.lowerExpr(args[0]!), args[0]!, locOf(e));
   }
 
 export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): IrExpr {
@@ -6845,6 +6929,10 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         const runtimeOptionalRoot = lowerer.runtimeOptionalRootOf(target);
         if (lowerer.runtimeOptionalStorageLocals.has(runtimeOptionalRoot)) lowerer.runtimeOptionalLocals.add(runtimeOptionalRoot);
         return { kind: "assignExpr", localId: target.id, value, type: target.type, loc };
+      }
+      const indexedCompound = COMPOUND_ASSIGN_OPS[op];
+      if (indexedCompound !== undefined && ts.isElementAccessExpression(expr.left)) {
+        return lowerElementCompound(lowerer, expr, indexedCompound);
       }
       // `events.defaultMaxListeners = v` — the module-property write
       // Node validates (validateNumber(n, 'defaultMaxListeners', 0)):
@@ -7466,6 +7554,8 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
       case ts.SyntaxKind.EqualsEqualsEqualsToken:
       case ts.SyntaxKind.ExclamationEqualsEqualsToken: {
         const negated = op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+        const indexed = tryLowerIndexedComparison(lowerer, left, right, negated, loc);
+        if (indexed) return indexed;
         if (plainBothNum) return { kind: "bin", op: negated ? "!==" : "===", left, right, type: BOOL, loc };
         if (bothStr) return { kind: "strEq", negated, left, right, type: BOOL, loc };
         // bool === bool: a plain value compare (the config-drift checks'

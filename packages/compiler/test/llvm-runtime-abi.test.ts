@@ -54,6 +54,7 @@ const corpusDir = join(repoRoot, "tests/corpus");
  * every other surface. */
 const EMIT_FIXTURES = [
   "1541-fs-readdir-dirent.ts",
+  "2942-fsp-readdir-dirent.ts",
   "957-builtins-namespace.ts",
   "992-fs-roundtrip.ts",
   "993-fs-readdir.ts",

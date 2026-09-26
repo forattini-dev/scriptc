@@ -30,15 +30,25 @@ fib.ir.json
 $ scriptc build fib.ts --emit=c
 $ ls .scriptc/
 fib.c
+fib.ir.json
 $ scriptc build fib.ts --emit=llvm
 $ ls .scriptc/
+fib.c
+fib.ir.json
 fib.ll
 $ scriptc build fib.ts --emit=asm
 $ ls .scriptc/
+fib.c
+fib.ir.json
+fib.ll
 fib.s
 $ scriptc build fib.ts --emit=obj
 $ ls .scriptc/
+fib.c
+fib.ir.json
+fib.ll
 fib.o
+fib.s
 ```
 
 ## The runtime

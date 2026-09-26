@@ -23,7 +23,7 @@ import {
   filterExistingWorktreePaths,
   workspaceResetCommand,
 } from "./worktree-files.mjs";
-import { sandboxCommand, shellQuote } from "./sandbox-command.mjs";
+import { REMOTE_COMMAND_PENDING, sandboxCommand, sandboxStatusCommand, shellQuote } from "./sandbox-command.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const laneCaseShardedFiles = [
@@ -31,6 +31,7 @@ const laneCaseShardedFiles = [
   "tests/harness/llvm-differential.test.ts",
   "tests/harness/npm.test.ts",
   "tests/harness/server.test.ts",
+  "tests/harness/test262.test.ts",
 ];
 // Coverage analysis is frontend-only: SCRIPTC_SAN cannot change its result.
 // It still case-shards across the selected lane so every corpus entry is
@@ -143,6 +144,7 @@ const hostLaneContractPattern = [
   "udp-loopback-pair",
   "1564-fs-watch.ts",
   "1470-child-lifecycle.ts",
+  "2963-child-fork-dispatch/main.ts",
   "read-all: chunked writes with delays, then EOF",
 ].join("|");
 const hostInvariantContractFiles = [
@@ -362,7 +364,7 @@ function run(
       } else if (exitMarker && remoteExitCode === undefined) {
         reject(new Error(`${label ?? command} did not report its remote exit status`));
       } else if (remoteExitCode !== undefined && remoteExitCode !== 0) {
-        reject(new Error(`${label ?? command} remote command exited ${remoteExitCode}`));
+        reject(Object.assign(new Error(`${label ?? command} remote command exited ${remoteExitCode}`), { remoteExitCode }));
       } else {
         resolve();
       }
@@ -417,6 +419,7 @@ const execIn = async (
     worker.name,
     ...prepared.argv,
   ];
+  const deadline = Date.now() + wallTimeoutMs;
   try {
     await vercel(commandArgs, {
       exitMarker,
@@ -425,32 +428,29 @@ const execIn = async (
       timeoutMs: wallTimeoutMs,
     });
   } catch (error) {
+    if (error.remoteExitCode !== undefined) throw error;
     console.warn(`[${label}] CLI completion was not confirmed (${error.message}); checking the remote command status...`);
-    const probeMarker = `__SCRIPTC_REMOTE_PROBE_${randomBytes(12).toString("hex")}__`;
-    const probeScript =
-      `scriptc_status=125; test ! -f ${shellQuote(statusPath)} || ` +
-      `scriptc_status=$(cat ${shellQuote(statusPath)}); ` +
-      `printf '\\n${probeMarker}%s\\n' "$scriptc_status"`;
-    await vercel(
-      [
-        "sandbox",
-        "exec",
-        "--timeout",
-        "1m",
-        "--workdir",
-        workdir,
-        worker.name,
-        "sh",
-        "-c",
-        probeScript,
-      ],
-      {
-        exitMarker: probeMarker,
-        idleTimeoutMs: 30_000,
-        label: `${label} status`,
-        timeoutMs: 60_000,
-      },
-    );
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(`${label} did not confirm completion before its timeout`, { cause: error });
+      const probeMarker = `__SCRIPTC_REMOTE_PROBE_${randomBytes(12).toString("hex")}__`;
+      const probeScript = sandboxStatusCommand(statusPath, probeMarker, Math.min(20, Math.floor(remaining / 1000)));
+      try {
+        await vercel(
+          ["sandbox", "exec", "--timeout", "1m", "--workdir", workdir, worker.name, "sh", "-c", probeScript],
+          {
+            exitMarker: probeMarker,
+            idleTimeoutMs: 30_000,
+            label: `${label} status`,
+            timeoutMs: Math.min(60_000, remaining),
+          },
+        );
+        return;
+      } catch (probeError) {
+        if (probeError.remoteExitCode !== REMOTE_COMMAND_PENDING) throw probeError;
+        console.log(`[${label}] remote command has not recorded completion; waiting...`);
+      }
+    }
   }
 };
 
@@ -731,7 +731,28 @@ try {
       // Workspace builds deliberately do not rebuild packaged native artifacts.
       // Every remote lane needs the Linux helper and runtime from this worktree.
       await execIn(worker, "pnpm", ["--filter", "@scriptc/llvm-linux-x64-gnu", "build:native"], {}, "LLVM helper", 5 * 60_000);
-      await execIn(worker, "pnpm", ["--filter", "@scriptc/runtime-linux-x64-gnu", "build:native"], { CC: "clang-22", AR: "llvm-ar-22" }, "runtime pack", 5 * 60_000);
+      await execIn(
+        worker,
+        "pnpm",
+        ["--filter", "@scriptc/runtime-linux-x64-gnu", "build:native"],
+        { CC: "zig", AR: "zig" },
+        "runtime pack",
+        5 * 60_000,
+        "/workspace",
+        3 * 60_000,
+      );
+      // Zig is a build-only dependency in this lane. Cross-target suites own
+      // the conditional Zig tests; exposing it here would silently expand the
+      // native-cache shard while that shard deliberately disables stable
+      // toolchain caching.
+      await execIn(
+        worker,
+        "sudo",
+        ["rm", "-f", "/usr/local/bin/zig"],
+        {},
+        "runtime toolchain cleanup",
+        60_000,
+      );
     }, imageConfig.custom ? workers.length : 8);
 
     await allWorkers("Testing", async (worker) => {

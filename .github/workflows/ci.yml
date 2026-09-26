@@ -7,7 +7,7 @@ on:
 
 jobs:
   tests:
-    name: test (${{ matrix.flavor }}, ${{ matrix.shard }}/3)
+    name: test (${{ matrix.flavor }}, ${{ matrix.shard }}/10)
     # arm64 macOS: same clang/libc the differential + number-formatting
     # oracles were verified against.
     runs-on: macos-15
@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         flavor: [plain, san]
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     env:
       # Capped workers: the shared runner's cores oversubscribe under the
       # corpus compile fan-out, and vitest's worker RPC times out ("Timeout
@@ -25,13 +25,14 @@ jobs:
       # san = ASan + RC audit over the same suite; anything but "1" is plain.
       SCRIPTC_SAN: ${{ matrix.flavor == 'san' && '1' || '' }}
       # Within-file partition for the large case-driven harnesses
-      # (differential, llvm-differential, npm, server, coverage, and Vercel
-      # E2E, plus the monolithic Rust corpus gate): they hash stable case names into slice i of 3
-      # (tests/harness/shard.ts), so the three shards' unions run every case
+      # (differential, LLVM differential, Rust differential, npm, server,
+      # Test262, coverage, Vercel E2E, and Rust emission): they hash stable
+      # case names into slice i of 10
+      # (tests/harness/shard.ts), so the ten shards' unions run every case
       # exactly once. vitest's own --shard is FILE-granular and cannot split
       # these monster files (differential.test.ts alone is ~9 min
       # sequential), hence the case-sharded steps below.
-      SCRIPTC_TEST_SHARD: ${{ matrix.shard }}/3
+      SCRIPTC_TEST_SHARD: ${{ matrix.shard }}/10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -48,31 +49,32 @@ jobs:
       - run: pnpm build
       # Separate vitest invocations because the shard axes must not mix: a file
       # lands in exactly ONE --shard slice, so an env-sharded file behind
-      # --shard would run only one of its three case slices and silently
+      # --shard would run only one of its ten case slices and silently
       # drop the rest. Files split by --shard here; cases split by env below.
       - name: Tests (file-sharded, case-sharded files excluded)
         run: >-
-          pnpm test --shard=${{ matrix.shard }}/3
+          pnpm test --shard=${{ matrix.shard }}/10
           --exclude=tests/harness/differential.test.ts
           --exclude=tests/harness/llvm-differential.test.ts
           --exclude=tests/harness/rust-differential.test.ts
           --exclude=tests/harness/npm.test.ts
           --exclude=tests/harness/server.test.ts
+          --exclude=tests/harness/test262.test.ts
           --exclude=tests/harness/coverage.test.ts
           --exclude=tests/harness/vercel-e2e.test.ts
           --exclude=packages/compiler/test/emit-rust.test.ts
           --exclude=packages/compiler/src/backend/native-toolchain.test.ts
       # Cache invalidation tests mutate compiler inputs process-wide and must
       # stay serial within a worker. They do not consume SCRIPTC_SAN, so divide
-      # them across the three plain jobs instead of running the 6+ minute file
+      # them across the ten plain jobs instead of running the 6+ minute file
       # in full in one shard of both flavors.
-      - name: Tests (native-cache correctness, slice ${{ matrix.shard }}/3)
+      - name: Tests (native-cache correctness, slice ${{ matrix.shard }}/10)
         if: matrix.flavor == 'plain'
         env:
-          SCRIPTC_CACHE_TEST_SHARD: ${{ matrix.shard }}/3
+          SCRIPTC_CACHE_TEST_SHARD: ${{ matrix.shard }}/10
           SCRIPTC_TEST_STABLE_TOOLCHAIN: "0"
         run: pnpm test packages/compiler/src/backend/native-toolchain.test.ts
-      - name: Tests (case-sharded, slice ${{ matrix.shard }}/3)
+      - name: Tests (case-sharded, slice ${{ matrix.shard }}/10)
         run: >-
           pnpm test
           tests/harness/differential.test.ts
@@ -80,11 +82,12 @@ jobs:
           tests/harness/rust-differential.test.ts
           tests/harness/npm.test.ts
           tests/harness/server.test.ts
+          tests/harness/test262.test.ts
           tests/harness/vercel-e2e.test.ts
           packages/compiler/test/emit-rust.test.ts
       # Coverage analysis is frontend-only: SCRIPTC_SAN cannot change its
-      # result, so the three plain slices cover the full corpus once.
-      - name: Tests (coverage sweep, slice ${{ matrix.shard }}/3)
+      # result, so the ten plain slices cover the full corpus once.
+      - name: Tests (coverage sweep, slice ${{ matrix.shard }}/10)
         if: matrix.flavor == 'plain'
         run: pnpm test tests/harness/coverage.test.ts
 
@@ -115,10 +118,30 @@ jobs:
           pnpm test packages/compiler/test/cc-driver.test.ts
           --testNamePattern "host-native clang static build"
 
+  # The TS7 parity sweep exercises the compiler frontend, so it can run
+  # alongside the Linux LLVM/runtime package build instead of following it.
+  ts7_parity:
+    name: test (TypeScript 7 parity)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: TypeScript 7 full parity sweep
+        run: pnpm test:ts7
+
   llvm_artifacts_linux_x64:
     name: test (Linux x64 LLVM artifacts, no clang)
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -139,10 +162,10 @@ jobs:
           echo "$RUNNER_TEMP/llvm-22.1.8/bin" >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @scriptc/llvm-linux-x64-gnu build:native
-      - run: CC=clang AR=llvm-ar pnpm --filter @scriptc/runtime-linux-x64-gnu build:native
       - uses: vercel-labs/setup-zig@v1
         with:
           version: 0.16.0
+      - run: CC=zig AR=zig pnpm --filter @scriptc/runtime-linux-x64-gnu build:native
       - name: Build and verify Linux x64 musl release packages
         run: |
           pnpm --filter @scriptc/llvm-linux-x64-musl build:native
@@ -161,8 +184,6 @@ jobs:
           node packages/runtime-linux-x64-musl/scripts/verify.mjs
       - run: pnpm --filter @scriptc/runtime-wasm32-wasi build:native
       - run: pnpm build
-      - name: TypeScript 7 full parity sweep
-        run: pnpm test:ts7
       - name: Linux helper object format and no-clang output contract
         run: |
           PATH="$RUNNER_TEMP/traps:$PATH"
@@ -177,11 +198,19 @@ jobs:
         run: |
           node packages/cli/dist/main.js build tests/corpus/001-hello.ts --backend llvm -o "$RUNNER_TEMP/hello"
           test "$("$RUNNER_TEMP/hello")" = 'hello world'
+      - name: Debian 12 glibc 2.36 runtime-pack smoke
+        run: |
+          docker run --rm --volume "$GITHUB_WORKSPACE:/work:ro" --workdir /work node:24-bookworm-slim sh -ec '
+            apt-get update
+            apt-get install --yes --no-install-recommends clang
+            SCRIPTC_NO_CACHE=1 SCRIPTC_LEGACY_C_PIPELINE=0 node packages/cli/dist/main.js build tests/corpus/001-hello.ts -o /tmp/hello
+            test "$(/tmp/hello)" = "hello world"
+          '
       - name: WASI helper object/runtime-pack smoke
         run: pnpm test packages/cli/test/wasi-runtime-pack.test.ts
 
   llvm_artifacts_macos_arm64:
-    name: test (macOS arm64 LLVM artifacts, no clang, ${{ matrix.shard }}/3)
+    name: test (macOS arm64 LLVM artifacts, no clang, ${{ matrix.shard }}/5)
     runs-on: macos-15
     # Shard 1 additionally runs package/install and link-parity contracts
     # before its LLVM differential slice. The slice itself can take ~10
@@ -191,12 +220,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5]
     env:
       # The helper differential uses the harness's stable per-case sharding,
       # keeping each macOS job below its timeout while the matrix union still
       # exercises every LLVM-tier program.
-      SCRIPTC_TEST_SHARD: ${{ matrix.shard }}/3
+      SCRIPTC_TEST_SHARD: ${{ matrix.shard }}/5
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -230,7 +259,7 @@ jobs:
         run: >-
           pnpm test packages/cli/test/runtime-pack.test.ts
           --testNamePattern "legacy C pipeline disabled"
-      - name: LLVM-tier helper object differential (${{ matrix.shard }}/3)
+      - name: LLVM-tier helper object differential (${{ matrix.shard }}/5)
         env:
           SCRIPTC_LLVM_HELPER_ONLY: "1"
           SCRIPTC_TEST_WORKERS: "4"
@@ -348,6 +377,10 @@ jobs:
           if ($actual -ne "hello world") {
             throw "unexpected scriptc output: $actual"
           }
+      - name: Windows PE subsystem selection
+        env:
+          SCRIPTC_NO_CACHE: "0"
+        run: pnpm exec vitest run packages/cli/test/windows-subsystem.test.ts
       - name: Windows CA-store differential
         shell: pwsh
         run: |
@@ -589,11 +622,10 @@ jobs:
           $bytes = [System.IO.File]::ReadAllBytes("$env:RUNNER_TEMP\hello.obj")
           if ($bytes[0] -ne 0x64 -or $bytes[1] -ne 0x86) { throw "expected AMD64 COFF object" }
 
-  # Aggregate gate with the pre-matrix job's name, so anything keyed on the
-  # single "test" check (branch protection, badges) keeps resolving. Fails
-  # unless every matrix shard and all platform/version integration jobs succeeded.
+  # Retain the pre-matrix "test" check for branch protection and badges. It
+  # passes only when every matrix shard and independent integration job does.
   test:
-    needs: [tests, linux_host_clang, llvm_artifacts_linux_x64, llvm_artifacts_macos_arm64, llvm_artifacts_macos_x64, windows_cli, llvm_artifacts_windows_x64, node_26_host, runtime_rust, compat_gates]
+    needs: [tests, linux_host_clang, ts7_parity, llvm_artifacts_linux_x64, llvm_artifacts_macos_arm64, llvm_artifacts_macos_x64, windows_cli, llvm_artifacts_windows_x64, node_26_host, runtime_rust, compat_gates]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -601,6 +633,7 @@ jobs:
         run: |
           test "${{ needs.tests.result }}" = success
           test "${{ needs.linux_host_clang.result }}" = success
+          test "${{ needs.ts7_parity.result }}" = success
           test "${{ needs.llvm_artifacts_linux_x64.result }}" = success
           test "${{ needs.llvm_artifacts_macos_arm64.result }}" = success
           test "${{ needs.llvm_artifacts_macos_x64.result }}" = success

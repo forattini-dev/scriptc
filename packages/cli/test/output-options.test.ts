@@ -46,6 +46,10 @@ describe("output option compatibility", () => {
     [{ emit: "llvm", emitIr: true }, /emit-ir/],
     [{ emit: "ir", emitIr: true }, /same output/],
     [{ backend: "wat" }, /unknown backend/],
+    [{ emit: "obj", windowsSubsystem: "gui" }, /windows-subsystem/],
+    [{ emit: "llvm", windowsSubsystem: "gui" }, /windows-subsystem/],
+    [{ emit: "obj", strip: true }, /strip/],
+    [{ emit: "llvm", strip: true }, /strip/],
   ] as const)("rejects %j", (override, message) => {
     const result = resolveOutputOptions("build", { ...BASE, ...override });
     expect(result).toEqual({ ok: false, message: expect.stringMatching(message) });
@@ -87,6 +91,20 @@ describe("output option compatibility", () => {
     expect(resolveOutputOptions("build", { ...BASE, emit: "llvm", ffi: "native.json" })).toMatchObject({
       ok: true,
       outputKind: "llvm",
+    });
+  });
+
+  test("executable outputs accept a Windows subsystem selection", () => {
+    expect(resolveOutputOptions("build", { ...BASE, windowsSubsystem: "gui" })).toMatchObject({
+      ok: true,
+      outputKind: "exe",
+    });
+  });
+
+  test("executable outputs accept stripping", () => {
+    expect(resolveOutputOptions("build", { ...BASE, strip: true })).toMatchObject({
+      ok: true,
+      outputKind: "exe",
     });
   });
 });

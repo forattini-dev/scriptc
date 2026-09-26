@@ -3,8 +3,9 @@ set -eu
 
 node_version=$(tr -d '\r\n' < .node-version)
 pnpm_version=$(sed -n 's/^ARG PNPM_VERSION=//p' Dockerfile.sandbox)
-if [ -z "$node_version" ] || [ -z "$pnpm_version" ]; then
-  echo "could not read the pinned Node or pnpm version" >&2
+zig_version=$(sed -n 's/^ARG ZIG_VERSION=//p' Dockerfile.sandbox)
+if [ -z "$node_version" ] || [ -z "$pnpm_version" ] || [ -z "$zig_version" ]; then
+  echo "could not read the pinned Node, pnpm, or Zig version" >&2
   exit 1
 fi
 
@@ -50,6 +51,7 @@ grep " ${node_archive}$" /tmp/node-SHASUMS256.txt \
   | sed "s# ${node_archive}# /tmp/${node_archive}#" \
   | sha256sum --check --strict -
 sudo tar -xJf "/tmp/${node_archive}" --directory /usr/local --strip-components=1
+sh scripts/install-zig.sh "$zig_version"
 sudo npm install --global "pnpm@${pnpm_version}"
 
 rm -f "/tmp/${node_archive}" /tmp/node-SHASUMS256.txt /tmp/llvm-snapshot.gpg.key /tmp/llvm-snapshot.gpg
@@ -57,4 +59,5 @@ sudo rm -rf /var/lib/apt/lists/*
 
 node --version
 pnpm --version
+zig version
 clang --version | sed -n '1p'

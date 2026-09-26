@@ -1,9 +1,11 @@
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
 import { streamTypedRefEligible } from "../../ir/analysis.js";
-import { IrType, isRefCounted, typeKey } from "../../ir/ir.js";
+import { IrType, isClassOwnEnumerableFieldName, isDynTypedRefType, isRefCounted, typeKey } from "../../ir/ir.js";
 import { mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
+import { classFieldIndex, classStructSym } from "./classes.js";
+import { llvmCommentText } from "./common.js";
 import { FN_ATTRS, llFieldType, releaseSym, traceArg, vAdapters } from "./shapes.js";
 import type { LlvmEmitterContext, LlStreamTypedRefAdapter, LlStreamTypedRefContext } from "./expr-context.js";
 
@@ -130,6 +132,63 @@ export function streamTypedRefCommitAdapter(host: LlvmEmitterContext,
       host.resolveThunkDefs.push(...lines);
       return `@${commit}`;
     }
+    if (isDynTypedRefType(t)) {
+      const meta = host.classMeta.get(t.className);
+      if (!meta) {
+        throw new InternalCompilerError(
+          `llvm emitter bug: typed-ref commit of unknown class ${t.className}`,
+        );
+      }
+      const commit = `${snapshot}_commit`;
+      host.declare(`declare ptr @scr_dyn_obj_get(ptr, ptr, ${host.sizeType})`);
+      host.declare(`declare ptr @scr_dyn_undefined()`);
+      host.declare(`declare zeroext i1 @scr_exc_pending()`);
+      const lines = [
+        `define internal void @${commit}(ptr %target, ptr %d) ${FN_ATTRS} { ; commit unknown class ${typeKey(t)}`,
+        `entry:`,
+      ];
+      const fields = meta.def.fields.filter((field) => isClassOwnEnumerableFieldName(field.name));
+      for (const [index, field] of fields.entries()) {
+        const next = `f${index}_next`;
+        const raw = `f${index}_raw`;
+        const missing = `f${index}_missing`;
+        const undef = `f${index}_undef`;
+        const input = `f${index}_input`;
+        const pending = `f${index}_pending`;
+        const store = `f${index}_store`;
+        const after = `f${index}_after`;
+        const { index: fieldIndex } = classFieldIndex(meta, field.name);
+        const fieldTy = llFieldType(field.type);
+        const checkTy = field.type.kind === "f64" ? "double" : field.type.kind === "bool" ? "i1" : "ptr";
+        lines.push(
+          `  %${raw} = call ptr @scr_dyn_obj_get(ptr %d, ptr ${host.cstr(field.name)}, ${host.sizeType} ${Buffer.byteLength(field.name, "utf8")})`,
+          `  %${missing} = icmp eq ptr %${raw}, null`,
+          `  %${undef} = call ptr @scr_dyn_undefined()`,
+          `  %${input} = select i1 %${missing}, ptr %${undef}, ptr %${raw}`,
+          `  %${next} = call ${field.type.kind === "bool" ? "zeroext " : ""}${checkTy} @${host.dyn.dynCheckHelper(field.type)}(ptr %${input}, ptr null)`,
+          `  %${pending} = call zeroext i1 @scr_exc_pending()`,
+          `  br i1 %${pending}, label %done, label %${store}`,
+          `${store}:`,
+          `  %f${index}_ptr = getelementptr inbounds %${classStructSym(t.className)}, ptr %target, i64 0, i32 ${fieldIndex}`,
+          `  %f${index}_old = load ${fieldTy}, ptr %f${index}_ptr`,
+        );
+        if (field.type.kind === "bool") {
+          lines.push(
+            `  %f${index}_stored = zext i1 %${next} to i8`,
+            `  store i8 %f${index}_stored, ptr %f${index}_ptr`,
+          );
+        } else {
+          lines.push(`  store ${fieldTy} %${next}, ptr %f${index}_ptr`);
+        }
+        if (isRefCounted(field.type)) {
+          lines.push(`  call void ${releaseSym(host, field.type)}(ptr %f${index}_old)`);
+        }
+        lines.push(`  br label %${after}`, `${after}:`);
+      }
+      lines.push(`  br label %done`, `done:`, `  ret void`, `}`, ``);
+      host.resolveThunkDefs.push(...lines);
+      return `@${commit}`;
+    }
     if (t.kind !== "record") return "null";
     const shape = host.recordsById.get(t.shapeId);
     if (!shape) {
@@ -165,7 +224,7 @@ export function streamTypedRefCommitAdapter(host: LlvmEmitterContext,
       lines.push(
         `  %tp${index} = getelementptr inbounds %${mangleRecordStruct(t.shapeId)}, ptr %target, i64 0, i32 ${member.index}`,
         `  %np${index} = getelementptr inbounds %${mangleRecordStruct(t.shapeId)}, ptr %next, i64 0, i32 ${member.index}`,
-        `  %old${index} = load ${member.type}, ptr %tp${index} ; ${member.name}`,
+        `  %old${index} = load ${member.type}, ptr %tp${index} ; ${llvmCommentText(member.name)}`,
         `  %new${index} = load ${member.type}, ptr %np${index}`,
         `  store ${member.type} %new${index}, ptr %tp${index}`,
         `  store ${member.type} %old${index}, ptr %np${index}`,
@@ -197,7 +256,7 @@ export function liveDynUnionRefAdapter(host: LlvmEmitterContext,
     }
     const mutableArms = union.arms
       .map((arm, tag) => ({ arm, tag }))
-      .filter(({ arm }) => streamTypedRefEligible(arm));
+      .filter(({ arm }) => streamTypedRefEligible(arm) || isDynTypedRefType(arm));
     if (mutableArms.length === 0) {
       throw new InternalCompilerError(`llvm emitter bug: live dyn ref of immutable union ${key}`);
     }
@@ -227,10 +286,18 @@ export function liveDynUnionRefAdapter(host: LlvmEmitterContext,
       `${tagPtr} = getelementptr inbounds %ScrUnion, ptr %u, i64 0, i32 1`,
     );
     B.line(`${tagValue} = load i32, ptr ${tagPtr}`);
-    const fallback = B.newLabel("ldu.dyn");
+    const fallback = B.newLabel("ldu.bad");
     const armLabels = mutableArms.map(() => B.newLabel("ldu.ref"));
+    const mutableTags = new Set(mutableArms.map(({ tag }) => tag));
+    const valueArms = union.arms
+      .map((arm, tag) => ({ arm, tag }))
+      .filter(({ tag }) => !mutableTags.has(tag));
+    const valueLabels = valueArms.map(() => B.newLabel("ldu.value"));
     B.terminate(
-      `switch i32 ${tagValue}, label %${fallback} [ ${mutableArms.map(({ tag }, index) => `i32 ${tag}, label %${armLabels[index]}`).join(" ")} ]`,
+      `switch i32 ${tagValue}, label %${fallback} [ ${[
+        ...mutableArms.map(({ tag }, index) => `i32 ${tag}, label %${armLabels[index]}`),
+        ...valueArms.map(({ tag }, index) => `i32 ${tag}, label %${valueLabels[index]}`),
+      ].join(" ")} ]`,
     );
     mutableArms.forEach(({ arm, tag }, index) => {
       const adapter = adapters.get(tag)!;
@@ -249,12 +316,150 @@ export function liveDynUnionRefAdapter(host: LlvmEmitterContext,
       );
       B.terminate(`ret ptr ${boxed}`);
     });
+    valueArms.forEach(({ arm }, index) => {
+      B.startBlock(valueLabels[index]!);
+      if (arm.kind === "undefinedT") {
+        host.declare(`declare ptr @scr_dyn_undefined()`);
+        host.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
+        const undef = B.tmp();
+        const boxed = B.tmp();
+        B.line(`${undef} = call ptr @scr_dyn_undefined()`);
+        B.line(`${boxed} = call ptr @scr_dyn_retain_v(ptr ${undef})`);
+        B.terminate(`ret ptr ${boxed}`);
+      } else if (arm.kind === "nullT") {
+        host.declare(`declare ptr @scr_dyn_new_null()`);
+        const boxed = B.tmp();
+        B.line(`${boxed} = call ptr @scr_dyn_new_null()`);
+        B.terminate(`ret ptr ${boxed}`);
+      } else if (arm.kind === "f64") {
+        host.declare(`declare double @scr_union_get_f64(ptr)`);
+        host.declare(`declare ptr @scr_dyn_new_num(double)`);
+        const value = B.tmp();
+        const boxed = B.tmp();
+        B.line(`${value} = call double @scr_union_get_f64(ptr %u)`);
+        B.line(`${boxed} = call ptr @scr_dyn_new_num(double ${value})`);
+        B.terminate(`ret ptr ${boxed}`);
+      } else if (arm.kind === "bool") {
+        host.declare(`declare zeroext i1 @scr_union_get_bool(ptr)`);
+        host.declare(`declare ptr @scr_dyn_new_bool(i1 zeroext)`);
+        const value = B.tmp();
+        const boxed = B.tmp();
+        B.line(`${value} = call zeroext i1 @scr_union_get_bool(ptr %u)`);
+        B.line(`${boxed} = call ptr @scr_dyn_new_bool(i1 ${value})`);
+        B.terminate(`ret ptr ${boxed}`);
+      } else {
+        const payloadPtr = B.tmp();
+        const payload = B.tmp();
+        const boxed = B.tmp();
+        B.line(`${payloadPtr} = getelementptr inbounds %ScrUnion, ptr %u, i64 0, i32 5`);
+        B.line(`${payload} = load ptr, ptr ${payloadPtr}`);
+        B.line(`${boxed} = call ptr @${host.dyn.toDynHelper(arm)}(ptr ${payload})`);
+        B.terminate(`ret ptr ${boxed}`);
+      }
+    });
     B.startBlock(fallback);
-    const boxed = B.tmp();
-    B.line(`${boxed} = call ptr @${host.dyn.toDynHelper(t)}(ptr %u)`);
-    B.terminate(`ret ptr ${boxed}`);
+    host.declare(`declare void @scr_trap(ptr)`);
+    B.line(`call void @scr_trap(ptr ${host.cstr("scriptc: internal error: invalid union tag\n")})`);
+    B.terminate(`unreachable`);
     host.resolveThunkDefs.push(
       `define internal ptr @${sym}(ptr %u) ${FN_ATTRS} { ; materialize live union value ${key}`,
+      B.render(),
+      `}`,
+      ``,
+    );
+    return sym;
+  }
+
+function nestedTypedRefUnionAdapter(
+    host: LlvmEmitterContext,
+    t: IrType & { kind: "union" },
+    ctx: LlStreamTypedRefContext,
+  ): string {
+    const key = typeKey(t);
+    const unions = (ctx.unions ??= new Map());
+    const existing = unions.get(key);
+    if (existing) return existing;
+    const def = host.unionsById.get(t.unionId);
+    if (!def) {
+      throw new InternalCompilerError(
+        `llvm emitter bug: typed-ref union ${t.unionId} is undeclared`,
+      );
+    }
+    const sym = `${ctx.prefix}_union_${unions.size}`;
+    unions.set(key, sym);
+    host.declare(
+      `declare ptr @scr_dyn_new_typed_ref(ptr, ptr, ptr, ptr, ${host.sizeType}, ptr, ptr)`,
+    );
+    const B = new BlockBuilder();
+    const tagPtr = B.tmp();
+    const tagValue = B.tmp();
+    B.line(`${tagPtr} = getelementptr inbounds %ScrUnion, ptr %u, i64 0, i32 1`);
+    B.line(`${tagValue} = load i32, ptr ${tagPtr}`);
+    const bad = B.newLabel("tr.union.bad");
+    const labels = def.arms.map(() => B.newLabel("tr.union.arm"));
+    B.terminate(
+      `switch i32 ${tagValue}, label %${bad} [ ${def.arms.map((_, index) => `i32 ${index}, label %${labels[index]}`).join(" ")} ]`,
+    );
+    def.arms.forEach((arm, index) => {
+      B.startBlock(labels[index]!);
+      if (streamTypedRefEligible(arm) || isDynTypedRefType(arm)) {
+        const adapter = host.streamTypedRefMaterializeAdapter(arm, ctx);
+        const rc = vAdapters(host, arm);
+        const armKey = typeKey(arm);
+        const payloadPtr = B.tmp();
+        const payload = B.tmp();
+        const boxed = B.tmp();
+        B.line(`${payloadPtr} = getelementptr inbounds %ScrUnion, ptr %u, i64 0, i32 5`);
+        B.line(`${payload} = load ptr, ptr ${payloadPtr}`);
+        B.line(
+          `${boxed} = call ptr @scr_dyn_new_typed_ref(ptr ${payload}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${host.cstr(armKey)}, ${host.sizeType} ${Buffer.byteLength(armKey, "utf8")}, ptr @${adapter.snapshot}, ptr ${adapter.commit})`,
+        );
+        B.terminate(`ret ptr ${boxed}`);
+      } else if (arm.kind === "undefinedT") {
+        host.declare(`declare ptr @scr_dyn_undefined()`);
+        host.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
+        const undef = B.tmp();
+        const boxed = B.tmp();
+        B.line(`${undef} = call ptr @scr_dyn_undefined()`);
+        B.line(`${boxed} = call ptr @scr_dyn_retain_v(ptr ${undef})`);
+        B.terminate(`ret ptr ${boxed}`);
+      } else if (arm.kind === "nullT") {
+        host.declare(`declare ptr @scr_dyn_new_null()`);
+        const boxed = B.tmp();
+        B.line(`${boxed} = call ptr @scr_dyn_new_null()`);
+        B.terminate(`ret ptr ${boxed}`);
+      } else if (arm.kind === "f64") {
+        host.declare(`declare double @scr_union_get_f64(ptr)`);
+        host.declare(`declare ptr @scr_dyn_new_num(double)`);
+        const value = B.tmp();
+        const boxed = B.tmp();
+        B.line(`${value} = call double @scr_union_get_f64(ptr %u)`);
+        B.line(`${boxed} = call ptr @scr_dyn_new_num(double ${value})`);
+        B.terminate(`ret ptr ${boxed}`);
+      } else if (arm.kind === "bool") {
+        host.declare(`declare zeroext i1 @scr_union_get_bool(ptr)`);
+        host.declare(`declare ptr @scr_dyn_new_bool(i1 zeroext)`);
+        const value = B.tmp();
+        const boxed = B.tmp();
+        B.line(`${value} = call zeroext i1 @scr_union_get_bool(ptr %u)`);
+        B.line(`${boxed} = call ptr @scr_dyn_new_bool(i1 ${value})`);
+        B.terminate(`ret ptr ${boxed}`);
+      } else {
+        const payloadPtr = B.tmp();
+        const payload = B.tmp();
+        const boxed = B.tmp();
+        B.line(`${payloadPtr} = getelementptr inbounds %ScrUnion, ptr %u, i64 0, i32 5`);
+        B.line(`${payload} = load ptr, ptr ${payloadPtr}`);
+        B.line(`${boxed} = call ptr @${host.dyn.toDynHelper(arm)}(ptr ${payload})`);
+        B.terminate(`ret ptr ${boxed}`);
+      }
+    });
+    B.startBlock(bad);
+    host.declare(`declare void @scr_trap(ptr)`);
+    B.line(`call void @scr_trap(ptr ${host.cstr("scriptc: internal error: invalid union tag\n")})`);
+    B.terminate(`unreachable`);
+    host.resolveThunkDefs.push(
+      `define internal ptr @${sym}(ptr %u) ${FN_ATTRS} { ; typed-ref union ${key}`,
       B.render(),
       `}`,
       ``,
@@ -269,7 +474,16 @@ export function streamTypedRefBoxValue(host: LlvmEmitterContext,
     ctx: LlStreamTypedRefContext,
   ): string {
     const boxed = B.tmp();
-    if (!streamTypedRefEligible(t)) {
+    if (
+      t.kind === "union" &&
+      (host.unionsById.get(t.unionId)?.arms.some(
+        (arm) => streamTypedRefEligible(arm) || isDynTypedRefType(arm),
+      ) ?? false)
+    ) {
+      B.line(`${boxed} = call ptr @${nestedTypedRefUnionAdapter(host, t, ctx)}(ptr ${value})`);
+      return boxed;
+    }
+    if (!streamTypedRefEligible(t) && !isDynTypedRefType(t)) {
       const valueTy = t.kind === "f64"
         ? "double"
         : t.kind === "bool"
@@ -307,7 +521,33 @@ export function streamTypedRefMaterializeAdapter(host: LlvmEmitterContext,
     adapter.commit = host.streamTypedRefCommitAdapter(t, snapshot);
     const B = new BlockBuilder();
 
-    if (t.kind === "record") {
+    if (isDynTypedRefType(t)) {
+      const meta = host.classMeta.get(t.className);
+      if (!meta) {
+        throw new InternalCompilerError(
+          `llvm emitter bug: typed-ref materialize of unknown class ${t.className}`,
+        );
+      }
+      host.declare(`declare ptr @scr_dyn_new_obj()`);
+      host.declare(`declare void @scr_dyn_obj_set(ptr, ptr, ${host.sizeType}, ptr)`);
+      const out = B.tmp();
+      B.line(`${out} = call ptr @scr_dyn_new_obj()`);
+      for (const field of meta.def.fields.filter((f) => isClassOwnEnumerableFieldName(f.name))) {
+        const { index } = classFieldIndex(meta, field.name);
+        const fieldPtr = B.tmp();
+        let fieldValue = B.tmp();
+        B.line(`${fieldPtr} = getelementptr inbounds %${classStructSym(t.className)}, ptr %p, i64 0, i32 ${index}`);
+        B.line(`${fieldValue} = load ${llFieldType(field.type)}, ptr ${fieldPtr}`);
+        if (llFieldType(field.type) === "i8") {
+          const boolValue = B.tmp();
+          B.line(`${boolValue} = trunc i8 ${fieldValue} to i1`);
+          fieldValue = boolValue;
+        }
+        const boxed = host.streamTypedRefBoxValue(B, field.type, fieldValue, ctx);
+        B.line(`call void @scr_dyn_obj_set(ptr ${out}, ptr ${host.cstr(field.name)}, ${host.sizeType} ${Buffer.byteLength(field.name, "utf8")}, ptr ${boxed})`);
+      }
+      B.terminate(`ret ptr ${out}`);
+    } else if (t.kind === "record") {
       const shape = host.recordsById.get(t.shapeId);
       if (!shape) {
         throw new InternalCompilerError(

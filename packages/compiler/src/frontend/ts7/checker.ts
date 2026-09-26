@@ -626,13 +626,13 @@ export class CheckerFacade {
     if (flags & (TypeFlags.EnumLiteral | TypeFlags.Enum) || flags & TypeFlags.Union) {
       base = this.raw.getBaseTypeOfLiteralType(type) ?? type;
     } else if (flags & (TypeFlags.StringLiteral | TypeFlags.TemplateLiteral)) {
-      base = this.intrinsic("string", () => this.raw.getStringType());
+      base = this.getStringType();
     } else if (flags & TypeFlags.NumberLiteral) {
-      base = this.intrinsic("number", () => this.raw.getNumberType());
+      base = this.getNumberType();
     } else if (flags & TypeFlags.BigIntLiteral) {
       base = this.intrinsic("bigint", () => this.raw.getBigIntType());
     } else if (flags & TypeFlags.BooleanLiteral) {
-      base = this.intrinsic("boolean", () => this.raw.getBooleanType());
+      base = this.getBooleanType();
     } else {
       base = type;
     }
@@ -760,6 +760,18 @@ export class CheckerFacade {
   getUnknownType(): Type {
     this.unknownType ??= this.raw.getUnknownType();
     return this.unknownType;
+  }
+
+  getStringType(): Type {
+    return this.intrinsic("string", () => this.raw.getStringType());
+  }
+
+  getNumberType(): Type {
+    return this.intrinsic("number", () => this.raw.getNumberType());
+  }
+
+  getBooleanType(): Type {
+    return this.intrinsic("boolean", () => this.raw.getBooleanType());
   }
 
   /** 7.0.2 dropped getAwaitedType (the census's one MISSING checker method).

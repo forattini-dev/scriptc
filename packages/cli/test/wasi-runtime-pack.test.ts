@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -45,4 +45,29 @@ test.runIf(supported)("WASI helper object plus runtime pack builds and runs with
     },
     encoding: "utf8",
   })).resolves.toMatchObject({ stdout: "hello world\n" });
+});
+
+test.runIf(supported)("switching WASI LLVM and native C builds preserves both translation units", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-wasi-native-output-"));
+  dirs.push(dir);
+  const entry = join(dir, "hello.ts");
+  const outDir = join(dir, ".scriptc");
+  const nativeEnv = { ...process.env };
+  delete nativeEnv.SCRIPTC_TARGET;
+  const wasiEnv = { ...nativeEnv, SCRIPTC_TARGET: "wasm32-wasi" };
+  const build = (args: string[], env: NodeJS.ProcessEnv) => execFileAsync(process.execPath, [
+    "--import", tsxLoader, cliEntry, "build", entry, ...args,
+  ], { env, maxBuffer: 4 * 1024 * 1024 });
+  await writeFile(entry, 'console.log("hello");\n');
+
+  await build([], wasiEnv);
+  const llvm = await readFile(join(outDir, "hello.ll"));
+  const wasm = await readFile(join(outDir, "hello.wasm"));
+  await build(["--backend=c", "--keep-c"], nativeEnv);
+  const c = await readFile(join(outDir, "hello.c"));
+  expect(await readFile(join(outDir, "hello.ll"))).toEqual(llvm);
+  expect(await readFile(join(outDir, "hello.wasm"))).toEqual(wasm);
+
+  await build([], wasiEnv);
+  expect(await readFile(join(outDir, "hello.c"))).toEqual(c);
 });

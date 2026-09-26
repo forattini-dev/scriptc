@@ -8,7 +8,7 @@ import type { CEmitter } from "./c-emitter.js";
 import type { IrFunction } from "../../ir/ir.js";
 import { IrClassDef, IrType, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, isRefCounted, mapOf, STRING } from "../../ir/ir.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordClone, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
-import { boxKindC, cDecl, cType, elemKindC, mapValKindC, releaseCallC, retainCallC, vAdapters } from "./types.js";
+import { boxKindC, cCommentText, cDecl, cType, elemKindC, mapValKindC, releaseCallC, retainCallC, vAdapters } from "./types.js";
 import { streamRooted } from "../../ir/analysis.js";
 
 /** The overflow map's C member name on index-signature record structs.
@@ -150,11 +150,11 @@ export interface ClassMeta {
     };
 
     for (const s of shapes) {
-      out.push(`typedef struct ${s.struct} ${s.struct}; /* ${s.comment} */`);
+      out.push(`typedef struct ${s.struct} ${s.struct}; /* ${cCommentText(s.comment)} */`);
     }
     out.push("");
     for (const s of shapes) {
-      out.push(`struct ${s.struct} { /* ${s.comment} */`, `  size_t rc;`);
+      out.push(`struct ${s.struct} { /* ${cCommentText(s.comment)} */`, `  size_t rc;`);
       if (inHierarchy(s)) {
         // The hierarchy prefix: base fields follow at identical offsets in
         // every subclass, so vt must sit between rc and the field list.
@@ -178,7 +178,7 @@ export interface ClassMeta {
         }
       }
       for (const f of s.fields) {
-        out.push(`  ${cDecl(f.type, mangleField(f.name))}; /* ${f.name} */`);
+        out.push(`  ${cDecl(f.type, mangleField(f.name))}; /* ${cCommentText(f.name)} */`);
       }
       if (s.indexValue) {
         out.push(`  ScrMap *${OVERFLOW_MEMBER}; /* [key: string] overflow (string-keyed) */`);
@@ -304,7 +304,7 @@ export interface ClassMeta {
         `static void ${s.trace}(void *o0, ScrTraceVisit visit, void *ctx) {`,
         `  ${s.struct} *o = (${s.struct} *)o0;`,
         ...tracedFields.map(
-          (m) => `  visit(o->${m.member}, ctx); /* ${m.name} */`,
+          (m) => `  visit(o->${m.member}, ctx); /* ${cCommentText(m.name)} */`,
         ),
         `}`,
         `static void ${s.gcFree}(void *o0) {`,
@@ -313,7 +313,7 @@ export interface ClassMeta {
               `  ${s.struct} *o = (${s.struct} *)o0;`,
               ...untracedRefFields.map((m) => {
                 const field = `o->${m.member}`;
-                return `  if (${field}) ${releaseCallC(m.type, field)}; /* ${m.name} (acyclic) */`;
+                return `  if (${field}) ${releaseCallC(m.type, field)}; /* ${cCommentText(m.name)} (acyclic) */`;
               }),
             ]
           : []),
@@ -403,7 +403,7 @@ function emitRecordCloneC(
       for (const slot of root.slots) {
         const ret = cType(slot.fn.returnType).trim();
         out.push(
-          `  ${ret} (*${slot.member})(${emitter.vtSlotParams(slot, false).join(", ")}); /* ${slot.method} */`,
+          `  ${ret} (*${slot.member})(${emitter.vtSlotParams(slot, false).join(", ")}); /* ${cCommentText(slot.method)} */`,
         );
       }
       out.push(`} ${vtt};`);
@@ -432,8 +432,8 @@ function emitRecordCloneC(
       const head = `{ ${meta.pre}, ${meta.post}, &${mangleClassReleaseDirect(meta.def.name)} }`;
       const entries = emitter.vtEntriesFor(meta).map(({ slot, impl }) =>
         impl === null
-          ? `0 /* ${slot.method}: outside the declaring subtree */`
-          : `&${mangleVtAdapter(impl.def.name, slot.method)} /* ${slot.method} */`,
+          ? `0 /* ${cCommentText(slot.method)}: outside the declaring subtree */`
+          : `&${mangleVtAdapter(impl.def.name, slot.method)} /* ${cCommentText(slot.method)} */`,
       );
       out.push(
         `static const ${vtt} ${mangleVtInstance(meta.def.name)} = { /* class ${meta.def.name} */`,
@@ -557,7 +557,7 @@ function emitRecordCloneC(
         ...(isStreamRooted
           ? [`  scr_stream_st_trace(o->sc_st, visit, ctx); /* stream state closures/pipes */`]
           : []),
-        ...tracedFields.map((f) => `  visit(o->${mangleField(f.name)}, ctx); /* ${f.name} */`),
+        ...tracedFields.map((f) => `  visit(o->${mangleField(f.name)}, ctx); /* ${cCommentText(f.name)} */`),
         `}`,
         `static void ${s.gcFree}(void *o0) {`,
         ...(untracedRefFields.length > 0 || emitterRooted
@@ -571,7 +571,7 @@ function emitRecordCloneC(
           : []),
         ...untracedRefFields.map((f) => {
           const field = `o->${mangleField(f.name)}`;
-          return `  if (${field}) ${releaseCallC(f.type, field)}; /* ${f.name} (acyclic) */`;
+          return `  if (${field}) ${releaseCallC(f.type, field)}; /* ${cCommentText(f.name)} (acyclic) */`;
         }),
         `  scr_obj_free_note();`,
         `  scr_cyc_free(o0);`,
@@ -770,6 +770,7 @@ function emitRecordCloneC(
       elem.kind === "child" || // spawned child handles: scr_child_* adapters, no trace
       elem.kind === "netServer" || // server handles: scr_net_server_* adapters, no trace
       elem.kind === "symbol" || // symbol identities: scr_sym_* adapters, no trace
+      elem.kind === "bigint" || // immutable numeric values: scr_bigint_* adapters
       elem.kind === "classval" || // class objects: no-op adapters, no trace (immortal statics)
       // Closures: scr_closure_* adapters + scr_closure_trace_v (always
       // cycle-headered — captures can reach back through boxes).
@@ -798,7 +799,7 @@ function emitRecordCloneC(
       t.kind === "map" || t.kind === "set" || t.kind === "promise" ||
       t.kind === "generator" ||
       t.kind === "regex" || t.kind === "url" || t.kind === "searchParams" ||
-      t.kind === "symbol" || t.kind === "stats" ||
+      t.kind === "symbol" || t.kind === "bigint" || t.kind === "stats" ||
       t.kind === "fileHandle" ||
       t.kind === "spawnRes" || t.kind === "child" || t.kind === "bytes" ||
       t.kind === "netServer" || t.kind === "netSocket" ||
@@ -806,7 +807,8 @@ function emitRecordCloneC(
       t.kind === "dgramSocket" || t.kind === "testCtx" ||
       t.kind === "httpReq" || t.kind === "httpRes" ||
       t.kind === "httpClientReq" || t.kind === "secureCtx" ||
-      t.kind === "fsWatcher" || t.kind === "childStream" ||
+      t.kind === "cryptoHash" || t.kind === "cryptoHmac" ||
+      t.kind === "fsWatcher" || t.kind === "childStream" || t.kind === "childWriter" ||
       // Island handles: the box carries scr_jsval_retain_v/release_v and
       // no trace — the same stance as jsval array elements.
       t.kind === "jsval" ||

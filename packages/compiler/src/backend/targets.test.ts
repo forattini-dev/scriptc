@@ -8,8 +8,10 @@ import {
   MACOS_X64_TARGET,
   WASM32_WASI_TARGET,
   WINDOWS_X64_MSVC_TARGET,
+  executableOptimizationLinkerArgs,
   nativeCodegenTarget,
   nativeCodegenTargetRefusal,
+  windowsSubsystemLinkerArgs,
 } from "./targets.js";
 
 describe("native code-generation targets", () => {
@@ -58,5 +60,19 @@ describe("native code-generation targets", () => {
 
   test("describes the WASI relocatable-object ABI", () => {
     expect(WASM32_WASI_TARGET.supports).toMatchObject({ asm: true, obj: true, exe: true });
+  });
+
+  test("strips WASI debug payload only from release executables", () => {
+    expect(executableOptimizationLinkerArgs("wasi", "release")).toEqual(["-Wl,--strip-debug"]);
+    expect(executableOptimizationLinkerArgs("wasi", "dev")).toEqual([]);
+    expect(executableOptimizationLinkerArgs("linux", "release")).toEqual([]);
+  });
+
+  test("selects the PE GUI subsystem without changing default console links", () => {
+    expect(windowsSubsystemLinkerArgs("win32", undefined)).toEqual([]);
+    expect(windowsSubsystemLinkerArgs("win32", "console")).toEqual([]);
+    expect(windowsSubsystemLinkerArgs("win32", "gui")).toEqual(["-Wl,--subsystem,windows"]);
+    expect(() => windowsSubsystemLinkerArgs("linux", "gui")).toThrow("Windows executable target");
+    expect(() => windowsSubsystemLinkerArgs("win32", "other" as "gui")).toThrow("unknown Windows subsystem");
   });
 });

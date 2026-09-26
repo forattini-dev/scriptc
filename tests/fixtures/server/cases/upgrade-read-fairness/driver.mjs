@@ -37,6 +37,9 @@ for (let i = 0; i < CLIENTS; i++) {
   sockets.push(socket);
 }
 
+// CI contention can stretch the server's 50 timer ticks well past 500 ms.
 const watchdog = setTimeout(() => {
+  console.error("upgrade-read-fairness driver timed out waiting for the server to close its sockets");
+  process.exitCode = 1;
   for (const socket of sockets) socket.destroy();
-}, 1_000);
+}, 30_000);

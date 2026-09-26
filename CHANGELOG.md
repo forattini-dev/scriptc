@@ -76,13 +76,106 @@ All notable changes to scriptc will be documented in this file.
 
 <!-- release:start -->
 
+## 0.1.6
+
+### Features
+
+- **Static Array behavior covers construction, mutation, indexing, flattening, splicing, and joining.** Array construction and iterable conversion, `fill`, `copyWithin`, relative-index coercion, `flat`, splice insertion, and join coercion now compile with JavaScript semantics.
+- **Static Object and String operations expand.** Own-property checks, prototype tags, `String.prototype.at`, `codePointAt`, and `split` coercions now compile with Node-compatible behavior.
+
+### Performance
+
+- **Array, string, and terminal operations use fewer resources.** Array comparisons and string operations allocate less, fibers reuse stacks and release cached memory while idle, and terminal dimensions come directly from native streams.
+
+<!-- release:end -->
+
+## 0.1.5
+
+### Features
+
+- **Static HTTP support covers more client and server behavior.** The `node:http` surface adds request and response controls, timeout and event handling, connection shutdown behavior, and stricter header validation.
+- **Static numeric APIs expand.** `Float64Array`, indexed compound assignments, and additional analytic and remaining `Math` functions compile natively.
+- **Array and string search calls handle more JavaScript inputs.** Static `includes`, `lastIndexOf`, and positioned string methods accept omitted and primitive search values while preserving position coercion.
+- **Published Effect modules can compile statically.** The npm-static path follows reachable exports through package modules and prunes unused package code.
+- **Executable stripping is available as an opt-in build option.**
+
+### Performance
+
+- **LLVM emits faster numeric operations.** Proven integer arithmetic and numeric remainder use direct operations, and numeric array reads avoid redundant boxing, retains, and temporary records.
+
+### Fixes
+
+- **Static JavaScript coercions preserve Node behavior across more call forms.** String padding and search, `Number` conversion, and narrowed string and buffer calls now handle unions, wrappers, objects, nullish values, and omitted arguments correctly.
+- **Dynamic islands load more legacy packages.** Redis 6 entry points and callable `EventEmitter` usage work with the island runtime.
+- **Published LLVM helpers retain executable permissions.**
+- **Switching build modes preserves reusable artifacts.**
+
+## 0.1.4
+
+### Features
+
+- **Static module interoperability expands.** `node:module` coverage, CommonJS factory exports, and statically analyzable literal dynamic imports compile through the native module graph.
+- **Node built-in functions work as values.** Supported `node:path`, `node:fs`, and other built-in functions can be stored and passed around while preserving static calls.
+- **Static call lowering handles more JavaScript shapes.** Overloaded callable specialization, fixed-tuple argument spreads, union receiver calls, and loose equality now compile natively.
+- **Compression APIs expand.** One-shot and callback-based zlib codecs compile statically.
+- **Child-process APIs gain IPC and callback coverage.** `fork` supports parent-child messaging, `execFile` supports inline UTF-8 callback options, and shell output can be captured.
+- **Static HTTP servers enforce Node's Host rules and support trailers.** HTTP/1.1 requests require `Host` by default and return Node-compatible 400 responses, with opt-out and HTTP/1.0 handling preserved; incoming chunk trailers expose raw and distinct values, while outgoing trailers support framing and streaming.
+- **Filesystem and URL support expands.** Static filesystem support adds synchronous buffer overloads, async `realpath`, `lstat` metadata, `readdir` with `Dirent`, and descriptor operations; URLs add credential, origin, port, and hash behavior.
+- **Date, process, and event APIs gain static behavior.** `Date.parse`, writable `process.exitCode`, and scoped computed `EventEmitter` names compile with Node behavior.
+- **Static Set construction accepts readonly tuple seeds.** Supported readonly tuples initialize native Sets while preserving single evaluation and insertion order.
+
+### Performance
+
+- **LLVM bitwise operations use native integer instructions.** Numeric JavaScript bitwise operators now lower to `i32` operations on the LLVM backend.
+
+### Fixes
+
+- **Windows and Linux runtime builds cover more host details.** Windows executables support GUI subsystem selection and installed CMake generators, Windows runtimes include native clock and sleep shims, and GNU runtime packs preserve glibc 2.36 compatibility.
+- **Static npm resolution follows package import maps.** Package-scoped imports use edge-specific conditions, and fallback Node declarations include `RequestInfo` without widening supported fetch inputs.
+- **HTTP request parsing bounds and validates trailers.** Header and trailer parsing enforce byte and field-count limits, and trailer data is safely discarded when handlers respond before the request body finishes.
+
+## 0.1.3
+
+### Features
+
+- **BigInt compiles natively.** BigInt literals, arithmetic, comparisons, conversions, storage, byte-buffer and `DataView` operations, and width boundaries now preserve Node behavior across the C and LLVM backends.
+- **Static crypto utilities expand.** Hashes, HMACs, PBKDF2, random fills and integers, timing-safe equality, and one-shot hashing compile through the native `node:crypto` surface with Node-compatible errors.
+- **Child-process stdin is writable.** `child.stdin` supports native writes, backpressure, ending, destruction, and lifecycle and error events across the C and LLVM backends.
+- **Commander 15 compiles statically.** The npm-static path now preserves the declaration and runtime behavior needed by Commander 15 command actions.
+- **TypeScript workspace sources compile statically.** Source-only workspace package entries now resolve through the program module graph while retaining the existing JavaScript package boundary.
+
+### Performance
+
+- **WASI release binaries are smaller.** Release links strip debug sections while development output retains its metadata.
+
+### Fixes
+
+- **Generated JSON record keys are valid.** Escaped and terminating property names now emit correctly in both native backends.
+- **Windows console output preserves UTF-8.** Attached consoles use UTF-8 without changing redirected byte output.
+- **Nested recursion and discarded conditionals lower correctly.** Mutual nested function references are initialized before capture, and discarded conditional expressions retain lazy control flow.
+- **Library archives retain section granularity.** Per-function and per-data sections now allow consumers to garbage-collect unreferenced archive members.
+
+## 0.1.2
+
+### Features
+
+- **CommonJS module graphs compile statically.** `require`, `module.exports`, `exports`, module metadata, caching, cycles, resolution, and failure eviction now follow Node semantics across compiled CommonJS graphs.
+- **Async iteration parity expands.** Async generators support queued `next`/`return`/`throw` requests, promised yields, cleanup, and class, object, and private methods; `for await` closes custom async iterators and WHATWG readable streams correctly.
+- **Explicit resource management compiles natively.** `using`, `await using`, `for using`, disposable Node handles, and suppressed disposal errors preserve JavaScript cleanup ordering.
+- **Node module resolution introspection is supported.** `import.meta.resolve`, `require.resolve`, `require.resolve.paths`, and `module.createRequire` handle supported static requests with Node-compatible resolution and errors.
+- **Static npm declarations preserve overloads.** `--npm-static` keeps overload groups from shipped declaration files while compiling package implementations, including Commander command actions.
+- **Unknown values preserve native handles.** Class and child handles can round-trip through `unknown` while private fields remain hidden.
+
+### Fixes
+
+- **TypeScript compatibility is more faithful.** Branded primitive types, leading BOM literals, TypeScript 7 project resolution, and Node type-link behavior now retain their expected semantics.
+- **Dynamic operations and runtime arguments are more reliable.** Dynamic `any`-local operators lower correctly, executable-path arguments remain intact, and URLSearchParams sorting scales without quadratic behavior.
+
 ## 0.1.1
 
 ### Fixes
 
 - **Native package releases are more reliable.** Musl LLVM helpers build as portable static executables, downloaded helper artifacts retain executable permissions, and npm publishing reconciles asynchronous staged versions on retry.
-
-<!-- release:end -->
 
 ## 0.0.37
 

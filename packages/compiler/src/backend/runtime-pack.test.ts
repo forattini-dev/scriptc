@@ -21,7 +21,7 @@ import {
   platformLinkerSupportsPersistentCache,
   resolvePlatformLinker,
 } from "./linker.js";
-import { MACOS_ARM64_TARGET } from "./targets.js";
+import { MACOS_ARM64_TARGET, WINDOWS_X64_MSVC_TARGET, type NativeTargetSpec } from "./targets.js";
 
 const VERSION = compilerReleaseVersion();
 
@@ -42,6 +42,7 @@ const BASE: NativeLinkFeatures = {
   events: false,
   emitter: false,
   symbol: false,
+  bigint: false,
   searchParams: false,
   qs: false,
   parseArgs: false,
@@ -57,11 +58,11 @@ const BASE: NativeLinkFeatures = {
   tlsCa: false,
 };
 
-async function fixture() {
+async function fixture(target: NativeTargetSpec = MACOS_ARM64_TARGET) {
   const root = await mkdtemp(join(tmpdir(), "scriptc-runtime-pack-unit-"));
   const packagePath = join(root, "package.json");
   await writeFile(packagePath, JSON.stringify({
-    name: "@scriptc/runtime-darwin-arm64",
+    name: target.runtimePackPackage,
     version: VERSION,
   }));
   const artifact = async (path: string, bytes: string) => {
@@ -92,20 +93,20 @@ async function fixture() {
   const manifest: RuntimePackManifest = {
     schema: "scriptc.runtime-pack.v1",
     format: 1,
-    package: "@scriptc/runtime-darwin-arm64",
+    package: target.runtimePackPackage,
     version: VERSION,
     target: {
-      name: "macos-arm64",
-      llvm_triple: "arm64-apple-macosx14.0.0",
-      architecture: "arm64",
-      object_format: "macho",
-      minimum_os: "14.0",
+      name: target.name,
+      llvm_triple: target.llvmTriple,
+      architecture: target.architecture,
+      object_format: target.objectFormat,
+      minimum_os: target.minimumOs,
     },
     runtime_abi: { version: 1, marker: "scr_runtime_abi_v1" },
     compiler: {
       command: "clang",
       identity: "fixture clang",
-      target: "arm64-apple-macosx14.0.0",
+      target: target.llvmTriple,
     },
     macros: {
       executable: ["SCR_DYNAMIC", "SCR_TEXT_DECODER_LEGACY"],
@@ -194,6 +195,25 @@ describe("runtime pack manifests", () => {
       resolver: () => packagePath,
     });
     expect(plan.driverFlags).toContain("-Wl,-dead_strip");
+  });
+
+  test("Windows runtime-pack links select the GUI subsystem only when requested", async () => {
+    const { packagePath, root } = await fixture(WINDOWS_X64_MSVC_TARGET);
+    const options = {
+      target: WINDOWS_X64_MSVC_TARGET,
+      programObject: join(root, "program.obj"),
+      outPath: join(root, "program.exe"),
+      features: BASE,
+      ffi: null,
+      optimization: "release" as const,
+      resolver: () => packagePath,
+    };
+    const defaultPlan = await createNativeLinkPlan(options);
+    const consolePlan = await createNativeLinkPlan({ ...options, windowsSubsystem: "console" });
+    const guiPlan = await createNativeLinkPlan({ ...options, windowsSubsystem: "gui" });
+    expect(defaultPlan.driverFlags).not.toContain("-Wl,--subsystem,windows");
+    expect(consolePlan.driverFlags).toEqual(defaultPlan.driverFlags);
+    expect(guiPlan.driverFlags).toEqual([...defaultPlan.driverFlags, "-Wl,--subsystem,windows"]);
   });
 
   test("selection chooses the most-specific variant and feature archive", async () => {

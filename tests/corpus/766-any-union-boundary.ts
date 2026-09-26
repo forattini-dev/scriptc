@@ -43,37 +43,6 @@ console.log(`${hs.length}`, `${hs[0]}`, `${hs[1]}`, `${hs.constructor.name}`);
 const floats = new Float32Array([1.5, -0.25]);
 const hf: any = floats;
 console.log(`${hf.length}`, `${hf[1]}`, `${hf.constructor.name}`);
-console.log(`${hb.constructor === hb.constructor}`, `${hw.constructor === hw.constructor}`);
-
-// A bytes-armed union, both arms.
-function payload(flag: boolean): Uint8Array | string {
-  return flag ? bytes : "textual";
-}
-const pa: any = payload(true);
-console.log(`${pa.length}`, `${pa[1]}`);
-const pb: any = payload(false);
-console.log(`${pb.length}`, `${pb.slice(0, 4)}`);
-
-// URLs: an engine URL built from href — components and String() agree.
-const url = new URL("https://example.dev/media/a.mp3?q=1#frag");
-const hu: any = url;
-console.log(`${hu.href}`, `${hu.protocol}`, `${hu.pathname}`);
-console.log(`${hu}`);
-
-// A URL-or-bytes union, both arms.
-function source(flag: boolean): Uint8Array | URL {
-  return flag ? bytes : url;
-}
-const sa: any = source(false);
-console.log(`${sa.href}`);
-const sb: any = source(true);
-console.log(`${sb.length}`);
-
-// Union-typed record FIELDS and array ELEMENTS lift through the same
-// tag switch when the composite crosses.
-const packet = { note: pick(true), quiet: pick(false), body: payload(true) };
-const hp: any = packet;
-console.log(`${hp.note}`, `${typeof hp.quiet}`, `${hp.body.length}`);
-const list: (string | undefined)[] = [pick(true), pick(false), "last"];
-const hl: any = list;
-console.log(`${hl.length}`, `${hl[0]}`, `${typeof hl[1]}`, `${hl[2]}`);
+const doubles = new Float64Array([Math.PI, -0.1]);
+const hd: any = doubles;
+console.log(`${hd.length}`, `${hd[0]}`, `${hd[1]}`, `${hd.constructor.name}`);

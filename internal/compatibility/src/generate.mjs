@@ -191,9 +191,10 @@ function featureEntries(compat) {
   return compat.features ?? [];
 }
 
-function featureOf(row, entries) {
+function featureOf(row, entries, parentSignature) {
   return entries.find((entry) =>
     entry.chapter === row.chapter &&
+    (entry.parent === undefined || entry.parent === parentSignature) &&
     ((entry.symbols ?? []).includes(row.apiSymbol) || (entry.signatures ?? []).includes(row.signature))
   );
 }
@@ -202,6 +203,7 @@ function symbolCandidates(row) {
   const result = new Set([row.apiSymbol]);
   const aliases = [
     ["fsPromises.", "fs/promises."],
+    ["dnsPromises.", "dns/promises."],
     ["timersPromises.", "timers/promises."],
     ["streamPromises.", "stream/promises."],
     ["streamConsumers.", "stream/consumers."],
@@ -216,6 +218,7 @@ function directExportName(row, module) {
   const symbol = row.apiSymbol;
   const subpathAliases = {
     "fs/promises": "fsPromises",
+    "dns/promises": "dnsPromises",
     "stream/promises": "streamPromises",
     "stream/consumers": "streamConsumers",
     "timers/promises": "timersPromises",
@@ -326,10 +329,10 @@ function classificationContext() {
   };
 }
 
-function classifyStatic(row, chapter, ctx) {
+function classifyStatic(row, chapter, ctx, parentSignature) {
   if (row.depth === 0) return tier("unreviewed", "", { source: "chapter-summary" });
   if (row.scope === "documentation" || row.scope === "configuration") return tier("not-applicable", "", { source: row.scope });
-  const feature = featureOf(row, ctx.staticFeatures);
+  const feature = featureOf(row, ctx.staticFeatures, parentSignature);
   if (feature) return tier(feature.status, "", { source: `compiler-feature:${row.chapter}.${row.apiSymbol}`, tests: feature.evidence });
   for (const candidate of symbolCandidates(row)) {
     // Dedicated lowering paths are authoritative when an older generic
@@ -360,10 +363,10 @@ function classifyStatic(row, chapter, ctx) {
   return tier("unreviewed", "");
 }
 
-function classifyDynamic(row, chapter, ctx) {
+function classifyDynamic(row, chapter, ctx, parentSignature) {
   if (row.depth === 0) return tier("unreviewed", "", { source: "chapter-summary" });
   if (row.scope === "documentation" || row.scope === "configuration") return tier("not-applicable", "", { source: row.scope });
-  const feature = featureOf(row, ctx.dynamicFeatures);
+  const feature = featureOf(row, ctx.dynamicFeatures, parentSignature);
   if (feature) return tier(feature.status, "", { source: `island-feature:${row.chapter}.${row.apiSymbol}`, tests: feature.evidence });
 
   if (row.chapter === "globals") {
@@ -451,8 +454,9 @@ function flattenChapter(rootNode, chapter, ctx) {
       nodeStability: stability,
     };
     row.scope = scopeOf(row);
-    row.static = classifyStatic(row, chapter, ctx);
-    row.dynamic = classifyDynamic(row, chapter, ctx);
+    const parentSignature = parents.at(-1)?.textRaw ?? parents.at(-1)?.name;
+    row.static = classifyStatic(row, chapter, ctx, parentSignature);
+    row.dynamic = classifyDynamic(row, chapter, ctx, parentSignature);
     rows.push(row);
     for (const field of CHILD_FIELDS) {
       for (const child of node[field] ?? []) walk(child, [...parents, node], depth + 1, stability);
@@ -603,6 +607,32 @@ function publicDetail(tier) {
   if (source.startsWith("compiler-feature:")) {
     if (tier.status === "not-applicable") return "Node configuration or documentation that does not map to a compiled program API.";
     if (tier.status === "not-implemented") return "Not implemented in scriptc's static module-loader subset yet.";
+    if (source.startsWith("compiler-feature:stream.") || source.startsWith("compiler-feature:webstreams.")) {
+      return "Implemented for the documented static async-iteration subset.";
+    }
+    if (source.startsWith("compiler-feature:http.http.validateHeader")) {
+      return "Static header validation is implemented for the tested call shapes.";
+    }
+    if (source.startsWith("compiler-feature:http.request.getHeader") ||
+        source.startsWith("compiler-feature:http.request.getRawHeaderNames") ||
+        source.startsWith("compiler-feature:http.request.hasHeader") ||
+        source.startsWith("compiler-feature:http.request.removeHeader") ||
+        source.startsWith("compiler-feature:http.request.setHeader") ||
+        source.startsWith("compiler-feature:http.response.getHeader")) {
+      return "Static outgoing header reads and mutations support the tested string-value shapes.";
+    }
+    if (/^compiler-feature:http\.(?:path|method|host|protocol|listening|headersSent|writableEnded|complete|httpVersion|url|statusCode)$/.test(source)) {
+      return "Static HTTP request metadata and message state support the tested lifecycle.";
+    }
+    if (/^compiler-feature:http\.response\.write(?:Continue|Processing|EarlyHints)$/.test(source)) {
+      return "Static HTTP/1.1 informational responses support the tested no-callback forms; Early Hints accepts string-valued fields.";
+    }
+    if (/^compiler-feature:http\.(?:response\.setTimeout|connection|req|sendDate|socket|statusMessage|strictContentLength|writableFinished)$/.test(source)) {
+      return "Static ServerResponse state, socket access, timeouts, and strict body length checks support the tested HTTP/1.1 forms.";
+    }
+    if (/^compiler-feature:http\.(?:headersDistinct|rawHeaders|rawTrailers|trailers|trailersDistinct)$/.test(source)) {
+      return "Static IncomingMessage header and trailer reads support the tested HTTP/1.1 forms.";
+    }
     return "Implemented for the documented scriptc module-loader subset.";
   }
   if (source.startsWith("compiler-chapter-policy:")) {
@@ -882,11 +912,18 @@ function checkLocal() {
   }
   const ctx = classificationContext();
   if (snapshot.chapters.length !== 62) throw new Error(`expected 62 pinned Node API chapters, found ${snapshot.chapters.length}`);
+  const ancestors = [];
   for (const row of snapshot.rows) {
-    if (row.depth === 0) continue;
+    if (row.depth === 0) {
+      ancestors.length = 1;
+      ancestors[0] = row;
+      continue;
+    }
     const chapter = snapshot.chapters.find((item) => item.slug === row.chapter);
-    const expectedStatic = classifyStatic(row, chapter, ctx);
-    const expectedDynamic = classifyDynamic(row, chapter, ctx);
+    const parentSignature = ancestors[row.depth - 1]?.signature;
+    const expectedStatic = classifyStatic(row, chapter, ctx, parentSignature);
+    const expectedDynamic = classifyDynamic(row, chapter, ctx, parentSignature);
+    ancestors[row.depth] = row;
     if (JSON.stringify(row.static) !== JSON.stringify(expectedStatic) || JSON.stringify(row.dynamic) !== JSON.stringify(expectedDynamic)) {
       throw new Error(`generated classification is stale at ${row.id} (${row.signature}); run 'pnpm node-compat'`);
     }

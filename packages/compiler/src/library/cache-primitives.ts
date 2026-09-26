@@ -14,7 +14,7 @@ interface CacheOutputOptions {
 
 export interface CacheOutputPaths {
   cPath: string;
-  staleCPath: string;
+  alternateCPath: string;
   irPath: string;
 }
 
@@ -55,7 +55,7 @@ export function outputPaths(
   const stem = basename(options.entryPath).replace(/\.(ts|mts|cts|js|mjs|cjs)$/, "") + stemSuffix;
   return {
     cPath: join(options.outDir, `${stem}.${backend === "llvm" ? "ll" : "c"}`),
-    staleCPath: join(options.outDir, `${stem}.${backend === "llvm" ? "c" : "ll"}`),
+    alternateCPath: join(options.outDir, `${stem}.${backend === "llvm" ? "c" : "ll"}`),
     irPath: join(options.outDir, `${stem}.ir.json`),
   };
 }
@@ -69,8 +69,8 @@ export function frontendOutputExclusions(
   const paths = outputPaths(options, backend, stemSuffix);
   const outputArtifacts = [
     paths.cPath,
-    paths.staleCPath,
-    ...(options.emitIr ? [paths.irPath] : []),
+    paths.alternateCPath,
+    paths.irPath,
     ...additionalPaths,
   ].map((path) => resolve(path));
   const outputDirectories = new Set<string>();

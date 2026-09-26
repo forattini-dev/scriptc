@@ -1449,7 +1449,12 @@ export function fenceStaticHeadersIteration(
   node: ts.Node,
 ): void {
   if (lowerer.dynamic) return;
-  const value = ts.isExpression(node) ? requestInitValueExpr(node) : node;
+  // The initializer is the value being iterated. Asking for the binding
+  // pattern's synthesized tuple type can panic in TypeScript serialization.
+  const source = ts.isArrayBindingPattern(node) && ts.isVariableDeclaration(node.parent) && node.parent.initializer
+    ? node.parent.initializer
+    : node;
+  const value = ts.isExpression(source) ? requestInitValueExpr(source) : source;
   const sym = isStdlibFetchInterface(lowerer, value, "Headers");
   if (!sym) return;
   lowerer.noLowering(
@@ -3211,11 +3216,17 @@ export { lowerDynamicImportCall } from "./lower-dynamic-import.js";
       };
     }
     const isMath = lowerer.stdlibGlobalMember(access, "Math") !== null;
-    // The STATIC Math members (floor/min/max/random): one C call IS the
-    // JS operation — no island, no --dynamic. Only the tabled arity with
-    // plain (non-spread) arguments takes this path; other forms fall
-    // through to the spread fold / island / lib fence below.
+    // Static numeric Math calls precede the island path. The scalar methods
+    // use their declared arity; min/max and hypot accept their variadic forms.
     const staticMath = isMath ? own(STATIC_MATH_FNS, name) : undefined;
+    if (staticMath && name === "hypot") {
+      const elems = call.arguments.map((a) => ts.isSpreadElement(a)
+        ? lowerer.lowerExprExpecting(a.expression, arrayOf(F64))
+        : lowerer.lowerExprExpecting(a, F64));
+      const spreads = call.arguments.flatMap((a, i) => ts.isSpreadElement(a) ? [i] : []);
+      const packed: IrExpr = { kind: "arrayLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: arrayOf(F64), loc };
+      return { kind: "libCall", fn: staticMath.fn, args: [packed], type: F64, loc };
+    }
     if (
       staticMath &&
       call.arguments.every((a) => !ts.isSpreadElement(a))

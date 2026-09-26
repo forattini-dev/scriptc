@@ -1,6 +1,6 @@
-// The assert surface's honest fences: the loose == quartet (assert's own
-// equal/deepEqual — assert/strict's same-named members ARE the strict
-// comparisons and lower), reference-equality strictEqual on objects,
+// The assert surface's honest fences: legacy deepEqual/notDeepEqual
+// (shallow equal/notEqual and assert/strict's same-named aliases lower),
+// reference-equality strictEqual on objects,
 // union operands (narrow first), mismatched or uncomparable deep types
 // (typed arrays, class instances), namespace-object calls, unsupported
 // throws/rejects expectations (properties outside the static error
@@ -11,7 +11,7 @@
 import assert from "node:assert";
 import * as assertNs from "node:assert";
 
-assert.equal(1, 1); // loose == — points at the strict forms
+assert.equal(1, 1); // shallow legacy equality lowers for primitives
 assert.notEqual(1, 2);
 assert.deepEqual([1], [1]);
 assert.notDeepEqual([1], [2]);

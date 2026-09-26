@@ -50,7 +50,7 @@ async function fixture(target: NativeTargetSpec) {
 const features = {
   dynamic: false, regex: false, copying: false, textDecoderLegacy: false, fileHandle: false,
   fetch: false, netIsland: false, zlib: false, assert: false, inspect: false, dynInvoke: false,
-  dc: false, dynAsync: false, events: false, emitter: false, symbol: false, searchParams: false,
+  dc: false, dynAsync: false, events: false, emitter: false, symbol: false, bigint: false, searchParams: false,
   qs: false, parseArgs: false, stream: false, net: false, http: false, http2: false,
   dgram: false, watch: false, foreignFfi: false, nodeTest: false, tls: false, tlsCa: false,
 };

@@ -743,7 +743,9 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
           "ReadableStream",
           member,
           "prototype",
-          "the wider Web Streams graph is outside the native readable-stream slice",
+          member === "values"
+            ? "direct for-await consumption compiles statically; storing or driving the first-class iterator handle requires --dynamic"
+            : "the wider Web Streams graph is outside the native readable-stream slice",
         )
       ),
       ...["pipeTo", "tee"].map((member) =>
@@ -760,7 +762,7 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
         "ReadableStream",
         "[Symbol.asyncIterator]",
         "prototype-symbol",
-        "symbol-keyed async iterator handles have no compiler lowering in either tier; use values() with --dynamic",
+        "direct for-await consumption compiles statically; explicit symbol access and stored iterator handles have no compiler lowering in either tier",
       ),
       outOfScopeEntry(
         "stdlib.readable-stream.symbol.toStringTag",

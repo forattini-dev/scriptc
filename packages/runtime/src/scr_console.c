@@ -6,6 +6,7 @@
 #ifdef _WIN32
 #include <fcntl.h> /* _O_BINARY */
 #include <io.h>    /* _setmode, _fileno */
+#include <windows.h>
 #endif
 
 /* Set by scr_async.c at loop exhaustion; lives here (unconditionally) so
@@ -71,6 +72,39 @@ static void scr_flush_at_exit(void) { fflush(stdout); }
 
 static void scr_collect_cycles_at_exit(void) { scr_collect_cycles(); }
 
+#ifdef _WIN32
+static UINT scr_original_console_output_cp = 0;
+
+static void scr_restore_console_output_cp(void) {
+  if (scr_original_console_output_cp != 0) {
+    (void)SetConsoleOutputCP(scr_original_console_output_cp);
+  }
+}
+
+static void scr_enable_utf8_console_output(void) {
+  DWORD mode;
+  HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+  bool out_is_console = out != NULL && out != INVALID_HANDLE_VALUE &&
+                        GetConsoleMode(out, &mode);
+  bool err_is_console = err != NULL && err != INVALID_HANDLE_VALUE &&
+                        GetConsoleMode(err, &mode);
+  if (!out_is_console && !err_is_console) return;
+
+  UINT original = GetConsoleOutputCP();
+  if (original == 0 || original == CP_UTF8) return;
+  if (!SetConsoleOutputCP(CP_UTF8)) return;
+
+  /* The code page belongs to the shared console, not this process. Restore
+   * it after every scriptc exit hook has finished writing. */
+  scr_original_console_output_cp = original;
+  if (atexit(scr_restore_console_output_cp) != 0) {
+    (void)SetConsoleOutputCP(original);
+    scr_original_console_output_cp = 0;
+  }
+}
+#endif
+
 void scr_runtime_abi_v1(void) {}
 
 void scr_init(void) {
@@ -84,6 +118,11 @@ void scr_init(void) {
   _setmode(_fileno(stdout), _O_BINARY);
   _setmode(_fileno(stderr), _O_BINARY);
   _setmode(_fileno(stdin), _O_BINARY);
+  /* Byte streams stay raw UTF-8. A real Windows console instead decodes
+   * narrow writes through its output code page, which commonly starts as
+   * CP437; select UTF-8 only while this process is attached and restore the
+   * shared setting at exit. */
+  scr_enable_utf8_console_output();
 #endif
   /* A private formatting buffer coalesces the several stdio calls needed to
    * render one console line. Every JavaScript-visible stdout write flushes
@@ -94,8 +133,9 @@ void scr_init(void) {
   setvbuf(stdout, outbuf, _IOFBF, sizeof outbuf);
   /* atexit is LIFO; registration order makes exit run: library cleanup
    * (registered later, in scr_lib_init) → cycle collection → RC audit →
-   * flush. The final collection frees cycles the program dropped, so the
-   * audit (and ASan's leak check) see them as freed, not leaked. */
+   * flush → Windows console-code-page restore. The final collection frees
+   * cycles the program dropped, so the audit (and ASan's leak check) see
+   * them as freed, not leaked. */
   atexit(scr_flush_at_exit);
 #ifdef SCR_RC_AUDIT
   atexit(scr_rc_audit_at_exit);

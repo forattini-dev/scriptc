@@ -152,6 +152,15 @@ describe(`server differential (${cases.length} programs${sanitize ? ", sanitized
     expect(nativeRes.driverStdout).toBe(nodeRes.driverStdout);
   }, 120_000);
 
+  test("http-trailers rejects an aggregate trailer overflow", async () => {
+    const entry = join(fixturesRoot, "cases/http-trailers/main.ts");
+    const driver = join(fixturesRoot, "cases/http-trailers/limit-driver.mjs");
+    const binary = await build(entry);
+    const nativeRes = await runLane(binary, [], driver);
+    expect(nativeRes.exitCode).toBe(0);
+    expect(nativeRes.driverStdout).toBe("limit HTTP/1.1 400 Bad Request\nlimit driver done\n");
+  }, 120_000);
+
   test("net-reuse-port emits the additive LLVM ABI", async () => {
     const entry = join(fixturesRoot, "cases/net-reuse-port/main.ts");
     const outDir = join(cacheDir, `server-llvm-reuse-port${sanitize ? "-san" : ""}`);
@@ -176,4 +185,28 @@ describe(`server differential (${cases.length} programs${sanitize ? ", sanitized
       /call void @scr_net_listen_opts_reuse_port\(ptr [^,]+, double [^,]+, ptr [^,]+, i1 [^,]+, i1 [^,]+, ptr [^)]+\)/,
     );
   });
+
+  test("http-host-header-optout works through the LLVM runtime pack", async () => {
+    const entry = join(fixturesRoot, "cases/http-host-header-optout/main.ts");
+    const driver = join(fixturesRoot, "cases/http-host-header-optout/driver.mjs");
+    const outDir = join(cacheDir, `server-llvm-host-header${sanitize ? "-san" : ""}`);
+    mkdirSync(outDir, { recursive: true });
+    const result = await compile(entry, {
+      outPath: join(outDir, "program"),
+      outDir,
+      sanitize,
+      backend: "llvm",
+    });
+    if (!result.ok) {
+      throw new Error(
+        "server fixture failed to compile for LLVM:\n" +
+          result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"),
+      );
+    }
+    const nodeRes = await runLane("node", [entry], driver);
+    const nativeRes = await runLane(result.binaryPath, [], driver);
+    expect(nativeRes.stdout).toEqual(nodeRes.stdout);
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.driverStdout).toBe(nodeRes.driverStdout);
+  }, 120_000);
 });

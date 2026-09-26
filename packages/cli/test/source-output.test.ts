@@ -36,16 +36,30 @@ function cli(args: string[], env: NodeJS.ProcessEnv = process.env) {
 test("default and explicit paths identify each source primary artifact", async () => {
   const { dir, entry } = await fixture();
   const expected = { ir: "hello.ir.json", c: "hello.c", rust: "hello.rs", llvm: "hello.ll" } as const;
+  const artifacts: string[] = [];
   for (const kind of ["ir", "c", "rust", "llvm"] as const) {
     const result = await cli(["build", entry, `--emit=${kind}`]);
     const path = join(dir, ".scriptc", expected[kind]);
+    artifacts.push(expected[kind]);
     expect(result.stdout).toBe(`${path}\n`);
-    expect(await readdir(join(dir, ".scriptc"))).toEqual([expected[kind]]);
+    expect((await readdir(join(dir, ".scriptc"))).sort()).toEqual([...artifacts].sort());
   }
   const exact = join(dir, "artifact.with-custom-suffix");
   const result = await cli(["build", entry, "--emit=llvm", "-o", exact]);
   expect(result.stdout).toBe(`${exact}\n`);
   expect(await readFile(exact, "utf8")).toContain("define i32 @main");
+});
+
+test("a default source output preserves previously generated sibling artifacts", async () => {
+  const { dir, entry } = await fixture();
+  const outDir = join(dir, ".scriptc");
+  await mkdir(outDir);
+  const siblings = ["hello", "hello.exe", "hello.wasm", "hello.c", "hello.ll", "hello.s", "hello.o"];
+  await Promise.all(siblings.map((name) => writeFile(join(outDir, name), `saved ${name}\n`)));
+  await cli(["build", entry, "--emit=ir"]);
+  for (const name of siblings) {
+    await expect(readFile(join(outDir, name), "utf8")).resolves.toBe(`saved ${name}\n`);
+  }
 });
 
 test("IR CLI output round-trips through the public parser and validator", async () => {

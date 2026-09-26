@@ -15,8 +15,10 @@ import { InternalCompilerError } from "../../errors.js";
  * only f64/string/bool/unit arms — the frontend's fence). */
 import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/ir.js";
 import { isRefCounted, typeKey } from "../../ir/ir.js";
+import { jsonObjectKeyLabel } from "../json-literal.js";
 import { mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
+import { llvmCommentText } from "./common.js";
 import { llFieldType, releaseSym, traceAdapter, type ShapeHost } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import { undefinedArmTag } from "../../ir/analysis.js";
@@ -248,7 +250,7 @@ export class LlWalkers {
         if (i > 0) this.putc(B, "%b", "44"); // ','
         if (edgeable(f.type)) this.jbEdgeIdx(B, String(i));
         const v = this.loadField(B, "%v", shapeId, fieldIndex.get(f.name)!, f.type);
-        B.line(`call void @${this.jsonWriteHelper(f.type)}(ptr %b, ${this.valTy(f.type)} ${v}) ; [${f.name}]`);
+        B.line(`call void @${this.jsonWriteHelper(f.type)}(ptr %b, ${this.valTy(f.type)} ${v}) ; [${llvmCommentText(f.name)}]`);
       });
       this.putc(B, "%b", "93"); // ']'
       if (cyclic) this.jbLeave(B);
@@ -269,10 +271,10 @@ export class LlWalkers {
     this.putc(B, "%b", "123"); // '{'
     if (!droppable) {
       emitFields.forEach((f, i) => {
-        this.puts(B, "%b", `${i > 0 ? "," : ""}"${f.name}":`);
+        this.puts(B, "%b", `${i > 0 ? "," : ""}${jsonObjectKeyLabel(f.name)}`);
         if (edgeable(f.type)) this.jbEdgeProp(B, f.name);
         const v = this.loadField(B, "%v", shapeId, fieldIndex.get(f.name)!, f.type);
-        B.line(`call void @${this.jsonWriteHelper(f.type)}(ptr %b, ${this.valTy(f.type)} ${v}) ; ${f.name}`);
+        B.line(`call void @${this.jsonWriteHelper(f.type)}(ptr %b, ${this.valTy(f.type)} ${v}) ; ${llvmCommentText(f.name)}`);
       });
     } else {
       const first = B.slot();
@@ -305,9 +307,9 @@ export class LlWalkers {
           B.startBlock(lw);
         }
         comma();
-        this.puts(B, "%b", `"${f.name}":`);
+        this.puts(B, "%b", jsonObjectKeyLabel(f.name));
         if (edgeable(f.type)) this.jbEdgeProp(B, f.name);
-        B.line(`call void @${this.jsonWriteHelper(f.type)}(ptr %b, ${this.valTy(f.type)} ${v}) ; ${f.name}`);
+        B.line(`call void @${this.jsonWriteHelper(f.type)}(ptr %b, ${this.valTy(f.type)} ${v}) ; ${llvmCommentText(f.name)}`);
         if (skip !== null) {
           B.br(skip);
           B.startBlock(skip);

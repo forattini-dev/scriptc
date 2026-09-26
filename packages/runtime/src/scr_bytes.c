@@ -154,6 +154,11 @@ double scr_bytes_get(const ScrBytes *b, double i) {
       memcpy(&v, b->data + idx * 4, 4);
       return (double)v;
     }
+    case SCR_BYTES_F64: {
+      double v;
+      memcpy(&v, b->data + idx * 8, 8);
+      return v;
+    }
     case SCR_BYTES_I32: {
       int32_t v;
       memcpy(&v, b->data + idx * 4, 4);
@@ -182,6 +187,9 @@ void scr_bytes_set(ScrBytes *b, double i, double v) {
       memcpy(b->data + idx * 4, &f, 4);
       break;
     }
+    case SCR_BYTES_F64:
+      memcpy(b->data + idx * 8, &v, 8);
+      break;
     case SCR_BYTES_I32: {
       /* ToInt32 is ToUint32 reinterpreted signed (same 2^32 residue). */
       uint32_t u = scr_bytes_to_u32(v);
@@ -410,7 +418,7 @@ void scr_dataview_set(ScrBytes *b, double byte_off, double value, ScrDataViewGet
       memcpy(&u, &value, 8);
       break;
     default:
-      return; /* BIG kinds never lower (bigint arguments) */
+      return; /* BigInt setters use scr_dataview_write_u64_raw. */
   }
   /* Scatter host-independently; le false is the JS big-endian default. */
   uint8_t *p = b->data + (size_t)off;
@@ -1616,6 +1624,9 @@ ScrBytes *scr_bytes_from_arr(ScrBytesElem elem, const ScrArr *arr) {
         memcpy(b->data + i * 4, &f, 4);
         break;
       }
+      case SCR_BYTES_F64:
+        memcpy(b->data + i * 8, &v, 8);
+        break;
       case SCR_BYTES_I32: {
         uint32_t u = scr_bytes_to_u32(v);
         memcpy(b->data + i * 4, &u, 4); /* same residue reinterpreted */
@@ -2234,4 +2245,48 @@ double scr_bytes_write_var(ScrBytes *b, double value, double offset, double byte
     p[le ? i : width - 1 - i] = (uint8_t)(u >> (8 * i));
   }
   return offset + (double)width;
+}
+
+bool scr_bytes_read_u64_raw(const ScrBytes *b, double offset, bool le, uint64_t *out) {
+  if (!scr_bytes_rw_check(b, offset, 8)) return false;
+  const uint8_t *p = b->data + (size_t)offset;
+  uint64_t value = 0;
+  for (size_t i = 0; i < 8; i++) value |= (uint64_t)p[le ? i : 7 - i] << (8 * i);
+  *out = value;
+  return true;
+}
+
+bool scr_bytes_write_u64_raw(ScrBytes *b, double offset, bool le, uint64_t value) {
+  if (!scr_bytes_rw_check(b, offset, 8)) return false;
+  uint8_t *p = b->data + (size_t)offset;
+  for (size_t i = 0; i < 8; i++) p[le ? i : 7 - i] = (uint8_t)(value >> (8 * i));
+  return true;
+}
+
+static bool scr_dataview_u64_check(const ScrBytes *b, double byte_off) {
+  double off = (byte_off != byte_off) ? 0 : trunc(byte_off);
+  if (!(off >= 0) || off > 9007199254740991.0 || off + 8 > (double)b->len) {
+    static const char msg[] = "Offset is outside the bounds of the DataView";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return false;
+  }
+  return true;
+}
+
+bool scr_dataview_read_u64_raw(const ScrBytes *b, double offset, bool le, uint64_t *out) {
+  double off = (offset != offset) ? 0 : trunc(offset);
+  if (!scr_dataview_u64_check(b, offset)) return false;
+  const uint8_t *p = b->data + (size_t)off;
+  uint64_t value = 0;
+  for (size_t i = 0; i < 8; i++) value |= (uint64_t)p[le ? i : 7 - i] << (8 * i);
+  *out = value;
+  return true;
+}
+
+bool scr_dataview_write_u64_raw(ScrBytes *b, double offset, bool le, uint64_t value) {
+  double off = (offset != offset) ? 0 : trunc(offset);
+  if (!scr_dataview_u64_check(b, offset)) return false;
+  uint8_t *p = b->data + (size_t)off;
+  for (size_t i = 0; i < 8; i++) p[le ? i : 7 - i] = (uint8_t)(value >> (8 * i));
+  return true;
 }

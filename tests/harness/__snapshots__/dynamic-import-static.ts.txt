@@ -1,35 +1,15 @@
-dynamic-import-static.ts:5:20 - error SC2012: 'import()' runs in the embedded dynamic engine, which this build does not include
+dynamic-import-static.ts:5:24 - error SC1090: dynamic import() of computed specifiers (the module graph embeds at build time — the specifier must be a string literal) are not supported yet
 
-  4 | async function run(): Promise<void> {
-  5 |   const fs = await import("fs");
-    |                    ^~~~~~~~~~~~
-  6 |   console.log(fs ? "y" : "n");
+  4 | async function run(specifier: string): Promise<void> {
+  5 |   const module = await import(specifier);
+    |                        ^~~~~~~~~~~~~~~~~
+  6 |   console.log(module);
 
-  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
+dynamic-import-static.ts:6:15 - error SC2004: uses of 'module' inherit the blocker on its declaration
 
-dynamic-import-static.ts:6:15 - error SC2004: uses of 'fs' inherit the blocker on its declaration
+  5 |   const module = await import(specifier);
+  6 |   console.log(module);
+    |               ^~~~~~
+  7 | }
 
-  5 |   const fs = await import("fs");
-  6 |   console.log(fs ? "y" : "n");
-    |               ^~
-  7 |   const p = await import("node:path");
-
-  hint: the declaration of 'fs' did not compile — fix the diagnostic reported there and these sites clear with it
-
-dynamic-import-static.ts:7:19 - error SC2012: 'import()' runs in the embedded dynamic engine, which this build does not include
-
-  6 |   console.log(fs ? "y" : "n");
-  7 |   const p = await import("node:path");
-    |                   ^~~~~~~~~~~~~~~~~~~
-  8 |   console.log(p ? "y" : "n");
-
-  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
-
-dynamic-import-static.ts:8:15 - error SC2004: uses of 'p' inherit the blocker on its declaration
-
-  7 |   const p = await import("node:path");
-  8 |   console.log(p ? "y" : "n");
-    |               ^
-  9 | }
-
-  hint: the declaration of 'p' did not compile — fix the diagnostic reported there and these sites clear with it
+  hint: the declaration of 'module' did not compile — fix the diagnostic reported there and these sites clear with it

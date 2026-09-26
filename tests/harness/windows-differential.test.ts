@@ -274,6 +274,19 @@ async function runOnBox(remoteCmd: string, env?: Record<string, string>): Promis
   }
 }
 
+/** Runs with a Windows pseudo-console instead of redirected stdio. The regular
+ * lane proves byte-exact pipe output; this catches terminal decoding bugs that
+ * are invisible once ssh captures the child through a pipe. */
+async function runOnBoxConsole(remoteCmd: string): Promise<Buffer> {
+  const full = `cd /d ${laneDirWin} && set SCRIPTC_TEST_ENV=from-harness&& ${remoteCmd}`;
+  const pending = execFileAsync("ssh", [...sshOpts, "-tt", host, full], {
+    encoding: "buffer",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  pending.child.stdin?.end();
+  return (await pending).stdout;
+}
+
 async function scpToLane(paths: string[]): Promise<void> {
   await execFileAsync("scp", ["-q", "-r", ...sshOpts, ...paths, `${host}:${laneDirScp}/`]);
 }
@@ -594,6 +607,23 @@ describe.skipIf(!enabled)(`windows differential (${target})`, () => {
         expect(nodeRes.exitCode).toBe(expectedExit);
         expect(nativeRes.exitCode).toBe(expectedExit);
       },
+    );
+
+    const consoleProbe = join(corpusDir, "2892-windows-console-unicode.ts");
+    test.skipIf(!files.includes(consoleProbe))(
+      "native console renders UTF-8 stdout and stderr",
+      async () => {
+        await shipProgram(consoleProbe);
+        const output = await runOnBoxConsole(`chcp && ${laneName(consoleProbe)}.exe && chcp`);
+        const rendered = output.toString("utf8");
+        for (const marker of ["console.log", "console.error", "stdout.write", "stderr.write"]) {
+          expect(rendered).toContain(`${marker} ─ · › αβγ 你好 🎉`);
+        }
+        const codePages = [...rendered.matchAll(/Active code page: (\d+)/g)].map((match) => match[1]);
+        expect(codePages).toHaveLength(2);
+        expect(codePages[1]).toBe(codePages[0]);
+      },
+      120_000,
     );
   });
 

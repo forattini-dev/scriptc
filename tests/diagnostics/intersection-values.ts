@@ -1,13 +1,18 @@
 // SC2008: intersection types that resolve to no runtime shape. Object-member
-// intersections intern through the record path and callable hybrids map to
-// '%call' records — what fences is the remainder, like a primitive part
-// against an object part (inhabited only per the checker, never buildable).
+// intersections intern through the record path, literal-marker primitive
+// brands erase to their primitive, and callable hybrids map to '%call'
+// records. A primitive intersected with runtime-bearing data still fences.
 
 // The producer has a BODY (an ambient `declare function` would compile to
 // Node's ReferenceError at the call instead — the declare-erasure stance).
-type Branded = number & { __brand: "id" };
-function mint(): Branded {
-  return 1 as Branded;
+type RuntimeDecorated = number & { value: number };
+function decorate(): RuntimeDecorated {
+  return 1 as RuntimeDecorated;
 }
-const kept = mint();
-console.log(kept);
+console.log(decorate());
+// Literal markers have no runtime slot after primitive-brand erasure. A use
+// that tries to observe one retains a clean unsupported-site diagnostic.
+type VisibleBrand = string & { readonly __brand: "VisibleBrand" };
+const visible = "value" as VisibleBrand;
+console.log(visible.__brand);
+// The primitive representation never manufactures this field.

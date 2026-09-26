@@ -308,6 +308,8 @@ export const ARRAY_METHODS = new Set([
   "unshift",
   "pop",
   "reverse",
+  "fill",
+  "copyWithin",
   "concat",
   "map",
   "filter",
@@ -324,6 +326,7 @@ export const ARRAY_METHODS = new Set([
   "reduce",
   "reduceRight",
   "indexOf",
+  "lastIndexOf",
   "includes",
   "join",
   "slice",
@@ -407,7 +410,7 @@ export const STR_METHODS: Record<
   slice: { method: "slice", result: STRING, minArgs: 0, maxArgs: 2 },
   // substring: slice's clamp-and-swap sibling (negatives clamp to 0
   // instead of counting from the end; start > end swaps).
-  substring: { method: "substring", result: STRING, minArgs: 1, maxArgs: 2 },
+  substring: { method: "substring", result: STRING, minArgs: 0, maxArgs: 2 },
   repeat: { method: "repeat", result: STRING, minArgs: 1, maxArgs: 1 },
   trim: { method: "trim", result: STRING, minArgs: 0, maxArgs: 0 },
   trimStart: { method: "trimStart", result: STRING, minArgs: 0, maxArgs: 0 },
@@ -444,6 +447,9 @@ export const STR_METHODS: Record<
   toWellFormed: { method: "toWellFormed", result: STRING, minArgs: 0, maxArgs: 0 },
 };
 
+/** String index reads return an undefined arm and compose the existing UTF-16 intrinsics. */
+export const STRING_INDEX_METHODS = new Set(["at", "codePointAt"]);
+
 /** One member of the island-backed ambient surface: declared argument
  * types (tsc enforces them at call sites; the arity double-checks the
  * table against the ambient file) and the validated island-exit target the
@@ -468,8 +474,8 @@ export const boundaryOutOfIslandMsg = (typeName: string): string =>
   `and 'T | undefined' over those)`;
 
 /** The island-backed surface — standard-library APIs with no static
- * runtime implementation (Math methods/properties beyond the compile-time
- * constants, number/string methods beyond the
+ * runtime implementation (Math methods outside STATIC_MATH_FNS,
+ * number/string methods beyond the
  * intrinsic set, parseFloat, ...). ONE table drives both sides of the
  * gate: under --dynamic each entry lowers to marshal → engine execution →
  * validated exit to the declared return type; without the flag each use
@@ -486,11 +492,10 @@ export const ISLAND_SURFACE = {
   /** `Math.<fn>(...)` lowers to callMethod(globalGet("Math"), fn, args);
    * Math.PI and Math.E are compile-time numeric literals in STATIC_MATH_PROPS;
    * remaining Math properties retain island/fence behavior.
-   * min/max/atan2/hypot/pow are declared with exactly two parameters
-   * (rest/optional parameters aren't representable). */
+   * The entries here handle untabled scalar call shapes where --dynamic is
+   * available; STATIC_MATH_FNS handles the ordinary typed calls first. */
   math: {
-    // floor, min/max (two-arg), and random are STATIC now
-    // (STATIC_MATH_FNS below).
+    // The static table below handles these methods at its admitted arities.
     fns: {
       abs: ISL_N1, acos: ISL_N1, asin: ISL_N1, atan: ISL_N1, atan2: ISL_N2,
       cbrt: ISL_N1, ceil: ISL_N1, cos: ISL_N1, exp: ISL_N1,
@@ -909,6 +914,7 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
  * thread machinery) and never runs as a cluster worker (cluster forks the
  * node binary itself) — Node's own answers for a directly-run script. */
 export const BUILTIN_MODULE_CONSTS: Record<string, Record<string, string | number | boolean | undefined> | undefined> = {
+  http: { maxHeaderSize: 16384 },
   path: { sep: "/", delimiter: ":" },
   "path/posix": { sep: "/", delimiter: ":" },
   "path/win32": { sep: "\\", delimiter: ";" },

@@ -24,10 +24,11 @@ import { InternalCompilerError } from "../../errors.js";
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrType } from "../../ir/ir.js";
-import { DYN_HANDLE_KINDS, isRefCounted, typeKey } from "../../ir/ir.js";
+import { DYN_HANDLE_KINDS, isDynTypedRefType, isRefCounted, typeKey } from "../../ir/ir.js";
 import { dynDesc, undefinedArmTag } from "../../ir/analysis.js";
 import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
+import { llvmCommentText } from "./common.js";
 import { arrNewCall, elemAccess, llFieldType, releaseSym, traceAdapter, traceArg, vAdapters } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { WalkerHost } from "./walkers.js";
@@ -39,6 +40,10 @@ const DYN_HANDLE_TAG_NUM: Record<string, number> = {
   httpRes: 1,
   netSocket: 2,
   netServer: 3,
+  http2Session: 4,
+  http2Stream: 5,
+  httpClientReq: 6,
+  child: 16,
 };
 
 export const DYN_KIND = {
@@ -61,6 +66,7 @@ export const DYN_KIND = {
  * unit instances (undefined-armed dynCheck targets build them). */
 export interface DynHost extends WalkerHost {
   unitInstanceRef(unionId: string, tag: number): string;
+  liveDynRefAdapter(t: IrType): { snapshot: string; commit: string };
 }
 
 /** Exact double literal (the emitter's f64Lit — the walkers' copy). */
@@ -211,7 +217,7 @@ export class LlDyn {
     this.host.declare(`declare ptr @scr_dyn_obj_get(ptr, ptr, ${this.S})`);
     const t = B.tmp();
     const len = Buffer.byteLength(key, "utf8");
-    B.line(`${t} = call ptr @scr_dyn_obj_get(ptr ${d}, ptr ${this.host.cstr(key)}, ${this.S} ${len}) ; .${key}`);
+    B.line(`${t} = call ptr @scr_dyn_obj_get(ptr ${d}, ptr ${this.host.cstr(key)}, ${this.S} ${len}) ; .${llvmCommentText(key)}`);
     return t;
   }
 
@@ -364,6 +370,31 @@ export class LlDyn {
         if (t.elem !== "u8") throw new InternalCompilerError(`llvm emitter bug: dynMatch of bytes<${t.elem}>`);
         kindIs(DYN_KIND.BYTES);
         break;
+      case "func":
+        kindIs(DYN_KIND.FUNC);
+        break;
+      case "object": {
+        if (t.className !== "%Error") {
+          // Exact class capsules returned true before materialization.
+          // Plain dyn objects carry no class brand.
+          B.terminate(`ret i1 false`);
+          break;
+        }
+        const kd = this.kindOf(B, "%d");
+        const isObj = B.tmp();
+        B.line(`${isObj} = icmp eq i32 ${kd}, ${DYN_KIND.OBJ}`);
+        const lObj = B.newLabel("dm.err.obj");
+        const lFail = B.newLabel("dm.err.fail");
+        B.condBr(isObj, lObj, lFail);
+        B.startBlock(lObj);
+        const marker = this.objGetLit(B, "%d", "%error");
+        const present = B.tmp();
+        B.line(`${present} = icmp ne ptr ${marker}, null`);
+        B.terminate(`ret i1 ${present}`);
+        B.startBlock(lFail);
+        B.terminate(`ret i1 false`);
+        break;
+      }
       case "record": {
         const shape = this.host.recordsById.get(t.shapeId);
         if (!shape) throw new InternalCompilerError(`llvm emitter bug: dynCheck of unknown shape ${t.shapeId}`);
@@ -442,7 +473,7 @@ export class LlDyn {
               B.startBlock(lCmp);
               const c = B.tmp();
               const same = B.tmp();
-              B.line(`${c} = call i32 @memcmp(ptr ${ent.key}, ptr ${this.host.cstr(f.name)}, ${this.S} ${klen}) ; ${f.name}`);
+              B.line(`${c} = call i32 @memcmp(ptr ${ent.key}, ptr ${this.host.cstr(f.name)}, ${this.S} ${klen}) ; ${llvmCommentText(f.name)}`);
               B.line(`${same} = icmp eq i32 ${c}, 0`);
               const lNo2 = B.newLabel("dm.kn");
               const skip = B.newLabel("dm.ks");
@@ -506,8 +537,27 @@ export class LlDyn {
         B.terminate(`ret i1 true`);
         break;
       }
-      default:
-        throw new LlvmUnsupportedError(`dynMatch:${t.kind}`);
+      default: {
+        const h = DYN_HANDLE_KINDS.get(t.kind);
+        if (!h) throw new LlvmUnsupportedError(`dynMatch:${t.kind}`);
+        const kd = this.kindOf(B, "%d");
+        const isHandle = B.tmp();
+        B.line(`${isHandle} = icmp eq i32 ${kd}, ${DYN_KIND.HANDLE}`);
+        const lHandle = B.newLabel("dm.handle");
+        const lNo = B.newLabel("dm.handle.no");
+        B.condBr(isHandle, lHandle, lNo);
+        B.startBlock(lHandle);
+        const tagPtr = B.tmp();
+        const tag = B.tmp();
+        B.line(`${tagPtr} = getelementptr inbounds i8, ptr %d, i64 ${this.abiOffset(24, 20)} ; ->v.handle.tag`);
+        B.line(`${tag} = load i32, ptr ${tagPtr}`);
+        const matched = B.tmp();
+        B.line(`${matched} = icmp eq i32 ${tag}, ${DYN_HANDLE_TAG_NUM[t.kind]}`);
+        B.terminate(`ret i1 ${matched}`);
+        B.startBlock(lNo);
+        B.terminate(`ret i1 false`);
+        break;
+      }
     }
     this.defs.push(
       `define internal zeroext i1 @${name}(ptr %d) ${FN_ATTRS} { ; matches ${key}`,
@@ -645,7 +695,7 @@ export class LlDyn {
               : "%ScrArr";
             B.line(`${cachedPtr} = getelementptr inbounds ${struct}, ptr ${cached}, i64 0, i32 ${member.index}`);
             B.line(`${checkedPtr} = getelementptr inbounds ${struct}, ptr ${checked}, i64 0, i32 ${member.index}`);
-            B.line(`${oldValue} = load ${member.type}, ptr ${cachedPtr} ; ${member.name}`);
+            B.line(`${oldValue} = load ${member.type}, ptr ${cachedPtr} ; ${llvmCommentText(member.name)}`);
             B.line(`${newValue} = load ${member.type}, ptr ${checkedPtr}`);
             B.line(`store ${member.type} ${newValue}, ptr ${cachedPtr}`);
             B.line(`store ${member.type} ${oldValue}, ptr ${checkedPtr}`);
@@ -731,7 +781,11 @@ export class LlDyn {
         // %error objects rebuild once and cache the pair. The C walker's
         // arm exactly.
         if (t.className !== "%Error") {
-          throw new InternalCompilerError(`llvm emitter bug: dynCheck of class ${t.className} (only %Error extracts from the checked-dynamic tree)`);
+          // Exact class capsules returned before this switch. A plain dyn
+          // object cannot acquire a class brand structurally.
+          B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${want}, ptr %d)`);
+          B.terminate(`ret ptr null`);
+          break;
         }
         const kd = this.kindOf(B, "%d");
         const isObj = B.tmp();
@@ -792,7 +846,7 @@ export class LlDyn {
         const storeInto = (fieldName: string, ft: IrType, value: string): void => {
           const idx = fieldIndex.get(fieldName)!;
           const p = B.tmp();
-          B.line(`${p} = getelementptr inbounds %${struct}, ptr %r0, i64 0, i32 ${idx} ; .${fieldName}`);
+          B.line(`${p} = getelementptr inbounds %${struct}, ptr %r0, i64 0, i32 ${idx} ; .${llvmCommentText(fieldName)}`);
           if (llFieldType(ft) === "i8") {
             const z = B.tmp();
             B.line(`${z} = zext i1 ${value} to i8`);
@@ -911,7 +965,7 @@ export class LlDyn {
               B.startBlock(lCmp);
               const c = B.tmp();
               const same = B.tmp();
-              B.line(`${c} = call i32 @memcmp(ptr ${ent.key}, ptr ${host.cstr(f.name)}, ${host.sizeType} ${klen}) ; ${f.name}`);
+              B.line(`${c} = call i32 @memcmp(ptr ${ent.key}, ptr ${host.cstr(f.name)}, ${host.sizeType} ${klen}) ; ${llvmCommentText(f.name)}`);
               B.line(`${same} = icmp eq i32 ${c}, 0`);
               const skip = B.newLabel("dcv.ks");
               const lNo2 = B.newLabel("dcv.kn");
@@ -1212,13 +1266,27 @@ export class LlDyn {
         break;
       }
       case "object": {
-        // %Error only (canConvertToDyn's gate): the checked-dynamic tree's error encoding.
-        if (t.className !== "%Error") {
-          throw new InternalCompilerError(`llvm emitter bug: to-dyn of class ${t.className}`);
+        const className = t.className;
+        if (className === "%Error") {
+          host.declare(`declare ptr @scr_dyn_from_error(ptr)`);
+          const r = B.tmp();
+          B.line(`${r} = call ptr @scr_dyn_from_error(ptr %v)`);
+          B.terminate(`ret ptr ${r}`);
+          break;
         }
-        host.declare(`declare ptr @scr_dyn_from_error(ptr)`);
+        if (!isDynTypedRefType(t)) {
+          throw new InternalCompilerError(`llvm emitter bug: to-dyn of runtime class ${className}`);
+        }
+        const adapter = host.liveDynRefAdapter(t);
+        const rc = vAdapters(host, t);
+        const keyLit = host.cstr(typeKey(t));
+        host.declare(
+          `declare ptr @scr_dyn_new_typed_ref(ptr, ptr, ptr, ptr, ${host.sizeType}, ptr, ptr)`,
+        );
         const r = B.tmp();
-        B.line(`${r} = call ptr @scr_dyn_from_error(ptr %v)`);
+        B.line(
+          `${r} = call ptr @scr_dyn_new_typed_ref(ptr %v, ptr ${rc.retain}, ptr ${rc.release}, ptr ${keyLit}, ${host.sizeType} ${Buffer.byteLength(typeKey(t), "utf8")}, ptr @${adapter.snapshot}, ptr ${adapter.commit})`,
+        );
         B.terminate(`ret ptr ${r}`);
         break;
       }
@@ -1250,7 +1318,7 @@ export class LlDyn {
         const fieldIndex = new Map(shape.fields.map((f, i) => [f.name, i + 1]));
         const loadFieldOf = (fname: string, ft: IrType): string => {
           const p = B.tmp();
-          B.line(`${p} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${fieldIndex.get(fname)!} ; .${fname}`);
+          B.line(`${p} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${fieldIndex.get(fname)!} ; .${llvmCommentText(fname)}`);
           const raw = B.tmp();
           B.line(`${raw} = load ${llFieldType(ft)}, ptr ${p}`);
           if (llFieldType(ft) !== "i8") return raw;
@@ -1317,7 +1385,7 @@ export class LlDyn {
           const fv = loadFieldOf(f.name, f.type);
           const conv = B.tmp();
           B.line(`${conv} = call ptr @${this.toDynHelper(f.type)}(${this.valTy(f.type)} ${fv})`);
-          B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${host.cstr(f.name)}, ${host.sizeType} ${klen}, ptr ${conv}) ; ${f.name}`);
+          B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${host.cstr(f.name)}, ${host.sizeType} ${klen}, ptr ${conv}) ; ${llvmCommentText(f.name)}`);
         }
         if (shape.indexValue) {
           const iv = shape.indexValue;
@@ -2954,7 +3022,7 @@ export class LlDyn {
       B.line(`${rest} = call ptr @scr_dyn_new_arr()`);
       const riSlot = B.slot();
       B.entryAllocas.push(`${riSlot} = alloca ${host.sizeType}`);
-      B.line(`store ${host.sizeType} ${t.params.length}, ptr ${riSlot}`);
+      B.line(`store ${host.sizeType} ${t.argumentsAll ? 0 : t.params.length}, ptr ${riSlot}`);
       const lc = B.newLabel("dfk.rc");
       const lb = B.newLabel("dfk.rb");
       const le = B.newLabel("dfk.re");

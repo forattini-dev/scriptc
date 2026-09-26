@@ -125,432 +125,79 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
   }, 120_000);
 
-  // Tier 1, auto mode: the eligibility heuristics pick escape-string-regexp
-  // (own .d.ts, unminified, no transform markers) without naming it.
-  test("--npm-static=auto opts the eligible pilot in", () => {
-    const { coverage } = analyze(join(pilotRoot, "escape-cli.ts"), { npmStatic: "auto" });
-    expect(coverage.npmStatic).toEqual([
-      { package: "escape-string-regexp", status: "static" },
-    ]);
+  test("picocolors compiles fully statically and byte-matches both color branches", async () => {
+    const entry = join(pilotRoot, "colors-cli.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["picocolors"] });
+    expect(coverage.npmStatic).toEqual([{ package: "picocolors", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
     expect(coverage.stats.statementsFailed).toBe(0);
-  }, 120_000);
 
-  test("--npm-static=auto admits an executable TypeScript package surface", () => {
-    const { coverage } = analyze(join(pilotRoot, "ts-source-cli.ts"), { npmStatic: "auto" });
-    expect(coverage.npmStatic).toEqual([
-      { package: "ts-source", status: "static" },
-    ]);
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.stats.statementsFailed).toBe(0);
-  }, 120_000);
+    const binary = await buildStatic(entry, ["picocolors"]);
+    const plainEnv: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
+    delete plainEnv["FORCE_COLOR"];
+    const colorEnv: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: "1" };
+    delete colorEnv["NO_COLOR"];
 
-  // Auto's runtime-JS probe anchors at the IMPORTING file, not the entry:
-  // shouty is installed only in inner/'s node_modules (the pnpm-monorepo
-  // shape — vercel's CLI deps live in packages/cli/node_modules while the
-  // analysis driver sits outside every package realm), so an entry-anchored
-  // probe answers "no runtime JS entry resolves" for an ordinary install.
-  test("--npm-static=auto probes runtime JS from the importing file's realm", async () => {
-    const entry = join(pilotRoot, "nested/main.ts");
-    const { coverage } = analyze(entry, { npmStatic: "auto" });
-    expect(coverage.npmStatic).toEqual([{ package: "shouty", status: "static" }]);
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.stats.statementsFailed).toBe(0);
-    const binary = await buildStatic(entry, "auto");
-    const [nodeRes, nativeRes] = await Promise.all([
-      runBinary(oracleExecutable, [entry]),
-      runBinary(binary, []),
-    ]);
-    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
-    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
-  }, 120_000);
-
-  // Auto refuses ms: it ships no own .d.ts (the declared-claim criterion),
-  // so the import keeps today's story — and the explicit opt-in below is
-  // the user's override.
-  test("--npm-static=auto refuses a package with no own .d.ts", () => {
-    const { coverage } = analyze(join(pilotRoot, "ms-cli.ts"), { npmStatic: "auto" });
-    expect(coverage.npmStatic).toEqual([
-      {
-        package: "ms",
-        status: "fallback",
-        detail: "auto: it ships no own .d.ts declaration surface",
-      },
-    ]);
-  }, 120_000);
-
-  // ms's coverage, pinned: aliased-typeof narrowing carried the entry
-  // conditional (`var type = typeof val` — the checker only narrows const
-  // aliases), and the whole driven surface is static. What remains is
-  // parse()'s undefined-returning GARBAGE paths against its JSDoc
-  // `@return {Number}` claim: two bare `return;`s stay runtime fences,
-  // and the switch's `return undefined` now COMPILES to the stranded-unit
-  // trap (divergence 335) — the same loud TypeError, thrown by compiled
-  // code instead of a deferred fence. Node answers undefined there, a
-  // value the declared representation cannot hold, so each path traps
-  // loudly instead of misbehaving. The frontier only moves deliberately.
-  test("ms compiles static with the JSDoc-contradicting undefined returns pinned", () => {
-    const { coverage } = analyze(join(pilotRoot, "ms-cli.ts"), { npmStatic: ["ms"] });
-    expect(coverage.npmStatic).toEqual([{ package: "ms", status: "static" }]);
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
-    const fences = coverage.runtimeFences ?? [];
-    expect(fences.length).toBe(2);
-    for (const f of fences) {
-      expect(f.message).toMatch(/bare 'return'/);
+    for (const env of [plainEnv, colorEnv]) {
+      const [nodeRes, nativeRes] = await Promise.all([
+        runBinary("node", [entry], env),
+        runBinary(binary, [], env),
+      ]);
+      expect(nativeRes.stdout).toEqual(nodeRes.stdout);
+      expect(comparableStderr(nativeRes.stderr)).toEqual(nodeRes.stderr);
+      expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
     }
-  }, 120_000);
-
-  // statuses' driven surface is WHOLLY static: every member read routes
-  // to the expando slot the package's own body writes, and dead-stripping
-  // takes the undriven helpers with their fences. The zeroes are the pin —
-  // the expando lowering must not quietly regress into runtime fences.
-  test("statuses compiles static with no fence on the expando surface", () => {
-    const { coverage } = analyze(join(pilotRoot, "statuses-cli.ts"), { npmStatic: ["statuses"] });
-    expect(coverage.npmStatic).toEqual([{ package: "statuses", status: "static" }]);
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0);
-    expect(coverage.stats.statementsFailed).toBe(0);
-    expect(coverage.runtimeFences ?? []).toHaveLength(0);
-  }, 120_000);
-
-  // Numeric and numeric-string inputs contradict status()'s numeric JSDoc
-  // return. Its internal message-map lookup is now admitted; the execution
-  // test below pins that path separately from these remaining runtime fences.
-  test("statuses' JSDoc-contradicting call path stays a runtime fence", () => {
-    const { coverage } = analyze(join(pilotRoot, "statuses-call-cli.ts"), { npmStatic: ["statuses"] });
-    expect(coverage.npmStatic).toEqual([{ package: "statuses", status: "static" }]);
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
-    const fences = coverage.runtimeFences ?? [];
-    expect(fences).toHaveLength(2);
-    expect(fences.filter((f) => /'string' values where 'number' is expected/.test(f.message))).toHaveLength(2);
-    expect(fences.filter((f) => /indexing records with non-string or non-number keys/.test(f.message))).toHaveLength(0);
-  }, 120_000);
-
-  test.for(["c", "rust"] as const)("statuses message lookups byte-match Node on %s", async (backend, { skip }) => {
-    if (sanitize && backend === "rust") skip("Rust differential is sanitizer-invariant");
-    const entry = join(pilotRoot, "statuses-message-cli.ts");
-    const binary = await buildStatic(entry, ["statuses"], backend);
-    const [node, native] = await Promise.all([
-      execFileAsync(oracleExecutable, [entry]),
-      execFileAsync(binary, [], { env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" } }),
-    ]);
-    expect(native.stdout).toBe(node.stdout);
-    expect(native.stdout).toBe('404\n200\n500\n404\ninvalid status message: "missing status message"\n');
-    expect(native.stderr).toBe(node.stderr);
-    expect(native.stderr).toBe("");
-  }, 120_000);
-
-  // Tier 2: commander opts in and COMPILES as program modules — the
-  // coverage floor is pinned (≥85% of ~1200 statements static) so frontier
-  // regressions surface here, while the remaining runtime fences keep the
-  // differential on the island lane (npm.test.ts) for now. Implicit-any
-  // monomorphization moved the driven frontier BEHIND the typed-value →
-  // untyped-param boundary (methods like _registerCommand and local
-  // helpers like knownBy now instantiate per argument types); the next
-  // fences are implicit-any FIELD writes of class instances (`cmd.parent
-  // = this` — the field inferred `any` from its ctor null) and
-  // getter/setter JSDoc union returns (`cmd.name()` → string | Command).
-  test("commander compiles static at the pinned coverage floor", () => {
-    const { coverage } = analyze(join(fixturesRoot, "commander-calc/calc-npm-static.ts"), {
-      npmStatic: ["commander"],
-    });
-    expect(coverage.npmStatic).toEqual([{ package: "commander", status: "static" }]);
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
-    const total = coverage.stats.statementsTotal + (coverage.unreached?.stats.statementsTotal ?? 0);
-    const failed = coverage.stats.statementsFailed + (coverage.unreached?.stats.statementsFailed ?? 0);
-    expect(total).toBeGreaterThan(1000); // the whole package joined the program
-    expect((total - failed) / total).toBeGreaterThanOrEqual(0.85);
   }, 180_000);
 
-  // Tier 3: the island fallback — esbundled's chunk requires "net", an
-  // unshimmed-builtin edge preflight refuses for a static package, so the
-  // opt-in DROPS with a note and the --dynamic build keeps the exact
-  // island behavior lazybuiltin.ts pins in npm.test.ts.
-  test("a preflight-refused package falls back to the island with a note", () => {
-    const { coverage } = analyze(join(fixturesRoot, "npm/divergent/lazybuiltin.ts"), {
-      dynamic: true,
-      npmStatic: ["esbundled"],
-    });
-    const statuses = coverage.npmStatic ?? [];
-    expect(statuses).toHaveLength(1);
-    expect(statuses[0]?.package).toBe("esbundled");
-    expect(statuses[0]?.status).toBe("fallback");
+  test("createRequire loads an opted-in package through its require entry", async () => {
+    const entry = join(pilotRoot, "create-require-cli.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["picocolors"] });
+    expect(coverage.npmStatic).toEqual([{ package: "picocolors", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-  }, 120_000);
-
-  // AUTO drops a package whose opt-in breaks the PROGRAM's own typecheck
-  // (the .d.ts-overload vs inferred-surface gap — commander's chaining
-  // shape in miniature): chainy's declared `name(): string / name(v):
-  // this` overloads admit the chained spelling, its inferred surface
-  // (`string | Chainy`) does not, so auto answers fallback with the
-  // inferred-surface note and the program stays analyzable. Explicit
-  // opt-ins keep the errors (the user asked for exactly that package).
-  test("auto falls back when the program fails against an inferred surface", () => {
-    const { coverage } = analyze(join(pilotRoot, "chainy-cli.ts"), { npmStatic: "auto" });
-    expect(coverage.npmStatic).toEqual([
-      {
-        package: "chainy",
-        status: "fallback",
-        detail: "auto: the program does not typecheck against its inferred surface",
-      },
-    ]);
-    expect(coverage.preflightFailed).toBe(false);
-  }, 120_000);
-
-  // Non-opted UNTYPED node_modules packages keep the checked-dynamic
-  // surface: maxNodeModuleJsDepth (active on every --npm-static load)
-  // would otherwise admit their JS and replace the flagless `any` with an
-  // inferred surface — changing the PROGRAM's own types under a flag that
-  // promised to touch only the opted-in packages (the jaro-winkler
-  // shape). The fs shadow serves those files as the any-surface stub:
-  // typegapped's import types `any` (its use sites meet the ordinary
-  // any fences, never its own checker errors), while
-  // escape-string-regexp compiles statically beside it.
-  test("a non-opted untyped package keeps the checked-dynamic any surface", () => {
-    const { coverage } = analyze(join(pilotRoot, "typegap-mix.ts"), {
-      dynamic: true,
-      npmStatic: ["escape-string-regexp"],
-    });
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.npmStatic).toEqual([{ package: "escape-string-regexp", status: "static" }]);
-    // typegapped's own checker errors never gate; the one report is the
-    // consumer's any-value fence — the same story a flagless island
-    // import of an untyped package tells.
-    expect(coverage.diagnostics).toHaveLength(1);
-    expect(coverage.diagnostics[0]?.code).toBe("SC1090");
-    expect(coverage.diagnostics[0]?.message).toMatch(/console\.log of 'any'/);
-  }, 120_000);
-
-  // WORKSPACE-LINKED packages: node_modules/wslinked is a symlink whose
-  // realpath lies outside every node_modules (the monorepo-internal
-  // install every workspace tool produces). The opt-in compiles its
-  // shipped dist statically as program modules — the fs shadow hides the
-  // declaration twins along the realpath'd internal edges, resolution
-  // lands on the runtime JS, and the binary byte-matches Node.
-  test("a workspace-linked package compiles statically under --npm-static", async () => {
-    const entry = join(fixturesRoot, "npm/cases/workspace-linked/main.ts");
-    const { coverage } = analyze(entry, { npmStatic: ["wslinked"] });
-    expect(coverage.npmStatic).toEqual([{ package: "wslinked", status: "static" }]);
-    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
     expect(coverage.stats.statementsFailed).toBe(0);
 
-    // Flavor-split like every fixed-name build dir: the other flavor's
-    // concurrent suite runs this same test (with a different sanitize
-    // flag, even) and must not share the dir.
-    const outDir = join(cacheDir, `npm-static-workspace-${sanitize ? "san" : "plain"}`);
-    mkdirSync(outDir, { recursive: true });
-    const result = await compile(entry, { backend: sanitize ? "c" : "rust", outPath: join(outDir, "program"), outDir, sanitize, npmStatic: ["wslinked"] });
-    if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+    const binary = await buildStatic(entry, ["picocolors"]);
+    const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
+    delete env["FORCE_COLOR"];
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary(oracleExecutable, [entry]),
-      runBinary(result.binaryPath, []),
+      runBinary("node", [entry], env),
+      runBinary(binary, [], env),
     ]);
-    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
-    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
-  }, 120_000);
-
-  // The FLAGLESS classification of the same workspace link: an npm import
-  // like any other — island-capable sites (per-package attribution naming
-  // 'wslinked'), never "nothing installed resolves it".
-  test("a workspace-linked package classifies as an npm import without flags", () => {
-    const { coverage } = analyze(join(fixturesRoot, "npm/cases/workspace-linked/main.ts"));
-    expect(coverage.preflightFailed).toBe(false);
-    const all = JSON.stringify(coverage.diagnostics);
-    expect(all).toContain("wslinked");
-    expect(all).not.toContain("nothing installed resolves");
-  }, 120_000);
-
-  /* ── bundler-emitted CJS: the getter-table export shapes (cases
-   * 2465-2469) ─ the canonical-table rewrite types each shape's named
-   * exports by their resolved values, the compiled binaries byte-match
-   * Node, and the consumer-anchored offender attribution degrades what
-   * inference cannot carry. */
-
-  // 2465: the esbuild __export getter table (renamed local, member-access
-  // getter body, mutable-var snapshot) + a lexer-visible-but-valueless
-  // chunk-wrapped name binding undefined, exactly Node.
-  // 2466: the esbuild __reExport star (+ annotation spread) over a plain
-  // CJS sibling.
-  // 2467: the tsc __exportStar barrel (defineProperty __esModule stamp,
-  // void-init preamble, own member export beside the stars).
-  // 2468: the Object.defineProperty(exports, 'n', { get }) re-export
-  // family plus a scalar member export.
-  test.for([
-    ["2465-getter-table", "gtable"],
-    ["2466-getter-star", "gtstar"],
-    ["2467-star-barrel", "gtbarrel"],
-    ["2468-defineprop-exports", "gtdefine"],
-  ] as const)("bundler-emitted CJS %s compiles statically and byte-matches Node", async ([caseDir, pkg]) => {
-    const entry = join(fixturesRoot, "npm/cases", caseDir, "main.ts");
-    const { coverage } = analyze(entry, { npmStatic: [pkg] });
-    expect(coverage.npmStatic).toEqual([{ package: pkg, status: "static" }]);
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
-    const binary = await buildStatic(entry, [pkg]);
-    const [nodeRes, nativeRes] = await Promise.all([
-      runBinary(oracleExecutable, [entry]),
-      runBinary(binary, []),
-    ]);
-    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.stdout).toEqual(nodeRes.stdout);
+    expect(comparableStderr(nativeRes.stderr)).toEqual(nodeRes.stderr);
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
   }, 180_000);
 
-  /* ── 2556-2557: esbuild's __toESM interop around EXTERNAL (unbundled)
-   * dependencies ─ the wrapper erases (the recognized helper pads down to
-   * the bare require it wraps), member accesses model on the required
-   * package's canonical table, `.default` binds the module for plain-CJS
-   * targets (and unconditionally under the `, 1` node-mode variant) and
-   * stays a member read for __esModule-stamped ones; interop the
-   * recognizer cannot finish degrades the package with a note naming the
-   * construct. */
-
-  // 2556: gtwrap wraps a plain-CJS external (gtcore — default IS the
-  // module) and an esbuild-bundle external (gtable — stamped, named
-  // getter passthrough); driven paths byte-match Node, and the undriven
-  // inline `__toESM(require(…)).tag` form costs nothing.
-  test("bundler-emitted CJS 2556-toesm-external compiles statically and byte-matches Node", async () => {
-    const entry = join(fixturesRoot, "npm/cases/2556-toesm-external/main.ts");
-    const { coverage } = analyze(entry, { npmStatic: ["gtwrap", "gtcore", "gtable"] });
-    expect(coverage.npmStatic).toEqual([
-      { package: "gtwrap", status: "static" },
-      { package: "gtcore", status: "static" },
-      { package: "gtable", status: "static" },
-    ]);
+  test("picocolors inherited valueOf retains the prototype-method fence", () => {
+    const entry = join(pilotRoot, "colors-prototype-cli.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["picocolors"] });
+    expect(coverage.npmStatic).toEqual([{ package: "picocolors", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0);
-    const binary = await buildStatic(entry, ["gtwrap", "gtcore", "gtable"]);
-    const [nodeRes, nativeRes] = await Promise.all([
-      runBinary(oracleExecutable, [entry]),
-      runBinary(binary, []),
-    ]);
-    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
-    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
-  }, 180_000);
-
-  // The interop's require edge is a require like any other: with only
-  // gtwrap opted in, the erased wrapper's require("gtcore") meets the
-  // existing SC1010 fence anchored in gtwrap's files, and the package
-  // degrades with the module-naming note — preflight and lowering agree.
-  test("__toESM of an unopted dependency degrades the wrapping package with the require note", () => {
-    const entry = join(fixturesRoot, "npm/cases/2556-toesm-external/main.ts");
-    const { coverage } = analyze(entry, { npmStatic: ["gtwrap"] });
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.npmStatic).toEqual([
-      {
-        package: "gtwrap",
-        status: "fallback",
-        detail: expect.stringContaining("'gtcore'") as string,
-      },
-    ]);
-  }, 120_000);
-
-  // 2557: a __toESM whose TEXT deviates beyond the structural recognizer
-  // (a hand-rolled block-body interop). The rewrite must not guess: the
-  // package degrades to the island with a note NAMING the construct —
-  // never a failed build, and never the silent alternative (the live
-  // helper chain's `var __create = Object.create;` fences at module load
-  // while the report claims "static").
-  test("a deviant __toESM helper degrades the package with a construct-naming note", () => {
-    const entry = join(fixturesRoot, "npm/cases/2557-toesm-drift/main.ts");
-    const { coverage } = analyze(entry, { npmStatic: ["gtdrift", "gtcore"] });
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.npmStatic).toEqual([
-      {
-        package: "gtdrift",
-        status: "fallback",
-        detail: expect.stringContaining("__toESM") as string,
-      },
-      { package: "gtcore", status: "static" },
-    ]);
-  }, 120_000);
-
-  // Auto must not newly admit what the recognition cannot finish: the
-  // eligibility heuristics pick gtdrift (own .d.ts, unminified, no
-  // runtime markers), the attempt runs, and the SAME construct-naming
-  // degrade answers — the preflight refusal and the lowering agree.
-  test("--npm-static=auto degrades a deviant __toESM package with the same note", () => {
-    const entry = join(fixturesRoot, "npm/cases/2557-toesm-drift/main.ts");
-    const { coverage } = analyze(entry, { npmStatic: "auto" });
-    expect(coverage.npmStatic).toEqual([
-      {
-        package: "gtdrift",
-        status: "fallback",
-        detail: expect.stringContaining("__toESM") as string,
-      },
-    ]);
-  }, 120_000);
-
-  // 2469: a TYPE-ONLY surface name (an interface) has no JS value the
-  // inferred surface can carry — the import-site SC0001 NAMES the package,
-  // and the consumer-anchored attribution degrades exactly it to the
-  // island with the note, never a failed gate. Explicit opt-ins degrade
-  // like auto's: the ratified bundle-shape behavior.
-  test("a consumer-anchored surface break degrades the named package with a note", () => {
-    const entry = join(fixturesRoot, "npm/cases/2469-bundle-offender/main.ts");
-    const { coverage } = analyze(entry, { npmStatic: ["gtghost"] });
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.npmStatic).toEqual([
-      {
-        package: "gtghost",
-        status: "fallback",
-        detail: expect.stringContaining("inferred export surface breaks 1 import site") as string,
-      },
-    ]);
-  }, 120_000);
-
-  // The build-transform-marker relaxation: a getter-table bundle with its
-  // own .d.ts is now ELIGIBLE for auto (the esbuild/tsc CJS stamps no
-  // longer disqualify — only a bundler RUNTIME like webpack's registry
-  // does), and the attempt succeeds outright here.
-  test("--npm-static=auto opts a getter-table bundle in", () => {
-    const entry = join(fixturesRoot, "npm/cases/2465-getter-table/main.ts");
-    const { coverage } = analyze(entry, { npmStatic: "auto" });
-    expect(coverage.npmStatic).toEqual([{ package: "gtable", status: "static" }]);
-    expect(coverage.preflightFailed).toBe(false);
-  }, 120_000);
-
-  // The COPIED workspace shape classifies exactly like the symlinked one:
-  // node_modules/wscopied is a real directory (no realpath escape — some
-  // workspace installers copy members into node_modules), so detection
-  // reads the workspace ROOT's "workspaces" globs instead. The member is
-  // UNTYPED: its implicit-any module error (the import-site 7016) must
-  // never gate — the package is the program author's own workspace code —
-  // and the flagless build reports the same island-capable per-package
-  // attribution the symlinked twin gets.
-  test("a copied workspace member classifies identically to a symlinked one", () => {
-    const { coverage } = analyze(join(fixturesRoot, "npm/cases/workspace-copied/main.ts"));
-    expect(coverage.preflightFailed).toBe(false);
-    const all = JSON.stringify(coverage.diagnostics);
-    expect(all).toContain("wscopied");
-    expect(all).not.toContain("nothing installed resolves");
-    expect(all).not.toContain("implicitly has an 'any' type");
-  }, 120_000);
-
-  /* ── require() of JSON modules ─────────────────────────────────────────
-   * The idiom statuses (`require('./codes.json')`) and mime-db
-   * (`module.exports = require('./db.json')`) ship. The document is DATA
-   * known at build time, so the CJS binding bakes into the same comptime
-   * global the ESM default import of a .json file already bakes into,
-   * keyed by the JSON module symbol — one value per document, however
-   * many files of the package require it (Node's module cache). */
-  test("a package requiring relative JSON documents compiles statically and byte-matches Node", async () => {
-    const entry = join(fixturesRoot, "npm/cases/json-require/main.ts");
-    const { coverage } = analyze(entry, { npmStatic: ["jsonzoo"] });
-    expect(coverage.npmStatic).toEqual([{ package: "jsonzoo", status: "static" }]);
-    expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toHaveLength(0);
-    // Baked, not deferred: the documents leave no runtime fence behind —
-    // reads through the binding are ordinary record/array field reads.
     expect(coverage.runtimeFences ?? []).toHaveLength(0);
-    const binary = await buildStatic(entry, ["jsonzoo"]);
+    expect(coverage.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(["SC2020"]);
+    expect(coverage.diagnostics.map((diagnostic) => diagnostic.message)).toEqual([
+      expect.stringContaining(".valueOf' is part of the standard library types"),
+    ]);
+  }, 120_000);
+
+  test("picocolors inherited hasOwnProperty matches Node", async () => {
+    const entry = join(pilotRoot, "colors-hasown-cli.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["picocolors"] });
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+
+    const binary = await buildStatic(entry, ["picocolors"]);
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary(oracleExecutable, [entry]),
+      runBinary("node", [entry]),
       runBinary(binary, []),
     ]);
-    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.stdout).toEqual(nodeRes.stdout);
+    expect(comparableStderr(nativeRes.stderr)).toEqual(nodeRes.stderr);
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
   }, 180_000);
-});
+

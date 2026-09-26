@@ -75,6 +75,7 @@ test("early library cache restores generated artifacts and metadata", async () =
     assert: true,
     inspect: false,
     symbol: false,
+    bigint: false,
     searchParams: false,
     emitter: false,
     zlib: false,
@@ -89,8 +90,8 @@ test("early library cache restores generated artifacts and metadata", async () =
     frontend: tracker.snapshot(),
   });
   await Promise.all([rm(f.cPath), rm(f.irPath), rm(f.sidecarPath)]);
-  const staleCPath = join(f.options.outDir, "entry.lib.c");
-  await writeFile(staleCPath, "/* stale c backend */\n");
+  const alternateCPath = join(f.options.outDir, "entry.lib.c");
+  await writeFile(alternateCPath, "/* saved c backend */\n");
 
   const hit = await readEarlyLibraryCache(f.root, f.options, null);
   expect(hit).not.toBeNull();
@@ -98,7 +99,7 @@ test("early library cache restores generated artifacts and metadata", async () =
   expect(await readFile(f.cPath, "utf8")).toBe("; generated llvm\n");
   expect(await readFile(f.irPath, "utf8")).toContain("irVersion");
   expect(await readFile(f.sidecarPath, "utf8")).toContain("contract");
-  await expect(readFile(staleCPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readFile(alternateCPath, "utf8")).toBe("/* saved c backend */\n");
 });
 
 test("early library cache publishes after creating a fresh output directory", async () => {
@@ -126,6 +127,7 @@ test("early library cache publishes after creating a fresh output directory", as
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,
@@ -154,6 +156,7 @@ test("early library cache hits refresh every payload's LRU time", async () => {
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,
@@ -197,6 +200,7 @@ test("early library cache misses on source edits and newly-resolved candidates",
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,
@@ -224,6 +228,7 @@ test("early library cache misses on source edits and newly-resolved candidates",
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,
@@ -245,7 +250,7 @@ test("semantic library cache restores and rebases IR after a comment-only edit",
   const sourceBefore = await readFile(f.source, "utf8");
   const returnStart = sourceBefore.indexOf("return");
   const semanticMod = {
-    irVersion: 8,
+    irVersion: 11,
     sourceFile: f.source,
     functions: [{
       name: "__main",
@@ -269,6 +274,7 @@ test("semantic library cache restores and rebases IR after a comment-only edit",
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,
@@ -302,7 +308,7 @@ test("semantic library cache refuses token and directive edits", async () => {
   const f = await fixture();
   const sourceBefore = await readFile(f.source, "utf8");
   const semanticMod = {
-    irVersion: 8,
+    irVersion: 11,
     sourceFile: f.source,
     functions: [{
       name: "__main",
@@ -326,6 +332,7 @@ test("semantic library cache refuses token and directive edits", async () => {
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,
@@ -346,7 +353,7 @@ test("semantic C cache accepts only line-preserving single-source edits", async 
   const f = await fixture();
   const sourceBefore = await readFile(f.source, "utf8");
   const semanticMod = {
-    irVersion: 8,
+    irVersion: 11,
     sourceFile: f.source,
     functions: [{
       name: "__main",
@@ -370,6 +377,7 @@ test("semantic C cache accepts only line-preserving single-source edits", async 
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,
@@ -406,6 +414,7 @@ test("semantic C cache refuses non-LF separator normalization", async () => {
         assert: false,
         inspect: false,
         symbol: false,
+        bigint: false,
         searchParams: false,
         emitter: false,
         zlib: false,
@@ -415,7 +424,7 @@ test("semantic C cache refuses non-LF separator normalization", async () => {
       frontend: tracker.snapshot(),
       semantic: {
         mod: {
-          irVersion: 8,
+          irVersion: 11,
           sourceFile: f.source,
           functions: [],
           entry: "__main",
@@ -436,7 +445,7 @@ test("semantic C cache refuses comment-only edits in multi-source graphs", async
   const importedSource = "export function helper(): number { return 1; }\n";
   await writeFile(imported, importedSource);
   const semanticMod = {
-    irVersion: 8,
+    irVersion: 11,
     sourceFile: f.source,
     functions: [{
       name: "__main",
@@ -463,6 +472,7 @@ test("semantic C cache refuses comment-only edits in multi-source graphs", async
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,
@@ -497,6 +507,7 @@ test("early library cache is separated by the host Node version", async () => {
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,
@@ -528,6 +539,7 @@ test("early library cache rejects corrupted artifacts and metadata", async () =>
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,
@@ -560,6 +572,7 @@ test("disabled early library cache performs no reads or writes", async () => {
       assert: false,
       inspect: false,
       symbol: false,
+      bigint: false,
       searchParams: false,
       emitter: false,
       zlib: false,

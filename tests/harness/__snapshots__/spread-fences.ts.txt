@@ -1,20 +1,13 @@
-spread-fences.ts:12:17 - error SC1090: spread arguments into fixed parameter positions (a spread can only fill a rest parameter) are not supported yet
+spread-fences.ts:14:21 - error SC1090: conditional spreads beyond `...(c ? { field: v } : {})` (exactly one property against an empty arm — spell other shapes as optional fields) is not supported yet
 
-  11 | const pair: number[] = [1, 2];
-  12 | console.log(two(...(pair as [number, number])));
-     |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  13 | 
-
-spread-fences.ts:20:21 - error SC1090: conditional spreads beyond `...(c ? { field: v } : {})` (exactly one property against an empty arm — spell other shapes as optional fields) is not supported yet
-
-  19 | const cond = true;
-  20 | const s1: Shape = { ...(cond ? { x: 1, y: 2 } : { x: 3, y: 4 }) };
+  13 | const cond = true;
+  14 | const s1: Shape = { ...(cond ? { x: 1, y: 2 } : { x: 3, y: 4 }) };
      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  21 | interface YOnly {
+  15 | interface YOnly {
 
-spread-fences.ts:25:27 - error SC1090: object spread after explicit properties (spreads must come first — a later spread would overwrite them with JS semantics the desugar does not model) are not supported yet
+spread-fences.ts:19:27 - error SC1090: object spread after explicit properties (spreads must come first — a later spread would overwrite them with JS semantics the desugar does not model) are not supported yet
 
-  24 | const yPart: YOnly = { y: 0 };
-  25 | const s2: Shape = { x: 5, ...yPart };
+  18 | const yPart: YOnly = { y: 0 };
+  19 | const s2: Shape = { x: 5, ...yPart };
      |                           ^~~~~~~~
-  26 | 
+  20 | // A spread field the target keeps (no later override) must match exactly —

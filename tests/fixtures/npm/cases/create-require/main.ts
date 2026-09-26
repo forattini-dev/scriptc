@@ -12,6 +12,11 @@ const require = createRequire(import.meta.url);
 // A plain CJS package: module.exports members through the island.
 const zoo = require("cjszoo") as any;
 console.log("zoo:", zoo.alpha as string, zoo.extra as string, zoo.gamma() as string);
+console.log(
+  "zoo resolve:",
+  (zoo.resolved as string).endsWith("/cjszoo/core.js"),
+  (zoo.resolvePaths as string[])[0]?.endsWith("/cjszoo"),
+);
 
 // The dual package: "exports" splits import/require — require() loads
 // the CJS arm, exactly Node's createRequire.

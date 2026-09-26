@@ -1,6 +1,6 @@
 # Test harness
 
-Two lanes over the same suite: plain (`pnpm test`) and sanitized (`SCRIPTC_SAN=1 pnpm test`, ASan + the runtime RC audit). Node is the oracle everywhere — corpus programs run under Node and as compiled binaries, and outputs must agree byte-for-byte. Both lanes must be green before a commit.
+Two lanes over the same suite: plain (`pnpm test`) and sanitized (`SCRIPTC_SAN=1 pnpm test`, ASan + the runtime RC audit). Corpus programs use Node as the oracle: they run under Node and as compiled binaries, and outputs must match exactly. The Test262 profile uses upstream assertions as its oracle. Both lanes must be green before a commit.
 
 The Node that hosts Vitest/the TypeScript compiler and the Node that supplies
 the semantic oracle are separate inputs. They are identical by default;
@@ -227,3 +227,7 @@ Compiler environment variables that can resolve mutable compilation inputs (`CPA
 `pnpm test:cache-identity` (optionally `--san`) is the acceptance artifact: it runs the full suite uncached, cache-populating, and cached, then diffs every test's name/status/failure output between the cached and uncached passes and exits nonzero on any drift.
 
 `pnpm build` is incremental (tsbuildinfo under `node_modules/.cache/scriptc-tsc/`); `pnpm build:fresh` is the clean-build escape.
+
+## Test262
+
+The default static compiler has a pinned Test262 regression profile and a separate full-snapshot survey runner. See [tests/test262/README.md](../test262/README.md) for commands, outcome reporting, and the current strict-script and scalar-assertion limits. Both plain and sanitized Sandbox lanes run the regression profile; dynamic islands are disabled.

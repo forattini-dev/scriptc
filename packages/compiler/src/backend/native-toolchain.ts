@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { localizeElfObject, mergeAndLocalizeCoffObjects } from "./object-localize.js";
 import { withNativeBuildSlot } from "./native-build-slot.js";
+import { executableOptimizationLinkerArgs, executableStripLinkerArgs, windowsSubsystemLinkerArgs, type WindowsSubsystem } from "./targets.js";
 import {
   createVendorArchives,
   MBEDTLS_VERSION,
@@ -289,6 +290,10 @@ export interface CcOptions {
    * executable lane; dev selects -O0 and may compile a caller-provided LLVM
    * shard set into independently cached objects before the final link. */
   optimization?: "release" | "dev";
+  /** Remove symbol/debug payload from the linked executable. */
+  strip?: boolean;
+  /** PE executable subsystem; omitted and console use the driver default. */
+  windowsSubsystem?: WindowsSubsystem;
   /** Optional equivalent LLVM modules for dev compilation. Unsupported
    * targets or merge failures fall back to the canonical cPath TU. */
   programShards?: readonly { name: string; source: string }[];
@@ -4049,6 +4054,16 @@ async function compileCInternal(
     ? EXECUTABLE_RUNTIME_SOURCES.filter((source) => source !== "scr_child.c")
     : EXECUTABLE_RUNTIME_SOURCES;
   const executableSectionFlags = executableSectionEliminationFlags(targetPlatform(driver));
+  const windowsSubsystemArgs = windowsSubsystemLinkerArgs(targetPlatform(driver), opts.windowsSubsystem);
+  const executableLinkFlags = [
+    ...executableSectionFlags.link,
+    ...executableOptimizationLinkerArgs(
+      targetPlatform(driver),
+      optimization,
+    ),
+    ...executableStripLinkerArgs(targetPlatform(driver), opts.strip ?? false),
+    ...windowsSubsystemArgs,
+  ];
   // scr_async.c submits callback-style filesystem work to a native worker.
   // POSIX drivers need the thread compile/link mode; win32 uses CreateThread.
   const threadArgs = targetPlatform(driver) === "win32" || targetPlatform(driver) === "wasi"

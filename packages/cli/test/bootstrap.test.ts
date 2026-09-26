@@ -87,13 +87,14 @@ test.each([
     expect((await build()).stderr).not.toContain("scriptc lowering");
     expect((await execFileAsync(outPath)).stdout).toBe("one\n");
 
-    // A source-primary build may replace the cached executable between exact
-    // invocations. The shipped bootstrap must not leave its stale IR sibling
-    // behind, whether cache validation returns directly or falls through.
-    const staleIr = join(outDir, "main.ir.json");
-    await writeFile(staleIr, "stale source-primary IR\n");
+    // A routed cache hit preserves outputs from earlier invocations.
+    const savedIr = join(outDir, "main.ir.json");
+    const savedC = join(outDir, "main.c");
+    await writeFile(savedIr, "saved IR\n");
+    await writeFile(savedC, "saved C\n");
     await expect(build()).resolves.toBeDefined();
-    await expect(readFile(staleIr)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(savedIr, "utf8")).toBe("saved IR\n");
+    expect(await readFile(savedC, "utf8")).toBe("saved C\n");
 
     // Route metadata can be evicted independently of the executable payload.
     // One full-compiler fallback must repair it so the following invocation is

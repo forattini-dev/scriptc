@@ -221,6 +221,10 @@ const PROBES: Probe[] = [
   { id: "stdlib.array.unshift", source: "const xs: number[] = [2];\nconsole.log(xs.unshift(1), xs[0]);\n" },
   { id: "stdlib.array.reverse", source: "const xs: number[] = [1, 2];\nconsole.log(xs.reverse()[0]);\n" },
   { id: "stdlib.math.floor", source: "console.log(Math.floor(1.5));\n" },
+  { id: "stdlib.math.sqrt", source: "console.log(Math.sqrt(4));\n" },
+  { id: "stdlib.math.tan", source: "console.log(Math.tan(2));\n" },
+  { id: "stdlib.math.sign", source: "console.log(Math.sign(-2));\n" },
+  { id: "stdlib.math.hypot", source: "console.log(Math.hypot(3, 4));\n" },
   { id: "stdlib.map.has", source: 'const m = new Map<string, number>();\nm.set("a", 1);\nconsole.log(m.has("a"));\n' },
   { id: "stdlib.date.now", source: "console.log(Date.now() > 0);\n" },
   { id: "stdlib.number.toFixed", source: "const n = 1.2345;\nconsole.log(n.toFixed(2));\n" },
@@ -257,7 +261,6 @@ const PROBES: Probe[] = [
   { id: "stdlib.math.E", source: "console.log(Math.E);\n" },
   // status dynamic-only — refused with the entry's code statically,
   // analyzed clean under --dynamic
-  { id: "stdlib.math.sqrt", source: "console.log(Math.sqrt(2));\n" },
   { id: "stdlib.string.replace", source: 'console.log("aa".replace("a", "b"));\n' },
   {
     id: "stdlib.headers.entries",

@@ -43,7 +43,7 @@ export function runtimeOptionalBindingType(lowerer: Lowerer, node: ts.Node, fall
         if (sig) {
           return {
             ...fallback,
-            params: sig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type),
+            params: sig.params.filter((p) => p.mode !== "dynRest" && p.mode !== "arguments").map((p) => p.type),
             ret: sig.returnType,
           };
         }
@@ -325,6 +325,11 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     const e = peel(node);
     if (isArrayRead(e)) return true;
     if (ts.isCallExpression(e) && lowerer.runtimeOptionalReduceTypes.has(e)) return true;
+    if (
+      ts.isCallExpression(e) && e.arguments.length === 0 &&
+      ts.isPropertyAccessExpression(e.expression) &&
+      e.expression.name.text === "stringify" && lowerer.isStdlibGlobal(e.expression.expression, "JSON")
+    ) return true;
     if (
       ts.isCallExpression(e) &&
       ts.isPropertyAccessExpression(e.expression) &&
@@ -838,7 +843,7 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
         if (sourceSig) {
           promoted = {
             ...promoted,
-            params: sourceSig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type),
+            params: sourceSig.params.filter((p) => p.mode !== "dynRest" && p.mode !== "arguments").map((p) => p.type),
             ret: sourceSig.returnType,
           };
         }

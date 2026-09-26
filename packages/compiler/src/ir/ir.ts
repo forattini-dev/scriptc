@@ -68,11 +68,10 @@ export type IrType =
   /** A typed array / Node Buffer (Uint8Array, Uint32Array, Float32Array/Float64Array;
    * Buffer IS a Uint8Array subclass and shares the u8 kind) — heap,
    * refcounted, MUTABLE, fixed-length, with ONE runtime representation
-   * (ScrBytes) that OWNS its storage: no views exist — subarray()/slice()
-   * both COPY (documented divergence for subarray), `.buffer`/
-   * `.byteOffset`/DataView are frontend-fenced. Element reads widen to
-   * f64; writes coerce JS-exactly (ToUint8/ToUint32 modular truncation,
-   * double→float rounding). OOB element access traps like arrays. Allowed
+   * (ScrBytes) that owns storage or borrows it for subarray and DataView
+   * views. Typed-array slice copies. Element reads widen to f64; writes
+   * coerce JS-exactly (ToUint8/ToUint32 modular truncation and f32
+   * rounding). OOB element access traps like arrays. Allowed
    * as array elements and union arms (tag-based narrowing, like url);
    * fenced out of map keys/values, set elements, and JSON. Holds only raw
    * bytes — never part of a cycle, no trace. */
@@ -207,12 +206,17 @@ export type IrType =
    * as a Map VALUE (the per-hostname context cache) like child; fenced out
    * of array elements and JSON like the other opaque handles. */
   | { kind: "secureCtx" }
+  /** Mutable node:crypto digest handles. Hash and Hmac share a runtime
+   * representation but remain distinct IR kinds so unsupported methods
+   * cannot cross between their public surfaces. */
+  | { kind: "cryptoHash" }
+  | { kind: "cryptoHmac" }
   /** Heap, refcounted closure. A rest-marked value with no restAbi hides
    * one trailing dyn-array slot supplied by its boxed thunk. restAbi jsval
    * spells an engine-array slot; restAbi array spells a typed array slot.
    * Typed calls complete that final slot with a fresh argument pack.
    * The marker distinguishes a variadic call from one taking an array. */
-  | { kind: "func"; params: IrType[]; ret: IrType; rest?: true; restAbi?: "jsval" | "array" }
+  | { kind: "func"; params: IrType[]; ret: IrType; rest?: true; restAbi?: "jsval" | "array"; argumentsAll?: true }
   | { kind: "object"; className: string } // heap, refcounted class instance
   /** The class STATIC side as a value — `typeof C`, the type of the class
    * name itself and of `new (…) => T` constructor-typed slots. Runtime
@@ -321,6 +325,8 @@ const POINTER_HANDLE_KINDS = [
   "httpRes",
   "httpClientReq",
   "secureCtx",
+  "cryptoHash",
+  "cryptoHmac",
   "fsWatcher",
   "childStream",
 ] as const satisfies readonly IrType["kind"][];
@@ -404,6 +410,8 @@ export const RUNTIME_RC_STEMS: Record<IrType["kind"], string> = {
   procStream: "",
   fsWatcher: "scr_watcher",
   secureCtx: "scr_secure_ctx",
+  cryptoHash: "scr_crypto_hash",
+  cryptoHmac: "scr_crypto_hash",
   func: "scr_closure",
   object: "",
   classval: "scr_classobj",
@@ -442,7 +450,7 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "symbol",
   "date", "array", "map", "set", "regex", "url", "searchParams", "stats", "fileHandle", "spawnRes", "child", "effect", "sqliteDb", "sqliteStmt", "genericFunc",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
-  "secureCtx", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
+  "secureCtx", "cryptoHash", "cryptoHmac", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
   // A generator object is a JS object: always truthy.
   "generator",
   // A class object is a JS object (constructors are functions): always truthy.
@@ -662,7 +670,7 @@ export function typeKey(t: IrType): string {
     case "set":
       return `set<${typeKey(t.elem)}>`; case "genericFunc": return `genericFunc<${t.familyId}>`;
     case "func":
-      return `func(${[...t.params.map(typeKey), ...(t.rest ? [t.restAbi === "array" ? "...typed[]" : t.restAbi === "jsval" ? "...jsval[]" : "...dyn[]"] : [])].join(",")})=>${typeKey(t.ret)}`;
+      return `func(${[...t.params.map(typeKey), ...(t.rest ? [t.restAbi === "array" ? "...typed[]" : t.restAbi === "jsval" ? "...jsval[]" : t.argumentsAll ? "arguments[]" : "...dyn[]"] : [])].join(",")})=>${typeKey(t.ret)}`;
     case "object":
       return `object:${t.className}`;
     case "classval":
@@ -695,6 +703,7 @@ export function typeEquals(a: IrType, b: IrType): boolean {
       b.kind === "func" &&
       a.params.length === b.params.length &&
       (a.rest === true) === (b.rest === true) && a.restAbi === b.restAbi &&
+      a.argumentsAll === b.argumentsAll &&
       a.params.every((p, i) => typeEquals(p, b.params[i]!)) &&
       typeEquals(a.ret, b.ret)
     );
@@ -1464,6 +1473,14 @@ export type IrStmt =
  * the fresh array. */
 export type IrArrIntrinsicMethod =
   | "length"
+  /** Internal ToNumber(a[index]) for f64-backed arrays: one numeric index,
+   * returning the stored number or NaN for a hole/undefined/missing key.
+   * Borrows the receiver and never traps on missing values. */
+  | "getNumber"
+  /** Internal strict equality of two f64/bool/string array slots. Arguments
+   * are [left index, right array, right index]; holes and present undefined
+   * compare as undefined. Both arrays have the same primitive element type. */
+  | "indexEq"
   | "push"
   | "pushSpread"
   | "concatSpread"
@@ -1479,6 +1496,12 @@ export type IrArrIntrinsicMethod =
   | "slice"
   | "shift"
   | "splice"
+  /** One dense copy pass, or one level of flattening into an empty typed
+   * result array. The supplied result is borrowed and returned retained. */
+  | "flatCopy"
+  | "flatOne"
+  /** Mutating splice with evaluated insertion items; returns removed slots. */
+  | "spliceInsert"
   | "reverse"
   /** ES2023 copying methods. `toSpliced` receives [start, deleteCount,
    * itemsArray], with omitted arguments completed by the frontend;
@@ -1930,6 +1953,24 @@ export type IrLibFn =
    * wart preserved), boolean/number/string by kind, function→"function".
    * Never throws. */
   | "dyn.typeof"
+  /** Object.prototype.toString.call on a checked-dynamic value. */
+  | "dyn.objectTag"
+  | "module.registryInit"
+  | "module.define"
+  | "module.enter"
+  | "module.link"
+  | "module.finish"
+  | "module.fail"
+  | "module.filename"
+  | "module.id"
+  | "module.path"
+  | "module.paths"
+  | "module.children"
+  | "module.parent"
+  | "module.loaded"
+  | "module.cacheGet"
+  | "module.cacheHas"
+  | "module.cacheKeys"
   /** toString() on a checked-dynamic receiver: runtime kind dispatch
    * (bytes decode per the literal encoding — utf8 default; strings,
    * numbers, booleans, arrays, objects answer JS-exactly; undefined and
@@ -2019,6 +2060,7 @@ export type IrLibFn =
    * zero-argument calls. Borrows the array; never throws. */
   | "math.maxArr"
   | "math.minArr"
+  | "math.hypotArr"
   /** `fs.readdirSync(path, { withFileTypes: true })` — Dirent rows over
    * one readdir pass (scr_lib.c's scandir snapshot; DT_UNKNOWN falls back
    * to lstat, Node's getDirents rule). The result type is the call site's
@@ -2358,6 +2400,7 @@ export type IrLibFn =
   | "net.listenOptsReusePort"
   | "net.listenOptsReusePortCb"
   | "net.serverPort"
+  | "net.serverListening"
   /** server.address() as the full AddressInfo record (the dgram.address
    * materialization pattern: the emitter builds the record from the three
    * runtime reads; the frontend pinned the shape). Never throws — before
@@ -2520,6 +2563,8 @@ export type IrLibFn =
    * maxHeaderSize takes dyn so explicit undefined remains distinguishable
    * from a number until its Node validation ladder). */
   | "http.createServerEmpty"
+  | "http.validateHeaderName"
+  | "http.validateHeaderValue"
   | "http.serverJoinDupHeaders"
   | "http.serverMaxHeaderSizeSet"
   /** The five writable numeric http.Server timeout fields use one
@@ -2529,6 +2574,11 @@ export type IrLibFn =
    * The constructor-option setter takes dyn so explicit undefined remains
    * distinguishable from a numeric value until its Node validation ladder. */
   | "http.serverTimeoutGet"
+  | "http.serverSetTimeout"
+  | "http.serverSetTimeoutCb"
+  | "http.serverOnTimeout"
+  | "http.serverCloseAllConnections"
+  | "http.serverCloseIdleConnections"
   | "http.serverTimeoutSet"
   | "http.serverTimeoutOptionSet"
   /** server.on("listening", cb) — the deferred listen-callback list. */
@@ -2544,7 +2594,25 @@ export type IrLibFn =
   | "http.resStatusSet"
   | "http.resStatusMsgGet"
   | "http.resStatusMsgSet"
+  | "http.resRequest"
+  | "http.resSocket"
+  | "http.resWritableFinished"
+  | "http.resSendDateGet"
+  | "http.resSendDateSet"
+  | "http.resStrictContentLengthGet"
+  | "http.resStrictContentLengthSet"
+  | "http.resSetTimeout"
+  | "http.resSetTimeoutCb"
+  | "http.resWritableEnded"
+  | "http.resFlushHeaders"
+  | "http.resAddTrailers"
+  | "http.resCork"
+  | "http.resUncork"
+  | "http.resWritableCorked"
   | "http.resGetHeader"
+  | "http.resGetHeaderNames"
+  | "http.resGetRawHeaderNames"
+  | "http.resGetHeaders"
   | "http.resHasHeader"
   | "http.resRemoveHeader"
   | "http.resOnFinish"
@@ -2556,6 +2624,11 @@ export type IrLibFn =
   | "http.resSetHeader"
   | "http.resWriteHead"
   | "http.resWriteHeadN"
+  /** HTTP/1.1 informational heads; early hints takes flat string pairs,
+   * with a lowercase `link` key required to send anything. */
+  | "http.resWriteContinue"
+  | "http.resWriteProcessing"
+  | "http.resWriteEarlyHints"
   | "http.resWrite"
   | "http.resWriteBytes"
   | "http.resEnd"
@@ -2637,6 +2710,8 @@ export type IrLibFn =
   | "http.reqHttpVersionMinor"
   | "http.reqAborted"
   | "http.reqComplete" | "http.reqDestroyed"
+  | "http.reqSetTimeout"
+  | "http.reqSetTimeoutCb"
   | "http.resDestroy"
   | "http.resOnClose"
   | "http.resWriteHeadPairs"
@@ -2936,6 +3011,33 @@ export type IrLibFn =
    * idiom reads it through a cast). */
   | "net.sockEncrypted"
   | "http.clientWrite"
+  | "http.clientSetHeader"
+  | "http.clientGetHeader"
+  | "http.clientHasHeader"
+  | "http.clientRemoveHeader"
+  | "http.clientGetHeaderNames"
+  | "http.clientGetRawHeaderNames"
+  | "http.clientGetHeaders"
+  | "http.clientFlushHeaders"
+  | "http.clientAddTrailers"
+  | "http.clientCork"
+  | "http.clientUncork"
+  | "http.clientWritableCorked"
+  | "http.clientMethod"
+  | "http.clientPath"
+  | "http.clientHost"
+  | "http.clientProtocol"
+  | "http.clientHeadersSent"
+  | "http.clientWritableEnded"
+  | "http.clientWritableFinished"
+  | "http.clientSocket"
+  | "http.clientReusedSocket"
+  | "http.clientSetNoDelay"
+  | "http.clientSetSocketKeepAlive"
+  | "http.clientSetTimeout"
+  | "http.clientSetTimeoutCb"
+  | "http.statusCodes"
+  | "http.methods"
   | "http.clientWriteBytes"
   | "http.clientEnd"
   | "http.clientEndStr"
@@ -2949,11 +3051,16 @@ export type IrLibFn =
   | "http.requestUrl"
   | "http.requestUrlCb"
   | "http.clientDestroy"
+  | "http.clientAbort"
+  | "http.clientAborted"
   | "http.clientDestroyed"
   | "http.clientOnResponse"
+  | "http.clientOnSocket"
+  | "http.clientOnFinish"
   | "http.clientOnError"
   | "http.clientOnTimeout"
   | "http.clientOnClose"
+  | "http.clientOnAbort"
   /** fs/promises (scr_lib.c over scr_async.c's settled minting): the SAME
    * sync syscalls, wrapped in an ALREADY-SETTLED promise — failure
    * REJECTS (catchable at the await) instead of throwing, so none of
@@ -4123,7 +4230,11 @@ export type IrLibFn =
    * (-1 when absent; the empty needle finds the clamped position).
    * Borrowed args; +1 string / plain f64; neither throws. */
   | "string.fromCharCode"
+  /** lastIndexOf returns the last UTF-16 start index, or -1. The two-arg
+   * form searches at or before its numeric position; NaN starts at the end.
+   * String arguments are borrowed and neither form throws. */
   | "string.lastIndexOf"
+  | "string.lastIndexOfFrom"
   /** String.raw(template, ...subs): the raw literals array (a string[]
    * read off the template record) interleaved with the PRE-STRINGIFIED
    * substitutions (the frontend applies the static ToString and packs
@@ -7284,6 +7395,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "error.nodeThrow",
   // Coercion runs user hooks; failures propagate.
   ...THROWING_COERCION_FNS,
+  "dyn.objectTag",
   "child.kill",
   // The caller's lookup runs synchronously inside the connect call — a
   // throw there propagates like Node's.
