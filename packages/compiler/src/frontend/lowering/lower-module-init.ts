@@ -5,6 +5,7 @@ import { type Lowerer, dynUndefinedExpr } from "./lowerer.js";
 import { newFnCtx } from "./scope-env.js";
 import type { FileParts } from "./lower-modules.js";
 import { nativeImportTargetOf } from "./lower-native-import-types.js";
+import { cjsModuleRef } from "./lower-node-module.js";
 
   /** Names every file's %init and registers the run-once guard globals
    * (EVERY module, the entry included: an admissible import cycle can
@@ -360,6 +361,44 @@ export function prepareModuleInits(L: Lowerer, parts: FileParts[]): void {
       while (at < statics.length) {
         body.push(...L.lowerStaticFieldInits(statics[at]!.info));
         at++;
+      }
+      const moduleRef = cjsModuleRef(L, sf);
+      if (moduleRef !== null) {
+        const guardedBody = body.splice(guardId !== undefined ? 2 : 0);
+        const catchLocal = L.declareHiddenLocal("%moduleError", { kind: "caught" });
+        guardedBody.unshift({
+          kind: "exprStmt",
+          expr: { kind: "libCall", fn: "module.enter", args: [moduleRef], type: VOID, loc: loc0 },
+          loc: loc0,
+        });
+        guardedBody.push({
+          kind: "exprStmt",
+          expr: { kind: "libCall", fn: "module.finish", args: [moduleRef], type: VOID, loc: loc0 },
+          loc: loc0,
+        });
+        body.push({
+          kind: "tryCatch",
+          tryBody: guardedBody,
+          catchBody: [
+            {
+              kind: "exprStmt",
+              expr: { kind: "libCall", fn: "module.fail", args: [moduleRef], type: VOID, loc: loc0 },
+              loc: loc0,
+            },
+            ...(guardId !== undefined
+              ? [{
+                  kind: "assign" as const,
+                  localId: guardId,
+                  value: { kind: "boolLit" as const, value: false, type: BOOL, loc: loc0 },
+                  loc: loc0,
+                }]
+              : []),
+            { kind: "rethrow", localId: catchLocal.id, loc: loc0 },
+          ],
+          catchLocalId: catchLocal.id,
+          finallyBody: null,
+          loc: loc0,
+        });
       }
       const loc: SrcLoc = { file: sf.fileName, start: 0, end: 0 };
       return {

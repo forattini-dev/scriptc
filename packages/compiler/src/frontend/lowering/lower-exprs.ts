@@ -78,7 +78,7 @@ import { recordKeyResultOk } from "./lower-record-key-types.js";
 import { lowerDynamicRequestInstanceOf } from "./lower-instanceof-island.js";
 import { lowerBuiltinTypeof, lowerBuiltinTypeofTest } from "./lower-typeof.js";
 import { lowerDynamicGlobalIdentifier } from "../ambient-values.js";
-import { fenceNodeModuleMutation } from "./lower-node-module.js";
+import { fenceNodeModuleMutation, isNodeModuleValue, lowerNodeModuleIdentifier, lowerNodeModuleProperty, lowerRequireCacheElement, lowerRequireCacheHas, lowerRequireMainProperty } from "./lower-node-module.js";
 import { templateRawTextOf } from "./lower-templates.js";
 import { coerceStringSearchValue, defaultAfterUndefined, lowerStaticallyUndefinedArgument } from "./optional-arguments.js";
 export {
@@ -906,6 +906,9 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       return { kind: "jsOp", op: "arrLit", args, type: JSVAL, loc };
     }
     if (ts.isTypeOfExpression(expr)) {
+      if (isNodeModuleValue(lowerer, expr.expression)) {
+        return strLit("object", loc);
+      }
       const builtin = lowerBuiltinTypeof(lowerer, expr, loc);
       if (builtin !== null) return builtin;
       // Island values ask the engine; static primitives constant-fold to
@@ -970,6 +973,8 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       lowerer.unsupported("SC1090", expr, "typeof expressions on statically-typed values");
     }
     if (ts.isIdentifier(expr)) {
+      const moduleValue = lowerNodeModuleIdentifier(lowerer, expr);
+      if (moduleValue) return moduleValue;
       if (lowerer.isSelfReference(expr)) {
         return { kind: "selfRef", type: lowerer.ctx.selfType!, loc };
       }
@@ -1791,6 +1796,10 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       if (isRequireMainFilename(lowerer, expr)) {
         return { kind: "strLit", value: lowerer.entry.fileName, type: STRING, loc };
       }
+      const requireMain = lowerRequireMainProperty(lowerer, expr);
+      if (requireMain) return requireMain;
+      const moduleProperty = lowerNodeModuleProperty(lowerer, expr);
+      if (moduleProperty) return moduleProperty;
       // Optional chaining `a?.b`: the guard lowers here (a tag test around
       // the plain property lowering below); the handled marker keeps this
       // re-entrant dispatch from looping.
@@ -5174,6 +5183,8 @@ export function fenceClosureProbe(
    * string-key element access (`a["length"]`) and string indexing (`s[0]`
    * typechecks against the lib's index signature; use .charAt) stay out. */
   export function lowerElementAccess(lowerer: Lowerer, expr: ts.ElementAccessExpression): IrExpr {
+    const cachedModule = lowerRequireCacheElement(lowerer, expr);
+    if (cachedModule) return cachedModule;
     // `a?.[i]`: the guard lowers as an optional-chain step around the
     // plain element read below.
     if (expr.questionDotToken && !lowerer.chainHandled.has(expr)) {
@@ -5889,6 +5900,9 @@ export function fenceClosureProbe(
       };
     }
     if (!ts.isElementAccessExpression(expr)) return null;
+
+    const cachedModule = lowerRequireCacheElement(lowerer, expr);
+    if (cachedModule) return cachedModule;
 
     const header = lowerer.lowerHttpHeadersElement(expr);
     if (header) return header;
@@ -6920,6 +6934,9 @@ function lowerAnyBinaryInIsland(
 export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const loc = locOf(expr);
     const op = expr.operatorToken.kind;
+
+    const cacheHas = lowerRequireCacheHas(lowerer, expr);
+    if (cacheHas) return cacheHas;
 
     if (op === ts.SyntaxKind.EqualsToken || (op >= ts.SyntaxKind.FirstCompoundAssignment && op <= ts.SyntaxKind.LastCompoundAssignment)) {
       // `x = e` in EXPRESSION position (`while ((idx = s.indexOf("\n")) !== -1)`,

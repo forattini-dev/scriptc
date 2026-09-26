@@ -30,6 +30,7 @@ import { isUnitOnlyTsType, unitOnlyUnion } from "../type-mapper.js";
 import { type ClassInfo, decoratorNodesOf, probeExactInstanceClassOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow } from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import { esbuildOnceAssignedClassExpression } from "./esbuild-once.js";
+import { cjsModuleRegistryPrelude } from "./lower-node-module.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
 export interface FileParts {
@@ -2058,16 +2059,16 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
             loc,
           }
         : null;
-    const body: IrStmt[] =
-      initCall !== null
-        ? [{
-            kind: "exprStmt",
-            expr: isAsync
-              ? { kind: "awaitExpr", value: initCall, type: VOID, loc }
-              : initCall,
-            loc,
-          }]
-        : [];
+    const body: IrStmt[] = [...cjsModuleRegistryPrelude(lowerer, loc)];
+    if (initCall !== null) {
+      body.push({
+        kind: "exprStmt",
+        expr: isAsync
+          ? { kind: "awaitExpr", value: initCall, type: VOID, loc }
+          : initCall,
+        loc,
+      });
+    }
     // Node's startup refusal (a resolution the graph carries that Node
     // rejects — preflight's Node-order resolution walk — or a module-LINK
     // SyntaxError from either named-import checker): the graph is refused

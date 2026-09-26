@@ -1202,6 +1202,23 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // Object` still maps as a record. Its Object.prototype member surface
   // (`x.toString()`) fences at each use site, never silently.
   if (isStdlibInterface("Object")) return DYN;
+  // NodeJS.Module / the shipped fallback's ScriptcModule: a process-lifetime
+  // scalar handle into the compiled CommonJS module registry. Module
+  // identity is numeric identity; dedicated lowering serves its fields
+  // before generic number operations can observe the representation.
+  if (
+    (psym?.name === "ScriptcModule" || psym?.name === "Module") &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        (psym.name === "ScriptcModule" ||
+          isDeclaredInAmbientNamespace(d, "NodeJS") ||
+          isDeclaredInAmbientModule(d, "module")),
+    )
+  ) {
+    return F64;
+  }
   // events.EventEmitter: the runtime-provided emitter base class (the
   // Error-hierarchy precedent — user subclasses resolved through the
   // class-instance branch above). Both type layers declare it in the

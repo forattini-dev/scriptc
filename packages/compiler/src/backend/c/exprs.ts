@@ -5326,6 +5326,7 @@ function emitPrimitiveLibCall(state: LibCallState): Temp {
             // +1 string, or Node's "Invalid time value" RangeError
             // (may-throw seed set).
             return finish(`scr_date_to_iso(${arg(0)})`);
+          case "date.parse":
           case "date.parseGetTime":
             // The bounded date-string parse (X509 validity + ECMA format);
             // NaN elsewhere. Never throws.
@@ -7377,6 +7378,46 @@ function emitProcessLibCall(state: LibCallState): Temp {
   }
 }
 
+function emitModuleLibCall(state: LibCallState): Temp {
+  const { e, arg, finish } = state;
+  switch (e.fn) {
+    case "module.registryInit":
+      return finish(`scr_module_registry_init(${arg(0)})`);
+    case "module.define":
+      return finish(`scr_module_define(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)})`);
+    case "module.enter":
+      return finish(`scr_module_enter(${arg(0)})`);
+    case "module.link":
+      return finish(`scr_module_link(${arg(0)}, ${arg(1)})`);
+    case "module.finish":
+      return finish(`scr_module_finish(${arg(0)})`);
+    case "module.fail":
+      return finish(`scr_module_fail(${arg(0)})`);
+    case "module.filename":
+      return finish(`scr_module_filename(${arg(0)})`);
+    case "module.id":
+      return finish(`scr_module_id(${arg(0)})`);
+    case "module.path":
+      return finish(`scr_module_path(${arg(0)})`);
+    case "module.paths":
+      return finish(`scr_module_paths(${arg(0)})`);
+    case "module.children":
+      return finish(`scr_module_children(${arg(0)})`);
+    case "module.parent":
+      return finish(`scr_module_parent(${arg(0)})`);
+    case "module.loaded":
+      return finish(`scr_module_loaded(${arg(0)})`);
+    case "module.cacheGet":
+      return finish(`scr_module_cache_get(${arg(0)})`);
+    case "module.cacheHas":
+      return finish(`scr_module_cache_has(${arg(0)})`);
+    case "module.cacheKeys":
+      return finish("scr_module_cache_keys()");
+    default:
+      throw new InternalCompilerError(`emitter bug: module libCall dispatch for ${e.fn}`);
+  }
+}
+
 function emitErrorsEventsLibCall(state: LibCallState): Temp {
   const { e, emitter, args, arg, finish } = state;
   const fn = e.fn;
@@ -8257,8 +8298,10 @@ function emitLibCallExpr(emitter: CEmitter, e: LibCallExpr): Temp {
   const state: LibCallState = { emitter, e, args, arg, finish };
   const prefix = fn.slice(0, fn.indexOf(".")) as LibCallPrefix;
   switch (prefix) {
-    case "bigint": case "effect": case "layer": case "schema": case "option": case "module": case "promise": case "sqlite":
+    case "bigint": case "effect": case "layer": case "schema": case "option": case "promise": case "sqlite":
       throw new Error(`${prefix} requires --backend rust`);
+    case "module":
+      return emitModuleLibCall(state);
     case "fetch":
     case "island":
     case "json":

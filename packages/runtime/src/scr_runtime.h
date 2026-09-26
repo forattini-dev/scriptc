@@ -2215,6 +2215,30 @@ void scr_lib_init(int argc, char **argv);
 /* +1 on the ONE interned argv array (identity and mutation semantics match
  * Node's stable process.argv). */
 ScrArr *scr_process_argv(void);
+
+/* CommonJS module graph introspection. Module values are process-lifetime
+ * numeric handles into a registry populated by the generated program before
+ * its entry initializer runs. Metadata arguments are borrowed; getters return
+ * owned (+1) strings/arrays. Negative parent handles distinguish null (-1)
+ * from undefined (-2); a cache miss is -1. */
+void scr_module_registry_init(double count);
+void scr_module_define(double module_id, ScrStr *filename, ScrStr *id,
+                       ScrStr *path, ScrArr *paths, bool is_main);
+void scr_module_enter(double module_id);
+void scr_module_link(double parent_id, double child_id);
+void scr_module_finish(double module_id);
+void scr_module_fail(double module_id);
+ScrStr *scr_module_filename(double module_id);
+ScrStr *scr_module_id(double module_id);
+ScrStr *scr_module_path(double module_id);
+ScrArr *scr_module_paths(double module_id);
+ScrArr *scr_module_children(double module_id);
+double scr_module_parent(double module_id);
+bool scr_module_loaded(double module_id);
+double scr_module_cache_get(ScrStr *filename);
+bool scr_module_cache_has(ScrStr *filename);
+ScrArr *scr_module_cache_keys(void);
+
 /* Raw argv accessors — the island's process shim builds the same
  * ["scriptc", argv[0], ...] shape from the same stash. */
 int scr_lib_arg_count(void);

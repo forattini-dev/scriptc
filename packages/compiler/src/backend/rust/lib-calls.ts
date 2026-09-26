@@ -666,7 +666,7 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     return expr.fn === "date.newMs" ? `runtime::date_value_new(${context.emitExpr(arg)})`
       : `runtime::date_value_time(&(${context.emitExpr(arg)}))`;
   }
-  if ((expr.fn === "date.newString" || expr.fn === "date.parseGetTime") &&
+  if ((expr.fn === "date.newString" || expr.fn === "date.parse" || expr.fn === "date.parseGetTime") &&
       expr.args.length === 1 && arg !== undefined) {
     const time = `runtime::date_parse_get_time(&(${context.emitExpr(arg)}))`;
     return expr.fn === "date.newString" ? `runtime::date_value_new(${time})` : time;

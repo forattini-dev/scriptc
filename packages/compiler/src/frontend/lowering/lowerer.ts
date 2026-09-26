@@ -98,6 +98,7 @@ import {
 import { CompoundOp, IslandFnEntry, boundaryIntoIslandMsg, boundaryOutOfIslandMsg, BuiltinModuleFn, builtinConstLit, builtinModuleConstOf, builtinModulesArrayLit, builtinFenceHintOf, builtinModuleFnOf, stdlibMemberFence, isStdlibMember, isStdlibSymbol, isStdlibGlobal, stdlibGlobalMember, nodeTypesOnlySymbol } from "./surfaces.js";
 import { noteNativeImportSource, lowerNativeImportAssertion } from "./lower-native-import-boundary.js";
 import { prepareModuleInits, lowerFileInit, pruneUnusedNativeModuleCaches } from "./lower-module-init.js";
+import { prepareCjsModuleGraph } from "./lower-node-module.js";
 import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonImports, collectAssetImports, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall } from "./lower-classes.js"; import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bodyReadsArguments, funcTypeFromParamShapes, implicitMonoFile, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
@@ -119,7 +120,7 @@ import { lowerObjectLiteral } from "./lower-object-literal.js";
 import type { ExpandoMember } from "./lower-expando.js";
 import { lowerRecordFieldCall, lowerObjectMethodCall } from "./lower-calls.js"; import { familiesIr, noteFamily } from "./lower-families.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
-import { varRef } from "../../ir/build.js";
+import { numLit, varRef } from "../../ir/build.js";
 import {
   cleanFuncAdaptable,
   coerceInto,
@@ -2426,9 +2427,30 @@ export class Lowerer {
     const initName = this.initNameOf.get(dep);
     if (initName === undefined) return null;
     const loc = locOf(node);
-    return {
+    const init: IrStmt = {
       kind: "exprStmt",
       expr: { kind: "call", callee: initName, args: [], type: VOID, loc },
+      loc,
+    };
+    const parentModule = this.cjsModuleIdOf.get(node.getSourceFile());
+    const childModule = this.cjsModuleIdOf.get(dep);
+    if (parentModule === undefined || childModule === undefined) return init;
+    return {
+      kind: "block",
+      body: [
+        {
+          kind: "exprStmt",
+          expr: {
+            kind: "libCall",
+            fn: "module.link",
+            args: [numLit(parentModule, loc), numLit(childModule, loc)],
+            type: VOID,
+            loc,
+          },
+          loc,
+        },
+        init,
+      ],
       loc,
     };
   }
@@ -2459,6 +2481,7 @@ export class Lowerer {
 
   run(): LowerResult {
     const parts = this.splitFiles();
+    prepareCjsModuleGraph(this, parts);
     // The coverage remainder deliberately visits every body that reachable
     // emit skipped. Those files are already phase-managed, so an ordinary
     // checker miss would stay a one-node IPC query instead of falling back
@@ -2820,6 +2843,7 @@ export class Lowerer {
    * themselves. */
   emitReachable(extraRoots?: readonly string[]): { reachable: Set<string>; result: LowerResult } {
     const parts = this.splitFiles();
+    prepareCjsModuleGraph(this, parts);
     // Direct lowering callers do not necessarily run program preflight.
     // Establish the same managed header/top-level batch here before
     // collection, while the production path simply finds warm memos.

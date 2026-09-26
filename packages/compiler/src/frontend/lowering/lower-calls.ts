@@ -52,7 +52,7 @@ import { npmStaticPackageOfPath } from "../npm-static.js";
 import { countedFor, varRef } from "../../ir/build.js";
 import { rejectStaticThis } from "./static-this.js";
 import { packDynamicRest } from "./dynamic-rest.js";
-import { fenceNodeModuleMutationCall } from "./lower-node-module.js";
+import { fenceNodeModuleMutationCall, lowerRequireCacheKeys } from "./lower-node-module.js";
 import { defaultAfterUndefined, lowerOptionalArgument, lowerStaticallyUndefinedArgument, positionNumber } from "./optional-arguments.js";
 
 import { lowerLegacyHasOwnCall, lowerObjectStaticCall } from "./lower-object-statics.js";
@@ -4353,6 +4353,7 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
     if (ts.isPropertyAccessExpression(expr.expression)) {
       const intrinsic =
         fenceNodeModuleMutationCall(lowerer, expr, expr.expression) ??
+        lowerRequireCacheKeys(lowerer, expr, expr.expression.name.text) ??
         lowerEffectCall(lowerer, expr, loc) ?? // the effect kernel (`Effect.succeed(...)` on the package's namespace binding, static builds) — lower-effect.ts
         // Native globals can resolve through module declarations; claim
         // them before generic namespace export dispatch.
