@@ -146,6 +146,7 @@ export async function compileExecutableNative(
       events: features.events,
       emitter: features.emitter,
       symbol: features.symbol,
+      bigint: features.bigint,
       searchParams: features.searchParams,
       qs: features.qs,
       parseArgs: features.parseArgs,

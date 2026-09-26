@@ -415,6 +415,8 @@ export interface CcOptions {
    * registry initializes lazily), so it cross-compiles everywhere.
    * Symbol-free binaries keep their exact link line. */
   symbol?: boolean;
+  /** The program uses native BigInt values or operations. */
+  bigint?: boolean;
   /** The program uses the URLSearchParams surface (moduleUsesSearchParams
    * on the IR): compiles scr_url_params.c into the binary — the symbol
    * gating precedent: pure data structure (no loop hooks, no install),
@@ -1044,6 +1046,7 @@ export interface LibArchiveOptions {
   assert?: boolean;
   inspect?: boolean;
   symbol?: boolean;
+  bigint?: boolean;
   searchParams?: boolean;
   emitter?: boolean;
   zlib?: boolean;
@@ -1174,6 +1177,8 @@ async function compileLibArchiveUnbounded(opts: LibArchiveOptions): Promise<void
     ...(opts.assert || regex || opts.symbol ? ["scr_assert.c"] : []),
     ...(opts.inspect ? ["scr_inspect.c"] : []),
     ...(opts.symbol ? ["scr_symbol.c"] : []),
+    ...(opts.bigint ? ["scr_bigint.c"] : []),
+    ...(opts.assert && opts.bigint ? ["scr_bigint_assert.c"] : []),
     ...(opts.searchParams ? ["scr_url_params.c"] : []),
     ...(opts.emitter ? ["scr_events_emitter.c", "scr_dyn_handle.c"] : []),
     ...(opts.zlib ? ["scr_zlib.c"] : []),
@@ -4491,6 +4496,8 @@ async function compileCInternal(
     // their exact size class.
     ...(opts.emitter || net ? [rt(join(rtDir, "scr_dyn_handle.c"))] : []),
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
+    ...(opts.bigint ? [rt(join(rtDir, "scr_bigint.c"))] : []),
+    ...(opts.assert && opts.bigint ? [rt(join(rtDir, "scr_bigint_assert.c"))] : []),
     ...(opts.searchParams ? [rt(join(rtDir, "scr_url_params.c"))] : []),
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),
     ...(opts.parseArgs ? [rt(join(rtDir, "scr_util.c"))] : []),

@@ -1,7 +1,9 @@
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import type { IrModule, SrcLoc } from "../ir/ir.js";
 
-/** BigInt's exact native representation currently belongs to the Rust runtime. */
+/** LLVM still lacks complete BigInt lowering. The C and Rust runtimes own
+ * native representations and must not be rejected by this compatibility
+ * fence. */
 export function nativeBigIntBackendDiagnostics(mod: IrModule, backend: "c" | "llvm"): ScrDiagnostic[] {
   let loc: SrcLoc | undefined;
   const visit = (value: unknown, parentLoc: SrcLoc): void => {
@@ -12,7 +14,12 @@ export function nativeBigIntBackendDiagnostics(mod: IrModule, backend: "c" | "ll
     }
     const node = value as { kind?: unknown; fn?: unknown; test?: unknown; loc?: SrcLoc };
     const here = node.loc ?? parentLoc;
-    if ((node.kind === "dynTest" && node.test === "bigint") || node.kind === "bigint" || (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("bigint."))) {
+    const dynamicTagTest = node.kind === "dynTest" && node.test === "bigint";
+    const llvmBigIntValue = backend === "llvm" && (
+      node.kind === "bigint" ||
+      (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("bigint."))
+    );
+    if (dynamicTagTest || llvmBigIntValue) {
       loc = here;
       return;
     }

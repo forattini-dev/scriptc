@@ -240,8 +240,6 @@ export function vAdapters(t: IrType): { retain: string; release: string } {
     return { retain: `${stem}_retain_v`, release: `${stem}_release_v` };
   }
   switch (t.kind) {
-    case "bigint":
-      throw new Error("native BigInt values require --backend rust");
     case "object":
       return { retain: `${mangleClassRetain(t.className)}_v`, release: `${mangleClassRelease(t.className)}_v` };
     case "record":
@@ -280,8 +278,6 @@ export function elemKindC(elem: IrType): string {
     throw new InternalCompilerError(`emitter bug: array of ${elem.kind} (frontend rejects these)`);
   }
   switch (elem.kind) {
-    case "bigint":
-      throw new Error("native BigInt values require --backend rust");
     case "f64":
       return "SCR_ELEM_F64";
     case "bool":
@@ -310,6 +306,7 @@ export function elemKindC(elem: IrType): string {
     // Symbols (symbol[] — heterogeneous sentinel lists): refcounted
     // identity pointers holding only strings — no trace, no cycles ever.
     case "symbol":
+    case "bigint":
     // Class objects ((typeof Shape)[] — the registry idiom): immortal
     // statics behind no-op RC adapters — no trace, no cycles ever;
     // indexOf/includes/=== are the REF kind's pointer identity, exactly

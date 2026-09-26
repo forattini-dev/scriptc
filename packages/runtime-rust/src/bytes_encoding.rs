@@ -788,6 +788,27 @@ fn bytes_write_unsigned(
     }
 }
 
+pub fn bytes_read_u64(bytes: &JsBytes<u8>, offset: f64, little_endian: bool) -> u64 {
+    let offset = bytes_num_offset(bytes, offset, 8);
+    bytes_read_unsigned(bytes, offset, 8, little_endian)
+}
+
+pub fn bytes_write_u64(bytes: &JsBytes<u8>, offset: f64, little_endian: bool, value: u64) -> f64 {
+    let offset = bytes_num_offset(bytes, offset, 8);
+    bytes_write_unsigned(bytes, offset, 8, little_endian, value);
+    (offset + 8) as f64
+}
+
+pub fn data_view_read_u64(bytes: &JsBytes<u8>, offset: f64, little_endian: bool) -> u64 {
+    let offset = data_view_offset(bytes, offset, 8);
+    bytes_read_unsigned(bytes, offset, 8, little_endian)
+}
+
+pub fn data_view_write_u64(bytes: &JsBytes<u8>, offset: f64, little_endian: bool, value: u64) {
+    let offset = data_view_offset(bytes, offset, 8);
+    bytes_write_unsigned(bytes, offset, 8, little_endian, value);
+}
+
 pub fn bytes_read_num(bytes: &JsBytes<u8>, kind: &str, offset: f64) -> f64 {
     let width = bytes_num_width(kind);
     let offset = bytes_num_offset(bytes, offset, width);

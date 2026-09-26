@@ -4,7 +4,7 @@
 use std::{cmp::Ordering, rc::Rc};
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
-use crate::{JsString, throw_range_error, throw_syntax_error, throw_type_error};
+use crate::{JsBytes, JsString, bytes_read_u64, bytes_write_u64, data_view_read_u64, data_view_write_u64, throw_range_error, throw_range_error_code, throw_syntax_error, throw_type_error};
 
 // Match V8's maximum bit length. Check huge shifts/exponents before allocating,
 // while preserving constant results such as 0 << huge and (-1) ** huge.
@@ -76,6 +76,52 @@ pub fn bigint_inspect(value: &JsBigInt) -> JsString { JsString::from(display_big
 pub fn bigint_eq(left: &JsBigInt, right: &JsBigInt) -> bool { left == right }
 pub fn bigint_eq_string(left: &JsBigInt, right: &JsString) -> bool {
     bigint_parse(right).is_some_and(|parsed| left == &parsed)
+}
+fn bigint_low_u64(value: &JsBigInt) -> u64 {
+    let modulus = BigInt::from(1_u8) << 64_usize;
+    let wrapped = ((value.0.as_ref() % &modulus) + &modulus) % &modulus;
+    wrapped.to_u64().expect("BigInt reduced modulo 2^64")
+}
+fn bigint_received(value: &JsBigInt) -> String {
+    let plain = value.0.to_string();
+    let (sign, digits) = plain.strip_prefix('-').map_or(("", plain.as_str()), |digits| ("-", digits));
+    let mut output = String::with_capacity(plain.len() + plain.len() / 3 + 1);
+    output.push_str(sign);
+    let first = digits.len() % 3;
+    let mut at = if first == 0 { 3 } else { first };
+    output.push_str(&digits[..at]);
+    while at < digits.len() {
+        output.push('_');
+        output.push_str(&digits[at..at + 3]);
+        at += 3;
+    }
+    output.push('n');
+    output
+}
+fn bigint_buffer_value(value: &JsBigInt, signed: bool) -> u64 {
+    let valid = if signed { value.0.to_i64().is_some() } else { value.0.to_u64().is_some() };
+    if !valid {
+        let range = if signed { ">= -(2n ** 63n) and < 2n ** 63n" } else { ">= 0n and < 2n ** 64n" };
+        throw_range_error_code(
+            format!("The value of \"value\" is out of range. It must be {range}. Received {}", bigint_received(value)),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    bigint_low_u64(value)
+}
+pub fn bigint_buffer_read(bytes: &JsBytes<u8>, offset: f64, signed: bool, little_endian: bool) -> JsBigInt {
+    let value = bytes_read_u64(bytes, offset, little_endian);
+    JsBigInt::new(if signed { BigInt::from(value as i64) } else { BigInt::from(value) })
+}
+pub fn bigint_buffer_write(bytes: &JsBytes<u8>, value: &JsBigInt, offset: f64, signed: bool, little_endian: bool) -> f64 {
+    bytes_write_u64(bytes, offset, little_endian, bigint_buffer_value(value, signed))
+}
+pub fn bigint_data_view_get(bytes: &JsBytes<u8>, offset: f64, signed: bool, little_endian: bool) -> JsBigInt {
+    let value = data_view_read_u64(bytes, offset, little_endian);
+    JsBigInt::new(if signed { BigInt::from(value as i64) } else { BigInt::from(value) })
+}
+pub fn bigint_data_view_set(bytes: &JsBytes<u8>, offset: f64, value: &JsBigInt, little_endian: bool) {
+    data_view_write_u64(bytes, offset, little_endian, bigint_low_u64(value));
 }
 
 pub fn bigint_add(a: &JsBigInt, b: &JsBigInt) -> JsBigInt { JsBigInt::new(a.0.as_ref() + b.0.as_ref()) }

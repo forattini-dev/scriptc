@@ -2239,6 +2239,42 @@ double scr_module_cache_get(ScrStr *filename);
 bool scr_module_cache_has(ScrStr *filename);
 ScrArr *scr_module_cache_keys(void);
 
+/* ECMAScript bigint values (scr_bigint.c, linked on demand). */
+typedef struct ScrBigInt ScrBigInt;
+ScrBigInt *scr_bigint_retain(ScrBigInt *v);
+void scr_bigint_release(ScrBigInt *v);
+void *scr_bigint_retain_v(void *v);
+void scr_bigint_release_v(void *v);
+ScrBigInt *scr_bigint_parse(ScrStr *text);
+ScrBigInt *scr_bigint_from_f64(double value);
+ScrBigInt *scr_bigint_neg(ScrBigInt *value);
+ScrBigInt *scr_bigint_not(ScrBigInt *value);
+ScrBigInt *scr_bigint_add(ScrBigInt *a, ScrBigInt *b);
+ScrBigInt *scr_bigint_sub(ScrBigInt *a, ScrBigInt *b);
+ScrBigInt *scr_bigint_mul(ScrBigInt *a, ScrBigInt *b);
+ScrBigInt *scr_bigint_div(ScrBigInt *a, ScrBigInt *b);
+ScrBigInt *scr_bigint_mod(ScrBigInt *a, ScrBigInt *b);
+ScrBigInt *scr_bigint_pow(ScrBigInt *a, ScrBigInt *b);
+ScrBigInt *scr_bigint_and(ScrBigInt *a, ScrBigInt *b);
+ScrBigInt *scr_bigint_or(ScrBigInt *a, ScrBigInt *b);
+ScrBigInt *scr_bigint_xor(ScrBigInt *a, ScrBigInt *b);
+ScrBigInt *scr_bigint_shl(ScrBigInt *a, ScrBigInt *count);
+ScrBigInt *scr_bigint_shr(ScrBigInt *a, ScrBigInt *count);
+bool scr_bigint_eq(ScrBigInt *a, ScrBigInt *b);
+bool scr_bigint_eq_string(ScrBigInt *a, ScrStr *b);
+double scr_bigint_cmp_f64(ScrBigInt *a, ScrBigInt *b);
+double scr_bigint_cmp_number(ScrBigInt *a, double b);
+bool scr_bigint_truthy(ScrBigInt *value);
+ScrStr *scr_bigint_to_string(ScrBigInt *value, double radix);
+ScrStr *scr_bigint_inspect(ScrBigInt *value);
+double scr_bigint_to_f64(ScrBigInt *value);
+ScrBigInt *scr_bigint_as_uint_n(double bits, ScrBigInt *value);
+ScrBigInt *scr_bigint_as_int_n(double bits, ScrBigInt *value);
+ScrBigInt *scr_bigint_buffer_read(ScrBytes *bytes, double offset, bool sign, bool le);
+double scr_bigint_buffer_write(ScrBytes *bytes, ScrBigInt *value, double offset, bool sign, bool le);
+ScrBigInt *scr_bigint_dataview_get(ScrBytes *bytes, double offset, bool sign, bool le);
+void scr_bigint_dataview_set(ScrBytes *bytes, double offset, ScrBigInt *value, bool le);
+
 /* Raw argv accessors — the island's process shim builds the same
  * ["scriptc", argv[0], ...] shape from the same stash. */
 int scr_lib_arg_count(void);
@@ -5460,6 +5496,10 @@ double scr_bytes_read_num(const ScrBytes *b, double offset, ScrBytesNumKind kind
 double scr_bytes_write_num(ScrBytes *b, double value, double offset, ScrBytesNumKind kind, bool le);
 double scr_bytes_read_var(const ScrBytes *b, double offset, double byte_length, bool sign, bool le);
 double scr_bytes_write_var(ScrBytes *b, double value, double offset, double byte_length, bool sign, bool le);
+bool scr_bytes_read_u64_raw(const ScrBytes *b, double offset, bool le, uint64_t *out);
+bool scr_bytes_write_u64_raw(ScrBytes *b, double offset, bool le, uint64_t value);
+bool scr_dataview_read_u64_raw(const ScrBytes *b, double offset, bool le, uint64_t *out);
+bool scr_dataview_write_u64_raw(ScrBytes *b, double offset, bool le, uint64_t value);
 
 /* fs.readFileSync(path) [no encoding] / writeFileSync(path, buf) — the
  * Buffer forms of scr_lib.c's utf8 pair, byte-exact and NUL-safe.
@@ -6656,6 +6696,11 @@ void scr_assert_deq_leave(void);
 void scr_assert_eq_f64(double a, double b, bool negated, bool deep, ScrStr *msg, bool has_msg);
 void scr_assert_eq_str(ScrStr *a, ScrStr *b, bool negated, bool deep, ScrStr *msg, bool has_msg);
 void scr_assert_eq_bool(bool a, bool b, bool negated, bool deep, ScrStr *msg, bool has_msg);
+/* BigInt scalar equality (scr_bigint_assert.c): included only when both
+ * optional runtime families are active, preserving their independent
+ * link gates. */
+void scr_assert_eq_bigint(ScrBigInt *a, ScrBigInt *b, bool negated, bool deep,
+                          ScrStr *msg, bool has_msg);
 void scr_assert_deep_result(bool equal, bool negated, ScrStr *msg, bool has_msg);
 /* deepStrictEqual's verdict over two typed-array/Buffer values of one
  * static elem kind: brands_eq (Node compares prototypes — Buffer vs
@@ -6706,6 +6751,10 @@ void scr_assert_neq_fail(const char *insp, size_t ilen, bool deep,
  * the divergences). Borrows everything; throws on the failing verdict. */
 void scr_assert_eq_dyn(ScrDyn *a, ScrDyn *b, bool negated, bool deep,
                        ScrStr *msg, bool has_msg);
+/* assert.equal/notEqual over the frontend's Abstract Equality verdict;
+ * actual/expected are borrowed util.inspect renderings. */
+void scr_assert_loose_result(bool equal, bool negated, ScrStr *actual,
+                             ScrStr *expected, ScrStr *msg, bool has_msg);
 /* assert.throws / assert.rejects whose callback returned (or whose
  * promise fulfilled): "Missing expected exception|rejection" with Node's
  * details — ` (${expected.name})` when the expected class/shape carries a
