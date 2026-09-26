@@ -545,7 +545,8 @@ function loadProgram7(
   const coreRoots = [entryPath, ambientDtsPath(), nodeSurface, ...projectDeclarations.collect([entryPath])];
   if (bunTypes !== null && nodeTypes !== null) coreRoots.push(bunTypes);
   coreRoots.push(overridesDtsPath());
-  let program = projectDeclarations.createProgram(coreRoots, options);
+  let programRoots = [...coreRoots];
+  let program = projectDeclarations.createProgram(programRoots, options);
   // tsgo's own module resolution may pull @types/node files our own
   // resolver's type-directive lookup missed (bun's isolated layout: the
   // store lives under node_modules/.bun with per-package symlinks, so a
@@ -566,8 +567,17 @@ function loadProgram7(
     }
     if (hasTypesNode) {
       program.dispose();
-      program = projectDeclarations.createProgram(coreRoots.filter((root) => root !== nodeSurface), options);
+      programRoots = programRoots.filter((root) => root !== nodeSurface);
+      program = projectDeclarations.createProgram(programRoots, options);
     }
+  }
+  for (let pass = 0; pass < 32; pass++) {
+    const extraRoots = createRequireProgramRoots7(program).filter((root) => !programRoots.includes(root));
+    if (extraRoots.length === 0) break;
+    program.dispose();
+    programRoots.push(...extraRoots);
+    program = projectDeclarations.createProgram(programRoots, options);
+    if (pass === 31) throw new Error("createRequire program-root discovery did not converge");
   }
   const entry = program.getSourceFile(entryPath);
   if (!entry) throw new Error(`could not load ${entryPath}`);
@@ -581,7 +591,7 @@ function loadProgram7(
     externalTypes,
     externalTypeSpecifiersByFile,
     withProjectWorld: (action) => {
-      const view = projectDeclarations.createProgram(coreRoots.filter((root) => root !== overridesDtsPath()), options);
+      const view = projectDeclarations.createProgram(programRoots.filter((root) => root !== overridesDtsPath()), options);
       try { return action(view); } finally { view.dispose(); }
     },
     disposeAll: () => program.dispose(),
@@ -726,10 +736,15 @@ export function checkPreflight(load: LoadResult): ScrDiagnostic[] {
  * share — anything require-shaped it does NOT match (computed specifiers,
  * extra arguments) is not a module edge and fences at its use site. */
 function requireSpecOf7(node: ts.Node): string | null {
-  if (!ts.isCallExpression(node)) return null;
-  if (!ts.isIdentifier(node.expression) || node.expression.text !== "require") return null;
-  if (node.arguments.length !== 1) return null;
-  const arg = node.arguments[0]!;
+  let value = node;
+  while (
+    ts.isParenthesizedExpression(value) || ts.isAsExpression(value) ||
+    ts.isTypeAssertion(value) || ts.isNonNullExpression(value)
+  ) value = value.expression;
+  if (!ts.isCallExpression(value)) return null;
+  if (!ts.isIdentifier(value.expression) || value.expression.text !== "require") return null;
+  if (value.arguments.length !== 1) return null;
+  const arg = value.arguments[0]!;
   return ts.isStringLiteral(arg) ? arg.text : null;
 }
 
@@ -983,7 +998,8 @@ function isCreateRequireBinding7(program: ts.Program, callee: ts.Identifier): bo
  * module edges; other source bindings get a pointed fence before lowering
  * can mistake them for module syntax. */
 function requireCallBindingKind7(program: ts.Program, node: ts.Node): RequireCallBindingKind7 {
-  const call = ts.isVariableDeclaration(node) ? node.initializer : node;
+  const raw = ts.isVariableDeclaration(node) ? node.initializer : node;
+  const call = raw && ts.isExpression(raw) ? stripRequireCasts7(raw) : raw;
   if (!call || !ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) return "ambient";
   const checker = program.getTypeChecker();
   const symbol = checker.getSymbolAtLocation(call.expression);
@@ -2408,7 +2424,8 @@ function preflight7(load: LoadResult): {
         depPositions.get(sf)!.push({ dep, pos: stmt.getStart(sf) });
       }
     }
-    if (isJsSourceFileName(sf.fileName)) {
+    {
+      const jsRequireFile = isJsSourceFileName(sf.fileName);
       const stmts = sf.statements;
       let firstRunnable = -1;
       stmts.forEach((s, i) => {
@@ -2418,8 +2435,9 @@ function preflight7(load: LoadResult): {
         const stmt = stmts[k]!;
         for (const req of requiresOf7(stmt)) {
           const loc = { file: sf.fileName, start: req.node.getStart(sf), end: req.node.getEnd() };
+          const bindingKind = requireCallBindingKind7(program, req.node);
+          if (!jsRequireFile && bindingKind !== "createRequire") continue;
           if (isNodeEsmFile7(sf)) {
-            const bindingKind = requireCallBindingKind7(program, req.node);
             if (bindingKind !== "createRequire") {
               diags.push(unsupportedDiag("SC1013", loc, esmRequireFeature7(bindingKind)));
               continue;
@@ -2456,6 +2474,7 @@ function preflight7(load: LoadResult): {
               dep = npmStaticProgramDep(program, npmReq.packageName, npmReq.typesFile);
               if (dep === null) continue; // offender recorded — the fallback loop reloads
             } else {
+              if (bindingKind === "createRequire") continue;
               if (
                 canonicalBuiltinModule(req.spec) === null &&
                 !processModuleAliasRequire7(req.spec, req.decl)
@@ -2483,6 +2502,7 @@ function preflight7(load: LoadResult): {
           // side-effect call, where Node PARSES the document and can throw,
           // which a lowering to nothing would not reproduce.
           const isJsonDep = dep !== null && dep.fileName.endsWith(".json");
+          if (isJsonDep && bindingKind === "createRequire") continue;
           if (isJsonDep && (req.decl === null || !ts.isIdentifier(req.decl.name))) {
             diags.push(
               unsupportedDiag(
@@ -2520,8 +2540,9 @@ function preflight7(load: LoadResult): {
       for (const call of nestedBareRequires) {
         const spec = requireSpecOf7(call)!;
         const loc = { file: sf.fileName, start: call.getStart(sf), end: call.getEnd() };
+        const bindingKind = requireCallBindingKind7(program, call);
+        if (!jsRequireFile && bindingKind !== "createRequire") continue;
         if (isNodeEsmFile7(sf)) {
-          const bindingKind = requireCallBindingKind7(program, call);
           if (bindingKind !== "createRequire") {
             diags.push(unsupportedDiag("SC1013", loc, esmRequireFeature7(bindingKind)));
             continue;
@@ -2533,6 +2554,7 @@ function preflight7(load: LoadResult): {
         const projectDep = resolveImport7(program, sf, spec);
         if (projectDep !== null) {
           if (projectDep.fileName.endsWith(".json")) {
+            if (bindingKind === "createRequire") continue;
             diags.push(unsupportedDiag("SC1012", loc, "require() of JSON modules"));
             continue;
           }
@@ -2548,6 +2570,7 @@ function preflight7(load: LoadResult): {
             if (nDep !== null) deps.push({ dep: nDep });
             continue;
           }
+          if (bindingKind === "createRequire") continue;
           if (canonicalBuiltinModule(spec) === null && !processModuleAliasRequire7(spec, null)) {
             // Binding-less by construction — same require-site throw
             // channel as the statement-level form above.

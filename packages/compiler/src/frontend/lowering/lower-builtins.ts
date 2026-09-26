@@ -13,7 +13,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { PoisonError, dynUndefinedExpr, ladderFenceExpr, nodeThrowExpr, own } from "./lowerer.js";
 import { activeRuntimeTarget } from "../../compat/runtime-target.js";
-import { canonicalBuiltinModule, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
+import { canonicalBuiltinModule, isJsSourceFile, locOf, npmStaticDepSf7, requireSpecOf, resolveImport } from "../program.js";
 import { BUN_MODULE_MEMBER_ALIASES, isTrapRuntimeModule } from "../builtin-modules.js";
 import { isRelativeSpecifier } from "../workspace-registry.js";
 import { probeNodeRequireRefusal } from "../npm.js";
@@ -532,6 +532,41 @@ function lowerBuiltinOptionalDefault(
     return cr !== null && cr.spec !== null && canonicalBuiltinModule(cr.spec) !== null;
   }
 
+/** A statically compiled program module reached through a canonical
+   * createRequire binding. This is the ESM twin of an ordinary CommonJS
+   * require edge. */
+  export function createRequireProgramModuleOf(
+    lowerer: Lowerer,
+    expr: ts.Expression | undefined,
+  ): { spec: string; baseFile: ts.SourceFile; dep: ts.SourceFile } | null {
+    if (expr === undefined) return null;
+    const call = stripTypeCasts(expr);
+    if (!ts.isCallExpression(call)) return null;
+    const cr = createRequireSpecOf(lowerer, call);
+    if (cr === null || cr.spec === null || canonicalBuiltinModule(cr.spec) !== null) return null;
+    const dep = resolveImport(lowerer.program, cr.baseFile, cr.spec) ??
+      npmStaticDepSf7(lowerer.program, cr.baseFile, cr.spec);
+    if (dep === null || dep.fileName.endsWith(".json")) return null;
+    return { spec: cr.spec, baseFile: cr.baseFile, dep };
+  }
+
+/** True for a const identifier or simple object pattern whose initializer
+   * is a createRequire call reaching a compiled program module. */
+  export function createRequireProgramModuleDecl(
+    lowerer: Lowerer,
+    nameNode: ts.Node,
+    init: ts.Expression | undefined,
+  ): boolean {
+    if (createRequireProgramModuleOf(lowerer, init) === null) return false;
+    if (ts.isIdentifier(nameNode)) return true;
+    if (!ts.isObjectBindingPattern(nameNode)) return false;
+    return nameNode.elements.every((element) =>
+      element.name !== undefined && element.dotDotDotToken === undefined && element.initializer === undefined &&
+      ts.isIdentifier(element.name) &&
+      (element.propertyName === undefined || ts.isIdentifier(element.propertyName) || ts.isStringLiteralLike(element.propertyName)),
+    );
+  }
+
 /** `require("spec")` through a createRequire binding — the erasure per
    * target. Builtins are reached here only OUTSIDE the const-namespace-
    * binding shape (that declaration erases; member uses resolve through
@@ -563,6 +598,13 @@ function lowerBuiltinOptionalDefault(
         "SC1090",
         call,
         `module namespace objects as values (bind it first: const m = require("${spec}"), then access members through the binding)`,
+      );
+    }
+    if (createRequireProgramModuleOf(lowerer, call) !== null) {
+      lowerer.noLowering(
+        `createRequire's module namespace value for '${spec}'`,
+        call,
+        `bind it once (const m = require(${JSON.stringify(spec)})) and access statically-known members through that binding`,
       );
     }
     if (spec.startsWith("#")) {

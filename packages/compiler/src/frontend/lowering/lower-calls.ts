@@ -4428,6 +4428,10 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
         // TestContext surface (t.test/t.skip/t.diagnostic), t.assert.*.
         lowerer.lowerTestMethodCall(expr, expr.expression) ??
         lowerer.lowerTimeoutMethodCall(expr, expr.expression) ??
+        // The canonical robust spelling gets the record-aware path first;
+        // the general prototype emulation remains the fallback for other
+        // receiver/key shapes.
+        lowerLegacyHasOwnCall(lowerer, expr) ??
         lowerObjectOwnPrototypeCall(lowerer, expr, expr.expression) ??
         lowerObjectPrototypeCall(lowerer, expr, expr.expression) ??
         lowerStringPrototypeCall(lowerer, expr, expr.expression) ??
@@ -4448,9 +4452,6 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
         // Object.prototype.toString's default answer on records and
         // override-free program classes — "[object Object]", folded.
         lowerDefaultToStringCall(lowerer, expr, expr.expression) ??
-        // The defensive legacy own-property spelling used by transpilers
-        // and generated code; semantically the modern Object.hasOwn.
-        lowerLegacyHasOwnCall(lowerer, expr) ??
         // The remaining primitive prototype statics — toExponential(),
         // both toFixed() forms, hasOwnProperty over literal keys. Before
         // the island path. Optional-chain spellings first enter the chain

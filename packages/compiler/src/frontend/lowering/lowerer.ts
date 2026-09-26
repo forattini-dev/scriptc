@@ -104,7 +104,7 @@ import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bodyReadsArguments, 
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
 import { lowerStreamModuleCall } from "./lower-stream.js";
 import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from "./lower-event-emitter.js";
-import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerTimersPromisesSetInterval, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerProcessProperty, lowerNavigatorProperty, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall, textCodecBindingClassOf } from "./lower-builtins.js";
+import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireProgramModuleOf, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerTimersPromisesSetInterval, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerProcessProperty, lowerNavigatorProperty, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall, textCodecBindingClassOf } from "./lower-builtins.js";
 import { fenceFetchObjectAssignment, fenceFetchObjectBinding, fenceStaticAbortControllerMemberRead, fenceStaticHeadersIteration, fenceStaticHeadersMember, fenceStaticReadableStreamMember, fenceStaticResponseMember, fenceUnsupportedFetchConstructorMember, isIslandExpr, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerAbortControllerNew, lowerDynamicHeadersIteratorCall, lowerDynamicHeadersSpread, lowerDynamicImportCall, lowerFetchCall, lowerFetchElementMethodCall, lowerResponseNew, lowerStaticFetchCompanionCall, lowerStaticAbortControllerCall, lowerStaticAbortSignalListenerCall, lowerStaticReadableStreamCancelCall, lowerStaticReadableStreamControllerCall, lowerStaticReadableStreamNew, lowerStaticReadableStreamReaderCall, lowerStaticResponseCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
 import { lowerRequestNew } from "./lower-request.js";
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
@@ -1889,31 +1889,22 @@ export class Lowerer {
     if (ident.parent && ts.isShorthandPropertyAssignment(ident.parent) && ident.parent.name === ident) {
       symbol = this.checker.getShorthandAssignmentValueSymbol(ident.parent) ?? symbol;
     }
+    const createdWhole = this.createRequireWholeExportSymbolOf(ident);
+    if (createdWhole) symbol = createdWhole;
+    const createdMember = this.createRequireDestructuredExportSymbolOf(ident);
+    if (createdMember) symbol = createdMember;
     // tsgo synthesizes no expando symbol at a CJS MEMBER-EXPORT use site
     // (`common.GREETING` where the exporter attached GREETING with
     // `module.exports.GREETING = ...` — 5.9.3 answered the expando
     // property symbol here), but the exporter's MODULE symbol still
     // carries the member in its exports table; resolve through it so both
     // ends of the export key one symbol identity, like 5.9.3's.
-    if (!symbol && ident.parent && ts.isPropertyAccessExpression(ident.parent) && ident.parent.name === ident) {
+    if (ident.parent && ts.isPropertyAccessExpression(ident.parent) && ident.parent.name === ident) {
       const recv = ident.parent.expression;
       if (ts.isIdentifier(recv) && this.cjsLocalModuleBindingOf(recv)) {
-        const recvSym = this.checker.getSymbolAtLocation(recv);
-        const recvDecls = recvSym ? this.checker.declarationsOf(recvSym) : [];
-        const recvDecl = recvDecls.find(ts.isImportClause) ?? recvDecls[0];
-        if (recvDecl && ts.isVariableDeclaration(recvDecl) && recvDecl.initializer) {
-          const spec = requireSpecOf(recvDecl.initializer);
-          const dep = spec === null
-            ? null
-            : resolveImport(this.program, recvDecl.getSourceFile(), spec) ??
-              npmStaticDepSf7(this.program, recvDecl.getSourceFile(), spec);
-          if (dep) symbol = this.cjsModuleExportSymbol(dep, ident.text);
-        } else if (recvDecl && ts.isImportClause(recvDecl)) {
-          // The DEFAULT-import spelling of the same binding: the dep is
-          // the import declaration's resolved CJS module.
-          const dep = this.cjsDefaultImportDepOf(recvDecl);
-          if (dep) symbol = this.cjsModuleExportSymbol(dep, ident.text);
-        }
+        const dep = this.localModuleBindingDepOf(recv);
+        const exported = dep ? this.cjsModuleExportSymbol(dep, ident.text) : undefined;
+        if (exported) symbol = exported;
       }
     }
     if (!symbol) return null;
@@ -2179,7 +2170,11 @@ export class Lowerer {
    * property symbol exists at the attachment/use sites). */
   cjsModuleExportSymbol(sf: ts.SourceFile, name: string): ts.Symbol | undefined {
     const moduleSym = this.checker.getSymbolAtLocation(sf);
-    return moduleSym?.getExports().get(name as ts.__String);
+    const exports = moduleSym?.getExports();
+    const direct = exports?.get(name as ts.__String);
+    if (direct) return direct;
+    const root = exports?.get("export=" as ts.__String);
+    return root ? this.checker.getPropertyOfType(this.checker.getTypeOfSymbol(root), name) : undefined;
   }
 
   /** The local VALUE symbol behind a CJS export-table property symbol —
@@ -2256,6 +2251,60 @@ export class Lowerer {
     return dep;
   }
 
+  private localModuleBindingDepOf(expr: ts.Identifier): ts.SourceFile | null {
+    const sym = this.checker.getSymbolAtLocation(expr);
+    const decls = sym ? this.checker.declarationsOf(sym) : [];
+    const decl = decls.find(ts.isImportClause) ?? decls[0];
+    if (!decl) return null;
+    if (ts.isImportClause(decl)) return this.cjsDefaultImportDepOf(decl);
+    if (!ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name) || !decl.initializer) return null;
+    const directSpec = requireSpecOf(decl.initializer);
+    if (directSpec !== null) {
+      const dep = resolveImport(this.program, decl.getSourceFile(), directSpec) ??
+        npmStaticDepSf7(this.program, decl.getSourceFile(), directSpec);
+      return dep?.fileName.endsWith(".json") === true ? null : dep;
+    }
+    return createRequireProgramModuleOf(this, decl.initializer)?.dep ?? null;
+  }
+
+  private createRequireWholeExportSymbolOf(ident: ts.Identifier): ts.Symbol | null {
+    const binding = this.checker.getSymbolAtLocation(ident);
+    const decl = binding ? this.checker.declarationsOf(binding).find(ts.isVariableDeclaration) : undefined;
+    if (!decl || !ts.isIdentifier(decl.name) || !decl.initializer) return null;
+    const target = createRequireProgramModuleOf(this, decl.initializer);
+    if (target === null) return null;
+    const moduleSym = this.checker.getSymbolAtLocation(target.dep);
+    let symbol = moduleSym?.getExports().get("export=" as ts.__String);
+    if (!symbol) return null;
+    const wholeAssignment = this.checker.declarationsOf(symbol).find((d): d is ts.BinaryExpression => {
+      if (!ts.isBinaryExpression(d) || !ts.isExpressionStatement(d.parent) || !ts.isSourceFile(d.parent.parent)) return false;
+      const exported = cjsExportAssignmentOf(d.parent);
+      return exported?.kind === "table" && exported.obj === null && cjsExportDiscardReason(d.parent) === null;
+    });
+    if (wholeAssignment === undefined) return null;
+    let rhs: ts.Expression = wholeAssignment.right;
+    while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+    if (ts.isIdentifier(rhs)) {
+      const value = this.checker.getSymbolAtLocation(rhs);
+      if (value) return value.flags & ts.SymbolFlags.Alias ? this.checker.getAliasedSymbol(value) : value;
+    }
+    if (symbol.flags & ts.SymbolFlags.Alias) symbol = this.checker.getAliasedSymbol(symbol);
+    return this.cjsExportValueSymbol(symbol) ?? symbol;
+  }
+
+  private createRequireDestructuredExportSymbolOf(ident: ts.Identifier): ts.Symbol | null {
+    const binding = this.checker.getSymbolAtLocation(ident);
+    const element = binding ? this.checker.declarationsOf(binding).find(ts.isBindingElement) : undefined;
+    if (!element || element.name === undefined || !ts.isIdentifier(element.name) || !ts.isObjectBindingPattern(element.parent)) return null;
+    const declaration = element.parent.parent;
+    if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) return null;
+    const target = createRequireProgramModuleOf(this, declaration.initializer);
+    if (target === null) return null;
+    const property = element.propertyName;
+    const name = property && (ts.isIdentifier(property) || ts.isStringLiteralLike(property)) ? property.text : ident.text;
+    return this.cjsModuleExportSymbol(target.dep, name) ?? null;
+  }
+
   /** True when `expr` is an identifier bound by a top-level
    * `const x = require("./local")` of a project module — relative,
    * tsconfig-aliased, or package.json-mediated — or of a bare specifier
@@ -2269,30 +2318,8 @@ export class Lowerer {
   cjsLocalModuleBindingOf(expr: ts.Expression): boolean {
     if (!ts.isIdentifier(expr)) return false;
     const sym = this.checker.getSymbolAtLocation(expr);
-    const decls = sym ? this.checker.declarationsOf(sym) : [];
-    const decl = decls.find(ts.isImportClause) ?? decls[0];
-    if (!decl) return false;
-    if (ts.isImportClause(decl)) {
-      if (decl.name === undefined || this.cjsDefaultImportDepOf(decl) === null) return false;
-    } else {
-      if (!ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name) || !decl.initializer) {
-        return false;
-      }
-      const spec = requireSpecOf(decl.initializer);
-      if (spec === null) return false;
-      const resolvedRequire = resolveImport(this.program, decl.getSourceFile(), spec);
-      // `const codes = require("./codes.json")`: a JSON document is a
-      // VALUE, not an export table — the binding is the baked comptime
-      // global (collectJsonImports) and `codes.label` is an ordinary
-      // record field read, never a member-name delegation.
-      if (resolvedRequire?.fileName.endsWith(".json") === true) return false;
-      if (
-        resolvedRequire === null &&
-        npmStaticDepSf7(this.program, decl.getSourceFile(), spec) === null
-      ) {
-        return false;
-      }
-    }
+    if (this.localModuleBindingDepOf(expr) === null) return false;
+    if (this.createRequireWholeExportSymbolOf(expr) !== null) return false;
     // SINGLE-VALUE exporters (`module.exports = Countdown` / `= double` /
     // `= 42`): the requirer's binding IS the exported value, not a
     // namespace over an export table — the alias resolves straight to the

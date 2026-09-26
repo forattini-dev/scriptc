@@ -30,13 +30,13 @@ import { npmStaticPackageOfPath } from "../npm-static.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsAliasVarDeclOf, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
 import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfSearchParams, lowerForOfSet, lowerSafeIndexRead, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
-import { bindingGenericFnAliasInfoOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
+import { bindingGenericFnAliasInfoOf, bindingNeverReassigned, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
 import { genericIfaceBindingKeepsClass } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
 import { lowerHttpResPropertyAssignment, lowerHttpServerTimeoutAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
-import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, isReadlineTyped, textCodecBindingDecl } from "./lower-builtins.js";
+import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, createRequireProgramModuleDecl, createRequireProgramModuleOf, isReadlineTyped, textCodecBindingDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, isMatchSliceType, lowerAbsenceProbe, lowerElementCompound, lowerGroupsProjection, lowerOptionalNumber, matchResultNamedGroupsOf, probeLower, pureReemittable, runtimeOptionalTrueIds, symbolFieldInfo, withRuntimeOptionalNarrowed } from "./lower-exprs.js";
 import { isSafeToRepeat } from "./expressions/evaluation-safety.js";
@@ -620,7 +620,15 @@ export function provenanceElidedConstDecl(lowerer: Lowerer, decl: ts.VariableDec
       lowerer.hoistedVars.set(symbol, bound);
       return bound;
     }
-    const type = varBindingType(lowerer, nameNode);
+    let type = varBindingType(lowerer, nameNode);
+    const declaration = nameNode.parent;
+    if (
+      type?.kind === "dyn" && ts.isVariableDeclaration(declaration) && declaration.initializer &&
+      isJsSourceFile(declaration.getSourceFile()) && bindingNeverReassigned(lowerer, symbol, declaration)
+    ) {
+      const inferred = probeLower(lowerer, declaration.initializer);
+      if (inferred?.type.kind === "string") type = STRING;
+    }
     if (!type) lowerer.badType(nameNode, lowerer.typeOf(nameNode));
     const root = lowerer.activeStmtLists.find((e) => e.ctx === lowerer.ctx);
     if (!root) throw new InternalCompilerError("lowerer bug: var hoisting with no open statement list");
@@ -1006,6 +1014,18 @@ export function lowerStmt(lowerer: Lowerer, stmt: ts.Statement): IrStmt | IrStmt
     const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
     const isLet = (list.flags & ts.NodeFlags.Let) !== 0 || (list.flags & ts.NodeFlags.BlockScoped) === 0;
     return list.declarations.flatMap((decl) => {
+      if (isConst && createRequireProgramModuleDecl(lowerer, decl.name, decl.initializer)) {
+        if (!ts.isSourceFile(stmt.parent)) {
+          lowerer.unsupported(
+            "SC1090",
+            decl,
+            "createRequire program-module bindings outside the module's top level (move the binding to the top of the file)",
+          );
+        }
+        const target = createRequireProgramModuleOf(lowerer, decl.initializer)!;
+        const init = lowerer.requireInitStmt(target.spec, decl);
+        return init ? [init] : [];
+      }
       // CommonJS require declarations (JS files): at the module's top
       // level the BINDINGS are alias plumbing (no storage;
       // resolveValueSymbol routes the reads), but the require itself is
@@ -3635,6 +3655,19 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
       (lowerer.dynamic && init.type.kind === "dyn" && dynamicBindingType(lowerer, lowerer.mapTypeOf(lowerer.typeOf(decl.name)) ?? DYN, decl.type === undefined) ? DYN : null) ??
       (bindingTainted ? null : lowerer.mapTypeOf(lowerer.typeOf(decl.name))) ??
       (init.type.kind === "dyn" ? DYN : null);
+    // In inferred package JS, tsgo can retain `any` for a `var` even when
+    // its initializer has already proved a string (`var msg =
+    // message.toLowerCase()`). If the binding is never assigned again,
+    // retain that proven runtime type. This also keeps subsequent computed
+    // property reads on the native string-key path instead of falsely
+    // treating the key as possible Symbol transport.
+    if (
+      decl.type === undefined && type?.kind === "dyn" && init.type.kind === "string" &&
+      isJsSourceFile(decl.getSourceFile()) && ts.isIdentifier(decl.name)
+    ) {
+      const symbol = lowerer.checker.getSymbolAtLocation(decl.name);
+      if (symbol && bindingNeverReassigned(lowerer, symbol, decl)) type = STRING;
+    }
     // A JS `let x = {}`: TS's empty-object-literal type admits ANY later
     // non-nullish assignment (`envs = {}`, later `envs =
     // Object.fromEntries(...)` — tsc accepts every such write, since
@@ -4699,6 +4732,12 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       ts.isExpressionStatement(stmtNode) &&
       ts.isSourceFile(stmtNode.parent) &&
       isJsSourceFile(stmtNode.parent);
+    if (ts.isCallExpression(expr)) {
+      const created = createRequireProgramModuleOf(lowerer, expr);
+      if (created !== null) {
+        return lowerer.requireInitStmt(created.spec, expr) ?? { kind: "block", body: [], loc: locOf(expr) };
+      }
+    }
     if (
       requireSpecOf(expr) !== null &&
       ts.isCallExpression(expr) &&
