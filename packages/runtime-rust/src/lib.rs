@@ -114,6 +114,7 @@ include!("fs_watch.rs");
 include!("assets.rs");
 include!("child_process_and_paths.rs");
 include!("child_stream.rs");
+include!("child_writer.rs");
 include!("child_process_async.rs");
 include!("schema.rs");
 include!("effect.rs");

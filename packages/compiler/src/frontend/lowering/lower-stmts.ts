@@ -447,7 +447,7 @@ export function provenanceElidedConstDecl(lowerer: Lowerer, decl: ts.VariableDec
     // shape is the const's own initializer capturing the const:
     // `const server = http.createServer(h).listen(0, done)` with `done`
     // reading `server` — a TDZ read until the assign completes, JS exactly.
-    "child", "childStream", "netServer", "netSocket", "dgramSocket", "testCtx",
+    "child", "childStream", "childWriter", "netServer", "netSocket", "dgramSocket", "testCtx",
     "httpReq", "httpRes", "httpClientReq",
     // The h2 handles — `const client = http2.connect(url, mustCall(() =>
     // ...client...))` is the suite's canonical self-capturing const.

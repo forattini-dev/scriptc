@@ -15,6 +15,7 @@ pub fn finish() {
     fs_renames_finish();
     fs_watchers_finish();
     children_finish();
+    child_writers_finish();
     child_streams_finish();
     loop_net_finish();
     dgram_finish();
@@ -552,16 +553,16 @@ fn run_event_loop_with_first_checkpoint(
                 collect_cycles_if_pressured();
                 promise_check = PROMISE_CHECKS.with(|checks| checks.borrow_mut().pop_front());
             }
-            if had_unhandled_rejection() {
-                break;
-            }
+            if had_unhandled_rejection() { break; }
             continue;
         }
 
         #[cfg(feature = "island-v8")]
         {
             v8_report_unhandled_rejections();
-            if had_unhandled_rejection() { break; }
+            if had_unhandled_rejection() {
+                break;
+            }
         }
 
         if fs_renames_dispatch_one() {
@@ -585,6 +586,9 @@ fn run_event_loop_with_first_checkpoint(
         if child_streams_dispatch_one() {
             continue;
         }
+        if child_writers_dispatch_one() {
+            continue;
+        }
         let has_referenced_work = TIMER_TASKS
             .with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
             || IMMEDIATE_TASKS.with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
@@ -594,6 +598,7 @@ fn run_event_loop_with_first_checkpoint(
             || children_referenced_pending()
             || children_failed_pending()
             || child_streams_pending()
+            || child_writers_pending()
             || loop_net_pending()
             || dgram_pending()
             || ffi_foreign_pending();
@@ -679,7 +684,8 @@ fn run_event_loop_with_first_checkpoint(
                 loop_net_pending()
                     || dgram_pending()
                     || children_referenced_pending()
-                    || child_streams_pending(),
+                    || child_streams_pending()
+                    || child_writers_pending(),
             );
             ffi_foreign_wait(wait);
             continue;
@@ -702,7 +708,8 @@ fn run_event_loop_with_first_checkpoint(
                 loop_net_pending()
                     || dgram_pending()
                     || children_referenced_pending()
-                    || child_streams_pending(),
+                    || child_streams_pending()
+                    || child_writers_pending(),
             );
             stdin_wait(wait);
             continue;
@@ -719,7 +726,7 @@ fn run_event_loop_with_first_checkpoint(
             dgram_wait(wait);
             continue;
         }
-        if children_referenced_pending() || child_streams_pending() {
+        if children_referenced_pending() || child_streams_pending() || child_writers_pending() {
             let wait =
                 next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
             children_wait(wait);

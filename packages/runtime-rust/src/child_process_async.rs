@@ -1,12 +1,12 @@
-type ChildTrace = Box<dyn for<'a> Fn(&mut Tracer<'a>)>;
+type ChildTrace = Rc<dyn for<'a> Fn(&mut Tracer<'a>)>;
 
 struct ChildExitListener {
-    invoke: Box<dyn Fn(Option<f64>, Option<JsString>)>,
+    invoke: Rc<dyn Fn(Option<f64>, Option<JsString>)>,
     trace: ChildTrace,
 }
 
 struct ChildErrorListener {
-    invoke: Box<dyn Fn(JsError)>,
+    invoke: Rc<dyn Fn(JsError)>,
     trace: ChildTrace,
 }
 
@@ -19,6 +19,7 @@ pub struct ChildData {
     killed: bool,
     settled: bool,
     referenced: bool,
+    stdin: Option<JsChildWriter>,
     stdout: Option<JsChildStream>,
     stderr: Option<JsChildStream>,
     exit_listeners: Vec<ChildExitListener>,
@@ -40,6 +41,9 @@ impl Trace for ChildData {
         if let Some(stream) = &self.stdout {
             tracer.edge(stream);
         }
+        if let Some(writer) = &self.stdin {
+            tracer.edge(writer);
+        }
         if let Some(stream) = &self.stderr {
             tracer.edge(stream);
         }
@@ -54,6 +58,7 @@ impl ClearEdges for ChildData {
         self.spawn_error = None;
         self.spawn_errno = None;
         self.process = None;
+        self.stdin = None;
         self.stdout = None;
         self.stderr = None;
         self.settled = true;
@@ -71,9 +76,9 @@ pub fn child_spawn(command: &JsString, arguments: &JsArray<JsString>) -> JsChild
     child_spawn_options(
         command,
         arguments,
-        0.0,
-        0.0,
-        0.0,
+        3.0,
+        3.0,
+        3.0,
         0.0,
         0.0,
         false,
@@ -176,26 +181,42 @@ fn child_spawn_error(command: &JsString, error: std::io::Error) -> JsError {
 fn child_register(
     command: &JsString,
     spawned: std::io::Result<std::process::Child>,
+    stdin_piped: bool,
     stdout_piped: bool,
     stderr_piped: bool,
 ) -> JsChild {
-    let (process, spawn_error, spawn_errno, pid, stdout, stderr) = match spawned {
+    let (process, spawn_error, spawn_errno, pid, stdin, stdout, stderr) = match spawned {
         Ok(mut child) => {
             let pid = child.id();
+            let stdin = stdin_piped.then(|| {
+                child_writer_new(
+                    child
+                        .stdin
+                        .take()
+                        .expect("scriptc: missing piped child stdin"),
+                )
+            });
             let stdout = stdout_piped.then(|| {
                 child_stream_new(ChildPipeReader::Stdout(
-                    child.stdout.take().expect("scriptc: missing piped child stdout"),
+                    child
+                        .stdout
+                        .take()
+                        .expect("scriptc: missing piped child stdout"),
                 ))
             });
             let stderr = stderr_piped.then(|| {
                 child_stream_new(ChildPipeReader::Stderr(
-                    child.stderr.take().expect("scriptc: missing piped child stderr"),
+                    child
+                        .stderr
+                        .take()
+                        .expect("scriptc: missing piped child stderr"),
                 ))
             });
-            (Some(child), None, None, Some(pid), stdout, stderr)
+            (Some(child), None, None, Some(pid), stdin, stdout, stderr)
         }
         Err(error) => {
             let errno = error.raw_os_error();
+            let stdin = stdin_piped.then(child_writer_husk);
             let stdout = stdout_piped.then(child_stream_husk);
             let stderr = stderr_piped.then(child_stream_husk);
             (
@@ -203,6 +224,7 @@ fn child_register(
                 Some(child_spawn_error(command, error)),
                 errno,
                 None,
+                stdin,
                 stdout,
                 stderr,
             )
@@ -217,6 +239,7 @@ fn child_register(
         killed: false,
         settled: false,
         referenced: true,
+        stdin,
         stdout,
         stderr,
         exit_listeners: Vec::new(),
@@ -276,6 +299,7 @@ pub fn child_spawn_options(
             return child_register(
                 command,
                 Err(error),
+                stdin_mode == 3,
                 stdout_mode == 3,
                 stderr_mode == 3,
             );
@@ -315,33 +339,99 @@ pub fn child_spawn_options(
     child_register(
         command,
         child_command.spawn(),
+        stdin_mode == 3,
         stdout_mode == 3,
         stderr_mode == 3,
     )
 }
 
-/// Write to a piped stdin (mode 3). Blocking, in-thread: the pipe's own
-/// buffer absorbs a CLI's typical input; a producer that outruns a child
-/// which never reads is the documented limit. False when the child has
-/// no piped stdin (or it was already ended).
-pub fn child_stdin_write(child: &JsChild, bytes: &JsBytes<u8>) -> bool {
-    use std::io::Write;
-    let data = bytes_u8_values(bytes).to_vec();
-    child.with_mut(|child| {
-        let Some(stdin) = child.process.as_mut().and_then(|process| process.stdin.as_mut()) else {
-            return false;
-        };
-        stdin.write_all(&data).is_ok()
-    })
+pub fn child_exec_file(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    callback: Rc<dyn Fn(Option<JsError>, JsString, JsString)>,
+    trace: ChildTrace,
+) -> JsChild {
+    let child = child_spawn_options(
+        command,
+        arguments,
+        0.0,
+        3.0,
+        3.0,
+        0.0,
+        0.0,
+        false,
+        false,
+        &array_new(Vec::new()),
+        &string(""),
+    );
+    let stdout_bytes = Rc::new(RefCell::new(Vec::new()));
+    let stderr_bytes = Rc::new(RefCell::new(Vec::new()));
+    if let Some(stdout) = child_stdout(&child) {
+        let output = stdout_bytes.clone();
+        child_stream_on_data(
+            &stdout,
+            Rc::new(move |chunk| output.borrow_mut().extend(bytes_u8_values(&chunk))),
+            Rc::new(|_| {}),
+            false,
+        );
+    }
+    if let Some(stderr) = child_stderr(&child) {
+        let output = stderr_bytes.clone();
+        child_stream_on_data(
+            &stderr,
+            Rc::new(move |chunk| output.borrow_mut().extend(bytes_u8_values(&chunk))),
+            Rc::new(|_| {}),
+            false,
+        );
+    }
+
+    let called = Rc::new(std::cell::Cell::new(false));
+    let error_called = called.clone();
+    let error_callback = callback.clone();
+    let error_trace = trace.clone();
+    child_on_error(
+        &child,
+        Rc::new(move |error| {
+            if !error_called.replace(true) {
+                error_callback(Some(error), string(""), string(""));
+            }
+        }),
+        Rc::new(move |tracer| error_trace(tracer)),
+    );
+
+    let display = arguments.with(|arguments| {
+        let mut display = command.to_string();
+        for argument in arguments.elements().iter() {
+            display.push(' ');
+            display.push_str(argument);
+        }
+        display
+    });
+    child_on_close(
+        &child,
+        Rc::new(move |code, _signal| {
+            if called.replace(true) {
+                return;
+            }
+            let stdout = JsString::from(String::from_utf8_lossy(&stdout_bytes.borrow()).as_ref());
+            let stderr = JsString::from(String::from_utf8_lossy(&stderr_bytes.borrow()).as_ref());
+            let error = (code != Some(0.0)).then(|| JsError {
+                identity: Rc::new(()),
+                name: "Error".to_owned(),
+                message: format!("Command failed: {display}\n{stderr}"),
+                code: None,
+                cause: None,
+                dom: None,
+            });
+            callback(error, stdout, stderr);
+        }),
+        trace,
+    );
+    child
 }
 
-/// End a piped stdin: dropping the writer sends the child its EOF.
-pub fn child_stdin_end(child: &JsChild) {
-    child.with_mut(|child| {
-        if let Some(process) = child.process.as_mut() {
-            drop(process.stdin.take());
-        }
-    });
+pub fn child_stdin(child: &JsChild) -> Option<JsChildWriter> {
+    child.with(|child| child.stdin.clone())
 }
 
 pub fn child_stdout(child: &JsChild) -> Option<JsChildStream> {
@@ -500,7 +590,7 @@ pub fn process_kill_num(pid: f64, signal: f64) -> bool {
 
 pub fn child_on_exit(
     child: &JsChild,
-    callback: Box<dyn Fn(Option<f64>, Option<JsString>)>,
+    callback: Rc<dyn Fn(Option<f64>, Option<JsString>)>,
     trace: ChildTrace,
 ) {
     child.with_mut(|child| {
@@ -515,7 +605,7 @@ pub fn child_on_exit(
 
 pub fn child_on_close(
     child: &JsChild,
-    callback: Box<dyn Fn(Option<f64>, Option<JsString>)>,
+    callback: Rc<dyn Fn(Option<f64>, Option<JsString>)>,
     trace: ChildTrace,
 ) {
     child.with_mut(|child| {
@@ -528,11 +618,7 @@ pub fn child_on_close(
     });
 }
 
-pub fn child_on_error(
-    child: &JsChild,
-    callback: Box<dyn Fn(JsError)>,
-    trace: ChildTrace,
-) {
+pub fn child_on_error(child: &JsChild, callback: Rc<dyn Fn(JsError)>, trace: ChildTrace) {
     child.with_mut(|child| {
         if !child.settled {
             child.error_listeners.push(ChildErrorListener {
@@ -584,7 +670,13 @@ fn children_dispatch_one() -> bool {
         return false;
     };
     let child = ASYNC_CHILDREN.with(|children| children.borrow()[index].clone());
-    let (stdout, stderr) = child.with(|child| (child.stdout.clone(), child.stderr.clone()));
+    let (stdin, stdout, stderr) = child.with(|child| {
+        (
+            child.stdin.clone(),
+            child.stdout.clone(),
+            child.stderr.clone(),
+        )
+    });
     if matches!(outcome, ChildOutcome::Exit(..)) {
         if let Some(stream) = &stdout {
             child_stream_drain_after_exit(stream);
@@ -592,6 +684,9 @@ fn children_dispatch_one() -> bool {
         if let Some(stream) = &stderr {
             child_stream_drain_after_exit(stream);
         }
+    }
+    if let Some(writer) = &stdin {
+        child_writer_destroy(writer);
     }
     let child = ASYNC_CHILDREN.with(|children| children.borrow_mut().remove(index));
     let (exit_listeners, close_listeners, error_listeners) = child.with_mut(|child| {

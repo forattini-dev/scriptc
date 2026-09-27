@@ -811,7 +811,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // 2 fd) with the out/err fds for mode 2, detached, env replacement
   // pairs, cwd ("" = inherit).
   "cp.spawnOpts": {
-    argTypes: [STRING, arrayOf(STRING), F64, F64, F64, F64, F64, BOOL, BOOL, BOOL, arrayOf(STRING), STRING],
+    argTypes: [STRING, arrayOf(STRING), F64, F64, F64, F64, F64, BOOL, BOOL, arrayOf(STRING), STRING],
     result: CHILD_T,
   },
   // The callback's func type is program-dependent (zero params, or the

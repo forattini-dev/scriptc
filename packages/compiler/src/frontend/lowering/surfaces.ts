@@ -797,6 +797,7 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // entries carry the canonical shapes.
     spawnSync: { fn: "cp.spawnSync", params: [STRING, arrayOf(STRING)], result: SPAWNRES_T },
     spawn: { fn: "cp.spawn", params: [STRING, arrayOf(STRING)], result: CHILD_T },
+    execFile: { fn: "cp.execFile", params: [STRING, arrayOf(STRING)], result: CHILD_T },
     // execFileSync(file, args?, options?) and execSync(command, options?)
     // share the cp.execSync runtime entry (execSync sets the shell flag);
     // both call completions are special-cased in lowerBuiltinModuleCall.

@@ -1750,6 +1750,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       return { kind: "object", className: irName };
     }
   }
+  if (isStdlibInterface("ChildStdin")) return { kind: "childWriter" };
+  if (
+    psym?.name === "Writable" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isNodeTypesPath(d.getSourceFile().fileName) &&
+        isDeclaredInAmbientModule(d, "stream"),
+    )
+  ) {
+    return { kind: "childWriter" };
+  }
   if (
     (psym?.name === "Readable" &&
       checker.declarationsOf(psym).some(

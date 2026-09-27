@@ -500,15 +500,15 @@ fn host_child_spawn(args: &[v8e::Value]) -> Result<v8e::HostResult, v8e::Error> 
         child_stream_on_end(&stream, Rc::new(move || { v8_callback(&end_callbacks, on_end, Vec::new()); }), Rc::new(|_| {}));
     }
     let exit_callbacks = callbacks.clone();
-    child_on_exit(&child, Box::new(move |code, signal| { v8_callback(&exit_callbacks, "onExit", exit_arguments(code, signal)); }), Box::new(|_| {}));
+    child_on_exit(&child, Rc::new(move |code, signal| { v8_callback(&exit_callbacks, "onExit", exit_arguments(code, signal)); }), Rc::new(|_| {}));
     let close_callbacks = callbacks.clone();
-    child_on_close(&child, Box::new(move |code, signal| { v8_callback(&close_callbacks, "onClose", exit_arguments(code, signal)); }), Box::new(|_| {}));
+    child_on_close(&child, Rc::new(move |code, signal| { v8_callback(&close_callbacks, "onClose", exit_arguments(code, signal)); }), Rc::new(|_| {}));
     let error_callbacks = callbacks.clone();
-    child_on_error(&child, Box::new(move |error| {
+    child_on_error(&child, Rc::new(move |error| {
         let message = error_message(&error).to_string();
         let code = error.code.clone().unwrap_or_default();
         v8_callback(&error_callbacks, "onError", vec![v8e::string(&message), v8e::string(&code)]);
-    }), Box::new(|_| {}));
+    }), Rc::new(|_| {}));
     let pid = child_pid(&child).map_or_else(v8e::null, v8e::number);
     host_value(v8e::array(&[v8e::number(id as f64), pid]))
 }

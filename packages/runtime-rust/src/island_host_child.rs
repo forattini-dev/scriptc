@@ -108,23 +108,23 @@ fn island_child_wire(child: &JsChild, callbacks: &boa_engine::JsObject) {
     let exit_callbacks = callbacks.clone();
     child_on_exit(
         child,
-        Box::new(move |code, signal| {
+        Rc::new(move |code, signal| {
             island_net_call(&exit_callbacks, "onExit", |_| island_child_exit_arguments(code, signal.clone()));
         }),
-        Box::new(|_| {}),
+        Rc::new(|_| {}),
     );
     let close_callbacks = callbacks.clone();
     child_on_close(
         child,
-        Box::new(move |code, signal| {
+        Rc::new(move |code, signal| {
             island_net_call(&close_callbacks, "onClose", |_| island_child_exit_arguments(code, signal.clone()));
         }),
-        Box::new(|_| {}),
+        Rc::new(|_| {}),
     );
     let error_callbacks = callbacks.clone();
     child_on_error(
         child,
-        Box::new(move |error| {
+        Rc::new(move |error| {
             let message = error_message(&error).to_string();
             let code = error.code.clone().unwrap_or_default();
             island_net_call(&error_callbacks, "onError", |_| {
@@ -134,7 +134,7 @@ fn island_child_wire(child: &JsChild, callbacks: &boa_engine::JsObject) {
                 ]
             });
         }),
-        Box::new(|_| {}),
+        Rc::new(|_| {}),
     );
 }
 

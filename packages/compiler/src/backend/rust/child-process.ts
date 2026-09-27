@@ -62,7 +62,7 @@ function emitExitListener(
   const codeName = codeType === undefined ? "_sc_code" : "sc_code";
   const signalName = signalType === undefined ? "_sc_signal" : "sc_signal";
   const register = expr.fn === "child.onClose" ? "child_on_close" : "child_on_exit";
-  return `{ let ${child} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::${register}(&${child}, Box::new(move |${codeName}, ${signalName}| { ${bindings.join(" ")} let _ = ${dispatch}; }), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
+  return `{ let ${child} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::${register}(&${child}, std::rc::Rc::new(move |${codeName}, ${signalName}| { ${bindings.join(" ")} let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
 }
 
 function emitErrorListener(
@@ -84,10 +84,10 @@ function emitErrorListener(
     : "sc_error";
   const dispatch = context.emitClosureDispatch(callback, callbackType, parameter === undefined ? [] : [argument], expr.loc);
   const errorName = parameter === undefined ? "_sc_error" : "sc_error";
-  return `{ let ${child} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::child_on_error(&${child}, Box::new(move |${errorName}| { let _ = ${dispatch}; }), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
+  return `{ let ${child} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::child_on_error(&${child}, std::rc::Rc::new(move |${errorName}| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
 }
 
-function emitChildStreamAccess(
+function emitChildIoAccess(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string {
@@ -95,12 +95,43 @@ function emitChildStreamAccess(
   if (receiver === undefined) context.unsupported(`${expr.fn} without a receiver`, expr.loc);
   if (expr.type.kind !== "union") context.unsupported(`${expr.fn} without a union result`, expr.loc);
   const union = context.union(expr.type.unionId, expr.loc);
-  const streamTag = union.arms.findIndex((arm) => arm.kind === "childStream");
+  const handleKind = expr.fn === "child.stdin" ? "childWriter" : "childStream";
+  const streamTag = union.arms.findIndex((arm) => arm.kind === handleKind);
   const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
   if (streamTag < 0 || nullTag < 0) context.unsupported(`${expr.fn} union shape`, expr.loc);
   const name = context.unionName(union.id);
-  const accessor = expr.fn === "child.stdout" ? "stdout" : "stderr";
+  const accessor = expr.fn === "child.stdin" ? "stdin" : expr.fn === "child.stdout" ? "stdout" : "stderr";
   return `match runtime::child_${accessor}(&(${context.emitExpr(receiver)})) { Some(value) => ${name}::${context.unionVariant(streamTag)}(value), None => ${name}::${context.unionVariant(nullTag)}, }`;
+}
+
+function emitWriterListener(
+  expr: RustLibCallExpr,
+  callbackType: IrFuncType,
+  context: RustLibCallContext,
+): string {
+  const [receiverExpr, callbackExpr, onceExpr] = expr.args;
+  if (receiverExpr?.type.kind !== "childWriter" || callbackExpr === undefined || onceExpr?.type.kind !== "bool") {
+    context.unsupported(`${expr.fn} listener arguments`, expr.loc);
+  }
+  const writer = context.nextTemporary();
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const runtimeName = expr.fn === "writer.onDrain"
+    ? "child_writer_on_drain"
+    : expr.fn === "writer.onFinish"
+      ? "child_writer_on_finish"
+      : "child_writer_on_error";
+  if (expr.fn === "writer.onError") {
+    const parameter = callbackType.params[0];
+    const argument = context.hasErrorClassRoots()
+      ? `${context.errorValueName()}::Builtin(sc_error)`
+      : "sc_error";
+    const dispatch = context.emitClosureDispatch(callback, callbackType, parameter === undefined ? [] : [argument], expr.loc);
+    const errorName = parameter === undefined ? "_sc_error" : "sc_error";
+    return `{ let ${writer} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::${runtimeName}(&${writer}, std::rc::Rc::new(move |${errorName}| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
+  }
+  const dispatch = context.emitClosureDispatch(callback, callbackType, [], expr.loc);
+  return `{ let ${writer} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::${runtimeName}(&${writer}, std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
 }
 
 function emitStreamDataListener(
@@ -147,10 +178,47 @@ function emitStreamEndListener(
   return `{ let ${stream} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::child_stream_on_end(&${stream}, std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
 }
 
+function emitExecFile(
+  expr: RustLibCallExpr,
+  context: RustLibCallContext,
+): string {
+  const [commandExpr, argumentsExpr, callbackExpr] = expr.args;
+  if (expr.args.length !== 3 || commandExpr?.type.kind !== "string" ||
+      argumentsExpr?.type.kind !== "array" || argumentsExpr.type.elem.kind !== "string" ||
+      callbackExpr?.type.kind !== "func" || callbackExpr.type.ret.kind !== "void" ||
+      callbackExpr.type.params.length > 3 || expr.type.kind !== "child") {
+    context.unsupported("cp.execFile shape", expr.loc);
+  }
+  const callbackType = callbackExpr.type;
+  const args: string[] = [];
+  const errorType = callbackType.params[0];
+  if (errorType !== undefined) {
+    if (errorType.kind !== "union") context.unsupported("cp.execFile callback error parameter", expr.loc);
+    const union = context.union(errorType.unionId, expr.loc);
+    const errorTag = union.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error");
+    const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+    if (errorTag < 0 || nullTag < 0) context.unsupported("cp.execFile callback Error | null union", expr.loc);
+    const name = context.unionName(union.id);
+    const payload = context.hasErrorClassRoots()
+      ? `${context.errorValueName()}::Builtin(sc_error)`
+      : "sc_error";
+    args.push(`match sc_error { Some(sc_error) => ${name}::${context.unionVariant(errorTag)}(${payload}), None => ${name}::${context.unionVariant(nullTag)}, }`);
+  }
+  if (callbackType.params[1] !== undefined) args.push("sc_stdout");
+  if (callbackType.params[2] !== undefined) args.push("sc_stderr");
+  const command = context.nextTemporary();
+  const arguments_ = context.nextTemporary();
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const dispatch = context.emitClosureDispatch(callback, callbackType, args, expr.loc);
+  return `{ let ${command} = ${context.emitExpr(commandExpr)}; let ${arguments_} = ${context.emitExpr(argumentsExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::child_exec_file(&${command}, &${arguments_}, std::rc::Rc::new(move |sc_error, sc_stdout, sc_stderr| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))) }`;
+}
+
 export function emitRustChildProcessCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
+  if (expr.fn === "cp.execFile") return emitExecFile(expr, context);
   if (expr.fn === "cp.spawn" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "string" && expr.args[1]?.type.kind === "array" &&
       expr.args[1].type.elem.kind === "string") {
@@ -166,9 +234,9 @@ export function emitRustChildProcessCall(
         envPairs?.type.kind !== "array" || envPairs.type.elem.kind !== "string" || cwd?.type.kind !== "string") {
       context.unsupported("cp.spawnOpts argument shape", expr.loc);
     }
-    if ((stdinMode.value !== 0 && stdinMode.value !== 1) ||
+    if ((stdinMode.value !== 0 && stdinMode.value !== 1 && stdinMode.value !== 3) ||
         [stdoutMode.value, stderrMode.value].some((mode) => mode < 0 || mode > 3)) {
-      context.unsupported("cp.spawnOpts with piped or fd stdin", expr.loc);
+      context.unsupported("cp.spawnOpts with fd stdin", expr.loc);
     }
     return `runtime::child_spawn_options(&(${context.emitExpr(command)}), &(${context.emitExpr(arguments_)}), ${context.emitExpr(stdinMode)}, ${context.emitExpr(stdoutMode)}, ${context.emitExpr(stderrMode)}, ${context.emitExpr(stdoutFd)}, ${context.emitExpr(stderrFd)}, ${context.emitExpr(detached)}, ${context.emitExpr(hasEnv)}, &(${context.emitExpr(envPairs)}), &(${context.emitExpr(cwd)}))`;
   }
@@ -178,9 +246,27 @@ export function emitRustChildProcessCall(
     const accessor = expr.fn === "child.pid" ? "pid" : "exit_code";
     return unionArgument(expr.type, `runtime::child_${accessor}(&(${context.emitExpr(expr.args[0])}))`, empty, context, expr);
   }
-  if ((expr.fn === "child.stdout" || expr.fn === "child.stderr") && expr.args.length === 1 &&
+  if ((expr.fn === "child.stdin" || expr.fn === "child.stdout" || expr.fn === "child.stderr") && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "child") {
-    return emitChildStreamAccess(expr, context);
+    return emitChildIoAccess(expr, context);
+  }
+  if ((expr.fn === "writer.writeString" || expr.fn === "writer.writeBytes") && expr.args.length === 2 &&
+      expr.args[0]?.type.kind === "childWriter") {
+    const data = expr.args[1];
+    const isString = expr.fn === "writer.writeString" && data?.type.kind === "string";
+    const isBytes = expr.fn === "writer.writeBytes" && data?.type.kind === "bytes" && data.type.elem === "u8";
+    if (!isString && !isBytes) context.unsupported(`${expr.fn} data shape`, expr.loc);
+    const runtimeName = isString ? "child_writer_write_string" : "child_writer_write_bytes";
+    return `runtime::${runtimeName}(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(data)}))`;
+  }
+  if ((expr.fn === "writer.end" || expr.fn === "writer.destroy" || expr.fn === "writer.writable") &&
+      expr.args.length === 1 && expr.args[0]?.type.kind === "childWriter") {
+    const runtimeName = expr.fn === "writer.end"
+      ? "child_writer_end"
+      : expr.fn === "writer.destroy"
+        ? "child_writer_destroy"
+        : "child_writer_writable";
+    return `runtime::${runtimeName}(&(${context.emitExpr(expr.args[0])}))`;
   }
   if (expr.fn === "child.killed" && expr.args.length === 1 && expr.args[0]?.type.kind === "child") {
     return `runtime::child_killed(&(${context.emitExpr(expr.args[0])}))`;
@@ -211,6 +297,11 @@ export function emitRustChildProcessCall(
     return expr.fn === "stream.onData"
       ? emitStreamDataListener(expr, callbackType, context)
       : emitStreamEndListener(expr, callbackType, context);
+  }
+  if ((expr.fn === "writer.onDrain" || expr.fn === "writer.onFinish" || expr.fn === "writer.onError") && expr.args.length === 3) {
+    const callbackType = expr.args[1]?.type;
+    if (callbackType?.kind !== "func") context.unsupported(`${expr.fn} callback shape`, expr.loc);
+    return emitWriterListener(expr, callbackType, context);
   }
   return null;
 }
