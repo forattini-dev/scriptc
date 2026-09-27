@@ -547,7 +547,8 @@ export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
   if (dynReceiver === undefined && access.name.text === "localeCompare") return lowerLocaleCompareCall(lowerer, call, access);
   const entry = own(STR_METHODS, access.name.text);
   const indexMethod = STRING_INDEX_METHODS.has(access.name.text) ? access.name.text as "at" | "codePointAt" : null;
-  if (!entry && !indexMethod) return null;
+  const substr = access.name.text === "substr" && lowerer.nativeStringSubstr;
+  if (!entry && !indexMethod && !substr) return null;
   // A validated dyn receiver (`pkg.name.replace(...)` on a JSON.parse
   // value) arrives pre-extracted through `dynReceiver`; its checker type
   // is `any`, so the type/symbol gates don't apply — the dyn value's
@@ -567,7 +568,9 @@ export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
   }
   // The lib declares optional parameters beyond some lowered forms; fence
   // those arities instead of passing arguments the runtime doesn't take.
-  if (argumentNodes.length < (entry?.minArgs ?? 0) || argumentNodes.length > (entry?.maxArgs ?? 1)) {
+  const minArgs = substr ? 0 : (entry?.minArgs ?? 0);
+  const maxArgs = substr ? 2 : (entry?.maxArgs ?? 1);
+  if (argumentNodes.length < minArgs || argumentNodes.length > maxArgs) {
     lowerer.noLowering(
       `.${access.name.text} with ${argumentNodes.length} argument${argumentNodes.length === 1 ? "" : "s"} on strings`,
       call,
@@ -578,6 +581,7 @@ export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     : lowerMethodReceiver(lowerer, access.expression, STRING, access.name.text);
   const loc = locOf(call);
   if (indexMethod) return lowerStringIndexCall(lowerer, call, indexMethod, receiver, access.expression, argumentNodes);
+  if (substr) return lowerStringSubstrCall(lowerer, call, receiver, argumentNodes);
   if (!entry) return null;
   if (entry.method === "split") return lowerStringSplitCall(lowerer, call, receiver, access.expression, argumentNodes);
   if (entry.method === "padStart" || entry.method === "padEnd") {
@@ -644,28 +648,29 @@ export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     }
     return { kind: "call", callee: helper, args: [receiver, needle, position], type: entry.result, loc };
   }
-  if (entry.method === "charAt" || entry.method === "charCodeAt" || entry.method === "slice" || entry.method === "substring" || entry.method === "repeat") {
+  const method = entry.method;
+  if (method === "charAt" || method === "charCodeAt" || method === "slice" || method === "substring" || method === "repeat") {
     const defaults: IrExpr[] = [numLit(0, loc)];
-    if (entry.method === "slice" || entry.method === "substring") {
+    if (method === "slice" || method === "substring") {
       defaults.push({ kind: "bin", op: "/", left: numLit(1, loc), right: numLit(0, loc), type: F64, loc });
     }
     const args = defaults.map((value, index) => lowerPositionArgument(lowerer, argumentNodes[index], value));
-    const subject = entry.method === "repeat" ? "string repeat count" : "string position";
+    const subject = method === "repeat" ? "string repeat count" : "string position";
     // Keep ordinary numeric calls on the direct intrinsic path, including the
     // existing boundary validation for island values in numeric slots.
     if (args.every(arg => arg.type.kind === "f64" || arg.type.kind === "jsval")) {
-      return { kind: "strIntrinsic", method: entry.method, receiver, args, type: entry.result, loc };
+      return { kind: "strIntrinsic", method, receiver, args, type: entry.result, loc };
     }
     // A helper evaluates all arguments before conversions can invoke hooks or
     // throw. Its parameters also give owned strings/unions a per-call lifetime
     // when the call occurs in a loop condition or short-circuit expression.
-    const key = `str.positions:${entry.method}:${args.map(arg => typeKey(arg.type)).join(":")}`;
+    const key = `str.positions:${method}:${args.map(arg => typeKey(arg.type)).join(":")}`;
     let helper = lowerer.widthHelpers.get(key);
     if (!helper) {
       helper = `%str.positions.${lowerer.widthHelpers.size}`;
       const params = [receiver, ...args].map((arg, index) => ({ localId: `arg.${index}`, name: `arg${index}`, type: arg.type }));
       const result: IrExpr = {
-        kind: "strIntrinsic", method: entry.method, receiver: varRef("arg.0", STRING, loc),
+        kind: "strIntrinsic", method, receiver: varRef("arg.0", STRING, loc),
         args: args.map((arg, index) => positionNumber(lowerer, varRef(`arg.${index + 1}`, arg.type, loc), defaults[index]!, argumentNodes[index] ?? call, subject)),
         type: entry.result, loc,
       };
@@ -687,6 +692,47 @@ export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     type: entry.result,
     loc: locOf(call),
   };
+}
+
+function lowerStringSubstrCall(lowerer: Lowerer, call: ts.CallExpression, receiver: IrExpr,
+  argumentNodes: readonly ts.Expression[]): IrExpr {
+  const loc = locOf(call);
+  const defaults: IrExpr[] = [
+    numLit(0, loc),
+    { kind: "bin", op: "/", left: numLit(1, loc), right: numLit(0, loc), type: F64, loc },
+  ];
+  const args = defaults.map((value, index) => lowerPositionArgument(lowerer, argumentNodes[index], value));
+  if (args.every((arg) => arg.type.kind === "f64")) {
+    return { kind: "libCall", fn: "str.substr", args: [receiver, ...args], type: STRING, loc };
+  }
+  const key = `str.substr:${args.map((arg) => typeKey(arg.type)).join(":")}`;
+  let helper = lowerer.widthHelpers.get(key);
+  if (!helper) {
+    helper = `%str.substr.${lowerer.widthHelpers.size}`;
+    const values = [receiver, ...args];
+    const params = values.map((arg, index) => ({ localId: `arg.${index}`, name: `arg${index}`, type: arg.type }));
+    const numeric = args.map((arg, index) => positionNumber(
+      lowerer,
+      varRef(`arg.${index + 1}`, arg.type, loc),
+      defaults[index]!,
+      argumentNodes[index] ?? call,
+      index === 0 ? "string position" : "string length",
+    ));
+    lowerer.widthHelpers.set(key, helper);
+    lowerer.liftedFns.push({
+      name: helper,
+      params,
+      returnType: STRING,
+      locals: params.map((param) => ({ id: param.localId, name: param.name, type: param.type, mutable: false })),
+      body: [{
+        kind: "return",
+        value: { kind: "libCall", fn: "str.substr", args: [varRef("arg.0", STRING, loc), ...numeric], type: STRING, loc },
+        loc,
+      }],
+      loc,
+    });
+  }
+  return { kind: "call", callee: helper, args: [receiver, ...args], type: STRING, loc };
 }
 
 /** `a.localeCompare(b)` — the one-argument form only (locales/options

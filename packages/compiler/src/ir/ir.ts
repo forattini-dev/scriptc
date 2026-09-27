@@ -2201,6 +2201,8 @@ export type IrLibFn =
    * spec's URIError ("URI malformed"), catchable. Borrow; results +1. */
   | "str.encodeUriComponent"
   | "str.decodeUriComponent"
+  /** Annex B String.prototype.substr, implemented by the Rust runtime. */
+  | "str.substr"
   /** RegExp.escape (ES2025): per-code-point EncodeForRegExpEscape —
    * leading ASCII alphanumeric hex-escapes, syntax characters and '/'
    * take a backslash, other punctuators/whitespace/line terminators

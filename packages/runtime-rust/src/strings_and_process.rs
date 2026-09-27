@@ -403,6 +403,21 @@ pub fn string_substring(value: &JsString, start: f64, end: f64) -> JsString {
     string_from_utf16(&units[start..end])
 }
 
+pub fn string_substr(value: &JsString, start: f64, length: f64) -> JsString {
+    let units: Vec<u16> = value.encode_utf16().collect();
+    let start = relative_string_index(start, units.len());
+    let length = if length.is_nan() { 0.0 } else { length.trunc() };
+    if length <= 0.0 {
+        return empty_string();
+    }
+    let end = if length == f64::INFINITY {
+        units.len()
+    } else {
+        (start as f64 + length).min(units.len() as f64) as usize
+    };
+    string_from_utf16(&units[start..end])
+}
+
 pub fn string_slice(value: &JsString, start: f64, end: f64) -> JsString {
     let units: Vec<u16> = value.encode_utf16().collect();
     let start = relative_string_index(start, units.len());

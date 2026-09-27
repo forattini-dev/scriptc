@@ -5705,7 +5705,7 @@ export function lowerDynDispatchMethodCall(
 /** STR_METHODS ∪ the regex-form names, MINUS everything Array (or any
  * other dyn kind's prototype) also declares. */
 const DYN_STRING_ONLY_METHODS = new Set([
-  "charCodeAt", "charAt", "startsWith", "endsWith", "substring", "repeat",
+  "charCodeAt", "charAt", "startsWith", "endsWith", "substring", "substr", "repeat",
   "trim", "trimStart", "trimEnd", "split", "padStart", "padEnd",
   "toLowerCase", "toUpperCase", "replace", "replaceAll", "match", "matchAll",
   "search",
