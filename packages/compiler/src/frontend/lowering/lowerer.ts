@@ -349,6 +349,8 @@ export interface LowerOptions {
   nativeDenseArrays?: boolean;
   /** Rust's traced generic arrays can store Map/Set values. */
   nativeCollectionArrays?: boolean;
+  /** Rust preserves program-class identities across checked-dynamic slots. */
+  nativeClassDynamicRefs?: boolean;
   /** --dynamic: the island engine is linked, so island constructs
    * (__island_eval) may lower. Off by default — without it they produce a
    * requires-dynamic diagnostic instead. */
@@ -443,6 +445,8 @@ export interface LowererMode {
   nativeDenseArrays?: boolean;
   /** Rust's traced generic arrays can store Map/Set values. */
   nativeCollectionArrays?: boolean;
+  /** Rust preserves program-class identities across checked-dynamic slots. */
+  nativeClassDynamicRefs?: boolean;
   /** Names of bodies a prior reachability pass reached; null lowers everything. */
   reachable?: ReadonlySet<string> | null;
   /** Coverage remainder: lower ONLY bodies outside `reachable`, skip the
@@ -552,6 +556,7 @@ export function lowerToIr(
     nativePromiseViews: options.nativePromiseViews ?? false,
     nativeDenseArrays: options.nativeDenseArrays ?? false,
     nativeCollectionArrays: options.nativeCollectionArrays ?? false,
+    nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
     targetPlatform,
     startupCrash,
     ffiImports,
@@ -574,6 +579,7 @@ export function lowerToIr(
         nativePromiseViews: options.nativePromiseViews ?? false,
         nativeDenseArrays: options.nativeDenseArrays ?? false,
         nativeCollectionArrays: options.nativeCollectionArrays ?? false,
+        nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
         targetPlatform,
         startupCrash,
         ffiImports,
@@ -604,6 +610,7 @@ export function lowerToIr(
       nativePromiseViews: options.nativePromiseViews ?? false,
       nativeDenseArrays: options.nativeDenseArrays ?? false,
       nativeCollectionArrays: options.nativeCollectionArrays ?? false,
+      nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
       targetPlatform,
       startupCrash,
       ffiImports,
@@ -628,6 +635,7 @@ export function lowerToIr(
     nativePromiseViews: options.nativePromiseViews ?? false,
     nativeDenseArrays: options.nativeDenseArrays ?? false,
     nativeCollectionArrays: options.nativeCollectionArrays ?? false,
+    nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
     targetPlatform,
     ffiImports,
     libraryCallbacks,
@@ -1041,6 +1049,7 @@ export class Lowerer {
   readonly nativePromiseViews: boolean;
   readonly nativeDenseArrays: boolean;
   readonly nativeCollectionArrays: boolean;
+  readonly nativeClassDynamicRefs: boolean;
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
   readonly fnSigsBySymbol = new Map<ts.Symbol, FnSig>();
@@ -1808,6 +1817,7 @@ export class Lowerer {
     this.nativePromiseViews = mode.nativePromiseViews ?? false;
     this.nativeDenseArrays = mode.nativeDenseArrays ?? false;
     this.nativeCollectionArrays = mode.nativeCollectionArrays ?? false;
+    this.nativeClassDynamicRefs = mode.nativeClassDynamicRefs ?? false;
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();

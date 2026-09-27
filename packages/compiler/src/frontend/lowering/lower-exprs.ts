@@ -2749,6 +2749,16 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
           ? root
           : { kind: "downcast", value: root, type: narrowed, loc: expr.loc };
       }
+      // Rust's checked-dynamic class capsule retains the original native
+      // object. A successful named-class instanceof test therefore bridges
+      // the checker-narrowed read back through an interval-validating cast.
+      if (
+        narrowed?.kind === "object" &&
+        lowerer.nativeClassDynamicRefs &&
+        !lowerer.isSubclassOf(narrowed.className, "%Error")
+      ) {
+        return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
+      }
       return expr;
     }
     // instanceof narrowing for classes: tsc types this USE as a subclass of
@@ -8710,6 +8720,15 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
       };
     }
     if (left.type.kind === "dyn") {
+      if (lowerer.nativeClassDynamicRefs) {
+        return {
+          kind: "libCall",
+          fn: "dyn.classInstanceof",
+          args: [left, { kind: "strLit", value: target.def.name, type: STRING, loc }],
+          type: BOOL,
+          loc,
+        };
+      }
       lowerer.unsupported(
         "SC1090",
         expr,

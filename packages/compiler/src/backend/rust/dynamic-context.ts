@@ -17,6 +17,7 @@ export interface RustDynamicContext {
   nextTemporary(): string;
   closureName(shape: RustClosureShape): string;
   closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
+  classMetaOf(name: string, loc?: SrcLoc): RustClassMeta;
   dynFunctionCheckName(shape: RustClosureShape): string;
   dynFunctionVariant(shape: RustClosureShape): string;
   dynTypeName(): string;

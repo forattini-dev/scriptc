@@ -27,6 +27,7 @@ import { emitRustAsyncLocalStorageCall } from "./async-local-storage.js";
 import { emitRustAssertCall } from "./assert-calls.js";
 import { emitRustNativeModuleCall } from "./native-module.js";
 import { emitRustPromiseView } from "./promise-view.js";
+import type { RustClassMeta } from "./model.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -66,6 +67,7 @@ export interface RustLibCallContext {
   stripCasts(expr: IrExpr): IrExpr;
   hasClassMeta(name: string): boolean; errorMessageRead(className: string, receiver: string): string | null;
   classFieldName(className: string, fieldName: string, loc?: SrcLoc): string;
+  classMetaOf(className: string, loc?: SrcLoc): RustClassMeta;
   hasErrorClassRoots(): boolean;
   errorValueName(): string;
   rustString(value: string): string;

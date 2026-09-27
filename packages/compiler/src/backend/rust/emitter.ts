@@ -145,6 +145,7 @@ class RustEmitter {
     dynFunctionVariant: (shape) => this.dynFunctionVariant(shape),
     dynTypeName: () => this.dynTypeName(),
     emitClosureDispatch: (callee, type, args, loc) => this.emitClosureDispatch(callee, type, args, loc),
+    classMetaOf: (name, loc) => this.classMetaOf(name, loc),
     errorClassRoots: () => this.errorClassRoots(),
     errorValueName: () => this.errorValueName(),
     hasEmbeddedModules: () => featuresEmbedIsland(rustRuntimeFeatures(this.mod)),

@@ -254,6 +254,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "dyn.compare": ["c", "llvm", "rust"],
   "dyn.defineProps": ["c", "llvm", "rust"],
   "dyn.errInstanceof": ["c", "llvm", "rust"],
+  "dyn.classInstanceof": ["rust"],
   "dyn.hasKey": ["c", "llvm", "rust"],
   "dyn.hasOwn": ["c", "llvm", "rust"],
   "dyn.iterPack": ["c", "llvm", "rust"],

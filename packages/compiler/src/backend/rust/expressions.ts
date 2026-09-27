@@ -996,6 +996,7 @@ export class RustExpressionEmitter {
           stripCasts: (value) => this.context.stripCasts(value),
           hasClassMeta: (name) => this.context.classMeta.has(name), errorMessageRead: (className, receiver) => this.context.classMeta.has(className) ? emitErrorMessageRead(this.context, this.context.classMetaOf(className), className, receiver) : null,
           classFieldName: (className, fieldName, loc) => this.context.classFieldName(className, fieldName, loc),
+          classMetaOf: (className, loc) => this.context.classMetaOf(className, loc),
           hasErrorClassRoots: () => this.context.errorClassRoots().length > 0,
           errorValueName: () => this.context.errorValueName(),
           rustString: (value) => this.context.rustString(value),

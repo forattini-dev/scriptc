@@ -3759,6 +3759,10 @@ export type IrLibFn =
    * answer). args are the borrowed dyn and a compile-time class-name
    * string literal. Never throws. */
   | "dyn.errInstanceof"
+  /** Rust checked-dynamic class capsule instanceof. The capsule retains the
+   * original native object; the compile-time class-name literal selects the
+   * exact standalone type or a hierarchy preorder interval. */
+  | "dyn.classInstanceof"
   /** Object.keys/values/entries over a CHECKED-DYNAMIC receiver
    * (scr_json.c): the runtime walks the dyn node's own members in JS
    * own-key order (array-index keys ascending first, then insertion

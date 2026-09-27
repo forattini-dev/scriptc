@@ -914,7 +914,13 @@ export class RustDynamicEmitter {
       case "func": return `${this.context.dynFunctionCheckName(this.context.closureShapeForType(type, loc))}(${value})`;
       case "object": {
         if (!RUNTIME_ERROR_CLASSES.has(type.className)) {
-          this.context.unsupported(`dynamic checked cast to object '${type.className}'`, loc);
+          const meta = this.context.classMetaOf(type.className, loc);
+          const rustType = this.context.rustType(type, loc);
+          const name = this.context.dynTypeName();
+          const test = meta.hierarchy
+            ? `object.with(|object| ${meta.pre} <= object.sc_class_pre && object.sc_class_pre <= ${meta.post})`
+            : "true";
+          return `{ let value = ${value}; match value { ${name}::Object(mirror) => { let object: Option<${rustType}> = runtime::live_dyn_ref_get(mirror.identity()); match object { Some(object) if ${test} => object, _ => sc_dyn_check_fail_at("${this.context.rustString(type.className)}", &${name}::Object(mirror), ${path}), } }, value => sc_dyn_check_fail_at("${this.context.rustString(type.className)}", &value, ${path}), } }`;
         }
         return `sc_dyn_error_unbox(${value})`;
       }

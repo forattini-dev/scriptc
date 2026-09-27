@@ -1,5 +1,6 @@
 thread_local! {
     static LIVE_DYN_REFS: RefCell<HashMap<usize, Box<dyn Any>>> = RefCell::new(HashMap::new());
+    static LIVE_DYN_MIRRORS: RefCell<HashMap<usize, Box<dyn Any>>> = RefCell::new(HashMap::new());
     static DYN_FROM_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -56,6 +57,23 @@ pub fn live_dyn_ref_get<T: Clone + 'static>(mirror_identity: usize) -> Option<T>
     })
 }
 
+pub fn live_dyn_mirror_store<T: 'static>(source_identity: usize, mirror: T) {
+    LIVE_DYN_MIRRORS.with(|mirrors| {
+        mirrors.borrow_mut().insert(source_identity, Box::new(mirror));
+    });
+}
+
+pub fn live_dyn_mirror_get<T: Clone + 'static>(source_identity: usize) -> Option<T> {
+    LIVE_DYN_MIRRORS.with(|mirrors| {
+        mirrors
+            .borrow()
+            .get(&source_identity)
+            .and_then(|value| value.downcast_ref::<T>())
+            .cloned()
+    })
+}
+
 fn live_dyn_refs_clear() {
     LIVE_DYN_REFS.with(|refs| refs.borrow_mut().clear());
+    LIVE_DYN_MIRRORS.with(|mirrors| mirrors.borrow_mut().clear());
 }

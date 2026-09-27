@@ -209,6 +209,18 @@ export function emitRustDynamicLibCall(
     const target = context.nextTemporary();
     return `{ let ${value} = ${context.emitExpr(arg)}; let ${target} = ${context.emitExpr(secondArg)}; sc_dyn_error_instanceof(&${value}, ${target}.as_ref()) }`;
   }
+  if (expr.fn === "dyn.classInstanceof" && expr.args.length === 2 &&
+    arg?.type.kind === "dyn" && secondArg?.kind === "strLit") {
+    const meta = context.classMetaOf(secondArg.value, expr.loc);
+    const value = context.nextTemporary();
+    const mirror = context.nextTemporary();
+    const object = context.nextTemporary();
+    const type = context.rustType({ kind: "object", className: meta.def.name }, expr.loc);
+    const test = meta.hierarchy
+      ? `${object}.with(|object| ${meta.pre} <= object.sc_class_pre && object.sc_class_pre <= ${meta.post})`
+      : "true";
+    return `{ let ${value} = ${context.emitExpr(arg)}; match &${value} { ${context.dynTypeName()}::Object(${mirror}) => runtime::live_dyn_ref_get::<${type}>(${mirror}.identity()).is_some_and(|${object}| ${test}), _ => false, } }`;
+  }
   if (expr.fn === "dyn.structuredClone" && expr.args.length === 2 &&
     arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn") {
     const value = context.nextTemporary();

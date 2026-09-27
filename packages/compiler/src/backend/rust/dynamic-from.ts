@@ -120,19 +120,18 @@ export class RustDynamicFromEmitter {
         const arms = union.arms.map((arm, tag) => {
           const variant = `${this.context.unionName(union.id)}::${this.context.unionVariant(tag)}`;
           if (this.context.isUnit(arm)) return `${variant} => ${this.emit(arm, "()", loc, "", liveRef)}`;
-          if (arm.kind === "object" && !RUNTIME_ERROR_CLASSES.has(arm.className)) {
-            return `${variant}(..) => runtime::throw_error_code(${rustJsString(`dynamic boxing from object '${arm.className}' is not supported yet`, text => this.context.rustString(text))}, "SC3001")`;
-          }
           return `${variant}(payload) => ${this.emit(arm, "payload", loc, "", liveRef)}`;
         }).join(", ");
         return `{ let ${unionValue} = ${value}; match ${unionValue} { ${arms} } }`;
       }
       case "object": {
-        if (!RUNTIME_ERROR_CLASSES.has(type.className)) {
-          return `runtime::throw_error_code(${rustJsString(`dynamic boxing from object '${type.className}' is not supported yet`, text => this.context.rustString(text))}, "SC3001")`;
+        if (RUNTIME_ERROR_CLASSES.has(type.className)) {
+          const error = this.context.nextTemporary();
+          return `{ let ${error} = ${value}; sc_dyn_error_box(&${error}) }`;
         }
-        const error = this.context.nextTemporary();
-        return `{ let ${error} = ${value}; sc_dyn_error_box(&${error}) }`;
+        const source = this.context.nextTemporary();
+        const capsule = this.context.nextTemporary();
+        return `{ let ${source} = ${value}; let source_identity = ${source}.identity(); if let Some(${capsule}) = runtime::live_dyn_mirror_get::<runtime::JsMap<runtime::JsString, ${name}>>(source_identity) { ${name}::Object(${capsule}) } else { let ${capsule}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); runtime::live_dyn_ref_store(${capsule}.identity(), ${source}); runtime::live_dyn_mirror_store(source_identity, ${capsule}.clone()); ${name}::Object(${capsule}) } }`;
       }
       case "record": return this.emitRecord(type, value, loc, liveRef);
       default:
