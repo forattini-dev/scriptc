@@ -754,19 +754,24 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     isUtf8: { fn: "buffer.isUtf8", params: [BYTES_U8], result: BOOL },
   },
   zlib: {
-    // Buffer in, Buffer out, Node's default options; string inputs fence
-    // per site (see the zlib special case in lowerBuiltinModuleCall).
-    // native-toolchain.ts links libz only when these appear on the IR.
+    // The default-options convenience family is special-cased in
+    // lowerZlibModuleCall: string inputs UTF-8 encode, callback forms carry
+    // program-shaped closures, and explicit options fence per site.
+    deflate: { fn: "zlib.deflateCb", params: [], result: VOID },
     deflateSync: { fn: "zlib.deflateSync", params: [BYTES_U8], result: BYTES_U8 },
+    inflate: { fn: "zlib.inflateCb", params: [], result: VOID },
     inflateSync: { fn: "zlib.inflateSync", params: [BYTES_U8], result: BYTES_U8 },
-    // The gzip pair and Node's header-sniffing unzipSync (gzip magic vs a
-    // zlib header), plus the wrapper-free raw pair — same Buffer in,
-    // Buffer out, default-options story as the zlib pair above.
-    gzipSync: { fn: "zlib.gzipSync", params: [BYTES_U8], result: BYTES_U8 },
-    gunzipSync: { fn: "zlib.gunzipSync", params: [BYTES_U8], result: BYTES_U8 },
-    unzipSync: { fn: "zlib.unzipSync", params: [BYTES_U8], result: BYTES_U8 },
+    deflateRaw: { fn: "zlib.deflateRawCb", params: [], result: VOID },
     deflateRawSync: { fn: "zlib.deflateRawSync", params: [BYTES_U8], result: BYTES_U8 },
+    inflateRaw: { fn: "zlib.inflateRawCb", params: [], result: VOID },
     inflateRawSync: { fn: "zlib.inflateRawSync", params: [BYTES_U8], result: BYTES_U8 },
+    gzip: { fn: "zlib.gzipCb", params: [], result: VOID },
+    gzipSync: { fn: "zlib.gzipSync", params: [BYTES_U8], result: BYTES_U8 },
+    gunzip: { fn: "zlib.gunzipCb", params: [], result: VOID },
+    gunzipSync: { fn: "zlib.gunzipSync", params: [BYTES_U8], result: BYTES_U8 },
+    unzip: { fn: "zlib.unzipCb", params: [], result: VOID },
+    unzipSync: { fn: "zlib.unzipSync", params: [BYTES_U8], result: BYTES_U8 },
+    crc32: { fn: "zlib.crc32", params: [], result: F64 },
   },
   url: {
     // fileURLToPath accepts a URL value OR a string — the call lowering

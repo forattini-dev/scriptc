@@ -87,6 +87,71 @@ pub fn zlib_unzip_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
     bytes_from_elements(zlib_decompress_bytes(&source, true).0)
 }
 
+/// Node's zlib.crc32(data[, value]). The supplied value is the previous
+/// finalized CRC, so resume by complementing it before and after the update.
+pub fn zlib_crc32(input: &JsBytes<u8>, value: f64) -> f64 {
+    if !value.is_finite() || value.trunc() != value {
+        throw_range_error_code(
+            format!(
+                "The value of \"value\" is out of range. It must be an integer. Received {}",
+                format_number(value)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    if !(0.0..=4_294_967_295.0).contains(&value) {
+        throw_range_error_code(
+            format!(
+                "The value of \"value\" is out of range. It must be >= 0 && <= 4294967295. Received {}",
+                format_number(value)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    let mut crc = (value as u32) ^ u32::MAX;
+    zlib_with_input(input, |source| {
+        for byte in source {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xedb8_8320 & 0_u32.wrapping_sub(crc & 1));
+            }
+        }
+    });
+    (crc ^ u32::MAX) as f64
+}
+
+/// Schedule a default-options codec on the next loop turn. Runtime handles,
+/// exception slots, and callback execution stay on the owning thread.
+pub fn zlib_codec_async(
+    input: &JsBytes<u8>,
+    mode: u8,
+    compressing: bool,
+    callback: Box<dyn FnOnce(Option<JsError>, Option<JsBytes<u8>>)>,
+) {
+    let input = input.clone();
+    process_next_tick(Box::new(move || {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match (mode, compressing) {
+                (0, true) => zlib_deflate_sync(&input),
+                (0, false) => zlib_inflate_sync(&input),
+                (1, true) => zlib_deflate_raw_sync(&input),
+                (1, false) => zlib_inflate_raw_sync(&input),
+                (2, true) => zlib_gzip_sync(&input),
+                (2, false) => zlib_gunzip_sync(&input),
+                (3, false) => zlib_unzip_sync(&input),
+                _ => unreachable!("scriptc invariant: invalid zlib codec mode"),
+            }
+        }));
+        match outcome {
+            Ok(value) => callback(None, Some(value)),
+            Err(payload) => {
+                let caught = caught_from_panic(payload);
+                callback(Some(caught_error_value(&caught)), None);
+            }
+        }
+    }));
+}
+
 /// The shared one-shot deflate loop: Node's default compression level, with
 /// or without the zlib wrapper. Compression of valid input cannot fail.
 fn zlib_compress_bytes(source: &[u8], zlib_header: bool) -> Vec<u8> {

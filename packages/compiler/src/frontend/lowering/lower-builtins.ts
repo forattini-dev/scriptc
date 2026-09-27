@@ -1,7 +1,7 @@
 import { lowerNumericParser } from "./lower-numeric-parser.js";
 import { lowerFsWriteOptions } from "./lower-fs-write-options.js";
 import { fsConstantValue } from "./fs-constants.js";
-import { lowerDeflateLevel } from "./lower-zlib.js";
+import { lowerDeflateLevel, lowerZlibModuleCall } from "./lower-zlib.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Builtin-surface lowering: node builtin-module calls (fs, path, os, url,
  * crypto, child_process spawn/spawnSync and child/stats/spawn-result
@@ -1092,6 +1092,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     fn: BuiltinModuleFn,
     loc: SrcLoc,): IrExpr {
     const name = expr.expression.getText();
+    if (bi.module === "zlib") return lowerZlibModuleCall(lowerer, expr, bi.member, loc);
     // Numeric open flags are interpreted symbolically at the call site. The
     // O_* bit values differ between Darwin and Linux, so emit a stable mask
     // and let the target runtime select its own native constants.
