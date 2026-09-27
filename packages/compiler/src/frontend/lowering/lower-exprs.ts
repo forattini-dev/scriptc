@@ -1,6 +1,7 @@
 import { nullishConstantKind } from "./nullish-filter-proof.js";
 import { functionAbi } from "./function-abi.js";
 import { lowerComputedStringKey } from "./lower-computed-string-key.js";
+import { packDynamicRest } from "./dynamic-rest.js";
 import { lowerRegexStateRead, lowerRegexStateAssign, lowerDynamicRegexCapture } from "./lower-regex-state.js";
 import { lowerRuntimeKeyIn, lowerTypedRecordIn } from "./lower-record-membership.js";
 import { lowerNativeDateRegexInstanceof } from "./lower-date-instanceof.js";
@@ -4487,10 +4488,13 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
       // to DYN wholesale now (mapType's dyn-element array rule), so the
       // literal IS the dyn array.
       if (isJsSourceFile(expr.getSourceFile()) || mapped?.kind === "dyn") {
-        const elems = expr.elements.map((el): IrExpr => {
-          if (ts.isSpreadElement(el)) {
-            lowerer.unsupported("SC1090", el, "spread elements in a dynamic (unknown[]) array literal");
+        if (expr.elements.some(ts.isSpreadElement)) {
+          if (expr.elements.some(ts.isOmittedExpression)) {
+            lowerer.unsupported("SC1090", expr, "array holes combined with spreads in a dynamic (unknown[]) array literal");
           }
+          return packDynamicRest(lowerer, expr.elements, expr, loc);
+        }
+        const elems = expr.elements.map((el): IrExpr => {
           const v = lowerer.coerceToExpected(lowerer.lowerExpr(el), DYN);
           if (v.type.kind !== "dyn") {
             lowerer.unsupported(
