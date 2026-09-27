@@ -1134,6 +1134,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "str.atob": ["c", "llvm", "rust"],
   "str.b64Missing": ["c", "llvm", "rust"],
   "str.btoa": ["c", "llvm", "rust"],
+  "str.concatDyn": ["rust"],
   "str.decodeUriComponent": ["c", "llvm", "rust"],
   "str.encodeUri": ["c", "llvm", "rust"],
   "str.encodeUriComponent": ["c", "llvm", "rust"],

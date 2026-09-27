@@ -2203,6 +2203,8 @@ export type IrLibFn =
   | "str.decodeUriComponent"
   /** Annex B String.prototype.substr, implemented by the Rust runtime. */
   | "str.substr"
+  /** String.concat over a checked-dynamic spread argument vector (Rust). */
+  | "str.concatDyn"
   /** RegExp.escape (ES2025): per-code-point EncodeForRegExpEscape —
    * leading ASCII alphanumeric hex-escapes, syntax characters and '/'
    * take a backslash, other punctuators/whitespace/line terminators

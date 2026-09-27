@@ -311,6 +311,12 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "str.substr" && expr.args.length === 3 && arg?.type.kind === "string" && secondArg !== undefined && expr.args[2] !== undefined) {
     return `runtime::string_substr(&(${context.emitExpr(arg)}), ${context.emitExpr(secondArg)}, ${context.emitExpr(expr.args[2])})`;
   }
+  if (expr.fn === "str.concatDyn" && expr.args.length === 2 && arg?.type.kind === "string" && secondArg?.type.kind === "dyn") {
+    const receiver = context.nextTemporary();
+    const values = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${receiver} = ${context.emitExpr(arg)}; let ${values} = ${context.emitExpr(secondArg)}; let mut sc_output = runtime::JsStringBuilder::new(); sc_output.push_str(&${receiver}); match &${values} { ${dyn}::Array(sc_values) => { let mut sc_index = 0.0; while sc_index < runtime::array_len(sc_values) { let sc_value = runtime::array_get(sc_values, sc_index); sc_output.push_str(&sc_dyn_to_string(&sc_value)); sc_index += 1.0; } }, sc_value => sc_dyn_arg_type_fail("spread argument", "an array", sc_value), } sc_output.finish() }`;
+  }
   if ((expr.fn === "str.atob" || expr.fn === "str.btoa") && expr.args.length === 1 && arg?.type.kind === "dyn") {
     const value = context.nextTemporary();
     const helper = expr.fn === "str.atob" ? "string_atob" : "string_btoa";
