@@ -72,7 +72,7 @@ import { provenanceSources } from "./frontend/provenance-registry.js";
 import { clearResolveCaches } from "./frontend/resolve.js";
 import { retryNpmCallbackContext } from "./frontend/npm-static-context.js";
 import { withNpmDeclarationCandidates } from "./frontend/npm-static-declarations.js";
-import { detectAutoPackages, filterExternalNpmPackages, findSingleNpmSurfaceOffender, npmSurfaceHasTypeErrors, packagesNamedByDiag } from "./frontend/npm-static-auto.js";
+import { detectAutoPackages, filterExternalNpmPackages, findSingleNpmSurfaceOffender, npmSurfaceHasTypeErrors, npmTypeErrorKey, packagesNamedByDiag } from "./frontend/npm-static-auto.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
 import { loadFfiProfile, type FfiProfile } from "./ffi/ffi-manifest.js";
@@ -614,35 +614,57 @@ function runFrontendWithDeclarations(
   // degrade the same way — the ratified stance for bundle-shaped dists is
   // graceful per-package degradation, never a failed gate the user cannot
   // act on (the note carries the why).
-  if (effective.size > 0 && preflight.some((d) => d.code === "SC0001")) {
-    const dropWithNote = (p: string): void => {
-      effective.delete(p);
-      statuses.push({
-        package: p,
-        status: "fallback",
-        detail:
-          npmStatic === "auto"
-            ? "auto: the program does not typecheck against its inferred surface"
-            : npmStatic === "lib"
-              ? "the program does not typecheck against its inferred surface (type-only declarations and .d.ts type guards have no JS value inference can chase)"
-              : "the program does not typecheck against its inferred surface (type-only declarations and .d.ts type guards have no JS value inference can chase) — the package serves from the island instead",
-      });
-    };
-    // Preserve the graph when one removal clears the errors; otherwise use SOLO probes, then recheck survivors.
-    // Probes only need the entry, packages and copied diagnostics: release the unused checker before opening them.
+  const unattributedTypeErrors = preflight.filter((diagnostic) => diagnostic.code === "SC0001");
+  if (effective.size > 0 && unattributedTypeErrors.length > 0) {
+    // Establish the exact errors that already exist against the author's
+    // declaration graph before asking which inferred npm surface introduced
+    // the remainder. Release the package-heavy checker first: large npm
+    // graphs must never keep two tsgo programs resident at once. If every
+    // error is authoring-owned, this baseline program is a sufficient final
+    // diagnostic frontend because preflight prevents lowering.
     load.dispose();
-    const single = findSingleNpmSurfaceOffender(entryPath, effective, externalTypes);
-    if (single !== null) dropWithNote(single);
-    else for (const p of [...effective]) {
-      if (npmSurfaceHasTypeErrors(entryPath, [p], externalTypes)) dropWithNote(p);
-    }
-    load = loadProgram(entryPath, { npmStatic: effective, externalTypes });
-    preflight = checkPreflight(load);
-    if (preflight.some((d) => d.code === "SC0001") && effective.size > 0) {
-      for (const p of [...effective]) dropWithNote(p);
+    load = loadProgram(entryPath, { externalTypes });
+    const authoringPreflight = checkPreflight(load);
+    const authoringTypeErrors = new Set(
+      authoringPreflight.filter((diagnostic) => diagnostic.code === "SC0001").map(npmTypeErrorKey),
+    );
+    const attributableTypeErrors = unattributedTypeErrors.filter(
+      (diagnostic) => !authoringTypeErrors.has(npmTypeErrorKey(diagnostic)),
+    );
+    if (attributableTypeErrors.length > 0) {
+      const dropWithNote = (p: string): void => {
+        effective.delete(p);
+        statuses.push({
+          package: p,
+          status: "fallback",
+          detail:
+            npmStatic === "auto"
+              ? "auto: the program does not typecheck against its inferred surface"
+              : npmStatic === "lib"
+                ? "the program does not typecheck against its inferred surface (type-only declarations and .d.ts type guards have no JS value inference can chase)"
+                : "the program does not typecheck against its inferred surface (type-only declarations and .d.ts type guards have no JS value inference can chase) — the package serves from the island instead",
+        });
+      };
+      // Preserve the graph when one removal clears the errors; otherwise use SOLO probes, then recheck survivors.
+      // Probes only need the entry, packages and copied diagnostics: release the baseline checker before opening them.
       load.dispose();
+      const single = findSingleNpmSurfaceOffender(entryPath, effective, externalTypes, authoringTypeErrors);
+      if (single !== null) dropWithNote(single);
+      else for (const p of [...effective]) {
+        if (npmSurfaceHasTypeErrors(entryPath, [p], externalTypes, authoringTypeErrors)) dropWithNote(p);
+      }
       load = loadProgram(entryPath, { npmStatic: effective, externalTypes });
       preflight = checkPreflight(load);
+      if (
+        preflight.some(
+          (diagnostic) => diagnostic.code === "SC0001" && !authoringTypeErrors.has(npmTypeErrorKey(diagnostic)),
+        ) && effective.size > 0
+      ) {
+        for (const p of [...effective]) dropWithNote(p);
+        load.dispose();
+        load = loadProgram(entryPath, { npmStatic: effective, externalTypes });
+        preflight = checkPreflight(load);
+      }
     }
   }
   for (const p of requested) {

@@ -6,6 +6,7 @@
 import { checkPreflightTypes } from "./preflight-types.js";
 import { registerNpmDeclaration } from "./npm-static-declarations.js";
 import type { NpmStaticStatus } from "../coverage/report.js";
+import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import type { SrcLoc } from "../ir/ir.js";
 import { canonicalBuiltinModule, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./program.js";
 import { npmStaticIneligibleReason, npmStaticPackageOfPath } from "./npm-static.js";
@@ -151,21 +152,40 @@ export function filterExternalNpmPackages(
 export function findSingleNpmSurfaceOffender(
   entryPath: string, packages: ReadonlySet<string>,
   externalTypes?: Readonly<Record<string, string>>,
+  ignoredTypeErrors?: ReadonlySet<string>,
 ): string | null {
   for (const candidate of packages) {
     const retained = [...packages].filter((name) => name !== candidate);
-    if (!npmSurfaceHasTypeErrors(entryPath, retained, externalTypes)) return candidate;
+    if (!npmSurfaceHasTypeErrors(entryPath, retained, externalTypes, ignoredTypeErrors)) return candidate;
   }
   return null;
+}
+
+/** Stable identity for deciding whether a type error already exists against
+ * the program's authoring declarations. Locations alone can host multiple
+ * diagnostics, while messages alone can repeat at unrelated sites. */
+export function npmTypeErrorKey(diagnostic: Pick<ScrDiagnostic, "code" | "loc" | "message">): string {
+  return JSON.stringify([
+    diagnostic.code,
+    diagnostic.loc.file,
+    diagnostic.loc.start,
+    diagnostic.loc.end,
+    diagnostic.message,
+  ]);
 }
 
 /** A disposable type query, never a substitute for the final native preflight. */
 export function npmSurfaceHasTypeErrors(
   entryPath: string, packages: Iterable<string>,
   externalTypes?: Readonly<Record<string, string>>,
+  ignoredTypeErrors?: ReadonlySet<string>,
 ): boolean {
   const probe = loadProgram(entryPath, { npmStatic: packages, externalTypes });
-  try { return checkPreflightTypes(probe).some((d) => d.code === "SC0001"); }
+  try {
+    return checkPreflightTypes(probe).some(
+      (diagnostic) => diagnostic.code === "SC0001" && !ignoredTypeErrors?.has(npmTypeErrorKey(diagnostic)),
+    );
+  }
   finally { probe.dispose(); }
 }
 
