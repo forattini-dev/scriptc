@@ -5437,6 +5437,18 @@ export function fenceClosureProbe(
           );
         }
       }
+      // An `any`-typed access whose receiver lowers to a static record
+      // (`C.Code[key]` inside TypeScript's emitted class/namespace IIFE
+      // class body): dispatch from the represented value, just like the
+      // static-array case above. The record-key lowering stringifies a dyn
+      // key with JavaScript semantics and checks the finite declared field
+      // set; no untyped storage leaks into the native representation.
+      if (obj.type.kind === "record") {
+        const shape = lowerer.shapes.get(obj.type.shapeId);
+        if (shape && !shape.tuple) {
+          return lowerer.lowerRecordKeyRead(expr, obj.type.shapeId, shape);
+        }
+      }
     }
     // `env[key]` on a UNION of record shapes (`ProcessEnv | Record<string,
     // string>` — the env-bag parameter pattern): the per-arm keyed read,
@@ -7140,6 +7152,14 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         const takeRight = op === ts.SyntaxKind.AmpersandAmpersandToken ? left.value : !left.value;
         return takeRight ? lowerer.lowerExpr(expr.right) : left;
       }
+      // Every represented reference kind is unconditionally truthy in
+      // JavaScript. Fold `ref || unreachable` before lowering the RHS so
+      // dead fallback initializers do not introduce diagnostics or engine
+      // dependencies (notably TypeScript's emitted `C || (C = {})` after
+      // `C` has been initialized with a class object).
+      if (op === ts.SyntaxKind.BarBarToken && REF_TRUTHY_KINDS.has(left.type.kind)) {
+        return left;
+      }
       const right = lowerer.lowerExpr(expr.right);
       // A LITERAL-unit left operand (a compile-time undefined/null — the
       // capability-probe members: `process.features.inspector ||
@@ -7150,9 +7170,6 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
       // units only — computed unit-typed values keep the fences below.
       if (left.kind === "unitLit") {
         return op === ts.SyntaxKind.BarBarToken ? right : left;
-      }
-      if (op === ts.SyntaxKind.BarBarToken && REF_TRUTHY_KINDS.has(left.type.kind)) {
-        return left;
       }
       if (left.type.kind === "dyn" || right.type.kind === "dyn") {
         // A checked-dynamic operand (`fn.name || '<anonymous>'` —

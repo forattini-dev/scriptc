@@ -1,4 +1,4 @@
-/* Expando function members (`function foo() {}; foo.bar = 12` — the
+/* Expando callable/class members (`function foo() {}; foo.bar = 12` — the
  * namespace-object idiom tsc binds as members ON the function's own
  * symbol/type) and property members of module-level CALLABLE consts
  * (`const c: Combo = () => 1; c.p = {}` — an interface member written
@@ -12,11 +12,17 @@
  * the line implicitMonoFile already draws. User JS and island values keep
  * today's member story.
  *
+ * TypeScript's emitted class/namespace merge has the same runtime shape:
+ * `var C = class C {}; (function (C) { C.Code = {...}; })(C || (C = {}))`.
+ * The IIFE parameter is accepted only when that exact top-level form proves
+ * it aliases the class binding; arbitrary class mutation and aliases remain
+ * unsupported.
+ *
  * The lowering: each written member is a MODULE GLOBAL keyed by
- * (function symbol × member key), registered during collection by
+ * (owner symbol × member key), registered during collection by
  * scanning the file for member-assignment statements whose receiver is a
  * direct reference to a module-level function declaration or a
- * function-valued const. Reads and writes through the function's NAME
+ * function-valued const. Reads and writes through the owner's NAME
  * route to that global — the checker's declared member type is the
  * slot's type, and JS object identity holds because only references that
  * RESOLVE to the declaring symbol route this way (a structurally-typed
@@ -82,13 +88,98 @@ function npmStaticJsFile(sf: ts.SourceFile): boolean {
   return isJsSourceFile(sf) && npmStaticPackageOfPath(sf.fileName) !== null;
 }
 
-/** The module-level function-ish symbol a receiver expression resolves
- * to, or null: a top-level FunctionDeclaration, or a top-level `const`
+/** Strip syntax-only wrappers while preserving the value expression. */
+function unwrapExpr(expr: ts.Expression): ts.Expression {
+  while (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr) || ts.isTypeAssertion(expr)) expr = expr.expression;
+  return expr;
+}
+
+/** A module-level class-expression binding accepted as an expando owner.
+ * This shape is intentionally limited to opted-in npm-static JavaScript:
+ * it is the form TypeScript emits for a class followed by a namespace IIFE. */
+function rawEmittedClassOwnerSymbol(lowerer: Lowerer, ident: ts.Identifier): ts.Symbol | null {
+  let sym = lowerer.resolveValueSymbol(ident);
+  if (!sym) return null;
+  let decl = lowerer.checker.valueDeclarationOf(sym);
+  // Inside a named class expression, `C` resolves to the class expression's
+  // private inner name rather than the outer `var C`. Both designate the same
+  // class object for this emitted form, so normalize the inner symbol to the
+  // containing module binding before using symbol identity as the key.
+  if (decl && ts.isClassExpression(decl)) {
+    let parent: ts.Node = decl.parent;
+    while (ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) || ts.isTypeAssertion(parent)) parent = parent.parent;
+    if (!ts.isVariableDeclaration(parent) || !ts.isIdentifier(parent.name)) return null;
+    sym = lowerer.resolveValueSymbol(parent.name) ?? sym;
+    decl = lowerer.checker.valueDeclarationOf(sym);
+  }
+  if (!decl || !ts.isVariableDeclaration(decl) || !npmStaticJsFile(decl.getSourceFile())) return null;
+  if (!ts.isVariableStatement(decl.parent.parent) || !ts.isSourceFile(decl.parent.parent.parent)) return null;
+  const init = decl.initializer ? unwrapExpr(decl.initializer) : undefined;
+  return init && ts.isClassExpression(init) ? sym : null;
+}
+
+/** Parse the exact top-level call TypeScript emits for a class/namespace
+ * merge and return its outer class binding. */
+function namespaceIifeMergeOwnerSymbol(lowerer: Lowerer, call: ts.CallExpression): ts.Symbol | null {
+  if (!ts.isExpressionStatement(call.parent) || !ts.isSourceFile(call.parent.parent)) return null;
+  const callee = unwrapExpr(call.expression);
+  if (
+    !ts.isFunctionExpression(callee) ||
+    callee.parameters.length !== 1 ||
+    !ts.isIdentifier(callee.parameters[0]!.name) ||
+    call.arguments.length !== 1
+  ) return null;
+  const arg = unwrapExpr(call.arguments[0]!);
+  if (!ts.isBinaryExpression(arg) || arg.operatorToken.kind !== ts.SyntaxKind.BarBarToken) return null;
+  const left = unwrapExpr(arg.left);
+  const right = unwrapExpr(arg.right);
+  if (!ts.isIdentifier(left) || !ts.isBinaryExpression(right) || right.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
+  const assigned = unwrapExpr(right.left);
+  if (!ts.isIdentifier(assigned) || !ts.isObjectLiteralExpression(unwrapExpr(right.right))) return null;
+  const owner = rawEmittedClassOwnerSymbol(lowerer, left);
+  if (!owner || lowerer.resolveValueSymbol(assigned) !== owner) return null;
+  return owner;
+}
+
+/** A direct class-name receiver qualifies only when its source file also
+ * contains the exact emitted namespace merge. */
+function emittedClassOwnerSymbol(lowerer: Lowerer, ident: ts.Identifier): ts.Symbol | null {
+  const owner = rawEmittedClassOwnerSymbol(lowerer, ident);
+  if (!owner) return null;
+  return ident.getSourceFile().statements.some(
+    (stmt) =>
+      ts.isExpressionStatement(stmt) &&
+      ts.isCallExpression(stmt.expression) &&
+      namespaceIifeMergeOwnerSymbol(lowerer, stmt.expression) === owner,
+  ) ? owner : null;
+}
+
+/** Resolve the parameter of TypeScript's exact emitted namespace-merge IIFE
+ * back to its outer class symbol. No general parameter/alias flow is inferred. */
+function namespaceIifeClassOwnerSymbol(lowerer: Lowerer, ident: ts.Identifier): ts.Symbol | null {
+  const paramSym = lowerer.resolveValueSymbol(ident);
+  const paramDecl = paramSym ? lowerer.checker.valueDeclarationOf(paramSym) : undefined;
+  if (!paramDecl || !ts.isParameter(paramDecl) || !ts.isIdentifier(paramDecl.name)) return null;
+  const fn = paramDecl.parent;
+  if (!ts.isFunctionExpression(fn) || fn.parameters.length !== 1) return null;
+
+  const calleeParent = fn.parent;
+  const callee = ts.isParenthesizedExpression(calleeParent) ? calleeParent : fn;
+  const call = callee.parent;
+  if (!ts.isCallExpression(call) || call.expression !== callee || call.arguments.length !== 1) return null;
+  return namespaceIifeMergeOwnerSymbol(lowerer, call);
+}
+
+/** The module-level callable/class symbol a receiver expression resolves
+ * to, or null: a top-level FunctionDeclaration, a top-level `const`
  * variable whose checker type is callable (arrow/function-expression
- * consts, interface-typed callable consts). Only direct identifier
- * references qualify — routing is by symbol identity. */
-function expandoFnSymbolOf(lowerer: Lowerer, recv: ts.Expression): ts.Symbol | null {
+ * consts, interface-typed callable consts), or TypeScript's exact emitted
+ * class/namespace owner/parameter pair. Only direct identifier references
+ * qualify — routing is by symbol identity. */
+function expandoOwnerSymbolOf(lowerer: Lowerer, recv: ts.Expression): ts.Symbol | null {
   if (!ts.isIdentifier(recv)) return null;
+  const emittedClass = emittedClassOwnerSymbol(lowerer, recv) ?? namespaceIifeClassOwnerSymbol(lowerer, recv);
+  if (emittedClass) return emittedClass;
   // Island and checked-dynamic receivers never qualify by construction:
   // the declaration-shape checks below (a function DECLARATION, or a
   // const whose initializer is a function/arrow LITERAL) exclude import
@@ -140,7 +231,7 @@ function expandoWriteOf(
   const left = node.left;
   if (!ts.isPropertyAccessExpression(left) && !ts.isElementAccessExpression(left)) return null;
   if (ts.isPropertyAccessExpression(left) && left.questionDotToken) return null;
-  const fnSym = expandoFnSymbolOf(lowerer, left.expression);
+  const fnSym = expandoOwnerSymbolOf(lowerer, left.expression);
   if (!fnSym) return null;
   const key = memberKeyOf(lowerer, left);
   if (key === null) return null;
@@ -177,7 +268,20 @@ export function collectExpandoMembers(lowerer: Lowerer, sf: ts.SourceFile): void
         // register nothing and drop their collection-time diagnostics —
         // the write statement's own lowering re-diagnoses in context.
         const diagsBefore = lowerer.diags.length;
-        const tsType = lowerer.typeOf(w.access);
+        // The namespace-IIFE parameter in emitted JavaScript is unannotated,
+        // so the checker types `C.member` as `any`. The assignment itself is
+        // the declaration of that member: for this exact proven alias form,
+        // derive the slot from the RHS instead. Ordinary expandos retain the
+        // declared-member rule above.
+        let tsType = lowerer.typeOf(w.access);
+        if (
+          (tsType.flags & ts.TypeFlags.Any) !== 0 &&
+          ts.isBinaryExpression(node) &&
+          ts.isIdentifier(w.access.expression) &&
+          namespaceIifeClassOwnerSymbol(lowerer, w.access.expression)
+        ) {
+          tsType = lowerer.typeOf(node.right);
+        }
         let type: IrType | null;
         try {
           type = lowerer.mapTypeOf(tsType);
@@ -249,7 +353,7 @@ export function expandoWritableTarget(
   access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
 ): { id: string; type: IrType } | null {
   if (ts.isPropertyAccessExpression(access) && access.questionDotToken) return null;
-  const fnSym = expandoFnSymbolOf(lowerer, access.expression);
+  const fnSym = expandoOwnerSymbolOf(lowerer, access.expression);
   if (!fnSym) return null;
   const key = memberKeyOf(lowerer, access);
   if (key === null) return null;
@@ -275,7 +379,7 @@ export function expandoMemberRead(
 ): IrExpr | null {
   if (ts.isPropertyAccessExpression(access) && access.questionDotToken) return null;
   if (ts.isElementAccessExpression(access) && access.questionDotToken) return null;
-  const fnSym = expandoFnSymbolOf(lowerer, access.expression);
+  const fnSym = expandoOwnerSymbolOf(lowerer, access.expression);
   if (!fnSym) return null;
   const key = memberKeyOf(lowerer, access);
   if (key === null) return null;
