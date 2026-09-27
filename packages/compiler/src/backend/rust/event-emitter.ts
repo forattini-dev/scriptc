@@ -54,6 +54,7 @@ export class RustEventEmitterEmitter {
     this.context.line("enum ScEmitterListener {");
     this.context.pushIndent();
     this.context.line("Never,");
+    this.context.line(`Flex(${this.context.dynTypeName()}),`);
     if (this.context.streams.usesStreamFinished) {
       this.context.line("RuntimeVoid(std::rc::Rc<dyn Fn()>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>),");
       this.context.line("RuntimeError(std::rc::Rc<dyn Fn(runtime::JsError)>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>),");
@@ -73,6 +74,7 @@ export class RustEventEmitterEmitter {
     this.context.line("match self {");
     this.context.pushIndent();
     this.context.line("Self::Never => {},");
+    this.context.line("Self::Flex(value) => runtime::Trace::trace(value, tracer),");
     if (this.context.streams.usesStreamFinished) {
       this.context.line("Self::RuntimeVoid(_, trace) | Self::RuntimeError(_, trace) => trace(tracer),");
     }
@@ -168,10 +170,12 @@ export class RustEventEmitterEmitter {
       case "emitter.off": return this.emitOff(expr);
       case "emitter.checkListener": return this.emitCheckListener(expr);
       case "emitter.onDyn": return this.emitOnDynamic(expr);
+      case "emitter.onFlex": return this.emitOnFlex(expr);
       case "emitter.onDataDyn": return this.emitOnDynamic(expr, true);
       case "emitter.offDyn": return this.emitOffDynamic(expr);
       case "emitter.removeAll": return this.emitRemoveAll(expr);
       case "emitter.emit": return this.emitEvent(expr);
+      case "emitter.emitFlex": return this.emitFlexEvent(expr);
       case "emitter.emitData": return this.emitEvent(expr);
       case "emitter.emitError": return this.emitEvent(expr, true);
       case "emitter.count": return this.emitCount(expr);
@@ -273,6 +277,17 @@ export class RustEventEmitterEmitter {
     return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = sc_dyn_function_identity(&${values[2]}).unwrap_or_else(|| sc_dyn_arg_type_fail("listener", "of type function", &${values[2]})); let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[3]}), sc_identity, ${values[4]}, ${values[5]}); ${startFlow} ${values[0]} }`;
   }
 
+  private emitOnFlex(expr: RustLibCallExpr): string {
+    const [receiver, name, callback, once, prepend] = expr.args;
+    if (receiver === undefined || name?.type.kind !== "string" || callback?.type.kind !== "dyn" ||
+      once?.type.kind !== "bool" || prepend?.type.kind !== "bool" || expr.args.length !== 5 ||
+      !this.isEmitterObject(receiver.type) || !this.isEmitterObject(expr.type)) {
+      this.context.unsupported("EventEmitter computed listener registration shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = sc_dyn_function_identity(&${values[2]}).unwrap_or_else(|| sc_dyn_arg_type_fail("listener", "of type function", &${values[2]})); let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::Flex(${values[2]}), sc_identity, ${values[3]}, ${values[4]}); ${values[0]} }`;
+  }
+
   private startReadableFlow(type: IrType, value: string, loc: SrcLoc): string {
     if (type.kind !== "object") this.context.unsupported("stream data listener receiver", loc);
     if (type.className === "%Readable") {
@@ -336,6 +351,17 @@ export class RustEventEmitterEmitter {
       ? `if !sc_had_listeners { runtime::throw_value(${errorValue}.clone()); }`
       : "";
     return `{ ${this.bindWithRegistry(expr, values)} let sc_snapshot = runtime::emitter_snapshot(&sc_emitter, &${values[1]}); let sc_had_listeners = !sc_snapshot.is_empty(); ${unhandled} for sc_registration in sc_snapshot { if !runtime::emitter_listener_should_invoke(&sc_registration) { continue; } if sc_registration.once { let _ = runtime::emitter_remove_registration(&sc_emitter, &${values[1]}, sc_registration.registration); let _ = sc_emitter_emit_meta(&sc_emitter, "removeListener", ${values[1]}.clone()); } match sc_registration.callback { ${arms.join(" ")} } } sc_had_listeners }`;
+  }
+
+  private emitFlexEvent(expr: RustLibCallExpr): string {
+    const [receiver, name, ...args] = expr.args;
+    if (receiver === undefined || name?.type.kind !== "string" || expr.type.kind !== "bool" ||
+      !this.isEmitterObject(receiver.type) || args.some((argument) => argument.type.kind !== "dyn")) {
+      this.context.unsupported("EventEmitter computed emit shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const payload = values.slice(2).map((value) => `${value}.clone()`).join(", ");
+    return `{ ${this.bindWithRegistry(expr, values)} if ${values[1]}.as_ref() == "error" { runtime::trap_other("scriptc: computed event collided with the error event".to_owned()); } let sc_snapshot = runtime::emitter_snapshot(&sc_emitter, &${values[1]}); let sc_had_listeners = !sc_snapshot.is_empty(); for sc_registration in sc_snapshot { if !runtime::emitter_listener_should_invoke(&sc_registration) { continue; } if sc_registration.once { let _ = runtime::emitter_remove_registration(&sc_emitter, &${values[1]}, sc_registration.registration); let _ = sc_emitter_emit_meta(&sc_emitter, "removeListener", ${values[1]}.clone()); } match sc_registration.callback { ScEmitterListener::Flex(sc_callback) => { let _ = sc_dyn_call(&sc_callback, &[${payload}], "listener"); }, _ => runtime::trap_other("scriptc: computed event collided with a fixed event".to_owned()), } } sc_had_listeners }`;
   }
 
   private emitCount(expr: RustLibCallExpr): string {

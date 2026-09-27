@@ -43,7 +43,7 @@ import { newFnCtx } from "./scope-env.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/ir.js";
-import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
+import { STREAM_FORCED_EVENT_NAMES, streamForcedTuple, streamSidesOf } from "./lower-stream.js";
 import { boolLit, strLit, varRef } from "../../ir/build.js";
 
 /** True when the class descends from (or is) the runtime emitter. */
@@ -76,6 +76,36 @@ interface EventSig {
    * the event's runtime bucket may hold originals of MIXED signatures —
    * so listeners()/rawListeners() have no one honest element type. */
   dynListener: boolean;
+  /** At least one literal-name registration exists for this event. */
+  hasListener: boolean;
+}
+
+interface ComputedEventPattern {
+  prefix: string;
+  suffix: string;
+  listener: boolean;
+}
+
+function scannedEmitterInfo(lowerer: Lowerer, receiver: IrType | null): ClassInfo | null {
+  if (!receiver) return null;
+  let className: string;
+  if (receiver.kind === "object") {
+    className = receiver.className;
+  } else if (receiver.kind === "union") {
+    const arms = lowerer.unions.get(receiver.unionId)?.arms ?? [];
+    const objects = arms.filter((arm): arm is Extract<IrType, { kind: "object" }> => arm.kind === "object");
+    if (objects.length !== 1 || !arms.every((arm) => arm.kind === "object" || isUnitType(arm))) return null;
+    className = objects[0]!.className;
+  } else {
+    return null;
+  }
+  const info = lowerer.classes.get(className) ?? null;
+  return emitterRooted(lowerer, info) ? info : null;
+}
+
+function computedPatternOverlapsReserved(pattern: ComputedEventPattern): boolean {
+  return ["error", "newListener", "removeListener"].some((name) => patternMatchesName(pattern, name)) ||
+    [...STREAM_FORCED_EVENT_NAMES].some((name) => patternMatchesName(pattern, name));
 }
 
 /** The program-wide event-signature table, built lazily on the first
@@ -84,18 +114,22 @@ interface EventSig {
  * types and non-literal names are simply not candidates — the touching
  * sites speak for themselves when they lower. */
 function emitterEvents(lowerer: Lowerer): Map<string, EventSig> {
-  const holder = lowerer as unknown as { emitterEventTable?: Map<string, EventSig> };
+  const holder = lowerer as unknown as {
+    emitterEventTable?: Map<string, EventSig>;
+    emitterComputedPatterns?: ComputedEventPattern[];
+  };
   if (holder.emitterEventTable) return holder.emitterEventTable;
   const table = new Map<string, EventSig>();
+  const computedPatterns: ComputedEventPattern[] = [];
   const sigOf = (name: string): EventSig => {
     let sig = table.get(name);
-    if (!sig) table.set(name, (sig = { tuple: [], fromEmit: false, conflict: null, dynListener: false }));
+    if (!sig) table.set(name, (sig = { tuple: [], fromEmit: false, conflict: null, dynListener: false, hasListener: false }));
     return sig;
   };
   // The two forced tuples (see the header comment).
-  table.set("error", { tuple: [{ kind: "object", className: "%Error" }], fromEmit: true, conflict: null, dynListener: false });
-  table.set("newListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false });
-  table.set("removeListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false });
+  table.set("error", { tuple: [{ kind: "object", className: "%Error" }], fromEmit: true, conflict: null, dynListener: false, hasListener: false });
+  table.set("newListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false, hasListener: false });
+  table.set("removeListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false, hasListener: false });
 
   const fmt = (t: IrType): string => lowerer.fmt(t);
   const mergeEmit = (name: string, args: (IrType | null)[]): void => {
@@ -134,6 +168,7 @@ function emitterEvents(lowerer: Lowerer): Map<string, EventSig> {
     if (params.some((p) => p === null)) return;
     const prefix = params as IrType[];
     const sig = sigOf(name);
+    sig.hasListener = true;
     if (sig.conflict) return;
     if (sig.fromEmit) {
       if (prefix.length > sig.tuple.length) {
@@ -177,15 +212,22 @@ function emitterEvents(lowerer: Lowerer): Map<string, EventSig> {
       } catch {
         return; // checker trouble is the lowering's business, not the scan's
       }
-      if (recvT?.kind !== "object" || !emitterRooted(lowerer, lowerer.classes.get(recvT.className))) return;
-      if (!nameT.isStringLiteralType()) return;
+      const info = scannedEmitterInfo(lowerer, recvT);
+      if (!info) return;
+      if (!nameT.isStringLiteralType()) {
+        const pattern = computedEventPatternOf(lowerer, arg0);
+        if (pattern && streamSidesOf(lowerer, info) === null && !computedPatternOverlapsReserved(pattern)) {
+          computedPatterns.push({ ...pattern, listener: !isEmit });
+        }
+        return;
+      }
       const name = nameT.value;
       if (META_EVENTS.has(name) || name === "error") return; // forced tuples
       // Stream receivers' runtime-emitted events carry PER-BASE forced
       // tuples (lower-stream.ts) — their sites never join the program-
       // global table, so a stream's 'data' cannot collide with a user
       // event named 'data' on a plain emitter.
-      if (streamForcedTuple(lowerer, lowerer.classes.get(recvT.className), name) !== null) return;
+      if (streamForcedTuple(lowerer, info, name) !== null) return;
       try {
         if (isEmit) {
           mergeEmit(name, node.arguments.slice(1).map((a) => lowerer.mapTypeOf(lowerer.typeOf(a))));
@@ -198,7 +240,9 @@ function emitterEvents(lowerer: Lowerer): Map<string, EventSig> {
           // tuple position, and positions past the tuple read the boxed
           // undefined (exactly JS's extra-parameter semantics).
           if (cbT?.kind === "dyn" || (cbT?.kind === "func" && cbT.params.some((p) => p.kind === "dyn"))) {
-            sigOf(name).dynListener = true;
+            const sig = sigOf(name);
+            sig.hasListener = true;
+            sig.dynListener = true;
           } else if (cbT?.kind === "func") {
             mergeListener(name, cbT.params);
           }
@@ -210,7 +254,18 @@ function emitterEvents(lowerer: Lowerer): Map<string, EventSig> {
     walk(sf);
   }
   holder.emitterEventTable = table;
+  holder.emitterComputedPatterns = computedPatterns;
   return table;
+}
+
+function computedPatterns(lowerer: Lowerer): ComputedEventPattern[] {
+  emitterEvents(lowerer);
+  return (lowerer as unknown as { emitterComputedPatterns: ComputedEventPattern[] }).emitterComputedPatterns;
+}
+
+function computedPatternsOverlap(left: ComputedEventPattern, right: ComputedEventPattern): boolean {
+  return (left.prefix.startsWith(right.prefix) || right.prefix.startsWith(left.prefix)) &&
+    (left.suffix.endsWith(right.suffix) || right.suffix.endsWith(left.suffix));
 }
 
 /** The compile-time event name of the first argument, or a pointed fence
@@ -224,6 +279,177 @@ function eventNameOf(lowerer: Lowerer, member: string, arg: ts.Expression): stri
     arg,
     "event names must be compile-time string literals (each event's argument tuple is unified statically; symbol names have no lowering)",
   );
+}
+
+function staticStringPrefixOf(lowerer: Lowerer, node: ts.Expression, seen = new Set<ts.Symbol>()): string | null {
+  let expression = node;
+  while (ts.isParenthesizedExpression(expression)) expression = expression.expression;
+  if (ts.isStringLiteralLike(expression)) return expression.text;
+  if (ts.isTemplateExpression(expression)) return expression.head.text;
+  if (ts.isIdentifier(expression)) {
+    const symbol = lowerer.resolveValueSymbol(expression);
+    if (!symbol || seen.has(symbol)) return null;
+    seen.add(symbol);
+    const declaration = lowerer.checker.valueDeclarationOf(symbol);
+    if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer &&
+        (ts.getCombinedNodeFlags(declaration) & ts.NodeFlags.Const) !== 0) {
+      return staticStringPrefixOf(lowerer, declaration.initializer, seen);
+    }
+    return null;
+  }
+  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    return staticStringPrefixOf(lowerer, expression.left, seen);
+  }
+  return null;
+}
+
+function staticStringSuffixOf(lowerer: Lowerer, node: ts.Expression, seen = new Set<ts.Symbol>()): string | null {
+  let expression = node;
+  while (ts.isParenthesizedExpression(expression)) expression = expression.expression;
+  if (ts.isStringLiteralLike(expression)) return expression.text;
+  if (ts.isTemplateExpression(expression)) return expression.templateSpans.at(-1)?.literal.text ?? "";
+  if (ts.isIdentifier(expression)) {
+    const symbol = lowerer.resolveValueSymbol(expression);
+    if (!symbol || seen.has(symbol)) return null;
+    seen.add(symbol);
+    const declaration = lowerer.checker.valueDeclarationOf(symbol);
+    if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer &&
+        (ts.getCombinedNodeFlags(declaration) & ts.NodeFlags.Const) !== 0) {
+      return staticStringSuffixOf(lowerer, declaration.initializer, seen);
+    }
+    return null;
+  }
+  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    return staticStringSuffixOf(lowerer, expression.right, seen);
+  }
+  return null;
+}
+
+function computedEventPatternOf(lowerer: Lowerer, node: ts.Expression): ComputedEventPattern | null {
+  const prefix = staticStringPrefixOf(lowerer, node) ?? "";
+  const suffix = staticStringSuffixOf(lowerer, node) ?? "";
+  return prefix || suffix ? { prefix, suffix, listener: false } : null;
+}
+
+function patternMatchesName(pattern: ComputedEventPattern, name: string): boolean {
+  return name.startsWith(pattern.prefix) && name.endsWith(pattern.suffix);
+}
+
+function computedEventPattern(
+  lowerer: Lowerer,
+  info: ClassInfo,
+  member: string,
+  arg: ts.Expression,
+): ComputedEventPattern {
+  const pattern = computedEventPatternOf(lowerer, arg);
+  if (!pattern) {
+    lowerer.noLowering(
+      `${member} with an unrestricted computed event name`,
+      arg,
+      "computed event names need a nonempty constant prefix or suffix so they cannot collide with internal events",
+    );
+  }
+  if (streamSidesOf(lowerer, info) !== null || computedPatternOverlapsReserved(pattern)) {
+    lowerer.noLowering(
+      `${member} with a computed event name overlapping an internal event`,
+      arg,
+      "computed-name listeners use an exact-arity dynamic argument vector; internal error, meta, and stream events retain their fixed representations",
+    );
+  }
+  return pattern;
+}
+
+function lowerFlexListenerCall(
+  lowerer: Lowerer,
+  member: string,
+  name: IrExpr,
+  receiver: IrExpr,
+  cbNode: ts.Expression,
+  registering: boolean,
+  once: boolean,
+  prepend: boolean,
+  loc: SrcLoc,
+): IrExpr {
+  if (receiver.type.kind !== "object") {
+    lowerer.noLowering(
+      `${member} with a nullable or non-emitter receiver`,
+      cbNode,
+      "narrow the receiver to an EventEmitter instance before registering or removing a computed-name listener",
+    );
+  }
+  const cb = lowerer.lowerExpr(cbNode);
+  const getRecord = (id: string) => lowerer.shapes.get(id);
+  const getUnion = (id: string) => lowerer.unions.get(id);
+  let boxed: IrExpr;
+  if (cb.type.kind === "dyn") {
+    boxed = cb;
+  } else if (cb.type.kind === "func") {
+    if (!canBoxFuncIntoDyn(cb.type, getRecord, getUnion)) {
+      lowerer.noLowering(
+        `${member} with a computed-name listener that cannot cross the checked-dynamic boundary`,
+        cbNode,
+        "the listener's parameters and return value must have checked-dynamic conversions",
+      );
+    }
+    boxed = { kind: "dynFrom", value: cb, type: DYN, loc };
+  } else if (cb.kind === "unitLit" || canConvertToDyn(cb.type, getRecord, getUnion)) {
+    boxed = { kind: "dynFrom", value: cb, type: DYN, loc };
+  } else {
+    lowerer.noLowering(`${member} with a non-function computed-name listener`, cbNode);
+  }
+  const recvT = receiver.type;
+  const key = `emitter.${registering ? "onFlex" : "offDyn"}:${typeKey(recvT)}`;
+  let helper = lowerer.arrHofHelpers.get(key);
+  if (!helper) {
+    helper = `%emitter.${registering ? "onFlex" : "offFlex"}.${lowerer.arrHofHelpers.size}`;
+    lowerer.arrHofHelpers.set(key, helper);
+    const params: IrParam[] = [
+      { localId: "r.0", name: "r", type: recvT },
+      { localId: "n.0", name: "n", type: STRING },
+      { localId: "cb.0", name: "cb", type: DYN },
+      ...(registering ? [
+        { localId: "o.0", name: "o", type: BOOL },
+        { localId: "p.0", name: "p", type: BOOL },
+      ] : []),
+    ];
+    const locals = params.map((parameter) => ({
+      id: parameter.localId,
+      name: parameter.name,
+      type: parameter.type,
+      mutable: false,
+    }));
+    const body: IrStmt[] = [
+      {
+        kind: "exprStmt",
+        expr: { kind: "libCall", fn: "emitter.checkListener", args: [varRef("cb.0", DYN, loc)], type: VOID, loc },
+        loc,
+      },
+      {
+        kind: "return",
+        value: {
+          kind: "libCall",
+          fn: registering ? "emitter.onFlex" : "emitter.offDyn",
+          args: [
+            varRef("r.0", recvT, loc),
+            varRef("n.0", STRING, loc),
+            varRef("cb.0", DYN, loc),
+            ...(registering ? [varRef("o.0", BOOL, loc), varRef("p.0", BOOL, loc)] : []),
+          ],
+          type: recvT,
+          loc,
+        },
+        loc,
+      },
+    ];
+    lowerer.liftedFns.push({ name: helper, params, returnType: recvT, locals, body, loc });
+  }
+  return {
+    kind: "call",
+    callee: helper,
+    args: [receiver, name, boxed, ...(registering ? [boolLit(once, loc), boolLit(prepend, loc)] : [])],
+    type: recvT,
+    loc,
+  };
 }
 /** The event's unified tuple, with conflicts reported at this site. */
 function tupleOf(lowerer: Lowerer, table: Map<string, EventSig>, name: string, blame: ts.Node): IrType[] {
@@ -507,13 +733,21 @@ export function lowerEmitterMethodCall(lowerer: Lowerer, call: ts.CallExpression
   const loc = locOf(call);
   const args = call.arguments;
   const lowerReceiver = (): IrExpr => {
-    const receiver = superRecv?.thisRef ?? lowerer.lowerExpr(access.expression);
+    if (superRecv) return superRecv.thisRef;
+    const receiver = lowerer.lowerExpr(access.expression);
+    if (receiver.type.kind === "union") {
+      const target: IrType = { kind: "object", className: info.def.name };
+      const helper = lowerer.narrowedArmHelper(receiver.type.unionId, target, locOf(access.expression));
+      if (helper !== null) {
+        return { kind: "call", callee: helper, args: [receiver], type: target, loc: locOf(access.expression) };
+      }
+    }
     // lowerObjectMethodCall may select `info` from exact-new provenance
     // below the receiver's annotation (`const e: EventEmitter = new C()`).
     // The emitter specialization then dispatches from C, so materialize
     // the checker-proven downcast before its ordinary ancestor upcasts.
     if (
-      superRecv === undefined && receiver.type.kind === "object" &&
+      receiver.type.kind === "object" &&
       lowerer.isSubclassOf(info.def.name, receiver.type.className)
     ) {
       return {
@@ -524,6 +758,27 @@ export function lowerEmitterMethodCall(lowerer: Lowerer, call: ts.CallExpression
       };
     }
     return receiver;
+  };
+  const lowerFlexEmit = (name: IrExpr): IrExpr => {
+    const below: ClassInfo[] = [];
+    collectEmitOverridesBelow(info, below);
+    if (emitOverrideAtOrAbove(info) || below.length > 0) {
+      lowerer.noLowering(
+        "computed-name emit through an EventEmitter subclass overriding emit",
+        call,
+        "the override specialization needs a literal event name and fixed argument tuple",
+      );
+    }
+    const receiver = lowerReceiver();
+    if (receiver.type.kind !== "object") {
+      lowerer.noLowering(
+        "computed-name emit on a nullable or non-emitter receiver",
+        access.expression,
+        "narrow the receiver to an EventEmitter instance before emitting",
+      );
+    }
+    const payload = args.slice(1).map((argument) => lowerer.lowerExprExpecting(argument, DYN));
+    return { kind: "libCall", fn: "emitter.emitFlex", args: [receiver, name, ...payload], type: BOOL, loc };
   };
   // The class VALUE, not an instance (`EventEmitter.setMaxListeners(n)` —
   // the receiver's checker type carries construct signatures; mapType
@@ -613,8 +868,36 @@ export function lowerEmitterMethodCall(lowerer: Lowerer, call: ts.CallExpression
     if (args.length < 2 || !extrasPure) {
       lowerer.noLowering(`${member} with ${args.length} arguments`, call, "the supported form is (eventName, listener)");
     }
-    const name = eventNameOf(lowerer, member, args[0]!);
     const registering = REGISTER_MEMBERS.has(member);
+    if (!lowerer.typeOf(args[0]!).isStringLiteralType()) {
+      computedEventPattern(lowerer, info, member, args[0]!);
+      return lowerFlexListenerCall(
+        lowerer,
+        member,
+        lowerer.lowerExprExpecting(args[0]!, STRING),
+        lowerReceiver(),
+        args[1]!,
+        registering,
+        member === "once" || member === "prependOnceListener",
+        member === "prependListener" || member === "prependOnceListener",
+        loc,
+      );
+    }
+    const name = eventNameOf(lowerer, member, args[0]!);
+    if (!META_EVENTS.has(name) && name !== "error" && streamForcedTuple(lowerer, info, name) === null &&
+        computedPatterns(lowerer).some((pattern) => patternMatchesName(pattern, name))) {
+      return lowerFlexListenerCall(
+        lowerer,
+        member,
+        strLit(name, loc),
+        lowerReceiver(),
+        args[1]!,
+        registering,
+        member === "once" || member === "prependOnceListener",
+        member === "prependListener" || member === "prependOnceListener",
+        loc,
+      );
+    }
     // The runtime fires the meta events INTERNALLY (scr_ee_emit_meta —
     // Node calls this.emit, which would dispatch through an emit
     // override): with an override anywhere the receiver's instances could
@@ -707,7 +990,37 @@ export function lowerEmitterMethodCall(lowerer: Lowerer, call: ts.CallExpression
     if (args.length === 0) {
       lowerer.noLowering("emit without an event name", call);
     }
+    const nameType = lowerer.typeOf(args[0]!);
+    if (!nameType.isStringLiteralType()) {
+      const pattern = computedEventPatternOf(lowerer, args[0]!);
+      const mayBeObserved = pattern === null || computedPatternOverlapsReserved(pattern) || [...table].some(
+        ([candidate, signature]) => (candidate === "error" || signature.hasListener) && patternMatchesName(pattern, candidate),
+      ) || computedPatterns(lowerer).some((registered) =>
+        registered.listener && computedPatternsOverlap(pattern, registered));
+      if (!mayBeObserved) {
+        const receiver = lowerReceiver();
+        const dynamicName = lowerer.lowerExprExpecting(args[0]!, STRING);
+        const payload = args.slice(1).map((argument) => lowerer.lowerExpr(argument));
+        return {
+          kind: "seqExpr",
+          stmts: [receiver, dynamicName, ...payload].map((expression) => ({
+            kind: "exprStmt" as const,
+            expr: expression,
+            loc: expression.loc,
+          })),
+          result: boolLit(false, loc),
+          type: BOOL,
+          loc,
+        };
+      }
+      computedEventPattern(lowerer, info, member, args[0]!);
+      return lowerFlexEmit(lowerer.lowerExprExpecting(args[0]!, STRING));
+    }
     const name = eventNameOf(lowerer, member, args[0]!);
+    if (name !== "error" && !META_EVENTS.has(name) && streamForcedTuple(lowerer, info, name) === null &&
+        computedPatterns(lowerer).some((pattern) => patternMatchesName(pattern, name))) {
+      return lowerFlexEmit(strLit(name, loc));
+    }
     const receiver = lowerReceiver();
     if (name === "error") {
       // The special event: exactly one %Error-rooted payload; no listener
@@ -828,13 +1141,13 @@ export function lowerEmitterMethodCall(lowerer: Lowerer, call: ts.CallExpression
     }
     const name = eventNameOf(lowerer, member, args[0]!);
     const sig = table.get(name);
-    if (sig?.dynListener) {
+    if (sig?.dynListener || computedPatterns(lowerer).some((pattern) => pattern.listener && patternMatchesName(pattern, name))) {
       // A dyn-adapted registration means the runtime bucket can hold
       // originals of MIXED signatures — no one honest element type.
       lowerer.noLowering(
         `${member} of the event '${name}'`,
         call,
-        "a listener of this event is checked-dynamic (unannotated parameters), so the listener array has no one static element type — listenerCount(name) counts",
+        "a listener of this event uses checked-dynamic dispatch, so the listener array has no one static element type — listenerCount(name) counts",
       );
     }
     const tuple = tupleOf(lowerer, table, name, call);
