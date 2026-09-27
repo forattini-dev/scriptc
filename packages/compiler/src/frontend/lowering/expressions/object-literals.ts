@@ -1578,7 +1578,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       while (ts.isParenthesizedExpression(init)) init = init.expression;
       value =
         fenceClosureProbe(lowerer, prop.initializer, fieldType, () => lowerer.lowerExpr(prop.initializer)) ??
-        (fieldType !== undefined && ts.isArrayLiteralExpression(init)
+        (fieldType !== undefined && (ts.isArrayLiteralExpression(init) || ts.isCallExpression(init))
           ? lowerer.lowerExprExpecting(prop.initializer, fieldType)
           : lowerer.lowerExpr(prop.initializer));
     } else if (ts.isShorthandPropertyAssignment(prop)) {

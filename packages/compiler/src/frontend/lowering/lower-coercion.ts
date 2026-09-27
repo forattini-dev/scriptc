@@ -30,6 +30,7 @@ import { lowerDynObjectLiteral } from "./lower-exprs.js";
 import { familyFnOfValue, lowerFamilyImpl } from "./lower-families.js";
 import type { Lowerer } from "./lowerer.js";
 import { jsFuncNameOf } from "./lowerer.js";
+import { lowerFiniteFromEntriesExpecting } from "./lower-finite-from-entries.js";
 
   /** Coerce typed slots with checked shared views, canonical union wraps
    * and structural adapters; incompatible pairs keep their shape fences. */
@@ -625,6 +626,10 @@ import { jsFuncNameOf } from "./lowerer.js";
    * API answers nothing (binding-element defaults: `{ json = [] }`) and
    * the literal's own never[] would build the f64 representation. */
   export function lowerExprExpecting(lowerer: Lowerer, node: ts.Expression, expected: IrType | undefined): IrExpr { if (expected?.kind === "genericFunc") { const fn = familyFnOfValue(lowerer, node); if (fn !== null) return lowerFamilyImpl(lowerer, fn, expected.familyId, lowerer.checker.getContextualType(node) ?? undefined); } // a function expression flowing into a generic slot joins THAT slot's family, whether or not it declares type parameters of its own
+    if (expected?.kind === "record") {
+      const finiteFromEntries = lowerFiniteFromEntriesExpecting(lowerer, node, expected);
+      if (finiteFromEntries !== null) return finiteFromEntries;
+    }
     // The same slot behind a union (`transformRows: (<A>(rows) => …) | undefined`): the value can only inhabit the
     // family arm, so join THAT family and wrap at its tag. Without this the reference falls to the non-family value
     // path, which needs a pinned concrete signature a generic slot never supplies.

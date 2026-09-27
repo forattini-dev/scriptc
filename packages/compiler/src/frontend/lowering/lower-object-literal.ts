@@ -946,7 +946,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         while (ts.isParenthesizedExpression(init)) init = init.expression;
         value =
           fenceClosureProbe(lowerer, prop.initializer, fieldType, () => lowerer.lowerExpr(prop.initializer)) ??
-          (fieldType !== undefined && (ts.isArrayLiteralExpression(init) || fieldType.kind === "genericFunc" || familyArmedUnion(lowerer, fieldType)) // a family slot — bare or behind a union — takes the value as an implementation
+          (fieldType !== undefined && (ts.isArrayLiteralExpression(init) || ts.isCallExpression(init) || fieldType.kind === "genericFunc" || familyArmedUnion(lowerer, fieldType)) // a family slot — bare or behind a union — takes the value as an implementation
             ? lowerer.lowerExprExpecting(prop.initializer, fieldType)
             : lowerer.lowerExpr(prop.initializer));
       } else if (ts.isShorthandPropertyAssignment(prop)) {

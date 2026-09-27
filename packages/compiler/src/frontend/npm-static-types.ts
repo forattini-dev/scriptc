@@ -5,7 +5,7 @@
  * Declaration imports/external reexports, generic exports, export-star runtime barrels
  * and ambiguous names are deliberately left to the normal fallback path. */
 import { declarationText, npmDeclarationCandidates } from "./npm-static-declarations.js";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import ts from "typescript5";
 import { trackedFileExists, trackedReadFile } from "./input-tracker.js";
 import { resolveExports } from "./resolve.js";
@@ -101,6 +101,44 @@ function typeOnlyNames(path: string, text: string): string[] {
     entry.public !== "default" && /^[A-Za-z_$][\w$]*$/.test(entry.public)).map((entry) => entry.public);
 }
 
+/** Project declaration twins may refine a runtime function only when its
+ * declared return is one of the self-contained erased types bridged above.
+ * The augmentation adds an overload to an existing JS export; lowering still
+ * compiles the implementation body and validates its dynamic exit. */
+function projectFunctionAugmentation(
+  runtimePath: string,
+  runtimeText: string,
+  declarationPath: string,
+  declarationSource: string,
+  bridgedTypes: ReadonlySet<string>,
+): string {
+  const runtime = ts.createSourceFile(runtimePath, runtimeText, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const exportedFunctions = new Set<string>();
+  for (const statement of runtime.statements) {
+    if (
+      ts.isFunctionDeclaration(statement) && statement.name !== undefined &&
+      statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+    ) exportedFunctions.add(statement.name.text);
+  }
+  if (exportedFunctions.size === 0) return "";
+
+  const declaration = ts.createSourceFile(declarationPath, declarationSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const signatures: string[] = [];
+  for (const statement of declaration.statements) {
+    if (
+      !ts.isFunctionDeclaration(statement) || statement.name === undefined || statement.type === undefined ||
+      !exportedFunctions.has(statement.name.text) || !ts.isTypeReferenceNode(statement.type) ||
+      !ts.isIdentifier(statement.type.typeName) || (statement.type.typeArguments?.length ?? 0) !== 0 ||
+      !bridgedTypes.has(statement.type.typeName.text) ||
+      !statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+    ) continue;
+    signatures.push(statement.getText(declaration).replace(/\bdeclare\s+/, ""));
+  }
+  if (signatures.length === 0) return "";
+  const specifier = `./${basename(runtimePath)}`;
+  return `\ndeclare module ${JSON.stringify(specifier)} {\n${signatures.map((signature) => `  ${signature}`).join("\n")}\n}\n`;
+}
+
 export class RuntimeTypeBridge {
   private readonly files = new Map<string, string>();
   private readonly candidates = npmDeclarationCandidates();
@@ -135,7 +173,10 @@ export class RuntimeTypeBridge {
     if (names.length === 0) return text;
     const virtualPath = candidate === undefined ? declaration.replace(declarationName, ".__scriptc-types.d.ts") : `${path}.__scriptc-types.d.ts`;
     if (trackedFileExists(virtualPath) || declarationText(virtualPath) !== null) return text;
-    this.files.set(virtualPath, declaredText);
+    const augmentation = packageName === null
+      ? projectFunctionAugmentation(path, text, declaration, declaredText, new Set(names))
+      : "";
+    this.files.set(virtualPath, declaredText + augmentation);
     virtualDeclarations.add(virtualPath);
     const specifier = JSON.stringify(virtualPath).replaceAll("*", "\\u002a");
     const aliases = names.map((name) =>
