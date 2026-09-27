@@ -410,6 +410,7 @@ export class RustValueEmitter {
     if (type.kind === "f64") return `(*${left} == *${right} || (${left}.is_nan() && ${right}.is_nan()))`;
     if (type.kind === "string") return `${left}.as_ref() == ${right}.as_ref()`;
     if (type.kind === "symbol") return `runtime::symbol_ptr_eq(${left}, ${right})`;
+    if (type.kind === "dyn") return `sc_dyn_strict_equal(${left}, ${right})`;
     if (type.kind === "record") return recordPointerEquality(this.context.records.get(type.shapeId), left, right);
     if (type.kind === "func") {
       return `${this.functionIdentity(left, type, loc)} == ${this.functionIdentity(right, type, loc)}`;

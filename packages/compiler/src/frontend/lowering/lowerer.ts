@@ -351,6 +351,8 @@ export interface LowerOptions {
   nativeCollectionArrays?: boolean;
   /** Rust preserves program-class identities across checked-dynamic slots. */
   nativeClassDynamicRefs?: boolean;
+  /** Rust's traced generic Set can store checked-dynamic values. */
+  nativeDynamicSets?: boolean;
   /** --dynamic: the island engine is linked, so island constructs
    * (__island_eval) may lower. Off by default — without it they produce a
    * requires-dynamic diagnostic instead. */
@@ -447,6 +449,8 @@ export interface LowererMode {
   nativeCollectionArrays?: boolean;
   /** Rust preserves program-class identities across checked-dynamic slots. */
   nativeClassDynamicRefs?: boolean;
+  /** Rust's traced generic Set can store checked-dynamic values. */
+  nativeDynamicSets?: boolean;
   /** Names of bodies a prior reachability pass reached; null lowers everything. */
   reachable?: ReadonlySet<string> | null;
   /** Coverage remainder: lower ONLY bodies outside `reachable`, skip the
@@ -557,6 +561,7 @@ export function lowerToIr(
     nativeDenseArrays: options.nativeDenseArrays ?? false,
     nativeCollectionArrays: options.nativeCollectionArrays ?? false,
     nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
+    nativeDynamicSets: options.nativeDynamicSets ?? false,
     targetPlatform,
     startupCrash,
     ffiImports,
@@ -580,6 +585,7 @@ export function lowerToIr(
         nativeDenseArrays: options.nativeDenseArrays ?? false,
         nativeCollectionArrays: options.nativeCollectionArrays ?? false,
         nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
+        nativeDynamicSets: options.nativeDynamicSets ?? false,
         targetPlatform,
         startupCrash,
         ffiImports,
@@ -611,6 +617,7 @@ export function lowerToIr(
       nativeDenseArrays: options.nativeDenseArrays ?? false,
       nativeCollectionArrays: options.nativeCollectionArrays ?? false,
       nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
+      nativeDynamicSets: options.nativeDynamicSets ?? false,
       targetPlatform,
       startupCrash,
       ffiImports,
@@ -636,6 +643,7 @@ export function lowerToIr(
     nativeDenseArrays: options.nativeDenseArrays ?? false,
     nativeCollectionArrays: options.nativeCollectionArrays ?? false,
     nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
+    nativeDynamicSets: options.nativeDynamicSets ?? false,
     targetPlatform,
     ffiImports,
     libraryCallbacks,
@@ -1050,6 +1058,7 @@ export class Lowerer {
   readonly nativeDenseArrays: boolean;
   readonly nativeCollectionArrays: boolean;
   readonly nativeClassDynamicRefs: boolean;
+  readonly nativeDynamicSets: boolean;
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
   readonly fnSigsBySymbol = new Map<ts.Symbol, FnSig>();
@@ -1818,6 +1827,7 @@ export class Lowerer {
     this.nativeDenseArrays = mode.nativeDenseArrays ?? false;
     this.nativeCollectionArrays = mode.nativeCollectionArrays ?? false;
     this.nativeClassDynamicRefs = mode.nativeClassDynamicRefs ?? false;
+    this.nativeDynamicSets = mode.nativeDynamicSets ?? false;
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();
@@ -1854,6 +1864,7 @@ export class Lowerer {
         this.externalTypeSpecifiersByFile.has(tsgoPath(resolve(sf.fileName))),
       dynamic: this.dynamic,
       nativeCollectionArrays: this.nativeCollectionArrays,
+      nativeDynamicSets: this.nativeDynamicSets,
       typeMemo: this.typeMemo,
       canMemoizeType: () =>
         this.typeParamBindings === null &&

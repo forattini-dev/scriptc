@@ -2888,7 +2888,7 @@ function validateFunction(
           err(`setNew must be set-typed, got ${e.type.kind}`, e.loc);
           break;
         }
-        if (!isSupportedSetElem(e.type.elem)) {
+        if (!isSupportedSetElem(e.type.elem, true)) {
           err(`setNew element kind ${e.type.elem.kind} (frontend must fence)`, e.loc);
         }
         // The seed is one T[]-typed expression (T = the element type).

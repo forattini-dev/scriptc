@@ -420,6 +420,8 @@ export interface TypeMapperCtx {
   /** Rust's traced generic arrays can retain Map/Set elements. C/LLVM keep
    * this false because ScrArr has no collection element ABI. */
   nativeCollectionArrays: boolean;
+  /** Rust's traced generic Set can store checked-dynamic values. */
+  nativeDynamicSets: boolean;
   /** Successful context-free mappings, keyed by dynamic posture + the
    * TypeScript server's stable type id. A generated facade can reference the
    * same large record/function type thousands of times; remapping its full
@@ -1464,7 +1466,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
     if (args.length !== 1) return null;
     const elem = mapType(args[0]!, ctx);
-    if (!elem || !isSupportedSetElem(elem)) return null;
+    if (!elem || !isSupportedSetElem(elem, ctx.nativeDynamicSets)) return null;
     return setOf(elem);
   }
   // Date: the native timestamp slot, with backend-owned object identity.
@@ -3637,7 +3639,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
       if ((container === "Map" || container === "ReadonlyMap") && i === 1 && !isSupportedMapValue(mapped)) {
         return `the ${container} shape is supported, but '${text(arg)}' values have no Map slot yet (functions, promises, and nested Maps stay out)`;
       }
-      if ((container === "Set" || container === "ReadonlySet") && !isSupportedSetElem(mapped)) {
+      if ((container === "Set" || container === "ReadonlySet") && !isSupportedSetElem(mapped, ctx.nativeDynamicSets)) {
         return `the ${container} shape is supported, but elements are limited to numbers, strings, records, callbacks, symbols, and supported handles — '${text(arg)}' is outside that domain`;
       }
     }

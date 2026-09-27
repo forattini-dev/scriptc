@@ -569,8 +569,9 @@ export function isSupportedMapKey(t: IrType): boolean {
  * cycle risk at all (symbols hold only strings). Functions use their
  * closure object's identity and make the Set cycle-capable: a waiter may
  * capture the Set that retains it, so the runtime traces those key edges. */
-export function isSupportedSetElem(t: IrType): boolean {
-  return isSupportedMapKey(t) || t.kind === "record" || t.kind === "netServer" || t.kind === "func";
+export function isSupportedSetElem(t: IrType, nativeDynamicSets = false): boolean {
+  return isSupportedMapKey(t) || t.kind === "record" || t.kind === "netServer" || t.kind === "func" ||
+    (nativeDynamicSets && t.kind === "dyn");
 }
 
 /** The Map VALUE fence: scalars, checked-dynamic values, and selected
