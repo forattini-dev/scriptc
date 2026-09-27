@@ -2,7 +2,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { InternalCompilerError } from "../../errors.js";
 import { locOf } from "../program.js";
-import { BOOL, F64, VOID, typeEquals, typeKey, type IrExpr, type IrFunction, type IrLocal, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
+import { BOOL, DYN, F64, VOID, typeEquals, typeKey, type IrExpr, type IrFunction, type IrLocal, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { boolLit, countedFor, numLit, varRef } from "../../ir/build.js";
 import { fenceProducedArrayElem, strCharsCall } from "./lower-containers.js";
 import { tupleSpreadArray } from "./lower-native-containers.js";
@@ -85,8 +85,60 @@ export function lowerCollectionFromCall(L: Lowerer, call: ts.CallExpression): Ir
     L.noLowering("Array.from with this mapper signature", mapperNode!, "the native mapper accepts the element and optional numeric index");
   }
   const output = mapper?.type.kind === "func" ? mapper.type.ret : source.element;
+  if (!mapper && output.kind === "dyn" && source.value.type.kind === "set" && L.nativeDynamicSets) {
+    return materializeDynamicSet(L, source.value, locOf(call));
+  }
   fenceProducedArrayElem(L, call, "'Array.from(collection, mapper)'", output);
   return materialize(L, source, mapper, locOf(call));
+}
+
+/** Rust-only Set<dyn> snapshot into the existing checked-dynamic array
+ * representation. Keeping unknown[] as one dyn value avoids perturbing the
+ * established dynamic-array boundary while still materializing the native
+ * Set iterator in insertion order. */
+function materializeDynamicSet(L: Lowerer, source: IrExpr, loc: SrcLoc): IrExpr {
+  const setType = source.type;
+  if (setType.kind !== "set" || setType.elem.kind !== "dyn") throw new InternalCompilerError("dynamic Set materialization requires Set<dyn>");
+  const key = `materializeDynSet:${typeKey(setType)}`;
+  let helper = L.arrHofHelpers.get(key);
+  if (!helper) {
+    helper = `%collection.fromDynSet.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, helper);
+    const receiver = varRef("source.0", setType, loc);
+    const cursor = varRef("i.0", F64, loc);
+    const out = varRef("out.0", DYN, loc);
+    const iter = (method: "iterCount" | "iterLive" | "iterKey" | "iterEnter" | "iterExit", args: IrExpr[], output: IrType): IrExpr => ({
+      kind: "setIntrinsic", method, receiver, args, type: output, loc,
+    });
+    const loop = countedFor(loc, iter("iterCount", [], F64), () => [{
+      kind: "if",
+      cond: iter("iterLive", [cursor], BOOL),
+      then: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.packPush", args: [out, iter("iterKey", [cursor], DYN)], type: VOID, loc }, loc }],
+      else_: null,
+      loc,
+    }]);
+    L.liftedFns.push({
+      name: helper,
+      params: [{ localId: "source.0", name: "source", type: setType }],
+      returnType: DYN,
+      locals: [
+        { id: "source.0", name: "source", type: setType, mutable: false },
+        { id: "out.0", name: "out", type: DYN, mutable: false },
+        { id: "i.0", name: "cursor", type: F64, mutable: true },
+      ],
+      body: [
+        { kind: "varDecl", localId: "out.0", init: { kind: "dynArrLit", elems: [], type: DYN, loc }, loc },
+        { kind: "exprStmt", expr: iter("iterEnter", [], VOID), loc },
+        {
+          kind: "tryCatch", tryBody: [loop], catchBody: null, catchLocalId: null,
+          finallyBody: [{ kind: "exprStmt", expr: iter("iterExit", [], VOID), loc }], loc,
+        },
+        { kind: "return", value: out, loc },
+      ],
+      loc,
+    });
+  }
+  return { kind: "call", callee: helper, args: [source], type: DYN, loc };
 }
 
 function materialize(L: Lowerer, source: Source, mapper: IrExpr | undefined, loc: SrcLoc): IrExpr {
