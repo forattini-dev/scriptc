@@ -617,7 +617,7 @@ export function effectSuccessOf(L: Lowerer, type: ts.Type): ts.Type | null {
 function collectionCarrier(L: Lowerer, success: IrType | null, discard: boolean, expr: ts.Node, loc: SrcLoc): IrExpr {
   if (discard) return { kind: "strLit", value: "discard", type: STRING, loc };
   if (success?.kind === "array") {
-    if (!isSupportedArrayElem(success.elem)) L.unsupported("SC1090", expr, `the effect kernel cannot collect '${L.fmt(success.elem)}' elements`);
+    if (!isSupportedArrayElem(success.elem, L.nativeCollectionArrays)) L.unsupported("SC1090", expr, `the effect kernel cannot collect '${L.fmt(success.elem)}' elements`);
     return { kind: "arrayLit", elems: [], type: success, loc };
   }
   if (success?.kind === "record") return { kind: "strLit", value: `record:${success.shapeId}`, type: STRING, loc };

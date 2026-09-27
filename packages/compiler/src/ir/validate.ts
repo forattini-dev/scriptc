@@ -2487,7 +2487,7 @@ function validateFunction(
           break;
         }
         const elem = e.type.elem;
-        if (!isSupportedArrayElem(elem)) {
+        if (!isSupportedArrayElem(elem, true)) {
           err(`arrayLit with unsupported ${elem.kind} elements (frontend must fence)`, e.loc);
         }
         const spreadSet = new Set(e.spreads ?? []);
@@ -2514,7 +2514,7 @@ function validateFunction(
         if (!isRefCounted(e.type.elem)) {
           err(`arrayNewLen with non-refcounted ${e.type.elem.kind} elements (no absent value)`, e.loc);
         }
-        if (!isSupportedArrayElem(e.type.elem)) {
+        if (!isSupportedArrayElem(e.type.elem, true)) {
           err(`arrayNewLen with unsupported ${e.type.elem.kind} elements (frontend must fence)`, e.loc);
         }
         checkExpr(e.length);

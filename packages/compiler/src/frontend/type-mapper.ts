@@ -417,6 +417,9 @@ export interface TypeMapperCtx {
   /** --dynamic: `any` maps to the island handle type (jsval). Off, `any`
    * stays unmapped and the requires-dynamic diagnostic fires per site. */
   dynamic: boolean;
+  /** Rust's traced generic arrays can retain Map/Set elements. C/LLVM keep
+   * this false because ScrArr has no collection element ABI. */
+  nativeCollectionArrays: boolean;
   /** Successful context-free mappings, keyed by dynamic posture + the
    * TypeScript server's stable type id. A generated facade can reference the
    * same large record/function type thousands of times; remapping its full
@@ -887,7 +890,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // The shared predicate is the runtime/backend storage contract. In
     // particular, valid standalone values such as Map/Set and opaque
     // handles do not automatically have an array element representation.
-    if (!isSupportedArrayElem(elem)) return null;
+    if (!isSupportedArrayElem(elem, ctx.nativeCollectionArrays)) return null;
     // ChildProcess[] (the running-apps list) and Server[] (the [...set]
     // drain of the auxiliary-server registries): handles are ordinary
     // refcounted REF elements (their `_v` adapters, no trace — both drop
@@ -942,7 +945,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       const elem = elems[0];
       if (
         elem &&
-        isSupportedArrayElem(elem) &&
+        isSupportedArrayElem(elem, ctx.nativeCollectionArrays) &&
         elems.every((candidate) => candidate !== null && typeEquals(candidate, elem))
       ) {
         return arrayOf(elem);

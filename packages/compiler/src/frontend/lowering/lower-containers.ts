@@ -279,7 +279,7 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
       `${producer} with a callback returning 'unknown'-typed values (the result array has no static element type — annotate the callback's return)`,
     );
   }
-  if (!isSupportedArrayElem(elem)) {
+  if (!isSupportedArrayElem(elem, lowerer.nativeCollectionArrays)) {
     lowerer.unsupported(
       "SC1090",
       node,
@@ -2838,7 +2838,7 @@ export function lowerArrayConstructor(lowerer: Lowerer,
     const contextual = lowerer.checker.getContextualType(expr);
     if (contextual) result = lowerer.mapTypeOf(contextual);
   }
-  if (result?.kind !== "array" || !isSupportedArrayElem(result.elem)) {
+  if (result?.kind !== "array" || !isSupportedArrayElem(result.elem, lowerer.nativeCollectionArrays)) {
     lowerer.badType(expr, lowerer.typeOf(expr));
   }
   const argType = args.length === 1 ? lowerer.mapTypeOf(lowerer.typeOf(args[0]!)) : null;
@@ -2891,7 +2891,7 @@ export function lowerArrayOfCall(lowerer: Lowerer, call: ts.CallExpression,
     const contextual = lowerer.checker.getContextualType(call);
     if (contextual) result = lowerer.mapTypeOf(contextual);
   }
-  if (result?.kind !== "array" || !isSupportedArrayElem(result.elem)) {
+  if (result?.kind !== "array" || !isSupportedArrayElem(result.elem, lowerer.nativeCollectionArrays)) {
     lowerer.badType(call, lowerer.typeOf(call));
   }
   if (call.arguments.some(ts.isSpreadElement)) {

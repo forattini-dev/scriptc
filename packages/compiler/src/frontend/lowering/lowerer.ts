@@ -347,6 +347,8 @@ export interface LowerOptions {
   nativePromiseViews?: boolean;
   /** Rust arrays are dense: synthetic loops never pre-grow an output array. */
   nativeDenseArrays?: boolean;
+  /** Rust's traced generic arrays can store Map/Set values. */
+  nativeCollectionArrays?: boolean;
   /** --dynamic: the island engine is linked, so island constructs
    * (__island_eval) may lower. Off by default — without it they produce a
    * requires-dynamic diagnostic instead. */
@@ -439,6 +441,8 @@ export interface LowererMode {
   nativePromiseViews?: boolean;
   /** Rust arrays are dense: synthetic loops never pre-grow an output array. */
   nativeDenseArrays?: boolean;
+  /** Rust's traced generic arrays can store Map/Set values. */
+  nativeCollectionArrays?: boolean;
   /** Names of bodies a prior reachability pass reached; null lowers everything. */
   reachable?: ReadonlySet<string> | null;
   /** Coverage remainder: lower ONLY bodies outside `reachable`, skip the
@@ -547,6 +551,7 @@ export function lowerToIr(
     statefulRegex: options.statefulRegex ?? false,
     nativePromiseViews: options.nativePromiseViews ?? false,
     nativeDenseArrays: options.nativeDenseArrays ?? false,
+    nativeCollectionArrays: options.nativeCollectionArrays ?? false,
     targetPlatform,
     startupCrash,
     ffiImports,
@@ -568,6 +573,7 @@ export function lowerToIr(
         statefulRegex: options.statefulRegex ?? false,
         nativePromiseViews: options.nativePromiseViews ?? false,
         nativeDenseArrays: options.nativeDenseArrays ?? false,
+        nativeCollectionArrays: options.nativeCollectionArrays ?? false,
         targetPlatform,
         startupCrash,
         ffiImports,
@@ -597,6 +603,7 @@ export function lowerToIr(
       statefulRegex: options.statefulRegex ?? false,
       nativePromiseViews: options.nativePromiseViews ?? false,
       nativeDenseArrays: options.nativeDenseArrays ?? false,
+      nativeCollectionArrays: options.nativeCollectionArrays ?? false,
       targetPlatform,
       startupCrash,
       ffiImports,
@@ -620,6 +627,7 @@ export function lowerToIr(
     statefulRegex: options.statefulRegex ?? false,
     nativePromiseViews: options.nativePromiseViews ?? false,
     nativeDenseArrays: options.nativeDenseArrays ?? false,
+    nativeCollectionArrays: options.nativeCollectionArrays ?? false,
     targetPlatform,
     ffiImports,
     libraryCallbacks,
@@ -1032,6 +1040,7 @@ export class Lowerer {
   readonly statefulRegex: boolean;
   readonly nativePromiseViews: boolean;
   readonly nativeDenseArrays: boolean;
+  readonly nativeCollectionArrays: boolean;
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
   readonly fnSigsBySymbol = new Map<ts.Symbol, FnSig>();
@@ -1798,6 +1807,7 @@ export class Lowerer {
     this.statefulRegex = mode.statefulRegex ?? false;
     this.nativePromiseViews = mode.nativePromiseViews ?? false;
     this.nativeDenseArrays = mode.nativeDenseArrays ?? false;
+    this.nativeCollectionArrays = mode.nativeCollectionArrays ?? false;
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();
@@ -1833,6 +1843,7 @@ export class Lowerer {
       isExternalTypeFile: (sf) =>
         this.externalTypeSpecifiersByFile.has(tsgoPath(resolve(sf.fileName))),
       dynamic: this.dynamic,
+      nativeCollectionArrays: this.nativeCollectionArrays,
       typeMemo: this.typeMemo,
       canMemoizeType: () =>
         this.typeParamBindings === null &&

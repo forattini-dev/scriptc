@@ -275,7 +275,7 @@ function decoder(L: Lowerer, fn: IrLibFn, schema: IrExpr, schemaNode: ts.Express
   if (fn === "schema.decodeOption" || fn === "schema.decodeEffect" || fn === "schema.decodeExit") {
     // The carrier stamps the decoded type as an empty array literal's element, so the type must be one an array can
     // hold — a checked-dynamic result (`Schema.Unknown`) has no such carrier yet.
-    if (!isSupportedArrayElem(valueType)) {
+    if (!isSupportedArrayElem(valueType, L.nativeCollectionArrays)) {
       L.unsupported("SC1090", expr, `a schema decoder answering an Option/Effect/Exit of '${L.fmt(valueType)}' (the decoded type has no value carrier yet)`);
     }
     args.push({ kind: "arrayLit", elems: [], type: arrayOf(valueType), loc });

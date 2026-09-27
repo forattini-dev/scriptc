@@ -497,12 +497,14 @@ export function isUnitType(t: IrType): boolean {
   return t.kind === "undefinedT" || t.kind === "nullT";
 }
 
-/** Element kinds with a real ScrArr storage/RC representation in BOTH
- * backends. Array-producing lowerings can learn their result element from
+/** Element kinds with a real array storage/RC representation. Collection
+ * elements are Rust-only for now: its generic traced arrays can retain a
+ * Map/Set GC node, while the C/LLVM ScrArr ABI has no matching element kind.
+ * Array-producing lowerings can learn their result element from
  * a callback rather than through mapType's ordinary T[] gate, so they must
  * share this predicate instead of reconstructing an array around an
- * otherwise-valid standalone type (Map, Set, dyn, opaque handles, ...). */
-export function isSupportedArrayElem(t: IrType): boolean {
+ * otherwise-valid standalone type (dyn, opaque handles, ...). */
+export function isSupportedArrayElem(t: IrType, nativeCollectionArrays = false): boolean {
   switch (t.kind) {
     case "date": case "effect": case "genericFunc": case "f64": case "bigint":
     case "bool":
@@ -522,6 +524,9 @@ export function isSupportedArrayElem(t: IrType): boolean {
     case "classval":
     case "moduleNs":
       return true;
+    case "map":
+    case "set":
+      return nativeCollectionArrays;
     default:
       return false;
   }
