@@ -17,8 +17,8 @@ const normalizePath = (path: string): string => path.replaceAll("\\", "/");
 
 /** Provenance, never a filename suffix: only this load's compiler-owned
  * copies describe structural types alongside statically compiled JS. */
-export function isNpmStaticTypeFile(path: string): boolean { return virtualDeclarations.has(normalizePath(path)); }
-export function resetNpmStaticTypes(): void { virtualDeclarations.clear(); }
+export function isRuntimeTypeBridgeFile(path: string): boolean { return virtualDeclarations.has(normalizePath(path)); }
+export function resetRuntimeTypeBridgeFiles(): void { virtualDeclarations.clear(); }
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -28,12 +28,12 @@ function record(value: unknown): Record<string, unknown> | null {
 /** Only exact entry mappings with an explicit types target are bridged.
  * Patterns and nested conditional declaration graphs need their own resolver
  * coverage before admission. Sibling declarations cover internal ESM files. */
-function declarationFor(path: string, packageName: string): string | null {
+function declarationFor(path: string, packageName: string | null): string | null {
   for (let dir = dirname(path); ; dir = dirname(dir)) {
     const text = trackedReadFile(`${dir}/package.json`);
     let pkg: Record<string, unknown> | null = null;
     try { pkg = text === null ? null : record(JSON.parse(text)); } catch { /* resolver diagnoses malformed JSON */ }
-    if (pkg?.["name"] === packageName) {
+    if (packageName !== null && pkg?.["name"] === packageName) {
       const exports = record(pkg["exports"]);
       const entries = exports !== null && Object.keys(exports).some((key) => key.startsWith("."))
         ? Object.entries(exports) : [[".", pkg["exports"]] as const];
@@ -101,20 +101,29 @@ function typeOnlyNames(path: string, text: string): string[] {
     entry.public !== "default" && /^[A-Za-z_$][\w$]*$/.test(entry.public)).map((entry) => entry.public);
 }
 
-export class NpmStaticTypeBridge {
+export class RuntimeTypeBridge {
   private readonly files = new Map<string, string>();
   private readonly candidates = npmDeclarationCandidates();
 
   readFile(path: string): string | undefined { return this.files.get(normalizePath(path)); }
   fileExists(path: string): boolean { return this.files.has(normalizePath(path)); }
 
-  append(path: string, text: string, packageName: string): string {
+  /** Project JavaScript declaration twins use the same conservative bridge
+   * as npm-static, but their declaration is always the adjacent authored
+   * file rather than package metadata or an acquisition candidate. */
+  appendProject(path: string, text: string): string {
+    return this.append(path, text, null);
+  }
+
+  append(path: string, text: string, packageName: string | null): string {
     path = normalizePath(path);
     const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
     if (!ts.isExternalModule(source) || source.statements.some((s) =>
       ts.isExportDeclaration(s) && s.exportClause === undefined)) return text;
-    const candidate = this.candidates?.get(path);
-    const declaration = candidate === undefined ? declarationFor(path, packageName) : candidate;
+    const candidate = packageName === null ? undefined : this.candidates?.get(path);
+    const declaration = candidate === undefined
+      ? declarationFor(path, packageName)
+      : candidate;
     if (declaration === null || !declarationName.test(declaration)) return text;
     const declaredText = declarationText(declaration);
     if (declaredText === null) return text;

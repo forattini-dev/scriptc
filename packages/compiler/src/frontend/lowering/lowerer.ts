@@ -4,7 +4,7 @@ import { checkNativeCallResult } from "./native-call-result.js";
 import { jsArrayInferenceBinding, jsArrayInferenceExpression } from "../js-array-field-types.js";
 import { fsConstantValue } from "./fs-constants.js";
 import { ScopeEnv, type FnCtx } from "./scope-env.js";
-import { isNpmStaticTypeFile } from "../npm-static-types.js";
+import { isRuntimeTypeBridgeFile } from "../npm-static-types.js";
 import { activeRuntimeTarget, runtimeTargetIr } from "../../compat/runtime-target.js";
 import { isIslandModulePath, islandModuleReason, type ModuleTierRow } from "../tiering.js";
 /* AST + checker → IR.
@@ -5558,7 +5558,7 @@ export class Lowerer {
    * node_modules segment — workspace-registry.ts). The provenance half of the npm
    * typing rule (package types are island handles) and of the per-package
    * requires-dynamic attribution. */
-  readonly isNpmFile = (sf: ts.SourceFile): boolean => sf.isDeclarationFile && !isNpmStaticTypeFile(sf.fileName) &&
+  readonly isNpmFile = (sf: ts.SourceFile): boolean => sf.isDeclarationFile && !isRuntimeTypeBridgeFile(sf.fileName) &&
     (sf.fileName.includes("/node_modules/") || workspacePackageOfPath(sf.fileName) !== null) &&
     !this.isStdlibFile(sf);
 

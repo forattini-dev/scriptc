@@ -56,6 +56,7 @@ import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackag
 import { isPrunedNpmReexport, planNpmStaticReexports } from "./npm-static-prune.js";
 import { npmStaticDeclarationReexports, npmStaticRuntimeClassTargets, parseNpmStaticDeclarationOverloads, parseNpmStaticDeclarationProperties } from "./npm-static-declarations.js";
 import type { NpmStaticDeclarationOverloads, NpmStaticDeclarationProperties, NpmStaticOverloadSignature } from "./npm-static-declarations.js";
+import { RuntimeTypeBridge } from "./npm-static-types.js";
 import { provenanceEntryFor, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import { ADOPTED_OPTIONS, isJsSourceFileName, isRuntimeSourceFileName } from "./tsc-codes.js";
@@ -708,11 +709,26 @@ export function loadProgram(
   // outside node_modules — the classic typed-JS-library entry — must not exist for
   // the checker; resolve.ts answers the same runtime sibling).
   const npmShadow = npmStaticFsShadow();
+  const projectTypes = new RuntimeTypeBridge();
+  const projectTypeRewrites = new Map<string, string | null>();
+  const projectTypeRewrite = (path: string): string | undefined => {
+    if (!isJsSourceFileName(path) || isNodeModulesPath(path)) return undefined;
+    const normalized = path.split("\\").join("/");
+    const cached = projectTypeRewrites.get(normalized);
+    if (cached !== undefined) return cached ?? undefined;
+    const source = trackedReadFile(path);
+    const rewritten = source === null ? null : projectTypes.appendProject(path, source);
+    const replacement = rewritten !== null && rewritten !== source ? rewritten : null;
+    projectTypeRewrites.set(normalized, replacement);
+    return replacement ?? undefined;
+  };
   const fsShadow = {
-    readFile: (path: string) => npmShadow?.readFile(path),
-    fileExists: (path: string) => npmShadow?.fileExists(path) ?? false,
+    readFile: (path: string) => npmShadow?.readFile(path) ?? projectTypes.readFile(path) ?? projectTypeRewrite(path),
+    fileExists: (path: string) => (npmShadow?.fileExists(path) ?? false) || projectTypes.fileExists(path),
     hideFile: (path: string) =>
-      (npmShadow?.hideFile(path) ?? false) || projectDtsRuntimeSibling(path) !== null,
+      projectTypes.fileExists(path)
+        ? false
+        : (npmShadow?.hideFile(path) ?? false) || projectDtsRuntimeSibling(path) !== null,
   };
   const host = new ts.Ts7Host({ cwd: dirname(entryPath), fsShadow });
   const load = loadProgram7(host, entryPath, externalTypes);

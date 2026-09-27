@@ -1,6 +1,6 @@
 import * as ts from "./ts7/adapter.js";
 import type { TypeMapperCtx } from "./type-mapper.js";
-import { isNpmStaticTypeFile } from "./npm-static-types.js";
+import { isRuntimeTypeBridgeFile } from "./npm-static-types.js";
 import { isProjectTypeFile } from "./project-declarations.js";
 import { isKernelTypeFile } from "./kernel.js";
 
@@ -8,7 +8,7 @@ import { isKernelTypeFile } from "./kernel.js";
  * and mapped-type members. This admits types, not package implementations:
  * runtime imports and opaque kernel handles keep their separate checks. */
 export function isUnmappedRecordDeclaration(sf: ts.SourceFile, ctx: TypeMapperCtx): boolean {
-  return sf.isDeclarationFile && !isProjectTypeFile(sf) && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName) &&
+  return sf.isDeclarationFile && !isProjectTypeFile(sf) && !ctx.isExternalTypeFile(sf) && !isRuntimeTypeBridgeFile(sf.fileName) &&
     (ctx.dynamic || !isKernelTypeFile(sf.fileName));
 }
 

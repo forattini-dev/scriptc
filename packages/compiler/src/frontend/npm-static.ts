@@ -63,7 +63,7 @@
 import { thirdPartyDeclarationReason } from "./npm-static-declarations.js";
 import type { NpmStaticDeclarationOverloads, NpmStaticDeclarationProperties } from "./npm-static-declarations.js";
 import { rewriteBundlerCjsExports } from "./npm-static-rewrite.js";
-import { NpmStaticTypeBridge, resetNpmStaticTypes } from "./npm-static-types.js";
+import { RuntimeTypeBridge, resetRuntimeTypeBridgeFiles } from "./npm-static-types.js";
 import { isTsSourceFileName } from "./tsc-codes.js";
 import { npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } from "./workspace-registry.js";
 import { trackedReadFile, trackedRealpath } from "./input-tracker.js";
@@ -87,7 +87,7 @@ export function setNpmStaticPackages(packages: Iterable<string>): void {
   declarationProperties = new Map();
   offenders.clear();
   rewriteCache.clear();
-  resetNpmStaticTypes();
+  resetRuntimeTypeBridgeFiles();
   realpathProbed.clear();
 }
 
@@ -307,7 +307,7 @@ export interface NpmStaticFsShadow {
  * flag is off, so flagless compiles keep the exact host behavior. */
 export function npmStaticFsShadow(): NpmStaticFsShadow | null {
   if (!npmStaticActive()) return null;
-  const types = new NpmStaticTypeBridge();
+  const types = new RuntimeTypeBridge();
   return {
     fileExists: (path) => types.fileExists(path),
     readFile: (path) => {
