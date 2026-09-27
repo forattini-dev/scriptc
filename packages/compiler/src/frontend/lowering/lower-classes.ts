@@ -32,7 +32,7 @@ import { lowerHttpAgentNew, lowerHttpServerNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 import { classExpressionRunsOnceInEsbuildInitializer } from "./esbuild-once.js";
-import { errorWithCause } from "./lower-error-message.js";
+import { errorSuperArgs, errorWithCause } from "./lower-error-message.js";
 import { exactClassOfReceiver, exactInstanceClassOf } from "./lower-class-bindings.js";
 export { exactClassOfReceiver, exactInstanceClassOf, probeExactInstanceClassOf } from "./lower-class-bindings.js";
 import { rejectStaticThis } from "./static-this.js";
@@ -4064,14 +4064,25 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
           out.push(...paramPropInitStmts(lowerer, info, thisLocal));
           continue;
         }
+        const errorArgs = forward === undefined && base.builtinError
+          ? errorSuperArgs(lowerer, superCall.arguments, locOf(stmt), stmt)
+          : null;
+        if (errorArgs) out.push(...errorArgs.setup);
         const args = forward !== undefined
           ? forward
-          : base.builtinError
-            ? [lowerer.errorMessageArg(superCall.arguments, locOf(stmt), stmt)]
+          : errorArgs
+            ? [errorArgs.message]
             : base.builtinEmitter
               ? []
               : lowerer.completeArgs(superCall.arguments, base.ctorParams, locOf(stmt), stmt);
         out.push(lowerer.superCallStmt(info, thisLocal, args, locOf(stmt)));
+        if (errorArgs?.cause && errorArgs.hasCause) {
+          const receiver: IrExpr = { kind: "varRef", localId: thisLocal.id, type: { kind: "object", className: info.def.name }, loc: locOf(stmt) };
+          out.push(
+            { kind: "fieldSet", obj: receiver, className: info.def.name, field: "%cause", value: errorArgs.cause, loc: locOf(stmt) },
+            { kind: "fieldSet", obj: receiver, className: info.def.name, field: "%hasCause", value: errorArgs.hasCause, loc: locOf(stmt) },
+          );
+        }
         // super() returns → field initializers → parameter-property
         // assignments (Node's order, probed) → the rest of the body.
         out.push(...lowerer.fieldInitStmts(info, thisLocal));
