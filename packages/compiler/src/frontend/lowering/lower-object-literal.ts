@@ -359,6 +359,29 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       computedInlineSpread !== null && computedInlineSpread.prop === prop;
     const selectedComputedSpread = (): { local: IrLocal; init: IrExpr } | null =>
       computedLeadingSpread ?? computedInlineSpread;
+    const fenceEarlierExplicitOverwrite = (
+      prop: ts.SpreadAssignment,
+      sourceFields: readonly { name: string }[],
+    ): void => {
+      const names = new Set(sourceFields.map((field) => field.name));
+      const earlier = expr.properties
+        .slice(0, expr.properties.indexOf(prop))
+        .find((candidate) =>
+          !ts.isSpreadAssignment(candidate) &&
+          candidate.name !== undefined &&
+          names.has(propNameText(lowerer, candidate.name)),
+        );
+      const earlierName = earlier !== undefined && !ts.isSpreadAssignment(earlier)
+        ? earlier.name
+        : undefined;
+      if (earlierName !== undefined) {
+        lowerer.unsupported(
+          "SC1090",
+          prop,
+          `object spread after the explicit '${propNameText(lowerer, earlierName)}' property (the later spread may overwrite it; place the spread first to preserve JavaScript evaluation order)`,
+        );
+      }
+    };
     // Field names introduced by conditional spreads: their ternary carries
     // the spread's whole evaluation (cond once, value lazily), so a LATER
     // contributor overriding one would silently drop that evaluation —
@@ -435,20 +458,12 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         // re-read per field (historic path); any OTHER source must be a
         // re-emittable pure read, sharing one lowered node per field.
         // The desugar's one-entry-per-name list reads spread fields
-        // EAGERLY at the spread's position, so an explicit property
-        // BEFORE a spread would need JS's overwrite — order-fenced (the
-        // index-signature merge path above takes any order).
-        if (
-          expr.properties
-            .slice(0, expr.properties.indexOf(prop))
-            .some((p) => !ts.isSpreadAssignment(p))
-        ) {
-          lowerer.unsupported(
-            "SC1090",
-            prop,
-            "object spread after explicit properties (spreads must come first — a later spread would overwrite them with JS semantics the desugar does not model)",
-          );
-        }
+        // EAGERLY at the spread's position. Earlier explicit properties are
+        // therefore safe when their names are disjoint from the source
+        // shape (`{ type: "x", ...input }` where input omits `type`). An
+        // actual collision still needs JS's later overwrite while retaining
+        // the earlier value's evaluation, which this representation cannot
+        // express and remains fenced below once the source shape is known.
         let srcNode: ts.Expression = prop.expression;
         while (ts.isParenthesizedExpression(srcNode)) srcNode = srcNode.expression;
         let srcLowered =
@@ -532,6 +547,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
           }
           const srcShape = lowerer.shapes.get(recArm.shapeId);
           if (!srcShape) throw new InternalCompilerError(`lowerer bug: spread of unknown shape ${recArm.shapeId}`);
+          fenceEarlierExplicitOverwrite(prop, srcShape.fields);
           fenceAccessorSpreadSource(lowerer, prop, srcShape);
           if (srcShape.indexValue || shape.indexValue) {
             lowerer.unsupported(
@@ -672,6 +688,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         const inlineComputed = hasInlineSpread(prop);
         const srcShape = lowerer.shapes.get(srcType.shapeId);
         if (!srcShape) throw new InternalCompilerError(`lowerer bug: spread of unknown shape ${srcType.shapeId}`);
+        fenceEarlierExplicitOverwrite(prop, srcShape.fields);
         fenceAccessorSpreadSource(lowerer, prop, srcShape);
         // Index-signature shapes carry runtime-keyed overflow entries the
         // field-by-field desugar cannot enumerate — fenced on either side.
