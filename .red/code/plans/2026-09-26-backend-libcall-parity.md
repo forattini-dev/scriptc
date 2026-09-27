@@ -8,25 +8,23 @@ Implementar no backend e runtime Rust as 52 libcalls reveladas pela integração
 
 - `main` e `origin/main` apontam para `ffa87b78` após o fast-forward dos 126 commits da branch de integração.
 - `pnpm gen:backend-libcalls --check` encontra exatamente 52 órfãs: `zlib` 8, `crypto` 16, `emitter` 2, `child` 7, `cp` 2, `process` 9 e `writer` 8.
-- As 52 aparecem nos emitters C e LLVM de `upstream/main`, mas nenhuma aparece nos emitters correspondentes da `main` integrada. Essa diferença deve ser corrigida somente reaplicando a implementação upstream, sem criar ou evoluir código C/LLVM próprio.
+- As 52 aparecem nos emitters C e LLVM de `upstream/main`, mas nenhuma aparece nos emitters correspondentes da `main` integrada. Esse drift fica registrado para a próxima sincronização integral do upstream e não bloqueia a implementação Rust.
 - O upstream não possui backend Rust. A implementação Rust deve reutilizar os tipos de IR e as primitivas já presentes em `packages/runtime-rust`, sem transportar ownership, ponteiros ou lifecycle do runtime C.
 - As 52 chamadas formam cinco fatias verticais: zlib 8; crypto 16; EventEmitter flexível 2; child stdin + execFile 10; fork/IPC 16.
 
 ## Regras de execução
 
 - Trabalhar uma fatia Rust por commit. Depois de cada commit, buscar `origin/main` e reconciliar antes de iniciar a próxima fatia.
-- Tratar C e LLVM como código upstream: sincronizar literalmente o comportamento mantido pela Vercel, limitar qualquer resolução local ao encaixe indispensável do merge e nunca desenhar novas APIs, otimizações ou abstrações nessas lanes.
+- Tratar C e LLVM como código upstream: essas lanes só mudam quando uma sincronização integral trouxer alterações mantidas pela Vercel. O plano atual não porta, reimplementa, otimiza nem corrige código C/LLVM.
 - Implementar o runtime Rust com ownership explícito, handles rastreáveis e `#![forbid(unsafe_code)]`. Recursos de processo, hash e writer devem ter estado terminal explícito para impedir uso após digest, end, destroy ou disconnect.
 - Durante as cinco ondas de implementação Rust, executar apenas verificações de compilação e geração necessárias para manter o código navegável. Concentrar testes focados, corpus diferencial, sanitização e gates completos na onda final, conforme a decisão do mantenedor.
 - Alterar fontes de decisão e manifests de propriedade; regenerar `surface-manifest.json`, compatibilidade Node e `backend-libcalls.ts`. Não editar artefatos gerados à mão.
 
-## Pré-condição — Sincronizar C e LLVM do upstream
+## Limite de escopo — C e LLVM
 
-Reaplicar fielmente os casos C/LLVM que continuam presentes em `upstream/main` e foram omitidos durante o merge. As fontes de verdade são os commits upstream `d6657921` (zlib), `ffa248ef` (crypto), `1b2b39f5` (EventEmitter), `5e4b4df1` (child stdin), `9ff5ed16` (fork/IPC) e `a11fd6c8` (especialização que inclui `execFile`). Uma adaptação local só é aceitável quando nomes ou estruturas já reconciliadas impedirem a aplicação literal; ela deve preservar o comportamento upstream e não ampliar a lane.
+Não alterar os emitters ou runtimes C/LLVM neste plano. A ausência atual das 52 chamadas nessas lanes é evidência de drift da integração, não um backlog de implementação do fork. Quando ocorrer a próxima sincronização integral, aceitar as implementações mantidas em `upstream/main` e resolver somente conflitos indispensáveis para preservar a lane Rust.
 
-Arquivos esperados: `packages/compiler/src/backend/c/async.ts`, `c/exprs.ts`, `c/shapes.ts`, `c/types.ts`, `llvm/expr-callbacks.ts`, `llvm/expr-stream-callbacks.ts`, `llvm/lib-dispatch.ts`, `llvm/lib-process.ts`, `llvm/lib-shared.ts`, além dos registradores dos emitters quando um helper novo exigir contexto.
-
-Concluído quando uma comparação contra `upstream/main` confirmar que as 52 chamadas têm os mesmos caminhos C/LLVM mantidos pela Vercel e nenhuma lógica funcional própria do fork tiver sido adicionada nessas lanes. Esse checkpoint apenas desobstrui o inventário; não é uma frente de produto.
+Este limite está respeitado quando o diff produzido pelas ondas abaixo não tocar `packages/compiler/src/backend/c`, `packages/compiler/src/backend/llvm` nem `packages/runtime` por causa dessas 52 chamadas.
 
 ## Onda 1 — zlib Rust (8)
 
@@ -80,22 +78,21 @@ Concluído quando parent e child distinguirem ausência de IPC de canal desconec
 
 ## Onda 6 — Regeneração e validação final
 
-1. Regenerar `backend-libcalls.ts` e exigir que as 52 linhas incluam `rust`; as colunas C/LLVM devem refletir exclusivamente o estado sincronizado de `upstream/main`.
+1. Regenerar `backend-libcalls.ts` e exigir que as 52 linhas incluam `rust`; não fabricar colunas C/LLVM para completar a tabela.
 2. Rodar `pnpm manifest` quando as tabelas de decisão do compiler mudarem e então `pnpm node-compat`; inspecionar o ledger interno, o artefato público e o backlog por mudanças não relacionadas.
 3. Adicionar ou completar corpus diferencial por família. Cobrir sucesso, shapes importantes de erro, callback único, ordem/lifecycle, stdout, stderr e exit code. IPC precisa de fixtures parent/worker e crypto aleatório precisa testar invariantes, não bytes específicos.
 4. Rodar testes focados por família sob `pnpm limit`, depois `cargo test` e `cargo clippy -- -D warnings` no runtime Rust, `pnpm node-compat:check`, build do workspace e gate de docs se artefatos públicos mudarem.
 5. Rodar `pnpm test:sandbox`. Se credenciais Sandbox não existirem, rodar as lanes locais plain e sanitizada prescritas em `AGENTS.md`. Registrar separadamente qualquer limitação real do host para LLVM 22; não classificar ausência de toolchain como regressão de código.
 
-Concluído quando o gerador não tiver órfãs, as 52 chamadas tiverem lowering Rust, C/LLVM continuarem fiéis ao upstream, os artefatos gerados estiverem limpos, o runtime Rust continuar sem `unsafe`, todos os gates disponíveis estiverem verdes e `git status` estiver limpo.
+Concluído quando o gerador não tiver órfãs, as 52 chamadas tiverem lowering Rust, o diff da implementação permanecer fora das lanes C/LLVM, os artefatos gerados estiverem limpos, o runtime Rust continuar sem `unsafe`, todos os gates disponíveis estiverem verdes e `git status` estiver limpo.
 
 ## Ordem de checkpoints
 
-1. Sincronizar mecanicamente do upstream os casos C/LLVM perdidos no merge.
-2. Implementar zlib Rust.
-3. Implementar crypto Rust.
-4. Implementar EventEmitter flexível Rust.
-5. Implementar child stdin + execFile Rust.
-6. Implementar fork/IPC Rust.
-7. Regenerar, escrever a evidência diferencial Rust e executar todos os testes.
+1. Implementar zlib Rust.
+2. Implementar crypto Rust.
+3. Implementar EventEmitter flexível Rust.
+4. Implementar child stdin + execFile Rust.
+5. Implementar fork/IPC Rust.
+6. Regenerar, escrever a evidência diferencial Rust e executar todos os testes.
 
-Cada checkpoint termina com commit, `git fetch origin main`, reconciliação explícita e push. A pré-condição apenas recompõe o espelho upstream; todo o trabalho de produto subsequente acontece em Rust, da menor para a maior dependência de lifecycle, deixando a suíte pesada para o final sem acumular tudo em um único commit irrecuperável.
+Cada checkpoint termina com commit, `git fetch origin main`, reconciliação explícita e push. Todo o trabalho de produto acontece em Rust, da menor para a maior dependência de lifecycle, deixando a suíte pesada para o final sem acumular tudo em um único commit irrecuperável.
