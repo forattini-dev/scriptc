@@ -357,6 +357,8 @@ export interface LowerOptions {
   nativeStringSubstr?: boolean;
   /** Rust can concatenate a checked-dynamic spread argument vector. */
   nativeStringConcatDyn?: boolean;
+  /** Rust provides Unicode String.prototype.normalize. */
+  nativeStringNormalize?: boolean;
   /** --dynamic: the island engine is linked, so island constructs
    * (__island_eval) may lower. Off by default — without it they produce a
    * requires-dynamic diagnostic instead. */
@@ -459,6 +461,8 @@ export interface LowererMode {
   nativeStringSubstr?: boolean;
   /** Rust can concatenate a checked-dynamic spread argument vector. */
   nativeStringConcatDyn?: boolean;
+  /** Rust provides Unicode String.prototype.normalize. */
+  nativeStringNormalize?: boolean;
   /** Names of bodies a prior reachability pass reached; null lowers everything. */
   reachable?: ReadonlySet<string> | null;
   /** Coverage remainder: lower ONLY bodies outside `reachable`, skip the
@@ -572,6 +576,7 @@ export function lowerToIr(
     nativeDynamicSets: options.nativeDynamicSets ?? false,
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
+    nativeStringNormalize: options.nativeStringNormalize ?? false,
     targetPlatform,
     startupCrash,
     ffiImports,
@@ -598,6 +603,7 @@ export function lowerToIr(
         nativeDynamicSets: options.nativeDynamicSets ?? false,
         nativeStringSubstr: options.nativeStringSubstr ?? false,
         nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
+        nativeStringNormalize: options.nativeStringNormalize ?? false,
         targetPlatform,
         startupCrash,
         ffiImports,
@@ -632,6 +638,7 @@ export function lowerToIr(
       nativeDynamicSets: options.nativeDynamicSets ?? false,
       nativeStringSubstr: options.nativeStringSubstr ?? false,
       nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
+      nativeStringNormalize: options.nativeStringNormalize ?? false,
       targetPlatform,
       startupCrash,
       ffiImports,
@@ -660,6 +667,7 @@ export function lowerToIr(
     nativeDynamicSets: options.nativeDynamicSets ?? false,
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
+    nativeStringNormalize: options.nativeStringNormalize ?? false,
     targetPlatform,
     ffiImports,
     libraryCallbacks,
@@ -1077,6 +1085,7 @@ export class Lowerer {
   readonly nativeDynamicSets: boolean;
   readonly nativeStringSubstr: boolean;
   readonly nativeStringConcatDyn: boolean;
+  readonly nativeStringNormalize: boolean;
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
   readonly fnSigsBySymbol = new Map<ts.Symbol, FnSig>();
@@ -1848,6 +1857,7 @@ export class Lowerer {
     this.nativeDynamicSets = mode.nativeDynamicSets ?? false;
     this.nativeStringSubstr = mode.nativeStringSubstr ?? false;
     this.nativeStringConcatDyn = mode.nativeStringConcatDyn ?? false;
+    this.nativeStringNormalize = mode.nativeStringNormalize ?? false;
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();

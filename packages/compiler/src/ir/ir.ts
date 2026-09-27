@@ -2205,6 +2205,8 @@ export type IrLibFn =
   | "str.substr"
   /** String.concat over a checked-dynamic spread argument vector (Rust). */
   | "str.concatDyn"
+  /** Unicode String.prototype.normalize (Rust). */
+  | "str.normalize"
   /** RegExp.escape (ES2025): per-code-point EncodeForRegExpEscape —
    * leading ASCII alphanumeric hex-escapes, syntax characters and '/'
    * take a backslash, other punctuators/whitespace/line terminators
@@ -7798,6 +7800,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // decodeURIComponent throws the spec's URIError on bad hex/invalid
   // UTF-8 octets (encodeURIComponent never throws — see the IrLibFn doc).
   "str.decodeUriComponent",
+  "str.normalize",
   // The base64 globals: atob/btoa throw the catchable DOMException
   // InvalidCharacterError on malformed input; the zero-argument form
   // always throws Node's TypeError [ERR_MISSING_ARGS].

@@ -1,3 +1,5 @@
+use unicode_normalization::UnicodeNormalization;
+
 fn array_index(index: f64, allow_end: bool, len: usize) -> usize {
     if !index.is_finite() || index < 0.0 || index.fract() != 0.0 || index > usize::MAX as f64 {
         panic!("scriptc: invalid array index");
@@ -416,6 +418,42 @@ pub fn string_substr(value: &JsString, start: f64, length: f64) -> JsString {
         (start as f64 + length).min(units.len() as f64) as usize
     };
     string_from_utf16(&units[start..end])
+}
+
+pub fn string_normalize(value: &JsString, form: &JsString) -> JsString {
+    let Some(form) = form.well_formed_utf8() else {
+        throw_range_error("The normalization form should be one of NFC, NFD, NFKC, NFKD.".to_owned());
+    };
+    if !matches!(form, "NFC" | "NFD" | "NFKC" | "NFKD") {
+        throw_range_error("The normalization form should be one of NFC, NFD, NFKC, NFKD.".to_owned());
+    }
+    let mut output = JsStringBuilder::new();
+    let mut run = String::new();
+    let flush = |run: &mut String, output: &mut JsStringBuilder| {
+        if run.is_empty() {
+            return;
+        }
+        let normalized = match form {
+            "NFC" => run.nfc().collect::<String>(),
+            "NFD" => run.nfd().collect::<String>(),
+            "NFKC" => run.nfkc().collect::<String>(),
+            "NFKD" => run.nfkd().collect::<String>(),
+            _ => unreachable!(),
+        };
+        output.push_str(&normalized);
+        run.clear();
+    };
+    for item in char::decode_utf16(value.encode_utf16()) {
+        match item {
+            Ok(ch) => run.push(ch),
+            Err(error) => {
+                flush(&mut run, &mut output);
+                output.push_unit(error.unpaired_surrogate());
+            }
+        }
+    }
+    flush(&mut run, &mut output);
+    output.finish()
 }
 
 pub fn string_slice(value: &JsString, start: f64, end: f64) -> JsString {

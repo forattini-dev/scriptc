@@ -1883,6 +1883,7 @@ dependencies = [
  "scriptc-island-v8",
  "signal-hook",
  "terminal_size",
+ "unicode-normalization",
  "url",
  "webpki-roots",
 ]

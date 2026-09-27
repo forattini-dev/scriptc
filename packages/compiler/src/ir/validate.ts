@@ -261,6 +261,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "str.encodeUriComponent": { argTypes: [STRING], result: STRING },
   "str.substr": { argTypes: [STRING, F64, F64], result: STRING },
   "str.concatDyn": { argTypes: [STRING, DYN], result: STRING },
+  "str.normalize": { argTypes: [STRING, STRING], result: STRING },
   // The base64 globals: the argument is a dyn value (WebIDL ToString
   // runs in the runtime); the zero-argument form always throws.
   "str.atob": { argTypes: [DYN], result: STRING },

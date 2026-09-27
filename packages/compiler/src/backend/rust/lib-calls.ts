@@ -311,6 +311,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "str.substr" && expr.args.length === 3 && arg?.type.kind === "string" && secondArg !== undefined && expr.args[2] !== undefined) {
     return `runtime::string_substr(&(${context.emitExpr(arg)}), ${context.emitExpr(secondArg)}, ${context.emitExpr(expr.args[2])})`;
   }
+  if (expr.fn === "str.normalize" && expr.args.length === 2 && arg?.type.kind === "string" && secondArg?.type.kind === "string") {
+    return `runtime::string_normalize(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
   if (expr.fn === "str.concatDyn" && expr.args.length === 2 && arg?.type.kind === "string" && secondArg?.type.kind === "dyn") {
     const receiver = context.nextTemporary();
     const values = context.nextTemporary();

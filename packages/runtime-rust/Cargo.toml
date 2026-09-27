@@ -40,6 +40,7 @@ rustls = { version = "=0.23.43", default-features = false, features = ["ring", "
 rustls-pemfile = "=2.2.0"
 signal-hook = { version = "=0.4.4", default-features = false }
 url = "=2.5.0"
+unicode-normalization = "=0.1.25"
 webpki-roots = "=1.0.9"
 
 [target.'cfg(all(not(windows), not(target_os = "wasi")))'.dependencies]

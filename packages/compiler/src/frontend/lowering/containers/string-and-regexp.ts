@@ -550,7 +550,8 @@ export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
   const substr = access.name.text === "substr" && lowerer.nativeStringSubstr;
   const concatDyn = access.name.text === "concat" && lowerer.nativeStringConcatDyn &&
     argumentNodes.length === 1 && ts.isSpreadElement(argumentNodes[0]!);
-  if (!entry && !indexMethod && !substr && !concatDyn) return null;
+  const normalize = access.name.text === "normalize" && lowerer.nativeStringNormalize;
+  if (!entry && !indexMethod && !substr && !concatDyn && !normalize) return null;
   // A validated dyn receiver (`pkg.name.replace(...)` on a JSON.parse
   // value) arrives pre-extracted through `dynReceiver`; its checker type
   // is `any`, so the type/symbol gates don't apply — the dyn value's
@@ -570,8 +571,8 @@ export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
   }
   // The lib declares optional parameters beyond some lowered forms; fence
   // those arities instead of passing arguments the runtime doesn't take.
-  const minArgs = concatDyn ? 1 : substr ? 0 : (entry?.minArgs ?? 0);
-  const maxArgs = concatDyn ? 1 : substr ? 2 : (entry?.maxArgs ?? 1);
+  const minArgs = concatDyn ? 1 : substr || normalize ? 0 : (entry?.minArgs ?? 0);
+  const maxArgs = concatDyn ? 1 : substr ? 2 : normalize ? 1 : (entry?.maxArgs ?? 1);
   if (argumentNodes.length < minArgs || argumentNodes.length > maxArgs) {
     lowerer.noLowering(
       `.${access.name.text} with ${argumentNodes.length} argument${argumentNodes.length === 1 ? "" : "s"} on strings`,
@@ -584,6 +585,13 @@ export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
   const loc = locOf(call);
   if (indexMethod) return lowerStringIndexCall(lowerer, call, indexMethod, receiver, access.expression, argumentNodes);
   if (substr) return lowerStringSubstrCall(lowerer, call, receiver, argumentNodes);
+  if (normalize) {
+    const defaultForm = strLit("NFC", loc);
+    const form = argumentNodes[0]
+      ? lowerOptionalArgument(lowerer, argumentNodes[0], STRING, defaultForm)
+      : defaultForm;
+    return { kind: "libCall", fn: "str.normalize", args: [receiver, form], type: STRING, loc };
+  }
   if (concatDyn) {
     const spread = argumentNodes[0] as ts.SpreadElement;
     const values = lowerer.lowerExpr(spread.expression);

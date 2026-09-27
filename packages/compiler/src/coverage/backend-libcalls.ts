@@ -1138,6 +1138,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "str.decodeUriComponent": ["c", "llvm", "rust"],
   "str.encodeUri": ["c", "llvm", "rust"],
   "str.encodeUriComponent": ["c", "llvm", "rust"],
+  "str.normalize": ["rust"],
   "str.substr": ["rust"],
   "strdec.end": ["c", "llvm", "rust"],
   "strdec.next": ["c", "llvm", "rust"],
