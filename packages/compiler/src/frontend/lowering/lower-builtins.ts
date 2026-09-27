@@ -44,6 +44,8 @@ import { registerHttpClientFnBinding, voidizedCallback } from "./lower-server.js
 import { pairsSnapshotHelper } from "./pairs-snapshot.js";
 import { BOOL, BYTES_U8, CHILD_T, CHILDSTREAM_T, CHILDWRITER_T, CRYPTOHASH_T, CRYPTOHMAC_T, DYN, F64, FILEHANDLE_T, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/ir.js";
 import { boolLit, countedFor, numLit, strLit, varRef } from "../../ir/build.js";
+import { staticForkModulePath } from "../fork-target.js";
+import { tsgoPath } from "../dts-paths.js";
 
 export function optionalStringTags(lowerer: Lowerer, type: IrType): { stringTag: number; undefinedTag: number } | null {
   if (type.kind !== "union") return null;
@@ -1148,6 +1150,9 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     }
     if (bi.module === "child_process" && bi.member === "execFile") {
       return lowerExecFileCall(lowerer, expr, loc);
+    }
+    if (bi.module === "child_process" && bi.member === "fork") {
+      return lowerForkCall(lowerer, expr, loc);
     }
     if (bi.module === "fs" && bi.member === "watch") {
       return lowerFsWatchCall(lowerer, expr, loc);
@@ -2523,6 +2528,119 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       }
     }
     return { kind: "libCall", fn: "cp.execFile", args: [command, arguments_, callback], type: CHILD_T, loc };
+  }
+
+  function lowerForkCall(lowerer: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr {
+    if (expr.arguments.length < 1 || expr.arguments.length > 3 || expr.arguments.some(ts.isSpreadElement)) {
+      lowerer.noLowering("fork with this argument shape", expr, "use fork(staticModulePath[, stringArgs][, inlineOptions])");
+    }
+    const targetPath = staticForkModulePath(lowerer.program, expr.arguments[0]!);
+    const targetId = targetPath === null
+      ? undefined
+      : lowerer.forkTargetIdByPath.get(tsgoPath(resolve(targetPath)));
+    if (targetId === undefined) {
+      lowerer.noLowering(
+        "fork with a runtime-valued module path",
+        expr.arguments[0]!,
+        'resolve a relative worker with new URL("./worker.ts", import.meta.url) or fileURLToPath(...)',
+      );
+    }
+
+    let argsNode: ts.Expression | undefined;
+    let optsNode: ts.Expression | undefined;
+    if (expr.arguments.length === 3) {
+      argsNode = expr.arguments[1];
+      optsNode = expr.arguments[2];
+    } else if (expr.arguments.length === 2) {
+      const second = expr.arguments[1]!;
+      const type = lowerer.typeOf(second);
+      const mapped = lowerer.mapTypeOf(type);
+      if (lowerer.checker.isArrayType(type) || lowerer.checker.isTupleType(type) ||
+          (mapped?.kind === "array" && mapped.elem.kind === "string")) {
+        argsNode = second;
+      } else {
+        optsNode = second;
+      }
+    }
+    if (optsNode !== undefined && !ts.isObjectLiteralExpression(optsNode)) {
+      lowerer.noLowering("fork with a non-literal options argument", optsNode, "pass fork options inline");
+    }
+
+    let inMode = 1;
+    let outMode = 1;
+    let errMode = 1;
+    let sawStdio = false;
+    let silent = false;
+    let hasEnv: IrExpr = boolLit(false, loc);
+    let envPairs: IrExpr = { kind: "arrayLit", elems: [], type: arrayOf(STRING), loc };
+    let cwd: IrExpr = strLit("", loc);
+    const stdioMode = (node: ts.Expression, label: string): number => {
+      const type = lowerer.typeOf(node);
+      const value = type.isStringLiteralType() ? type.value : null;
+      if (value !== "ignore" && value !== "inherit" && value !== "pipe") {
+        lowerer.noLowering(`fork with ${label} stdio`, node, '"ignore", "inherit", and "pipe" are supported');
+      }
+      return value === "ignore" ? 0 : value === "inherit" ? 1 : 3;
+    };
+
+    if (optsNode && ts.isObjectLiteralExpression(optsNode)) {
+      for (const property of optsNode.properties) {
+        const member = optionMember(property);
+        if (!member) lowerer.noLowering("fork with this options shape", property, "write each member inline");
+        switch (member.name) {
+          case "cwd": cwd = lowerer.lowerExprExpecting(member.value, STRING); break;
+          case "env":
+            hasEnv = boolLit(true, loc);
+            envPairs = lowerer.recordToEnvPairs(member.value);
+            break;
+          case "silent":
+            if (member.value.kind === ts.SyntaxKind.TrueKeyword) silent = true;
+            else if (member.value.kind !== ts.SyntaxKind.FalseKeyword) {
+              lowerer.noLowering("fork with a non-literal silent option", member.value, "silent must be a boolean literal");
+            }
+            break;
+          case "stdio":
+            if (ts.isArrayLiteralExpression(member.value)) {
+              if (member.value.elements.length !== 4) {
+                lowerer.noLowering("fork with this stdio tuple", member.value, 'use [stdin, stdout, stderr, "ipc"]');
+              }
+              const ipc = member.value.elements[3]!;
+              const ipcType = lowerer.typeOf(ipc);
+              if (!ipcType.isStringLiteralType() || ipcType.value !== "ipc") {
+                lowerer.noLowering("fork without a fourth-slot IPC channel", ipc, 'the fourth slot must be "ipc"');
+              }
+              inMode = stdioMode(member.value.elements[0]!, "stdin");
+              outMode = stdioMode(member.value.elements[1]!, "stdout");
+              errMode = stdioMode(member.value.elements[2]!, "stderr");
+            } else {
+              const mode = stdioMode(member.value, "scalar");
+              inMode = outMode = errMode = mode;
+            }
+            sawStdio = true;
+            break;
+          case "serialization": {
+            const type = lowerer.typeOf(member.value);
+            if (!type.isStringLiteralType() || type.value !== "json") {
+              lowerer.noLowering("fork with non-JSON serialization", member.value, 'use serialization: "json"');
+            }
+            break;
+          }
+          case "execArgv":
+          case "windowsHide":
+            break;
+          default:
+            lowerer.noLowering(`fork with the '${member.name}' option`, member.value, "cwd, env, execArgv, silent, stdio, serialization, and windowsHide are supported");
+        }
+      }
+    }
+    if (!sawStdio && silent) inMode = outMode = errMode = 3;
+    return {
+      kind: "libCall",
+      fn: "cp.fork",
+      args: [numLit(targetId, loc), lowerer.lowerChildArgsArg(argsNode, loc), numLit(inMode, loc), numLit(outMode, loc), numLit(errMode, loc), hasEnv, envPairs, cwd],
+      type: CHILD_T,
+      loc,
+    };
   }
 
 /** `execFileSync(file, args?, options?)` / `execSync(command, options?)`
@@ -5282,6 +5400,9 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
       };
       return lowerer.maybeNarrow(read, expr);
     }
+    if (kind === "child" && name === "connected") {
+      return { kind: "libCall", fn: "child.connected", args: [lowerer.lowerExpr(expr.expression)], type: BOOL, loc };
+    }
     if (kind === "child") return null; // pid/exitCode/killed live in lowerIntrinsicProperty
     if (
       kind === "stats" &&
@@ -5321,6 +5442,65 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
    * lowerIntrinsicProperty). Everything else @types/node declares on
    * ChildProcess (stdout, once, ...) fences member-qualified. Null for
    * non-child receivers. */
+  function ignoredListenerReturn(type: IrType): boolean {
+    return type.kind === "void" || (type.kind === "promise" && type.inner.kind === "void");
+  }
+
+  function ipcJsonMessage(lowerer: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr {
+    const value = lowerer.lowerExpr(node);
+    if (!lowerer.jsonStringifySafe(value.type) && value.type.kind !== "dyn") {
+      lowerer.unsupported("SC1090", node, `IPC messages whose type is not JSON-safe (got '${lowerer.fmt(value.type)}')`);
+    }
+    return { kind: "jsonStringify", value, type: STRING, loc };
+  }
+
+  function ipcMessageListener(lowerer: Lowerer, node: ts.Expression): IrExpr {
+    const callback = lowerer.lowerExpr(node);
+    if (callback.type.kind !== "func" || callback.type.params.length > 1 || !ignoredListenerReturn(callback.type.ret)) {
+      lowerer.unsupported("SC1090", node, "message listeners take at most one JSON-safe parameter and return void or Promise<void>");
+    }
+    const parameter = callback.type.params[0];
+    if (parameter !== undefined && !lowerer.jsonStringifySafe(parameter) && parameter.kind !== "dyn") {
+      lowerer.unsupported("SC1090", node, `message listeners whose parameter is not JSON-safe (got '${lowerer.fmt(parameter)}')`);
+    }
+    return callback;
+  }
+
+  function ipcDisconnectListener(lowerer: Lowerer, node: ts.Expression): IrExpr {
+    const callback = lowerer.lowerExpr(node);
+    if (callback.type.kind !== "func" || callback.type.params.length !== 0 || callback.type.ret.kind !== "void") {
+      lowerer.unsupported("SC1090", node, "disconnect listeners take no parameters and return void");
+    }
+    return callback;
+  }
+
+  function ipcSendCallback(lowerer: Lowerer, node: ts.Expression): IrExpr {
+    const callback = lowerer.lowerExpr(node);
+    if (callback.type.kind !== "func" || callback.type.params.length > 1 || callback.type.ret.kind !== "void") {
+      lowerer.unsupported("SC1090", node, "send callbacks take () or (error: Error | null) and return void");
+    }
+    const parameter = callback.type.params[0];
+    if (parameter !== undefined) {
+      const union = parameter.kind === "union" ? lowerer.unions.get(parameter.unionId) : undefined;
+      const valid = union?.arms.length === 2 && union.arms.some((arm) => arm.kind === "nullT") &&
+        union.arms.some((arm) => arm.kind === "object" && arm.className === "%Error");
+      if (!valid) lowerer.unsupported("SC1090", node, "send callbacks whose parameter is Error | null");
+    }
+    return callback;
+  }
+
+  function lowerProcessIpcSend(lowerer: Lowerer, call: ts.CallExpression): IrExpr {
+    const loc = locOf(call);
+    if (call.arguments.length < 1 || call.arguments.length > 2 || call.arguments.some(ts.isSpreadElement)) {
+      lowerer.noLowering(`process.send with ${call.arguments.length} arguments`, call, "send(message[, callback]) is supported");
+    }
+    const json = ipcJsonMessage(lowerer, call.arguments[0]!, loc);
+    const callbackNode = call.arguments[1];
+    return callbackNode === undefined
+      ? { kind: "libCall", fn: "process.send", args: [json], type: BOOL, loc }
+      : { kind: "libCall", fn: "process.sendCb", args: [json, ipcSendCallback(lowerer, callbackNode)], type: BOOL, loc };
+  }
+
   export function lowerChildMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
@@ -5328,14 +5508,31 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
     if (!isChildSurfaceMember(lowerer, access)) return null;
     const name = access.name.text;
     const loc = locOf(call);
+    if (name === "send") {
+      if (call.arguments.length < 1 || call.arguments.length > 2 || call.arguments.some(ts.isSpreadElement)) {
+        lowerer.noLowering(`child.send with ${call.arguments.length} arguments`, call, "send(message[, callback]) is supported");
+      }
+      const receiver = lowerer.lowerExpr(access.expression);
+      const json = ipcJsonMessage(lowerer, call.arguments[0]!, loc);
+      const callbackNode = call.arguments[1];
+      return callbackNode === undefined
+        ? { kind: "libCall", fn: "child.send", args: [receiver, json], type: BOOL, loc }
+        : { kind: "libCall", fn: "child.sendCb", args: [receiver, json, ipcSendCallback(lowerer, callbackNode)], type: BOOL, loc };
+    }
+    if (name === "disconnect" && call.arguments.length === 0) {
+      if (!ts.isExpressionStatement(call.parent)) {
+        lowerer.unsupported("SC1090", call, "using the result of child.disconnect()");
+      }
+      return { kind: "libCall", fn: "child.disconnect", args: [lowerer.lowerExpr(access.expression)], type: VOID, loc };
+    }
     if ((name === "on" || name === "once") && call.arguments.length === 2) {
       const evT = lowerer.typeOf(call.arguments[0]!);
       const event = evT.isStringLiteralType() ? evT.value : null;
-      if (event !== "exit" && event !== "close" && event !== "error") {
+      if (event !== "exit" && event !== "close" && event !== "error" && event !== "message" && event !== "disconnect") {
         lowerer.noLowering(
           `child.${name}(${event === null ? "non-literal event" : `"${event}"`}, ...)`,
           call.arguments[0]!,
-          '"exit", "close", and "error" are the supported child events (as literals)',
+          '"exit", "close", "error", "message", and "disconnect" are the supported child events',
         );
       }
       if (!ts.isExpressionStatement(call.parent)) {
@@ -5346,6 +5543,13 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
         );
       }
       const receiver = lowerer.lowerExpr(access.expression);
+      const once = boolLit(name === "once", loc);
+      if (event === "message") {
+        return { kind: "libCall", fn: "child.onMessage", args: [receiver, ipcMessageListener(lowerer, call.arguments[1]!), once], type: VOID, loc };
+      }
+      if (event === "disconnect") {
+        return { kind: "libCall", fn: "child.onDisconnect", args: [receiver, ipcDisconnectListener(lowerer, call.arguments[1]!), once], type: VOID, loc };
+      }
       const cb = lowerer.lowerExpr(call.arguments[1]!);
       const hasStatus = event === "exit" || event === "close";
       if (cb.type.kind !== "func" || cb.type.params.length > (hasStatus ? 2 : 1)) {
@@ -5931,6 +6135,9 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
     if (member === "argv") {
       return { kind: "libCall", fn: "process.argv", args: [], type: arrayOf(STRING), loc };
     }
+    if (member === "connected") {
+      return { kind: "libCall", fn: "process.connected", args: [], type: BOOL, loc };
+    }
     // process.execArgv: the extra CLI arguments Node itself consumed — a
     // compiled binary consumed none, so the honest answer is a fresh [].
     if (member === "execArgv") {
@@ -6514,6 +6721,17 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
   export function lowerProcessMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken) return null;
+    const directProcessMember = lowerer.stdlibGlobalMember(access, "process");
+    if (directProcessMember === "send") return lowerProcessIpcSend(lowerer, call);
+    if (directProcessMember === "disconnect") {
+      if (call.arguments.length !== 0) {
+        lowerer.noLowering(`process.disconnect with ${call.arguments.length} arguments`, call);
+      }
+      if (!ts.isExpressionStatement(call.parent)) {
+        lowerer.unsupported("SC1090", call, "using the result of process.disconnect() (call it as its own statement)");
+      }
+      return { kind: "libCall", fn: "process.disconnect", args: [], type: VOID, loc: locOf(call) };
+    }
     // tty.WriteStream resize events are SIGWINCH-backed in Node. Lower the
     // stdout/stderr on/once/off spelling onto the existing signal registry so
     // terminal libraries do not need a scriptc-specific process-event shim.
@@ -6880,6 +7098,25 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
       }
       const evT = lowerer.typeOf(call.arguments[0]!);
       const event = evT.isStringLiteralType() ? evT.value : null;
+      if ((event === "message" || event === "disconnect") && !isOff) {
+        if (!ts.isExpressionStatement(call.parent)) {
+          lowerer.unsupported(
+            "SC1090",
+            call,
+            "chaining process IPC listener registration (register each listener as its own statement)",
+          );
+        }
+        const callback = event === "message"
+          ? ipcMessageListener(lowerer, call.arguments[1]!)
+          : ipcDisconnectListener(lowerer, call.arguments[1]!);
+        return {
+          kind: "libCall",
+          fn: event === "message" ? "process.onMessage" : "process.onDisconnect",
+          args: [callback, boolLit(member === "once", loc)],
+          type: VOID,
+          loc,
+        };
+      }
       // own(), not a bare index: the key is a USER-written event name,
       // and `{ SIGINT: 2 }["__proto__"]` answers Object.prototype — an
       // object flowed into a numLit and emitted itself into the C
@@ -6953,7 +7190,7 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
         lowerer.noLowering(
           `process.${member}(${event === null ? "non-literal event" : `"${event}"`}, ...)`,
           call.arguments[0]!,
-          '"SIGINT", "SIGTERM", "SIGWINCH", "exit", "warning", "unhandledRejection", "rejectionHandled", and "uncaughtException" are the supported process events (as literals)',
+          '"message", "disconnect", "SIGINT", "SIGTERM", "SIGWINCH", "exit", "warning", "unhandledRejection", "rejectionHandled", and "uncaughtException" are the supported process events (as literals)',
         );
       }
       if (!ts.isExpressionStatement(call.parent)) {
@@ -8403,6 +8640,7 @@ function staticTextDecoderEncoding(label: string): StaticTextDecoderEncoding | n
     if (!expr.questionDotToken) return null;
     if (!ts.isPropertyAccessExpression(expr.expression)) return null;
     const member = lowerer.stdlibGlobalMember(expr.expression, "process");
+    if (member === "send") return lowerProcessIpcSend(lowerer, expr);
     if (member !== "getuid" && member !== "getgid") return null;
     if (expr.arguments.length !== 0) {
       lowerer.noLowering(`process.${member} with ${expr.arguments.length} arguments`, expr);

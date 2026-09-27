@@ -7,9 +7,9 @@
     "tierItemCount": 6663,
     "tiers": {
       "static": {
-        "replace-refusal": 58,
-        "verify-gap": 2592,
-        "audit-partial": 561,
+        "replace-refusal": 49,
+        "verify-gap": 2573,
+        "audit-partial": 589,
         "classify": 3,
         "implement": 81
       },
@@ -38154,12 +38154,14 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:fs",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.fs.fchmodSync",
+          "tests": [
+            "tests/corpus/2950-fs-descriptor-publication.ts"
+          ]
         },
         "dynamic": {
           "status": "not-implemented",
@@ -38253,12 +38255,14 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:fs",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.fs.fstatSync",
+          "tests": [
+            "tests/corpus/2950-fs-descriptor-publication.ts"
+          ]
         },
         "dynamic": {
           "status": "not-implemented",
@@ -38286,12 +38290,14 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:fs",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.fs.fsyncSync",
+          "tests": [
+            "tests/corpus/2950-fs-descriptor-publication.ts"
+          ]
         },
         "dynamic": {
           "status": "not-implemented",
@@ -38517,12 +38523,14 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:fs",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.fs.linkSync",
+          "tests": [
+            "tests/corpus/2950-fs-descriptor-publication.ts"
+          ]
         },
         "dynamic": {
           "status": "not-implemented",
@@ -99603,12 +99611,18 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "refused",
-          "action": "replace-refusal",
-          "verification": "explicit-refusal",
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
           "confidence": "high",
-          "source": "surface-manifest:unsupported:node-builtin.crypto.hash",
-          "tests": []
+          "source": "surface-manifest:node-builtin.crypto.hash",
+          "tests": [
+            "tests/corpus/1358-crypto-random.ts",
+            "tests/corpus/1534-crypto-hash-chain.ts",
+            "tests/corpus/2556-crypto-introspection.ts",
+            "tests/corpus/2890-crypto-static-utility.ts",
+            "tests/harness/npm-static.test.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -100199,12 +100213,18 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "refused",
-          "action": "replace-refusal",
-          "verification": "explicit-refusal",
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
           "confidence": "high",
-          "source": "surface-manifest:unsupported:node-builtin.crypto.hash",
-          "tests": []
+          "source": "surface-manifest:node-builtin.crypto.hash",
+          "tests": [
+            "tests/corpus/1358-crypto-random.ts",
+            "tests/corpus/1534-crypto-hash-chain.ts",
+            "tests/corpus/2556-crypto-introspection.ts",
+            "tests/corpus/2890-crypto-static-utility.ts",
+            "tests/harness/npm-static.test.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -100366,12 +100386,18 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "refused",
-          "action": "replace-refusal",
-          "verification": "explicit-refusal",
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
           "confidence": "high",
-          "source": "surface-manifest:unsupported:node-builtin.crypto.hash",
-          "tests": []
+          "source": "surface-manifest:node-builtin.crypto.hash",
+          "tests": [
+            "tests/corpus/1358-crypto-random.ts",
+            "tests/corpus/1534-crypto-hash-chain.ts",
+            "tests/corpus/2556-crypto-introspection.ts",
+            "tests/corpus/2890-crypto-static-utility.ts",
+            "tests/harness/npm-static.test.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -100500,12 +100526,18 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "refused",
-          "action": "replace-refusal",
-          "verification": "explicit-refusal",
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
           "confidence": "high",
-          "source": "surface-manifest:unsupported:node-builtin.crypto.hash",
-          "tests": []
+          "source": "surface-manifest:node-builtin.crypto.hash",
+          "tests": [
+            "tests/corpus/1358-crypto-random.ts",
+            "tests/corpus/1534-crypto-hash-chain.ts",
+            "tests/corpus/2556-crypto-introspection.ts",
+            "tests/corpus/2890-crypto-static-utility.ts",
+            "tests/harness/npm-static.test.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -100634,12 +100666,18 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "refused",
-          "action": "replace-refusal",
-          "verification": "explicit-refusal",
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
           "confidence": "high",
-          "source": "surface-manifest:unsupported:node-builtin.crypto.hash",
-          "tests": []
+          "source": "surface-manifest:node-builtin.crypto.hash",
+          "tests": [
+            "tests/corpus/1358-crypto-random.ts",
+            "tests/corpus/1534-crypto-hash-chain.ts",
+            "tests/corpus/2556-crypto-introspection.ts",
+            "tests/corpus/2890-crypto-static-utility.ts",
+            "tests/harness/npm-static.test.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -101263,12 +101301,18 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "refused",
-          "action": "replace-refusal",
-          "verification": "explicit-refusal",
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
           "confidence": "high",
-          "source": "surface-manifest:unsupported:node-builtin.crypto.hash",
-          "tests": []
+          "source": "surface-manifest:node-builtin.crypto.hash",
+          "tests": [
+            "tests/corpus/1358-crypto-random.ts",
+            "tests/corpus/1534-crypto-hash-chain.ts",
+            "tests/corpus/2556-crypto-introspection.ts",
+            "tests/corpus/2890-crypto-static-utility.ts",
+            "tests/harness/npm-static.test.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -101430,12 +101474,18 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "refused",
-          "action": "replace-refusal",
-          "verification": "explicit-refusal",
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
           "confidence": "high",
-          "source": "surface-manifest:unsupported:node-builtin.crypto.hash",
-          "tests": []
+          "source": "surface-manifest:node-builtin.crypto.hash",
+          "tests": [
+            "tests/corpus/1358-crypto-random.ts",
+            "tests/corpus/1534-crypto-hash-chain.ts",
+            "tests/corpus/2556-crypto-introspection.ts",
+            "tests/corpus/2890-crypto-static-utility.ts",
+            "tests/harness/npm-static.test.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -101531,12 +101581,18 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "refused",
-          "action": "replace-refusal",
-          "verification": "explicit-refusal",
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
           "confidence": "high",
-          "source": "surface-manifest:unsupported:node-builtin.crypto.hash",
-          "tests": []
+          "source": "surface-manifest:node-builtin.crypto.hash",
+          "tests": [
+            "tests/corpus/1358-crypto-random.ts",
+            "tests/corpus/1534-crypto-hash-chain.ts",
+            "tests/corpus/2556-crypto-introspection.ts",
+            "tests/corpus/2890-crypto-static-utility.ts",
+            "tests/harness/npm-static.test.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -101698,12 +101754,18 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "refused",
-          "action": "replace-refusal",
-          "verification": "explicit-refusal",
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
           "confidence": "high",
-          "source": "surface-manifest:unsupported:node-builtin.crypto.hash",
-          "tests": []
+          "source": "surface-manifest:node-builtin.crypto.hash",
+          "tests": [
+            "tests/corpus/1358-crypto-random.ts",
+            "tests/corpus/1534-crypto-hash-chain.ts",
+            "tests/corpus/2556-crypto-introspection.ts",
+            "tests/corpus/2890-crypto-static-utility.ts",
+            "tests/harness/npm-static.test.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -108689,12 +108751,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.crc32",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "not-implemented",
@@ -109239,12 +109304,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.deflate",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -109312,12 +109380,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.deflateRaw",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -109385,12 +109456,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.gunzip",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -109458,12 +109532,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.gzip",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -109531,12 +109608,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.inflate",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -109604,12 +109684,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.inflateRaw",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -109677,12 +109760,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.unzip",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -110152,12 +110238,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.deflate",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -110225,12 +110314,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.deflateRaw",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -110298,12 +110390,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.gunzip",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -110371,12 +110466,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.gzip",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -110444,12 +110542,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.inflate",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -110517,12 +110618,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.inflateRaw",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -110590,12 +110694,15 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:zlib",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.zlib.unzip",
+          "tests": [
+            "tests/corpus/1404-zlib-crypto-bytes.ts",
+            "tests/corpus/2921-zlib-callbacks.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",

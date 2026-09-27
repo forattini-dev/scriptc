@@ -17,7 +17,7 @@ import { resolveBareAsset, resolveRelativeAsset } from "../resolve.js";
 import { trackedReadFile, trackedReadFileBytes } from "../input-tracker.js";
 import { type CycleEdge, canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, pathAliasesProgramModule, requireSpecOf, resolveImport, resolveNpmImport } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
-import { DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/ir.js";
+import { BOOL, DYN, F64, IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/ir.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, importCallHandleType, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireProgramModuleDecl, createRequireSpecOf, textCodecBindingDecl } from "./lower-builtins.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, bindingNeverReassigned, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishGenericBindingUnitOf } from "./lower-calls.js";
@@ -31,6 +31,7 @@ import { type ClassInfo, decoratorNodesOf, probeExactInstanceClassOf, genericIfa
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import { esbuildOnceAssignedClassExpression } from "./esbuild-once.js";
 import { cjsModuleRegistryPrelude } from "./lower-node-module.js";
+import { forkTargetPaths } from "../fork-target.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
 export interface FileParts {
@@ -38,6 +39,60 @@ export interface FileParts {
   fnDecls: ts.FunctionDeclaration[];
   classDecls: ts.ClassDeclaration[];
   topStmts: ts.Statement[];
+}
+
+/** Adds statically selected fork roots and their static dependencies without
+ * making them startup dependencies of the parent program. */
+export function appendForkModules(
+  program: ts.Program,
+  order: ts.SourceFile[],
+  targets: ts.SourceFile[],
+  onCycle: (cycle: string, reason: string) => void,
+): void {
+  if (order.length === 0) return;
+  const byPath = new Map(program.getSourceFiles().map((sf) => [resolvePath(sf.fileName), sf] as const));
+  const state = new Map<ts.SourceFile, "visiting" | "done">();
+  for (const sf of order) state.set(sf, "done");
+  const added: ts.SourceFile[] = [];
+  const stack: string[] = [];
+  const staticEdgesOf = (sf: ts.SourceFile): CycleEdge[] =>
+    orderedImportsOf(program, sf).flatMap(({ stmt, dep }) =>
+      dep !== null && dep !== sf ? [{ dep, stmt: stmt as ts.ImportDeclaration | ts.ExportDeclaration }] : [],
+    );
+  const cycleAdmissionReason = makeCycleAdmission(program, staticEdgesOf);
+  const visit = (sf: ts.SourceFile): void => {
+    const prior = state.get(sf);
+    if (prior === "done") return;
+    state.set(sf, "visiting");
+    stack.push(sf.fileName);
+    for (const edge of staticEdgesOf(sf)) {
+      const edgeState = state.get(edge.dep);
+      if (edgeState === "done") continue;
+      if (edgeState === "visiting") {
+        const reason = cycleAdmissionReason(sf, edge);
+        if (reason !== null) {
+          const cycleStart = stack.indexOf(edge.dep.fileName);
+          onCycle([...stack.slice(cycleStart), edge.dep.fileName].join(" → "), reason);
+        }
+        continue;
+      }
+      visit(edge.dep);
+    }
+    stack.pop();
+    state.set(sf, "done");
+    added.push(sf);
+  };
+  const knownTargets = new Set(targets);
+  for (const path of forkTargetPaths(program, order)) {
+    const target = byPath.get(resolvePath(path));
+    if (!target || target.isDeclarationFile || target.fileName.endsWith(".json")) continue;
+    if (!knownTargets.has(target)) {
+      knownTargets.add(target);
+      targets.push(target);
+    }
+    visit(target);
+  }
+  if (added.length > 0) order.splice(order.length - 1, 0, ...added);
 }
 
 /** Splits each file into function/class declarations and the top-level
@@ -2047,25 +2102,74 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
    * re-imports, re-requires) into a cache hit. */
   export function buildMain(lowerer: Lowerer): IrFunction {
     const loc: SrcLoc = { file: lowerer.entry.fileName, start: 0, end: 0 };
-    const entryInit = lowerer.initNameOf.get(lowerer.entry);
-    const isAsync = lowerer.asyncInitFiles.has(lowerer.entry);
-    const initCall: IrExpr | null =
-      entryInit !== undefined
-        ? {
-            kind: "call",
-            callee: entryInit,
-            args: [],
-            type: isAsync ? { kind: "promise", inner: VOID } : VOID,
-            loc,
-          }
-        : null;
-    const body: IrStmt[] = [...cjsModuleRegistryPrelude(lowerer, loc)];
-    if (initCall !== null) {
-      body.push({
+    const roots = [lowerer.entry, ...lowerer.forkTargets];
+    const isAsync = roots.some((root) => lowerer.asyncInitFiles.has(root));
+    const callRoot = (root: ts.SourceFile): IrStmt[] => {
+      const init = lowerer.initNameOf.get(root);
+      if (init === undefined) return [];
+      const rootAsync = lowerer.asyncInitFiles.has(root);
+      const call: IrExpr = {
+        kind: "call",
+        callee: init,
+        args: [],
+        type: rootAsync ? { kind: "promise", inner: VOID } : VOID,
+        loc,
+      };
+      return [{
         kind: "exprStmt",
-        expr: isAsync
-          ? { kind: "awaitExpr", value: initCall, type: VOID, loc }
-          : initCall,
+        expr: rootAsync ? { kind: "awaitExpr", value: call, type: VOID, loc } : call,
+        loc,
+      }];
+    };
+    const body: IrStmt[] = [...cjsModuleRegistryPrelude(lowerer, loc)];
+    const locals: IrFunction["locals"] = [];
+    if (lowerer.forkTargets.length === 0) {
+      body.push(...callRoot(lowerer.entry));
+    } else {
+      const targetId = "%forkTarget.0";
+      locals.push({ id: targetId, name: "%forkTarget", type: F64, mutable: false });
+      body.push({
+        kind: "varDecl",
+        localId: targetId,
+        init: {
+          kind: "libCall",
+          fn: "process.forkTarget",
+          args: [{ kind: "numLit", value: lowerer.forkTargets.length, type: F64, loc }],
+          type: F64,
+          loc,
+        },
+        loc,
+      });
+      const selector = (): IrExpr => ({ kind: "varRef", localId: targetId, type: F64, loc });
+      let workerBranch: IrStmt[] | null = null;
+      for (let id = lowerer.forkTargets.length - 1; id >= 0; id--) {
+        workerBranch = [{
+          kind: "if",
+          cond: {
+            kind: "bin",
+            op: "===",
+            left: selector(),
+            right: { kind: "numLit", value: id, type: F64, loc },
+            type: BOOL,
+            loc,
+          },
+          then: callRoot(lowerer.forkTargets[id]!),
+          else_: workerBranch,
+          loc,
+        }];
+      }
+      body.push({
+        kind: "if",
+        cond: {
+          kind: "bin",
+          op: "===",
+          left: selector(),
+          right: { kind: "numLit", value: -1, type: F64, loc },
+          type: BOOL,
+          loc,
+        },
+        then: callRoot(lowerer.entry),
+        else_: workerBranch,
         loc,
       });
     }
@@ -2095,7 +2199,7 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
       name: ENTRY_NAME,
       params: [],
       returnType: VOID,
-      locals: [],
+      locals,
       body,
       ...(isAsync ? { async: true as const } : {}),
       loc,

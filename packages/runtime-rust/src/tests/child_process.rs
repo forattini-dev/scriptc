@@ -41,7 +41,7 @@ fn record_exit(child: &JsChild, log: &Transcript) {
     let exit_log = log.clone();
     child_on_exit(
         child,
-        Box::new(move |code, signal| {
+        Rc::new(move |code, signal| {
             note(
                 &exit_log,
                 &format!(
@@ -51,7 +51,7 @@ fn record_exit(child: &JsChild, log: &Transcript) {
                 ),
             );
         }),
-        no_trace_boxed(),
+        no_trace_boxed().into(),
     );
 }
 
@@ -184,10 +184,10 @@ fn child_spawn_enoent_emits_error() {
     let error_log = log.clone();
     child_on_error(
         &child,
-        Box::new(move |error: JsError| {
+        Rc::new(move |error: JsError| {
             note(&error_log, &format!("error:{}", error_message(&error)));
         }),
-        no_trace_boxed(),
+        no_trace_boxed().into(),
     );
     record_exit(&child, &log);
 
@@ -278,19 +278,14 @@ fn child_large_output_no_deadlock() {
         Rc::new(move |chunk| {
             let bytes = bytes_u8_values(&chunk);
             counting.set(counting.get() + bytes.len());
-            counting_non_a.set(
-                counting_non_a.get() + bytes.iter().filter(|byte| **byte != b'a').count(),
-            );
+            counting_non_a
+                .set(counting_non_a.get() + bytes.iter().filter(|byte| **byte != b'a').count());
         }),
         no_trace(),
         false,
     );
     let end_log = log.clone();
-    child_stream_on_end(
-        &stdout,
-        Rc::new(move || note(&end_log, "end")),
-        no_trace(),
-    );
+    child_stream_on_end(&stdout, Rc::new(move || note(&end_log, "end")), no_trace());
     record_exit(&child, &log);
 
     run_event_loop();

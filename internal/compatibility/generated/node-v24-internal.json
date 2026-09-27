@@ -511,9 +511,9 @@
       "apiEntries": 276,
       "static": {
         "supported": 0,
-        "partial": 45,
+        "partial": 49,
         "refused": 0,
-        "not-implemented": 231,
+        "not-implemented": 227,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -1423,8 +1423,8 @@
       "apiEntries": 148,
       "static": {
         "supported": 0,
-        "partial": 2,
-        "refused": 9,
+        "partial": 11,
+        "refused": 0,
         "not-implemented": 137,
         "by-design": 0,
         "unreviewed": 0,
@@ -1495,9 +1495,9 @@
       "apiEntries": 78,
       "static": {
         "supported": 0,
-        "partial": 15,
+        "partial": 30,
         "refused": 4,
-        "not-implemented": 59,
+        "not-implemented": 44,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -50630,7 +50630,8 @@
           "tests/corpus/2920-fs-promises-function-values.ts",
           "tests/corpus/2940-fsp-realpath.ts",
           "tests/corpus/2941-fsp-lstat-identity.ts",
-          "tests/corpus/2942-fsp-readdir-dirent.ts"
+          "tests/corpus/2942-fsp-readdir-dirent.ts",
+          "tests/corpus/2950-fs-descriptor-publication.ts"
         ]
       },
       "dynamic": {
@@ -54596,8 +54597,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:fs"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.fs.fchmodSync",
+        "tests": [
+          "tests/corpus/2950-fs-descriptor-publication.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -54677,8 +54681,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:fs"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.fs.fstatSync",
+        "tests": [
+          "tests/corpus/2950-fs-descriptor-publication.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -54704,8 +54711,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:fs"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.fs.fsyncSync",
+        "tests": [
+          "tests/corpus/2950-fs-descriptor-publication.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -54893,8 +54903,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:fs"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.fs.linkSync",
+        "tests": [
+          "tests/corpus/2950-fs-descriptor-publication.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -118344,8 +118357,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.hash"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.crypto.hash",
+        "tests": [
+          "tests/corpus/1358-crypto-random.ts",
+          "tests/corpus/1534-crypto-hash-chain.ts",
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -118833,8 +118853,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.hash"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.crypto.hash",
+        "tests": [
+          "tests/corpus/1358-crypto-random.ts",
+          "tests/corpus/1534-crypto-hash-chain.ts",
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -118971,8 +118998,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.hash"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.crypto.hash",
+        "tests": [
+          "tests/corpus/1358-crypto-random.ts",
+          "tests/corpus/1534-crypto-hash-chain.ts",
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -119082,8 +119116,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.hash"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.crypto.hash",
+        "tests": [
+          "tests/corpus/1358-crypto-random.ts",
+          "tests/corpus/1534-crypto-hash-chain.ts",
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -119193,8 +119234,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.hash"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.crypto.hash",
+        "tests": [
+          "tests/corpus/1358-crypto-random.ts",
+          "tests/corpus/1534-crypto-hash-chain.ts",
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -119709,8 +119757,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.hash"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.crypto.hash",
+        "tests": [
+          "tests/corpus/1358-crypto-random.ts",
+          "tests/corpus/1534-crypto-hash-chain.ts",
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -119847,8 +119902,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.hash"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.crypto.hash",
+        "tests": [
+          "tests/corpus/1358-crypto-random.ts",
+          "tests/corpus/1534-crypto-hash-chain.ts",
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -119931,8 +119993,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.hash"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.crypto.hash",
+        "tests": [
+          "tests/corpus/1358-crypto-random.ts",
+          "tests/corpus/1534-crypto-hash-chain.ts",
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -120069,8 +120138,15 @@
         "inherited": true
       },
       "static": {
-        "status": "refused",
-        "evidence": "surface-manifest:unsupported:node-builtin.crypto.hash"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.crypto.hash",
+        "tests": [
+          "tests/corpus/1358-crypto-random.ts",
+          "tests/corpus/1534-crypto-hash-chain.ts",
+          "tests/corpus/2556-crypto-introspection.ts",
+          "tests/corpus/2890-crypto-static-utility.ts",
+          "tests/harness/npm-static.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -126357,8 +126433,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.crc32",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -126822,8 +126902,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.deflate",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -126886,8 +126970,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.deflateRaw",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -126950,8 +127038,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.gunzip",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -127014,8 +127106,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.gzip",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -127078,8 +127174,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.inflate",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -127142,8 +127242,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.inflateRaw",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -127206,8 +127310,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.unzip",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -128062,8 +128170,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.deflate",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -128126,8 +128238,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.deflateRaw",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -128190,8 +128306,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.gunzip",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -128254,8 +128374,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.gzip",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -128318,8 +128442,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.inflate",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -128382,8 +128510,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.inflateRaw",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -128446,8 +128578,12 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:zlib"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.zlib.unzip",
+        "tests": [
+          "tests/corpus/1404-zlib-crypto-bytes.ts",
+          "tests/corpus/2921-zlib-callbacks.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",

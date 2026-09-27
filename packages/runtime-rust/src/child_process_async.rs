@@ -22,6 +22,8 @@ pub struct ChildData {
     stdin: Option<JsChildWriter>,
     stdout: Option<JsChildStream>,
     stderr: Option<JsChildStream>,
+    ipc: Option<JsChildIpc>,
+    pending_exit: Option<(Option<f64>, Option<JsString>)>,
     exit_listeners: Vec<ChildExitListener>,
     close_listeners: Vec<ChildExitListener>,
     error_listeners: Vec<ChildErrorListener>,
@@ -47,6 +49,9 @@ impl Trace for ChildData {
         if let Some(stream) = &self.stderr {
             tracer.edge(stream);
         }
+        if let Some(ipc) = &self.ipc {
+            tracer.edge(ipc);
+        }
     }
 }
 
@@ -61,6 +66,8 @@ impl ClearEdges for ChildData {
         self.stdin = None;
         self.stdout = None;
         self.stderr = None;
+        self.ipc = None;
+        self.pending_exit = None;
         self.settled = true;
         self.referenced = false;
     }
@@ -242,6 +249,8 @@ fn child_register(
         stdin,
         stdout,
         stderr,
+        ipc: None,
+        pending_exit: None,
         exit_listeners: Vec::new(),
         close_listeners: Vec::new(),
         error_listeners: Vec::new(),
@@ -636,6 +645,13 @@ enum ChildOutcome {
 
 fn child_poll(child: &JsChild) -> Option<ChildOutcome> {
     child.with_mut(|child| {
+        if let Some((code, signal)) = child.pending_exit.clone() {
+            if child.ipc.as_ref().is_some_and(child_ipc_connected) {
+                return None;
+            }
+            child.pending_exit = None;
+            return Some(ChildOutcome::Exit(code, signal));
+        }
         if let Some(error) = child.spawn_error.take() {
             child.exit_code = child.spawn_errno.map(|errno| -f64::from(errno));
             return Some(ChildOutcome::Error(error));
@@ -650,10 +666,13 @@ fn child_poll(child: &JsChild) -> Option<ChildOutcome> {
         };
         child.process = None;
         child.exit_code = status.code().map(f64::from);
-        Some(ChildOutcome::Exit(
-            child.exit_code,
-            child_exit_signal(&status),
-        ))
+        let outcome = (child.exit_code, child_exit_signal(&status));
+        if child.ipc.as_ref().is_some_and(child_ipc_connected) {
+            child.pending_exit = Some(outcome);
+            None
+        } else {
+            Some(ChildOutcome::Exit(outcome.0, outcome.1))
+        }
     })
 }
 

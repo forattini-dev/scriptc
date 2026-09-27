@@ -13,9 +13,18 @@ pub fn zlib_deflate_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
 
 /// A frontend-validated integer compression level.
 pub fn zlib_deflate_sync_level(input: &JsBytes<u8>, level: f64) -> JsBytes<u8> {
-    assert!((-1.0..=9.0).contains(&level) && level.fract() == 0.0, "scriptc: invalid native deflate level");
-    let compression = if level == -1.0 { Compression::default() } else { Compression::new(level as u32) };
-    let output = zlib_with_input(input, |source| zlib_compress_bytes_level(source, true, compression));
+    assert!(
+        (-1.0..=9.0).contains(&level) && level.fract() == 0.0,
+        "scriptc: invalid native deflate level"
+    );
+    let compression = if level == -1.0 {
+        Compression::default()
+    } else {
+        Compression::new(level as u32)
+    };
+    let output = zlib_with_input(input, |source| {
+        zlib_compress_bytes_level(source, true, compression)
+    });
     bytes_from_elements(output)
 }
 
@@ -122,16 +131,18 @@ pub fn zlib_crc32(input: &JsBytes<u8>, value: f64) -> f64 {
 
 /// Schedule a default-options codec on the next loop turn. Runtime handles,
 /// exception slots, and callback execution stay on the owning thread.
+type ZlibCodecCallback = Box<dyn FnOnce(Option<JsError>, Option<JsBytes<u8>>)>;
+
 pub fn zlib_codec_async(
     input: &JsBytes<u8>,
     mode: u8,
     compressing: bool,
-    callback: Box<dyn FnOnce(Option<JsError>, Option<JsBytes<u8>>)>,
+    callback: ZlibCodecCallback,
 ) {
     let input = input.clone();
     process_next_tick(Box::new(move || {
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            match (mode, compressing) {
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match (mode, compressing) {
                 (0, true) => zlib_deflate_sync(&input),
                 (0, false) => zlib_inflate_sync(&input),
                 (1, true) => zlib_deflate_raw_sync(&input),
@@ -140,8 +151,7 @@ pub fn zlib_codec_async(
                 (2, false) => zlib_gunzip_sync(&input),
                 (3, false) => zlib_unzip_sync(&input),
                 _ => unreachable!("scriptc invariant: invalid zlib codec mode"),
-            }
-        }));
+            }));
         match outcome {
             Ok(value) => callback(None, Some(value)),
             Err(payload) => {
@@ -294,7 +304,12 @@ fn gzip_field(source: &[u8], offset: usize, length: usize) -> &[u8] {
 /// A NUL-terminated gzip header string (FNAME/FCOMMENT); answers the bytes
 /// it occupies, terminator included.
 fn gzip_terminated_field(source: &[u8], offset: usize) -> usize {
-    match source.get(offset..).unwrap_or(&[]).iter().position(|&b| b == 0) {
+    match source
+        .get(offset..)
+        .unwrap_or(&[])
+        .iter()
+        .position(|&b| b == 0)
+    {
         Some(end) => end + 1,
         None => throw_error_code("unexpected end of file".to_owned(), ZLIB_BUF_ERROR),
     }

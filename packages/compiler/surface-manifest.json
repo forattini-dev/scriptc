@@ -562,6 +562,15 @@
       ]
     },
     {
+      "id": "node-builtin.child_process.fork",
+      "kind": "node-builtin",
+      "name": "child_process.fork",
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
+    },
+    {
       "id": "node-builtin.child_process.spawn",
       "kind": "node-builtin",
       "name": "child_process.spawn",
@@ -672,19 +681,19 @@
       "id": "node-builtin.crypto.createHash",
       "kind": "node-builtin",
       "name": "crypto.createHash",
-      "status": "unsupported",
-      "backends": "unknown",
-      "code": "SC2020",
-      "note": "the one lowered shape is the composed chain createHash(\"sha256\").update(data).digest(\"hex\") — the Hash handle itself has no lowering (md5, sha1, sha256, sha384, and sha512 are the lowered algorithms)"
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
     },
     {
       "id": "node-builtin.crypto.createHmac",
       "kind": "node-builtin",
       "name": "crypto.createHmac",
-      "status": "unsupported",
-      "backends": "unknown",
-      "code": "SC2020",
-      "note": "the one lowered shape is the composed chain createHmac(\"sha256\", key).update(data).digest(\"hex\") — the Hmac handle itself has no lowering (md5, sha1, sha256, sha384, and sha512 over string or Buffer keys; KeyObject keys have none)"
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
     },
     {
       "id": "node-builtin.crypto.createPrivateKey",
@@ -798,10 +807,12 @@
       "id": "node-builtin.crypto.hash",
       "kind": "node-builtin",
       "name": "crypto.hash",
-      "status": "unsupported",
-      "backends": "unknown",
-      "code": "SC2020",
-      "note": "the lowered one-shot shapes hash MD5/SHA-1/SHA-256/SHA-384/SHA-512 strings or Buffer/Uint8Array inputs to default hex, with explicit base64 also supported for strings; other algorithms and output options have no lowering yet"
+      "status": "static",
+      "backends": [
+        "c",
+        "llvm",
+        "rust"
+      ]
     },
     {
       "id": "node-builtin.crypto.hkdf",
@@ -834,10 +845,10 @@
       "id": "node-builtin.crypto.pbkdf2Sync",
       "kind": "node-builtin",
       "name": "crypto.pbkdf2Sync",
-      "status": "unsupported",
-      "backends": "unknown",
-      "code": "SC2020",
-      "note": "key-derivation functions have no lowering yet — the lowered crypto surface is hashing, randomness, and the introspection statics"
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
     },
     {
       "id": "node-builtin.crypto.privateDecrypt",
@@ -887,6 +898,24 @@
       ]
     },
     {
+      "id": "node-builtin.crypto.randomFillSync",
+      "kind": "node-builtin",
+      "name": "crypto.randomFillSync",
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
+    },
+    {
+      "id": "node-builtin.crypto.randomInt",
+      "kind": "node-builtin",
+      "name": "crypto.randomInt",
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
+    },
+    {
       "id": "node-builtin.crypto.randomUUID",
       "kind": "node-builtin",
       "name": "crypto.randomUUID",
@@ -932,6 +961,17 @@
       "backends": "unknown",
       "code": "SC2020",
       "note": "asymmetric-key operations need a public-key stack (bignum, RSA/EC/EdDSA math) and a KeyObject value model — neither exists in the static runtime, so no faithful lowering can be small; the lowered crypto surface is hashing, randomness, and the introspection statics"
+    },
+    {
+      "id": "node-builtin.crypto.timingSafeEqual",
+      "kind": "node-builtin",
+      "name": "crypto.timingSafeEqual",
+      "status": "static",
+      "backends": [
+        "c",
+        "llvm",
+        "rust"
+      ]
     },
     {
       "id": "node-builtin.crypto.verify",
@@ -1124,6 +1164,46 @@
       ]
     },
     {
+      "id": "node-builtin.fs.fchmodSync",
+      "kind": "node-builtin",
+      "name": "fs.fchmodSync",
+      "status": "static",
+      "backends": [
+        "c",
+        "llvm"
+      ]
+    },
+    {
+      "id": "node-builtin.fs.fstatSync",
+      "kind": "node-builtin",
+      "name": "fs.fstatSync",
+      "status": "static",
+      "backends": [
+        "c",
+        "llvm"
+      ]
+    },
+    {
+      "id": "node-builtin.fs.fsyncSync",
+      "kind": "node-builtin",
+      "name": "fs.fsyncSync",
+      "status": "static",
+      "backends": [
+        "c",
+        "llvm"
+      ]
+    },
+    {
+      "id": "node-builtin.fs.linkSync",
+      "kind": "node-builtin",
+      "name": "fs.linkSync",
+      "status": "static",
+      "backends": [
+        "c",
+        "llvm"
+      ]
+    },
+    {
       "id": "node-builtin.fs.lstatSync",
       "kind": "node-builtin",
       "name": "fs.lstatSync",
@@ -1198,6 +1278,15 @@
       ]
     },
     {
+      "id": "node-builtin.fs.promises.lstat",
+      "kind": "node-builtin",
+      "name": "fs/promises.lstat",
+      "status": "static",
+      "backends": [
+        "c"
+      ]
+    },
+    {
       "id": "node-builtin.fs.promises.mkdir",
       "kind": "node-builtin",
       "name": "fs/promises.mkdir",
@@ -1239,6 +1328,15 @@
         "c",
         "llvm",
         "rust"
+      ]
+    },
+    {
+      "id": "node-builtin.fs.promises.realpath",
+      "kind": "node-builtin",
+      "name": "fs/promises.realpath",
+      "status": "static",
+      "backends": [
+        "c"
       ]
     },
     {
@@ -2663,6 +2761,33 @@
       "note": "deflateSync/inflateSync, gzipSync/gunzipSync, unzipSync and the raw pair are the lowered zlib surface"
     },
     {
+      "id": "node-builtin.zlib.crc32",
+      "kind": "node-builtin",
+      "name": "zlib.crc32",
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
+    },
+    {
+      "id": "node-builtin.zlib.deflate",
+      "kind": "node-builtin",
+      "name": "zlib.deflate",
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
+    },
+    {
+      "id": "node-builtin.zlib.deflateRaw",
+      "kind": "node-builtin",
+      "name": "zlib.deflateRaw",
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
+    },
+    {
       "id": "node-builtin.zlib.deflateRawSync",
       "kind": "node-builtin",
       "name": "zlib.deflateRawSync",
@@ -2685,6 +2810,15 @@
       ]
     },
     {
+      "id": "node-builtin.zlib.gunzip",
+      "kind": "node-builtin",
+      "name": "zlib.gunzip",
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
+    },
+    {
       "id": "node-builtin.zlib.gunzipSync",
       "kind": "node-builtin",
       "name": "zlib.gunzipSync",
@@ -2696,6 +2830,15 @@
       ]
     },
     {
+      "id": "node-builtin.zlib.gzip",
+      "kind": "node-builtin",
+      "name": "zlib.gzip",
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
+    },
+    {
       "id": "node-builtin.zlib.gzipSync",
       "kind": "node-builtin",
       "name": "zlib.gzipSync",
@@ -2703,6 +2846,24 @@
       "backends": [
         "c",
         "llvm",
+        "rust"
+      ]
+    },
+    {
+      "id": "node-builtin.zlib.inflate",
+      "kind": "node-builtin",
+      "name": "zlib.inflate",
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
+    },
+    {
+      "id": "node-builtin.zlib.inflateRaw",
+      "kind": "node-builtin",
+      "name": "zlib.inflateRaw",
+      "status": "static",
+      "backends": [
         "rust"
       ]
     },
@@ -2725,6 +2886,15 @@
       "backends": [
         "c",
         "llvm",
+        "rust"
+      ]
+    },
+    {
+      "id": "node-builtin.zlib.unzip",
+      "kind": "node-builtin",
+      "name": "zlib.unzip",
+      "status": "static",
+      "backends": [
         "rust"
       ]
     },
@@ -4090,8 +4260,6 @@
       "name": "Math.hypot",
       "status": "static",
       "backends": [
-        "c",
-        "llvm",
         "rust"
       ],
       "note": "compiles statically at any arity, including number[] spreads"

@@ -1,9 +1,12 @@
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
+import { emitRustProcessIpcCall } from "./child-process.js";
 
 export function emitRustProcessCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
+  const ipc = emitRustProcessIpcCall(expr, context);
+  if (ipc !== null) return ipc;
   const arg = expr.args[0];
   const secondArg = expr.args[1];
   if (expr.fn === "process.exit" && expr.args.length === 1 && arg !== undefined) {
@@ -12,6 +15,20 @@ export function emitRustProcessCall(
   if (expr.fn === "process.exitCodeSet" && expr.args.length === 1 && arg?.type.kind === "f64") {
     return `runtime::process_exit_code_set(${context.emitExpr(arg)})`;
   }
+  if (expr.fn === "process.setExitCode" && expr.args.length === 1 && arg?.type.kind === "f64") {
+    return `runtime::process_exit_code_set(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "process.currentExitCode" && expr.args.length === 0) {
+    return "f64::from(runtime::process_exit_code())";
+  }
+  if (expr.fn === "process.forkTarget" && expr.args.length === 1 && arg?.type.kind === "f64") {
+    return `runtime::process_fork_target(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "process.connected" && expr.args.length === 0) return "runtime::process_connected()";
+  if (expr.fn === "process.send" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::process_send(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "process.disconnect" && expr.args.length === 0) return "runtime::process_disconnect()";
   if (expr.fn === "process.exiting" && expr.args.length === 0 && expr.type.kind === "bool") {
     return "runtime::process_exiting()";
   }

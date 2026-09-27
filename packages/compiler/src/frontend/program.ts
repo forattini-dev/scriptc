@@ -572,12 +572,18 @@ function loadProgram7(
     }
   }
   for (let pass = 0; pass < 32; pass++) {
-    const extraRoots = createRequireProgramRoots7(program).filter((root) => !programRoots.includes(root));
+    const candidates = [
+      ...createRequireProgramRoots7(program),
+      ...forkTargetPaths(program, program.getSourceFiles()),
+    ];
+    const extraRoots = candidates.filter(
+      (root, index) => !programRoots.includes(root) && candidates.indexOf(root) === index,
+    );
     if (extraRoots.length === 0) break;
     program.dispose();
     programRoots.push(...extraRoots);
     program = projectDeclarations.createProgram(programRoots, options);
-    if (pass === 31) throw new Error("createRequire program-root discovery did not converge");
+    if (pass === 31) throw new Error("static program-root discovery did not converge");
   }
   const entry = program.getSourceFile(entryPath);
   if (!entry) throw new Error(`could not load ${entryPath}`);

@@ -797,7 +797,7 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // entries carry the canonical shapes.
     spawnSync: { fn: "cp.spawnSync", params: [STRING, arrayOf(STRING)], result: SPAWNRES_T },
     spawn: { fn: "cp.spawn", params: [STRING, arrayOf(STRING)], result: CHILD_T },
-    execFile: { fn: "cp.execFile", params: [STRING, arrayOf(STRING)], result: CHILD_T },
+    fork: { fn: "cp.fork", params: [STRING, arrayOf(STRING)], result: CHILD_T },
     // execFileSync(file, args?, options?) and execSync(command, options?)
     // share the cp.execSync runtime entry (execSync sets the shell flag);
     // both call completions are special-cased in lowerBuiltinModuleCall.
@@ -1179,9 +1179,6 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       "const execFileAsync = promisify(execFile) (from node:util), or use execFileSync",
   },
   crypto: {
-    hash:
-      "the lowered one-shot shapes hash MD5/SHA-1/SHA-256/SHA-384/SHA-512 strings or Buffer/Uint8Array inputs to default hex, " +
-      'with explicit base64 also supported for strings; other algorithms and output options have no lowering yet',
     ...Object.fromEntries(
       [
         "generateKeyPair", "generateKeyPairSync", "generateKey", "generateKeySync",

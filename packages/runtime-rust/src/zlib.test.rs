@@ -10,7 +10,10 @@ fn direct_input_and_offset_views_are_borrowed() {
             let expected = &storage[data.offset..data.offset + data.length];
             zlib_with_input(bytes, |actual| {
                 assert_eq!(actual, expected);
-                assert!(std::ptr::eq(actual.as_ptr(), expected.as_ptr()), "compression must borrow direct input instead of copying it");
+                assert!(
+                    std::ptr::eq(actual.as_ptr(), expected.as_ptr()),
+                    "compression must borrow direct input instead of copying it"
+                );
             });
         });
     }
@@ -32,12 +35,24 @@ fn compression_preserves_views_and_observes_alias_writes() {
             let plain = bytes_from_elements(source.clone());
             for level in [-1.0, 0.0, 1.0, 9.0] {
                 let zipped = zlib_deflate_sync_level(view, level);
-                assert_eq!(bytes_u8_values(&zipped), bytes_u8_values(&zlib_deflate_sync_level(&plain, level)));
+                assert_eq!(
+                    bytes_u8_values(&zipped),
+                    bytes_u8_values(&zlib_deflate_sync_level(&plain, level))
+                );
                 assert_eq!(bytes_u8_values(&zlib_inflate_sync(&zipped)), source);
             }
-            assert_eq!(bytes_u8_values(&zlib_deflate_sync(view)), bytes_u8_values(&zlib_deflate_sync(&plain)));
-            assert_eq!(bytes_u8_values(&zlib_deflate_raw_sync(view)), bytes_u8_values(&zlib_deflate_raw_sync(&plain)));
-            assert_eq!(bytes_u8_values(&zlib_gzip_sync(view)), bytes_u8_values(&zlib_gzip_sync(&plain)));
+            assert_eq!(
+                bytes_u8_values(&zlib_deflate_sync(view)),
+                bytes_u8_values(&zlib_deflate_sync(&plain))
+            );
+            assert_eq!(
+                bytes_u8_values(&zlib_deflate_raw_sync(view)),
+                bytes_u8_values(&zlib_deflate_raw_sync(&plain))
+            );
+            assert_eq!(
+                bytes_u8_values(&zlib_gzip_sync(view)),
+                bytes_u8_values(&zlib_gzip_sync(&plain))
+            );
             assert_eq!(bytes_u8_values(view), source, "compression changed input");
         }
         bytes_set(&direct, 3.0, 40.0 + f64::from(round));

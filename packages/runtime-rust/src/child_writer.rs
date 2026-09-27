@@ -168,17 +168,17 @@ fn child_writer_fail(writer: &JsChildWriter, error: JsError) {
 fn child_writer_write(writer: &JsChildWriter, data: Vec<u8>) -> bool {
     let result = writer.with_mut(|writer| {
         if !writer.writable {
-            return Err(child_writer_error(
+            return Err(Box::new(child_writer_error(
                 "write after end",
                 "ERR_STREAM_WRITE_AFTER_END",
-            ));
+            )));
         }
         let Some(sender) = &writer.sender else {
-            return Err(child_writer_error("write EPIPE", "EPIPE"));
+            return Err(Box::new(child_writer_error("write EPIPE", "EPIPE")));
         };
         let length = data.len();
         if sender.send(ChildWriterCommand::Write(data)).is_err() {
-            return Err(child_writer_error("write EPIPE", "EPIPE"));
+            return Err(Box::new(child_writer_error("write EPIPE", "EPIPE")));
         }
         writer.queued = writer.queued.saturating_add(length);
         let ready = writer.queued < CHILD_WRITER_HIGH_WATER_MARK;
@@ -188,7 +188,7 @@ fn child_writer_write(writer: &JsChildWriter, data: Vec<u8>) -> bool {
     match result {
         Ok(ready) => ready,
         Err(error) => {
-            child_writer_fail(writer, error);
+            child_writer_fail(writer, *error);
             false
         }
     }

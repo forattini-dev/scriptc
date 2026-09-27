@@ -50,8 +50,7 @@ fn reading_a_hole_as_a_value_fails_explicitly() {
     let array = array_new(vec![1.0]);
     array_set_length(&array, 3.0);
     let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| array_get(&array, 2.0)))
-        .err()
-        .expect("a hole read must fail");
+        .expect_err("a hole read must fail");
     let caught = caught_from_panic(payload);
     assert!(caught_is_error(&caught));
 }

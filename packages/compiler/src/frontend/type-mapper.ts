@@ -2455,9 +2455,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     const CHILD_SURFACE = new Set([
       "pid", "exitCode", "killed", "kill", "on", "once", "off",
-      "removeListener", "unref", "ref", "stdout", "stderr",
+      "removeListener", "unref", "ref", "stdin", "stdout", "stderr",
+      "send", "connected", "disconnect",
     ]);
-    const CHILD_CORE = new Set(["kill", "on", "stdout", "stderr", "unref", "exitCode"]);
+    const CHILD_CORE = new Set(["kill", "on", "stdin", "stdout", "stderr", "unref", "exitCode", "send", "connected"]);
     const props = checker.getPropertiesOfType(widened);
     let core = 0;
     const childShaped =
