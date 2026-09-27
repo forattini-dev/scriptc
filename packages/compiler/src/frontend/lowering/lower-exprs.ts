@@ -4173,6 +4173,12 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
         const receiver = strictReceiver({ kind: "regex" });
         return { kind: "regexIntrinsic", method: name, receiver, args: [], type: STRING, loc: locOf(expr) };
       }
+      if (name === "global") {
+        const loc = locOf(expr);
+        const receiver = strictReceiver({ kind: "regex" });
+        const flags: IrExpr = { kind: "regexIntrinsic", method: "flags", receiver, args: [], type: STRING, loc };
+        return { kind: "strIntrinsic", method: "includes", receiver: flags, args: [{ kind: "strLit", value: "g", type: STRING, loc }], type: BOOL, loc };
+      }
       if (name === "test") {
         lowerer.unsupported("SC1090", expr, "regex methods as values (call 'test' directly)");
       }
