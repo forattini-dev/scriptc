@@ -36,6 +36,8 @@ function resetGlobal(global: IrGlobal, unsupported: (kind: string) => never): st
     case "httpRes":
     case "httpClientReq":
     case "secureCtx":
+    case "cryptoHash":
+    case "cryptoHmac":
     case "map":
     case "set":
     case "record":

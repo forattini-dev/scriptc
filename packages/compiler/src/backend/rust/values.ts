@@ -108,6 +108,8 @@ export class RustValueEmitter {
       case "httpRes": return "true";
       case "httpClientReq": return "true";
       case "secureCtx": return "true";
+      case "cryptoHash": return "true";
+      case "cryptoHmac": return "true";
       case "record": return "true";
       case "object": return "true";
       case "func": return "true";
@@ -227,6 +229,8 @@ export class RustValueEmitter {
       case "httpRes": return "runtime::JsHttpResponse";
       case "httpClientReq": return "runtime::JsHttpClientRequest";
       case "secureCtx": return "runtime::JsSecureContext";
+      case "cryptoHash": return "runtime::JsCryptoHash";
+      case "cryptoHmac": return "runtime::JsCryptoHmac";
       case "map": return `runtime::JsMap<${this.rustType(type.key, loc)}, ${this.rustType(type.value, loc)}>`;
       case "set": return `runtime::JsSet<${this.rustType(type.elem, loc)}>`;
       case "record": {
@@ -426,7 +430,7 @@ export class RustValueEmitter {
 
   isTracedHandle(type: IrType): boolean {
     if (type.kind === "record" && isSharedRecord(this.context.records.get(type.shapeId))) return false;
-    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "effect" || type.kind === "genericFunc" || type.kind === "child" || type.kind === "sqliteDb" || type.kind === "sqliteStmt" || type.kind === "childStream" || type.kind === "fsWatcher" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "effect" || type.kind === "genericFunc" || type.kind === "child" || type.kind === "sqliteDb" || type.kind === "sqliteStmt" || type.kind === "childStream" || type.kind === "fsWatcher" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "cryptoHash" || type.kind === "cryptoHmac" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && (this.context.classes.has(type.className) || RUNTIME_STREAM_CLASSES.has(type.className) ||
         (RUNTIME_ERROR_CLASSES.has(type.className) && this.context.errorClassRoots().length > 0))) || type.kind === "func";
   }
@@ -508,6 +512,8 @@ export class RustValueEmitter {
       case "httpRes":
       case "httpClientReq":
       case "secureCtx":
+      case "cryptoHash":
+      case "cryptoHmac":
       case "regex":
       case "symbol":
       case "url":

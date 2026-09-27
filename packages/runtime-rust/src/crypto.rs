@@ -168,6 +168,196 @@ fn crypto_hmac_algorithm(algorithm: &JsString) -> CryptoHmac {
         .unwrap_or_else(|| unreachable!("scriptc invariant: unsupported HMAC algorithm reached the runtime"))
 }
 
+fn crypto_hash_finalized() -> ! {
+    throw_error_code(
+        "Digest already called".to_owned(),
+        "ERR_CRYPTO_HASH_FINALIZED",
+    )
+}
+
+fn crypto_invalid_digest(algorithm: &JsString) -> ! {
+    throw_type_error_code(
+        format!("Invalid digest: {}", algorithm.to_utf8_lossy()),
+        "ERR_CRYPTO_INVALID_DIGEST",
+    )
+}
+
+pub struct CryptoHashData {
+    algorithm: CryptoDigest,
+    data: Vec<u8>,
+    finalized: bool,
+}
+
+impl Trace for CryptoHashData {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+impl ClearEdges for CryptoHashData {
+    fn clear_edges(&mut self) {
+        self.data.fill(0);
+        self.data.clear();
+    }
+}
+
+impl Drop for CryptoHashData {
+    fn drop(&mut self) {
+        self.data.fill(0);
+    }
+}
+
+pub type JsCryptoHash = Gc<CryptoHashData>;
+
+pub struct CryptoHmacData {
+    algorithm: CryptoHmac,
+    key: Vec<u8>,
+    data: Vec<u8>,
+    finalized: bool,
+}
+
+impl Trace for CryptoHmacData {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+impl ClearEdges for CryptoHmacData {
+    fn clear_edges(&mut self) {
+        self.key.fill(0);
+        self.key.clear();
+        self.data.fill(0);
+        self.data.clear();
+    }
+}
+
+impl Drop for CryptoHmacData {
+    fn drop(&mut self) {
+        self.key.fill(0);
+        self.data.fill(0);
+    }
+}
+
+pub type JsCryptoHmac = Gc<CryptoHmacData>;
+
+pub fn crypto_hash_new(algorithm: &JsString) -> JsCryptoHash {
+    let Some(algorithm) = crypto_digest_algorithm_opt(algorithm) else {
+        throw_error("Digest method not supported".to_owned());
+    };
+    Gc::new(CryptoHashData {
+        algorithm,
+        data: Vec::new(),
+        finalized: false,
+    })
+}
+
+fn crypto_hmac_new(algorithm: &JsString, key: Vec<u8>) -> JsCryptoHmac {
+    let Some(algorithm) = crypto_hmac_algorithm_opt(algorithm) else {
+        crypto_invalid_digest(algorithm);
+    };
+    Gc::new(CryptoHmacData {
+        algorithm,
+        key,
+        data: Vec::new(),
+        finalized: false,
+    })
+}
+
+pub fn crypto_hmac_new_string(algorithm: &JsString, key: &JsString) -> JsCryptoHmac {
+    crypto_hmac_new(algorithm, key.as_bytes().to_vec())
+}
+
+pub fn crypto_hmac_new_bytes(algorithm: &JsString, key: &JsBytes<u8>) -> JsCryptoHmac {
+    crypto_hmac_new(algorithm, crypto_with_bytes(key, <[u8]>::to_vec))
+}
+
+pub fn crypto_hash_update_string(hash: &JsCryptoHash, data: &JsString) -> JsCryptoHash {
+    hash.with_mut(|state| {
+        if state.finalized {
+            crypto_hash_finalized();
+        }
+        state.data.extend_from_slice(data.as_bytes());
+    });
+    hash.clone()
+}
+
+pub fn crypto_hash_update_bytes(hash: &JsCryptoHash, data: &JsBytes<u8>) -> JsCryptoHash {
+    let data = crypto_with_bytes(data, <[u8]>::to_vec);
+    hash.with_mut(|state| {
+        if state.finalized {
+            crypto_hash_finalized();
+        }
+        state.data.extend_from_slice(&data);
+    });
+    hash.clone()
+}
+
+pub fn crypto_hmac_update_string(hmac: &JsCryptoHmac, data: &JsString) -> JsCryptoHmac {
+    hmac.with_mut(|state| {
+        if state.finalized {
+            crypto_hash_finalized();
+        }
+        state.data.extend_from_slice(data.as_bytes());
+    });
+    hmac.clone()
+}
+
+pub fn crypto_hmac_update_bytes(hmac: &JsCryptoHmac, data: &JsBytes<u8>) -> JsCryptoHmac {
+    let data = crypto_with_bytes(data, <[u8]>::to_vec);
+    hmac.with_mut(|state| {
+        if state.finalized {
+            crypto_hash_finalized();
+        }
+        state.data.extend_from_slice(&data);
+    });
+    hmac.clone()
+}
+
+pub fn crypto_hash_copy(hash: &JsCryptoHash) -> JsCryptoHash {
+    hash.with(|state| {
+        if state.finalized {
+            crypto_hash_finalized();
+        }
+        Gc::new(CryptoHashData {
+            algorithm: state.algorithm,
+            data: state.data.clone(),
+            finalized: false,
+        })
+    })
+}
+
+fn crypto_hash_finish(hash: &JsCryptoHash) -> Vec<u8> {
+    hash.with_mut(|state| {
+        if state.finalized {
+            crypto_hash_finalized();
+        }
+        state.finalized = true;
+        state.algorithm.digest(&state.data)
+    })
+}
+
+fn crypto_hmac_finish(hmac: &JsCryptoHmac) -> Vec<u8> {
+    hmac.with_mut(|state| {
+        if state.finalized {
+            return Vec::new();
+        }
+        state.finalized = true;
+        state.algorithm.sign(&state.key, &state.data)
+    })
+}
+
+pub fn crypto_hash_digest_string_handle(hash: &JsCryptoHash, encoding: &JsString) -> JsString {
+    decode_bytes(&crypto_hash_finish(hash), encoding)
+}
+
+pub fn crypto_hash_digest_buffer(hash: &JsCryptoHash) -> JsBytes<u8> {
+    bytes_from_vec(crypto_hash_finish(hash))
+}
+
+pub fn crypto_hmac_digest_string_handle(hmac: &JsCryptoHmac, encoding: &JsString) -> JsString {
+    decode_bytes(&crypto_hmac_finish(hmac), encoding)
+}
+
+pub fn crypto_hmac_digest_buffer(hmac: &JsCryptoHmac) -> JsBytes<u8> {
+    bytes_from_vec(crypto_hmac_finish(hmac))
+}
+
 /// The composed createHmac(alg, key).update(data).digest(enc) chain. The
 /// key always arrives as bytes (the frontend decodes a string key's UTF-8
 /// first), the data keeps the fused chain's string/bytes split.
@@ -241,6 +431,153 @@ pub fn crypto_hash_digest_bytes(
     encoding: &JsString,
 ) -> JsString {
     crypto_with_bytes(data, |data| crypto_hash_digest(algorithm, data, encoding))
+}
+
+fn crypto_random_fill_range(bytes: &JsBytes<u8>, offset: f64, size: f64) -> JsBytes<u8> {
+    let length = bytes.with(|data| data.length);
+    let length_number = length as f64;
+    if !offset.is_finite() || offset.fract() != 0.0 || !(0.0..=length_number).contains(&offset) {
+        throw_range_error_code(
+            format!(
+                "The value of \"offset\" is out of range. It must be >= 0 && <= {}. Received {}",
+                format_number(length_number),
+                format_number(offset)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    if !size.is_finite() || size.fract() != 0.0 || !(0.0..=2_147_483_647.0).contains(&size) {
+        throw_range_error_code(
+            format!(
+                "The value of \"size\" is out of range. It must be >= 0 && <= 2147483647. Received {}",
+                format_number(size)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    if offset + size > length_number {
+        throw_range_error_code(
+            format!(
+                "The value of \"size + offset\" is out of range. It must be <= {}. Received {}",
+                format_number(length_number),
+                format_number(offset + size)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    let offset = offset as usize;
+    let size = size as usize;
+    bytes.with(|data| {
+        let mut storage = data.storage.borrow_mut();
+        let start = data.offset + offset;
+        crypto_random_fill(&mut storage[start..start + size]);
+    });
+    bytes.clone()
+}
+
+pub fn crypto_random_fill_bytes(bytes: &JsBytes<u8>, offset: f64, size: f64) -> JsBytes<u8> {
+    crypto_random_fill_range(bytes, offset, size)
+}
+
+pub fn crypto_random_fill_rest(bytes: &JsBytes<u8>, offset: f64) -> JsBytes<u8> {
+    let length = bytes.with(|data| data.length) as f64;
+    crypto_random_fill_range(bytes, offset, length - offset)
+}
+
+fn crypto_require_safe_integer(value: f64, name: &str) {
+    if !value.is_finite() || value.fract() != 0.0 || value.abs() > 9_007_199_254_740_991.0 {
+        throw_type_error_code(
+            format!("The \"{name}\" argument must be a safe integer."),
+            "ERR_INVALID_ARG_TYPE",
+        );
+    }
+}
+
+pub fn crypto_random_int(min: f64, max: f64) -> f64 {
+    crypto_require_safe_integer(min, "min");
+    crypto_require_safe_integer(max, "max");
+    if max <= min {
+        throw_range_error_code(
+            format!(
+                "The value of \"max\" is out of range. It must be greater than the value of \"min\" ({}). Received {}",
+                format_number(min),
+                format_number(max)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    let range = max - min;
+    const CEILING: u64 = 1_u64 << 48;
+    if range > CEILING as f64 {
+        throw_range_error_code(
+            "The value of \"max - min\" is out of range. It must be <= 281474976710656.".to_owned(),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    let span = range as u64;
+    let limit = CEILING - CEILING % span;
+    loop {
+        let mut random = [0_u8; 6];
+        crypto_random_fill(&mut random);
+        let value = random
+            .into_iter()
+            .fold(0_u64, |accumulator, byte| accumulator << 8 | u64::from(byte));
+        if value < limit {
+            return min + (value % span) as f64;
+        }
+    }
+}
+
+fn crypto_pbkdf2_range(value: f64, name: &str, minimum: f64) -> usize {
+    if !value.is_finite() || value.fract() != 0.0 || value < minimum || value > 2_147_483_647.0 {
+        throw_range_error_code(
+            format!(
+                "The value of \"{name}\" is out of range. It must be >= {} && <= 2147483647. Received {}",
+                format_number(minimum),
+                format_number(value)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    value as usize
+}
+
+pub fn crypto_pbkdf2(
+    password: &JsBytes<u8>,
+    salt: &JsBytes<u8>,
+    iterations: f64,
+    key_length: f64,
+    digest: &JsString,
+) -> JsBytes<u8> {
+    let iterations = crypto_pbkdf2_range(iterations, "iterations", 1.0);
+    let key_length = crypto_pbkdf2_range(key_length, "keylen", 0.0);
+    let Some(algorithm) = crypto_hmac_algorithm_opt(digest) else {
+        crypto_invalid_digest(digest);
+    };
+    let password = crypto_with_bytes(password, |bytes| bytes.to_vec());
+    let salt = crypto_with_bytes(salt, |bytes| bytes.to_vec());
+    let digest_length = algorithm.sign(&password, &[]).len();
+    let mut result = Vec::with_capacity(key_length);
+    let block_count = key_length.div_ceil(digest_length);
+    for block_index in 1..=block_count {
+        let mut block = Vec::with_capacity(salt.len() + 4);
+        block.extend_from_slice(&salt);
+        block.extend_from_slice(&(block_index as u32).to_be_bytes());
+        let mut previous = algorithm.sign(&password, &block);
+        let mut accumulated = previous.clone();
+        for _ in 1..iterations {
+            previous = algorithm.sign(&password, &previous);
+            for (target, value) in accumulated.iter_mut().zip(&previous) {
+                *target ^= value;
+            }
+        }
+        let remaining = key_length - result.len();
+        result.extend_from_slice(&accumulated[..remaining.min(digest_length)]);
+        previous.fill(0);
+        accumulated.fill(0);
+        block.fill(0);
+    }
+    bytes_from_vec(result)
 }
 
 fn crypto_x509_der(input: &[u8]) -> Vec<u8> {

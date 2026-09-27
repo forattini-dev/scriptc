@@ -41,7 +41,7 @@ import { CRYPTO_CIPHERS, CRYPTO_CONSTANTS, CRYPTO_CURVES, CRYPTO_HASHES } from "
 import { generatorMeta, timerStyleCallback } from "./lower-calls.js";
 import { registerHttpClientFnBinding, voidizedCallback } from "./lower-server.js";
 import { pairsSnapshotHelper } from "./pairs-snapshot.js";
-import { BOOL, BYTES_U8, CHILD_T, CHILDSTREAM_T, CHILDWRITER_T, CRYPTOHASH_T, DYN, F64, FILEHANDLE_T, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/ir.js";
+import { BOOL, BYTES_U8, CHILD_T, CHILDSTREAM_T, CHILDWRITER_T, CRYPTOHASH_T, CRYPTOHMAC_T, DYN, F64, FILEHANDLE_T, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/ir.js";
 import { boolLit, countedFor, numLit, strLit, varRef } from "../../ir/build.js";
 
 export function optionalStringTags(lowerer: Lowerer, type: IrType): { stringTag: number; undefinedTag: number } | null {
@@ -3494,6 +3494,37 @@ function cryptoEncoding(lowerer: Lowerer, node: ts.Expression, use: string): IrE
   return lowerer.lowerExprExpecting(node, STRING);
 }
 
+function cryptoAlgorithm(lowerer: Lowerer, node: ts.Expression, use: string): IrExpr {
+  const type = lowerer.typeOf(node);
+  if (type.isStringLiteralType() && !isLoweredDigestAlgorithm(type.value.toLowerCase())) {
+    lowerer.noLowering(
+      `${use} with algorithm '${type.value}'`,
+      node,
+      "md5, sha1, sha256, sha384, and sha512 are the lowered digest algorithms",
+    );
+  }
+  return lowerer.lowerExprExpecting(node, STRING);
+}
+
+function cryptoInputBytes(lowerer: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr {
+  const value = lowerer.lowerExpr(node);
+  if (value.type.kind === "bytes" && value.type.elem === "u8") return value;
+  if (value.type.kind === "string") {
+    return {
+      kind: "libCall",
+      fn: "buffer.fromStr",
+      args: [value, { kind: "strLit", value: "utf8", type: STRING, loc }],
+      type: BYTES_U8,
+      loc,
+    };
+  }
+  lowerer.noLowering(
+    `crypto byte input of '${lowerer.fmt(value.type)}' values`,
+    node,
+    "string and Buffer/Uint8Array values are supported",
+  );
+}
+
   /** True when `node`'s checker type is async_hooks' AsyncLocalStorage
    * (the Channel detection's shape — the value is an f64 store handle,
    * type-mapper.ts). */
@@ -4233,6 +4264,88 @@ export { lowerJsonMethodCall } from "./lower-json.js";
     bi: { module: string; member: string },
     loc: SrcLoc,): IrExpr | null {
     if (bi.module !== "crypto") return null;
+    const args = expr.arguments;
+    if (args.some(ts.isSpreadElement)) {
+      lowerer.noLowering(`crypto.${bi.member} with spread arguments`, expr);
+    }
+    if (bi.member === "createHash") {
+      if (args.length !== 1) {
+        lowerer.noLowering(`crypto.createHash with ${args.length} arguments`, expr, "createHash(algorithm) is supported; options are not yet lowered");
+      }
+      return {
+        kind: "libCall",
+        fn: "crypto.hashNew",
+        args: [cryptoAlgorithm(lowerer, args[0]!, "crypto.createHash")],
+        type: CRYPTOHASH_T,
+        loc,
+      };
+    }
+    if (bi.member === "createHmac") {
+      if (args.length !== 2) {
+        lowerer.noLowering(`crypto.createHmac with ${args.length} arguments`, expr, "createHmac(algorithm, stringOrBufferKey) is supported; options and KeyObject keys are not yet lowered");
+      }
+      const algorithm = cryptoAlgorithm(lowerer, args[0]!, "crypto.createHmac");
+      const key = lowerer.lowerExpr(args[1]!);
+      if (key.type.kind === "string") {
+        return { kind: "libCall", fn: "crypto.hmacNewStr", args: [algorithm, key], type: CRYPTOHMAC_T, loc };
+      }
+      if (key.type.kind === "bytes" && key.type.elem === "u8") {
+        return { kind: "libCall", fn: "crypto.hmacNewBytes", args: [algorithm, key], type: CRYPTOHMAC_T, loc };
+      }
+      lowerer.noLowering(`crypto.createHmac with a '${lowerer.fmt(key.type)}' key`, args[1]!, "string and Buffer/Uint8Array keys are supported");
+    }
+    if (bi.member === "randomFillSync") {
+      if (args.length < 1 || args.length > 3) {
+        lowerer.noLowering(`crypto.randomFillSync with ${args.length} arguments`, expr, "randomFillSync(buffer[, offset[, size]]) is supported");
+      }
+      const buffer = lowerer.lowerExprExpecting(args[0]!, BYTES_U8);
+      const offset = args[1]
+        ? lowerer.lowerExprExpecting(args[1]!, F64)
+        : ({ kind: "numLit", value: 0, type: F64, loc } satisfies IrExpr);
+      if (args[2]) {
+        return {
+          kind: "libCall",
+          fn: "crypto.randomFill",
+          args: [buffer, offset, lowerer.lowerExprExpecting(args[2], F64)],
+          type: BYTES_U8,
+          loc,
+        };
+      }
+      return { kind: "libCall", fn: "crypto.randomFillRest", args: [buffer, offset], type: BYTES_U8, loc };
+    }
+    if (bi.member === "randomInt") {
+      if (args.length !== 1 && args.length !== 2) {
+        lowerer.noLowering(`crypto.randomInt with ${args.length} arguments`, expr, "the synchronous randomInt(max) and randomInt(min, max) forms are supported");
+      }
+      const min = args.length === 1
+        ? ({ kind: "numLit", value: 0, type: F64, loc } satisfies IrExpr)
+        : lowerer.lowerExprExpecting(args[0]!, F64);
+      return {
+        kind: "libCall",
+        fn: "crypto.randomInt",
+        args: [min, lowerer.lowerExprExpecting(args[args.length - 1]!, F64)],
+        type: F64,
+        loc,
+      };
+    }
+    if (bi.member === "pbkdf2Sync") {
+      if (args.length !== 5) {
+        lowerer.noLowering(`crypto.pbkdf2Sync with ${args.length} arguments`, expr, "pbkdf2Sync(password, salt, iterations, keylen, digest) is supported");
+      }
+      return {
+        kind: "libCall",
+        fn: "crypto.pbkdf2",
+        args: [
+          cryptoInputBytes(lowerer, args[0]!, locOf(args[0]!)),
+          cryptoInputBytes(lowerer, args[1]!, locOf(args[1]!)),
+          lowerer.lowerExprExpecting(args[2]!, F64),
+          lowerer.lowerExprExpecting(args[3]!, F64),
+          cryptoAlgorithm(lowerer, args[4]!, "crypto.pbkdf2Sync"),
+        ],
+        type: BYTES_U8,
+        loc,
+      };
+    }
     if (bi.member === "timingSafeEqual") {
       // Node's own contract: two ArrayBufferViews of EQUAL byte length,
       // compared in constant time; unequal lengths throw a RangeError

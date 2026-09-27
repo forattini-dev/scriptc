@@ -18,7 +18,7 @@ import { SCHEMA_SLOT, isPhantomAnyMember } from "./kernel-types.js";
 import { familyIdOf, isFamilySlotMember } from "./families.js";
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType } from "../ir/ir.js";
-import { arrayOf, BIGINT, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/ir.js";
+import { arrayOf, BIGINT, BOOL, bytesOf, canConvertToDyn, CHILD_T, CRYPTOHASH_T, CRYPTOHMAC_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/ir.js";
 import { isProjectTypeFile } from "./project-declarations.js";
 import { isNpmStaticTypeFile } from "./npm-static-types.js";
 import { isJsSourceFile, isNodeTypesPath } from "./program.js";
@@ -1664,6 +1664,20 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     )
   ) {
     return { kind: "secureCtx" };
+  }
+  // crypto.Hash / crypto.Hmac: native incremental digest handles. Keep
+  // provenance module-qualified so user classes with these common names
+  // retain their ordinary structural/class representation.
+  if (
+    (psym?.name === "Hash" || psym?.name === "Hmac") &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientModule(d, "crypto"),
+    )
+  ) {
+    return psym.name === "Hash" ? CRYPTOHASH_T : CRYPTOHMAC_T;
   }
   // fs.FSWatcher: the fs.watch handle (scr_watch.c). Module-checked like
   // net.Server — @types/node declares `interface FSWatcher extends

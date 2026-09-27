@@ -8,7 +8,7 @@ export { STATIC_MATH_PROPS } from "./math-constants.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
-import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrStrIntrinsicMethod, IrType, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, URL_T, VOID, arrayOf } from "../../ir/ir.js";
+import { BOOL, BYTES_U8, CHILD_T, CRYPTOHASH_T, CRYPTOHMAC_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrStrIntrinsicMethod, IrType, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, URL_T, VOID, arrayOf } from "../../ir/ir.js";
 import { isNodeTypesPath, requireSpecOf } from "../program.js";
 
 /** Statement-level constructs rejected wholesale, keyed by syntax kind. */
@@ -749,6 +749,15 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // first and the Buffer never materializes there); this entry covers
     // the bare calls and non-composed uses.
     randomBytes: { fn: "crypto.randomBytes", params: [F64], result: BYTES_U8 },
+    // Overloaded crypto calls are completed by lowerCryptoModuleCall. The
+    // table shapes keep imports and manifest projection connected to IR.
+    createHash: { fn: "crypto.hashNew", params: [STRING], result: CRYPTOHASH_T },
+    createHmac: { fn: "crypto.hmacNewStr", params: [STRING, STRING], result: CRYPTOHMAC_T },
+    hash: { fn: "crypto.hashDigestStr", params: [STRING, STRING, STRING], result: STRING },
+    timingSafeEqual: { fn: "crypto.timingSafeEqual", params: [BYTES_U8, BYTES_U8], result: BOOL },
+    randomFillSync: { fn: "crypto.randomFill", params: [BYTES_U8, F64, F64], result: BYTES_U8 },
+    randomInt: { fn: "crypto.randomInt", params: [F64, F64], result: F64 },
+    pbkdf2Sync: { fn: "crypto.pbkdf2", params: [BYTES_U8, BYTES_U8, F64, F64, STRING], result: BYTES_U8 },
   },
   buffer: {
     isUtf8: { fn: "buffer.isUtf8", params: [BYTES_U8], result: BOOL },
@@ -1169,17 +1178,9 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       "const execFileAsync = promisify(execFile) (from node:util), or use execFileSync",
   },
   crypto: {
-    createHash:
-      "the one lowered shape is the composed chain " +
-      'createHash("sha256").update(data).digest("hex") — the Hash handle itself has no lowering ' +
-      "(md5, sha1, sha256, sha384, and sha512 are the lowered algorithms)",
     hash:
       "the lowered one-shot shapes hash MD5/SHA-1/SHA-256/SHA-384/SHA-512 strings or Buffer/Uint8Array inputs to default hex, " +
       'with explicit base64 also supported for strings; other algorithms and output options have no lowering yet',
-    createHmac:
-      "the one lowered shape is the composed chain " +
-      'createHmac("sha256", key).update(data).digest("hex") — the Hmac handle itself has no lowering ' +
-      "(md5, sha1, sha256, sha384, and sha512 over string or Buffer keys; KeyObject keys have none)",
     ...Object.fromEntries(
       [
         "generateKeyPair", "generateKeyPairSync", "generateKey", "generateKeySync",
@@ -1203,7 +1204,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       ]),
     ),
     ...Object.fromEntries(
-      ["pbkdf2", "pbkdf2Sync", "scrypt", "scryptSync", "hkdf", "hkdfSync"].map((m) => [
+      ["pbkdf2", "scrypt", "scryptSync", "hkdf", "hkdfSync"].map((m) => [
         m,
         "key-derivation functions have no lowering yet — the lowered crypto surface is " +
           "hashing, randomness, and the introspection statics",

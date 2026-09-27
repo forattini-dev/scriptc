@@ -466,6 +466,8 @@ export class RustDefinitionEmitter {
         case "httpRes":
         case "httpClientReq":
         case "secureCtx":
+        case "cryptoHash":
+        case "cryptoHmac":
         case "func":
           comparison = "left.ptr_eq(right)";
           break;
@@ -964,6 +966,8 @@ export class RustDefinitionEmitter {
         case "httpRes":
         case "httpClientReq":
         case "secureCtx":
+        case "cryptoHash":
+        case "cryptoHmac":
         case "map":
         case "set":
         case "record":
