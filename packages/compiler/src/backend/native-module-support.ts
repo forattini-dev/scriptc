@@ -35,7 +35,12 @@ export function nativeModuleBackendDiagnostics(
       for (const child of value) visit(child);
       return;
     }
-    const node = value as { kind?: unknown; fn?: unknown; loc?: SrcLoc };
+    const node = value as { kind?: unknown; fn?: unknown; test?: unknown; loc?: SrcLoc };
+    if (node.kind === "dynTest" && (node.test === "finite" || node.test === "nan" || node.test === "safeInteger")) {
+      feature = "checked-dynamic Number predicates";
+      loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+      return;
+    }
     if (node.kind === "libCall" && (node.fn === "module.import" || node.fn === "module.namespace" || node.fn === "promise.view")) {
       if (node.fn === "promise.view") feature = "Promise payload views";
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };

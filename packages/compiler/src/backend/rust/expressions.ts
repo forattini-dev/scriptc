@@ -306,6 +306,9 @@ export class RustExpressionEmitter {
           case "bigint": test = `matches!(&${value}, ${name}::BigInt(..))`; break;
           case "symbol": test = `matches!(&${value}, ${name}::Symbol(..))`; break;
           case "integer": test = `matches!(&${value}, ${name}::Number(number) if runtime::number_is_integer(*number))`; break;
+          case "finite": test = `matches!(&${value}, ${name}::Number(number) if number.is_finite())`; break;
+          case "nan": test = `matches!(&${value}, ${name}::Number(number) if number.is_nan())`; break;
+          case "safeInteger": test = `matches!(&${value}, ${name}::Number(number) if runtime::number_is_safe_integer(*number))`; break;
           case "boolean": test = `matches!(&${value}, ${name}::Boolean(..))`; break;
           case "string": test = `matches!(&${value}, ${name}::String(..))`; break;
           case "undefined": test = `matches!(&${value}, ${name}::Undefined)`; break;

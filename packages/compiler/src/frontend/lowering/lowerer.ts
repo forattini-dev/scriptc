@@ -355,6 +355,8 @@ export interface LowerOptions {
   nativeDynamicSets?: boolean;
   /** Rust's traced generic Map can store checked-dynamic keys. */
   nativeDynamicMaps?: boolean;
+  /** Rust can evaluate non-coercing Number predicates over checked-dynamic values. */
+  nativeDynamicNumberPredicates?: boolean;
   /** Rust implements the Annex B String.prototype.substr operation. */
   nativeStringSubstr?: boolean;
   /** Rust can concatenate a checked-dynamic spread argument vector. */
@@ -461,6 +463,8 @@ export interface LowererMode {
   nativeDynamicSets?: boolean;
   /** Rust's traced generic Map can store checked-dynamic keys. */
   nativeDynamicMaps?: boolean;
+  /** Rust can evaluate non-coercing Number predicates over checked-dynamic values. */
+  nativeDynamicNumberPredicates?: boolean;
   /** Rust implements the Annex B String.prototype.substr operation. */
   nativeStringSubstr?: boolean;
   /** Rust can concatenate a checked-dynamic spread argument vector. */
@@ -579,6 +583,7 @@ export function lowerToIr(
     nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
     nativeDynamicSets: options.nativeDynamicSets ?? false,
     nativeDynamicMaps: options.nativeDynamicMaps ?? false,
+    nativeDynamicNumberPredicates: options.nativeDynamicNumberPredicates ?? false,
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
     nativeStringNormalize: options.nativeStringNormalize ?? false,
@@ -607,6 +612,7 @@ export function lowerToIr(
         nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
         nativeDynamicSets: options.nativeDynamicSets ?? false,
         nativeDynamicMaps: options.nativeDynamicMaps ?? false,
+        nativeDynamicNumberPredicates: options.nativeDynamicNumberPredicates ?? false,
         nativeStringSubstr: options.nativeStringSubstr ?? false,
         nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
         nativeStringNormalize: options.nativeStringNormalize ?? false,
@@ -643,6 +649,7 @@ export function lowerToIr(
       nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
       nativeDynamicSets: options.nativeDynamicSets ?? false,
       nativeDynamicMaps: options.nativeDynamicMaps ?? false,
+      nativeDynamicNumberPredicates: options.nativeDynamicNumberPredicates ?? false,
       nativeStringSubstr: options.nativeStringSubstr ?? false,
       nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
       nativeStringNormalize: options.nativeStringNormalize ?? false,
@@ -673,6 +680,7 @@ export function lowerToIr(
     nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
     nativeDynamicSets: options.nativeDynamicSets ?? false,
     nativeDynamicMaps: options.nativeDynamicMaps ?? false,
+    nativeDynamicNumberPredicates: options.nativeDynamicNumberPredicates ?? false,
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
     nativeStringNormalize: options.nativeStringNormalize ?? false,
@@ -1092,6 +1100,7 @@ export class Lowerer {
   readonly nativeClassDynamicRefs: boolean;
   readonly nativeDynamicSets: boolean;
   readonly nativeDynamicMaps: boolean;
+  readonly nativeDynamicNumberPredicates: boolean;
   readonly nativeStringSubstr: boolean;
   readonly nativeStringConcatDyn: boolean;
   readonly nativeStringNormalize: boolean;
@@ -1865,6 +1874,7 @@ export class Lowerer {
     this.nativeClassDynamicRefs = mode.nativeClassDynamicRefs ?? false;
     this.nativeDynamicSets = mode.nativeDynamicSets ?? false;
     this.nativeDynamicMaps = mode.nativeDynamicMaps ?? false;
+    this.nativeDynamicNumberPredicates = mode.nativeDynamicNumberPredicates ?? false;
     this.nativeStringSubstr = mode.nativeStringSubstr ?? false;
     this.nativeStringConcatDyn = mode.nativeStringConcatDyn ?? false;
     this.nativeStringNormalize = mode.nativeStringNormalize ?? false;

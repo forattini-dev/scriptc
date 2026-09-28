@@ -85,6 +85,9 @@ export function rustIslandDynamicTest(test: Extract<IrExpr, { kind: "dynTest" }>
     case "array": return `runtime::island_exit_boolean(&runtime::island_call_method(&runtime::island_global_get("Array"), "isArray", &[${value}.clone()]))`;
     case "bytes": return `runtime::island_exit_boolean(&runtime::island_call_method(&runtime::island_global_get("ArrayBuffer"), "isView", &[${value}.clone()]))`;
     case "integer": return `(runtime::island_value_typeof(${value}).as_ref() == "number" && runtime::number_is_integer(runtime::island_exit_number(${value})))`;
+    case "finite": return `(runtime::island_value_typeof(${value}).as_ref() == "number" && runtime::island_exit_number(${value}).is_finite())`;
+    case "nan": return `(runtime::island_value_typeof(${value}).as_ref() == "number" && runtime::island_exit_number(${value}).is_nan())`;
+    case "safeInteger": return `(runtime::island_value_typeof(${value}).as_ref() == "number" && runtime::number_is_safe_integer(runtime::island_exit_number(${value})))`;
     case "number": case "bigint": case "symbol": case "string": case "boolean": case "object":
       return `runtime::island_value_typeof(${value}).as_ref() == "${test}"`;
   }

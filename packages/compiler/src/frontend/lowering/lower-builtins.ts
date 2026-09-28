@@ -7591,11 +7591,16 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         const raw: IrExpr = { kind: "jsOp", op: "callMethod", name: member, args: [numberGlobal, arg], type: JSVAL, loc };
         return { kind: "jsExit", value: raw, type: BOOL, loc };
       }
-      // `unknown` lowers to the checked-dynamic tree. Number.isInteger
-      // observes its runtime kind without coercion: numeric nodes test the
-      // payload and every other kind is simply false.
-      if (arg.type.kind === "dyn" && member === "isInteger") {
-        return { kind: "dynTest", test: "integer", value: arg, type: BOOL, loc };
+      // `unknown` lowers to the checked-dynamic tree. Rust observes its
+      // runtime kind without coercion: numeric nodes test the payload and
+      // every other kind is simply false.
+      if (arg.type.kind === "dyn") {
+        const test = member === "isInteger"
+          ? "integer"
+          : lowerer.nativeDynamicNumberPredicates
+            ? ({ isFinite: "finite", isNaN: "nan", isSafeInteger: "safeInteger" } as const)[member as "isFinite" | "isNaN" | "isSafeInteger"]
+            : undefined;
+        if (test !== undefined) return { kind: "dynTest", test, value: arg, type: BOOL, loc };
       }
       const optional = lowerOptionalNumberPredicate(lowerer, arg, fn, loc);
       if (optional) return optional;
