@@ -5281,7 +5281,7 @@ export type IrExpr =
    * "function"` — true exactly for the checked-dynamic tree's function kind (boxed
    * closures); function values are truthy and answer FALSE to the
    * `"object"` test, JS-exact. */
-  | { kind: "dynTest"; test: "date" | "bigint" | "symbol" | "string" | "number" | "integer" | "finite" | "nan" | "safeInteger" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "date" | "regex" | "url" | "bigint" | "symbol" | "string" | "number" | "integer" | "finite" | "nan" | "safeInteger" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string, symbol, or dyn-typed (ToPropertyKey); `type` is always dyn. An
@@ -6079,7 +6079,7 @@ export function isClassOwnEnumerableFieldName(name: string): boolean {
 }
 
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:
- * JSON-safe data, bytes<u8> (payload copied), identity-preserving class
+ * JSON-safe data, branded RegExp/URL handles, bytes<u8> (payload copied), identity-preserving class
  * references, undefined-armed unions of those arms, boxable function types,
  * and the runtime HANDLE kinds (boxed by reference — DYN_HANDLE_KINDS). */
 export function canConvertToDyn(
@@ -6089,13 +6089,13 @@ export function canConvertToDyn(
   visiting: Set<string> = new Set(),
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion)) return true;
-  // bytes<u8> and boxable functions are dyn kinds the walker boxes
+  // bytes<u8>, branded native objects, and boxable functions are dyn kinds the walker boxes
   // ANYWHERE (Rust shares bytes; functions retain identity), including nested
   // in records/arrays/unions. isJsonSafeType rejects them, but dynFrom
   // needs only that the walker can build the dyn value, so this composite
   // fold extends the JSON-safe core.
   if (canBoxDynComposite(t, getRecord, getUnion)) return true;
-  if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
+  if (t.kind === "effect" || t.kind === "date" || t.kind === "regex" || t.kind === "url" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
   // %Error converts as the checked-dynamic tree's error encoding ({%error, name, message,
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
@@ -6124,7 +6124,7 @@ export function canConvertToDyn(
     // boundary exactly like a bare func dynFrom).
     return !!def && def.arms.every((a) =>
       a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion) ||
-      isDynTypedRefType(a) || DYN_HANDLE_KINDS.has(a.kind) ||
+      isDynTypedRefType(a) || a.kind === "regex" || a.kind === "url" || DYN_HANDLE_KINDS.has(a.kind) ||
       (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion)) ||
       (a.kind === "promise" && canConvertToDyn(a, getRecord, getUnion)),
     );
@@ -6133,7 +6133,7 @@ export function canConvertToDyn(
 }
 
 /** The composite extension of the dynFrom domain: JSON-safe scalars plus
- * bytes<u8> and boxable functions anywhere, recursing through records
+ * bytes<u8>, RegExp/URL handles, and boxable functions anywhere, recursing through records
  * (fields + index value), arrays, and unit-armed unions — exactly the
  * sc_td_* walker's capability. Returns false for a composite carrying a
  * kind the walker cannot box (Maps or handles nested in a record); those
@@ -6145,7 +6145,7 @@ function canBoxDynComposite(
   visiting: Set<string> = new Set(),
 ): boolean {
   switch (t.kind) {
-    case "effect": case "date": case "bigint": case "symbol": case "f64":
+    case "effect": case "date": case "regex": case "url": case "bigint": case "symbol": case "f64":
     case "string":
     case "bool":
     case "dyn":

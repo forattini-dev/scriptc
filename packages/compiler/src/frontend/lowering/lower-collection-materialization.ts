@@ -2,7 +2,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { InternalCompilerError } from "../../errors.js";
 import { locOf } from "../program.js";
-import { BOOL, DYN, F64, VOID, typeEquals, typeKey, type IrExpr, type IrFunction, type IrLocal, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
+import { BOOL, DYN, F64, STRING, VOID, typeEquals, typeKey, type IrExpr, type IrFunction, type IrLocal, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { boolLit, countedFor, numLit, varRef } from "../../ir/build.js";
 import { fenceProducedArrayElem, strCharsCall } from "./lower-containers.js";
 import { tupleSpreadArray } from "./lower-native-containers.js";
@@ -25,12 +25,12 @@ function collectionSource(L: Lowerer, input: ts.Expression): Source | null {
       ["keys", "values", "entries"].includes(node.expression.name.text) && L.isStdlibMember(node.expression)) {
     const receiver = node.expression.expression;
     const receiverType = L.mapTypeOf(L.typeOf(receiver));
-    if (receiverType?.kind !== "map" && receiverType?.kind !== "set") return null;
+    if (receiverType?.kind !== "map" && receiverType?.kind !== "set" && receiverType?.kind !== "searchParams") return null;
     mode = node.expression.name.text as Mode;
     node = receiver;
   }
   const mapped = L.mapTypeOf(L.typeOf(node));
-  if (!mapped || !["array", "set", "map", "record", "string"].includes(mapped.kind)) return null;
+  if (!mapped || !["array", "set", "map", "record", "string", "searchParams"].includes(mapped.kind)) return null;
   const shape = mapped.kind === "record" ? L.shapes.get(mapped.shapeId) : undefined;
   if (mapped.kind === "record" && (!shape?.tuple || shape.fields.length === 0 ||
       !shape.fields.every((f) => typeEquals(f.type, shape.fields[0]!.type)))) return null;
@@ -41,9 +41,10 @@ function collectionSource(L: Lowerer, input: ts.Expression): Source | null {
   let element: IrType;
   if (type.kind === "array" || type.kind === "set") element = type.elem;
   else if (type.kind === "map") element = mode === "keys" ? type.key : type.value;
+  else if (type.kind === "searchParams") element = STRING;
   else if (type.kind === "record" && shape?.tuple) element = shape.fields[0]!.type;
   else return null;
-  mode ??= type.kind === "map" ? "entries" : "values";
+  mode ??= type.kind === "map" || type.kind === "searchParams" ? "entries" : "values";
   if (mode === "entries") {
     const key = type.kind === "map" ? type.key : element;
     element = { kind: "record", shapeId: L.shapes.intern([{ name: "0", type: key }, { name: "1", type: element }], true) };
@@ -85,11 +86,88 @@ export function lowerCollectionFromCall(L: Lowerer, call: ts.CallExpression): Ir
     L.noLowering("Array.from with this mapper signature", mapperNode!, "the native mapper accepts the element and optional numeric index");
   }
   const output = mapper?.type.kind === "func" ? mapper.type.ret : source.element;
+  if (mapper && output.kind === "dyn" && source.value.type.kind === "map" && L.nativeDynamicMaps) {
+    return materializeDynamicMap(L, source, mapper, locOf(call));
+  }
   if (!mapper && output.kind === "dyn" && source.value.type.kind === "set" && L.nativeDynamicSets) {
     return materializeDynamicSet(L, source.value, locOf(call));
   }
   fenceProducedArrayElem(L, call, "'Array.from(collection, mapper)'", output);
   return materialize(L, source, mapper, locOf(call));
+}
+
+/** Rust-only Map<dyn, dyn> materialization keeps the outer unknown[] in the
+ * checked-dynamic representation. Mapper calls remain interleaved with live
+ * iterator reads, including insertion/deletion behavior and callback index. */
+function materializeDynamicMap(L: Lowerer, source: Source, mapper: IrExpr, loc: SrcLoc): IrExpr {
+  const mapType = source.value.type;
+  if (mapType.kind !== "map" || mapType.key.kind !== "dyn" || mapType.value.kind !== "dyn" || mapper.type.kind !== "func" || mapper.type.ret.kind !== "dyn") {
+    throw new InternalCompilerError("dynamic Map materialization requires Map<dyn, dyn> and a dyn-returning mapper");
+  }
+  const key = `materializeDynMap:${typeKey(mapType)}:${source.mode}:${typeKey(source.element)}:${typeKey(mapper.type)}`;
+  let helper = L.arrHofHelpers.get(key);
+  if (!helper) {
+    helper = `%collection.fromDynMap.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, helper);
+    const mapperType = mapper.type;
+    const receiver = varRef("source.0", mapType, loc);
+    const mapperRef = varRef("mapper.0", mapperType, loc);
+    const cursor = varRef("i.0", F64, loc);
+    const index = varRef("index.0", F64, loc);
+    const out = varRef("out.0", DYN, loc);
+    const iter = (method: "iterCount" | "iterLive" | "iterKey" | "iterValue" | "iterEnter" | "iterExit", args: IrExpr[], output: IrType): IrExpr => ({
+      kind: "mapIntrinsic", method, receiver, args, type: output, loc,
+    });
+    const mapKey = iter("iterKey", [cursor], DYN);
+    const mapValue = iter("iterValue", [cursor], DYN);
+    const element: IrExpr = source.mode === "entries"
+      ? { kind: "recordLit", fields: [{ name: "0", value: mapKey }, { name: "1", value: mapValue }], type: source.element, loc }
+      : source.mode === "keys" ? mapKey : mapValue;
+    const mapped: IrExpr = {
+      kind: "callValue",
+      callee: mapperRef,
+      args: [element, index].slice(0, mapperType.params.length),
+      type: DYN,
+      loc,
+    };
+    const loop = countedFor(loc, iter("iterCount", [], F64), () => [{
+      kind: "if",
+      cond: iter("iterLive", [cursor], BOOL),
+      then: [
+        { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.packPush", args: [out, mapped], type: VOID, loc }, loc },
+        { kind: "assign", localId: "index.0", value: { kind: "bin", op: "+", left: index, right: numLit(1, loc), type: F64, loc }, loc },
+      ],
+      else_: null,
+      loc,
+    }]);
+    L.liftedFns.push({
+      name: helper,
+      params: [
+        { localId: "source.0", name: "source", type: mapType },
+        { localId: "mapper.0", name: "mapper", type: mapperType },
+      ],
+      returnType: DYN,
+      locals: [
+        { id: "source.0", name: "source", type: mapType, mutable: false },
+        { id: "mapper.0", name: "mapper", type: mapperType, mutable: false },
+        { id: "out.0", name: "out", type: DYN, mutable: false },
+        { id: "i.0", name: "cursor", type: F64, mutable: true },
+        { id: "index.0", name: "index", type: F64, mutable: true },
+      ],
+      body: [
+        { kind: "varDecl", localId: "out.0", init: { kind: "dynArrLit", elems: [], type: DYN, loc }, loc },
+        { kind: "varDecl", localId: "index.0", init: numLit(0, loc), loc },
+        { kind: "exprStmt", expr: iter("iterEnter", [], VOID), loc },
+        {
+          kind: "tryCatch", tryBody: [loop], catchBody: null, catchLocalId: null,
+          finallyBody: [{ kind: "exprStmt", expr: iter("iterExit", [], VOID), loc }], loc,
+        },
+        { kind: "return", value: out, loc },
+      ],
+      loc,
+    });
+  }
+  return { kind: "call", callee: helper, args: [source.value, mapper], type: DYN, loc };
 }
 
 /** Rust-only Set<dyn> snapshot into the existing checked-dynamic array
@@ -186,6 +264,13 @@ function materializeFn(L: Lowerer, name: string, source: Source, mapperType: IrT
     const payload: IrExpr = type.kind === "map"
       ? { kind: "mapIntrinsic", method: "iterValue", receiver, args: [cursor], type: type.value, loc }
       : key;
+    value = source.mode === "entries"
+      ? { kind: "recordLit", fields: [{ name: "0", value: key }, { name: "1", value: payload }], type: source.element, loc }
+      : source.mode === "keys" ? key : payload;
+  } else if (type.kind === "searchParams") {
+    length = { kind: "libCall", fn: "sp.size", args: [receiver], type: F64, loc };
+    const key: IrExpr = { kind: "libCall", fn: "sp.keyAt", args: [receiver, cursor], type: STRING, loc };
+    const payload: IrExpr = { kind: "libCall", fn: "sp.valAt", args: [receiver, cursor], type: STRING, loc };
     value = source.mode === "entries"
       ? { kind: "recordLit", fields: [{ name: "0", value: key }, { name: "1", value: payload }], type: source.element, loc }
       : source.mode === "keys" ? key : payload;

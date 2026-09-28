@@ -71,6 +71,7 @@ export class RustDynamicFromEmitter {
       case "bool": return `${name}::Boolean(${value})`;
       case "string": return `${name}::String(${value})`;
       case "symbol": return `${name}::Symbol(${value})`;
+      case "regex": return `${name}::Regex(${value})`;
       case "url": return `${name}::Url(${value})`;
       case "bytes": {
         if (type.elem === "u8") {

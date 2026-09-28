@@ -2719,7 +2719,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       const narrowed = narrowedTs.flags & ts.TypeFlags.Never ? null : lowerer.mapTypeOf(narrowedTs);
       if (
         narrowed &&
-        (narrowed.kind === "date" || narrowed.kind === "bigint" || narrowed.kind === "symbol" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
+        (narrowed.kind === "date" || narrowed.kind === "regex" || narrowed.kind === "url" || narrowed.kind === "bigint" || narrowed.kind === "symbol" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
       ) {
         return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
       }

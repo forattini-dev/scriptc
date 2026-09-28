@@ -884,6 +884,20 @@ export class RustDynamicEmitter {
     switch (type.kind) {
       case "dyn": case "jsval": return value;
       case "date": return `sc_dyn_check_date_at(${value}, ${path})`;
+      case "regex": {
+        const name = this.context.dynTypeName();
+        const island = this.context.hasEmbeddedModules()
+          ? `, ${name}::Island(value) if runtime::island_instance_of(&value, &runtime::island_global_get("RegExp")) => { let source = runtime::island_exit_string(&runtime::island_get_property(&value, "source")); let flags = runtime::island_exit_string(&runtime::island_get_property(&value, "flags")); runtime::regex_new(&source, &flags) }`
+          : "";
+        return `{ let value = ${value}; match value { ${name}::Regex(value) => value${island}, value => sc_dyn_check_fail_at("RegExp", &value, ${path}), } }`;
+      }
+      case "url": {
+        const name = this.context.dynTypeName();
+        const island = this.context.hasEmbeddedModules()
+          ? `, ${name}::Island(value) if runtime::island_instance_of(&value, &runtime::island_global_get("URL")) => runtime::url_new(&runtime::island_exit_string(&runtime::island_get_property(&value, "href")))`
+          : "";
+        return `{ let value = ${value}; match value { ${name}::Url(value) => value${island}, value => sc_dyn_check_fail_at("URL", &value, ${path}), } }`;
+      }
       case "effect": return `sc_dyn_check_effect_at(${value}, ${path})`;
       case "f64": return `sc_dyn_check_number_at(${value}, ${path})`;
       case "bigint": return `sc_dyn_check_bigint_at(${value}, ${path})`;

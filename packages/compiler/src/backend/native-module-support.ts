@@ -5,7 +5,7 @@ import { nativeCallableRecordBackendDiagnostics } from "./native-callable-record
 import { nativeBigIntBackendDiagnostics } from "./native-bigint-support.js";
 import { nativeRegexBackendDiagnostics } from "./native-regex-support.js";
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
-import type { IrModule, SrcLoc } from "../ir/ir.js";
+import type { IrModule, IrType, SrcLoc } from "../ir/ir.js";
 import { LlvmUnsupportedError } from "./llvm/unsupported.js";
 
 /** Native module evaluation has a Rust implementation; other emitters must
@@ -27,6 +27,31 @@ export function nativeModuleBackendDiagnostics(
   if (bigints.length > 0) return bigints;
   const callableRecords = nativeCallableRecordBackendDiagnostics(mod, backend);
   if (callableRecords.length > 0) return callableRecords;
+  const records = new Map(mod.records?.map((shape) => [shape.id, shape]));
+  const unions = new Map(mod.unions?.map((union) => [union.id, union]));
+  const containsDynamicBrand = (type: IrType | undefined, seen = new Set<string>()): boolean => {
+    if (type === undefined) return false;
+    if (type.kind === "regex" || type.kind === "url") return true;
+    if (type.kind === "array" || type.kind === "set" || type.kind === "promise") {
+      return containsDynamicBrand(type.kind === "array" || type.kind === "set" ? type.elem : type.inner, seen);
+    }
+    if (type.kind === "map") return containsDynamicBrand(type.key, seen) || containsDynamicBrand(type.value, seen);
+    if (type.kind === "func") return type.params.some((param) => containsDynamicBrand(param, seen)) || containsDynamicBrand(type.ret, seen);
+    if (type.kind === "record") {
+      const key = `record:${type.shapeId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      const shape = records.get(type.shapeId);
+      return shape !== undefined && (shape.fields.some((field) => containsDynamicBrand(field.type, seen)) || containsDynamicBrand(shape.indexValue, seen));
+    }
+    if (type.kind === "union") {
+      const key = `union:${type.unionId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return unions.get(type.unionId)?.arms.some((arm) => containsDynamicBrand(arm, seen)) ?? false;
+    }
+    return false;
+  };
   let loc = mod.functions.find((fn) => fn.syncModuleCacheGlobal !== undefined)?.loc;
   let feature = "native local module imports";
   const visit = (value: unknown): void => {
@@ -35,11 +60,23 @@ export function nativeModuleBackendDiagnostics(
       for (const child of value) visit(child);
       return;
     }
-    const node = value as { kind?: unknown; fn?: unknown; test?: unknown; loc?: SrcLoc };
+    const node = value as { kind?: unknown; fn?: unknown; test?: unknown; value?: { type?: IrType }; loc?: SrcLoc };
     if (node.kind === "dynTest" && (node.test === "finite" || node.test === "nan" || node.test === "safeInteger")) {
       feature = "checked-dynamic Number predicates";
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
       return;
+    }
+    if (node.kind === "dynTest" && (node.test === "regex" || node.test === "url")) {
+      feature = "checked-dynamic builtin instanceof";
+      loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+      return;
+    }
+    if (node.kind === "dynFrom") {
+      if (containsDynamicBrand(node.value?.type)) {
+        feature = "checked-dynamic RegExp/URL values";
+        loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+        return;
+      }
     }
     if (node.kind === "libCall" && node.fn === "str.decodeUri") {
       feature = "decodeURI";

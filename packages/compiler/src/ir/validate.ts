@@ -5110,6 +5110,7 @@ function validateFunction(
             (a) =>
               a.kind === "undefinedT" ||
               jsonOk(a) ||
+              a.kind === "regex" || a.kind === "url" ||
               isDynTypedRefType(a) ||
               DYN_HANDLE_KINDS.has(a.kind),
           ) ??
@@ -5120,6 +5121,9 @@ function validateFunction(
         // marker object caughtToDyn builds) as a fresh runtime error.
         const errorOk = e.type.kind === "object" && e.type.className === "%Error";
         const classOk = isDynTypedRefType(e.type);
+        // Rust's checked-dynamic value retains these native object brands
+        // and dynCheck validates the tag before restoring the handle.
+        const brandedOk = e.type.kind === "regex" || e.type.kind === "url";
         // ADAPTABLE function targets unwrap or wrap the checked-dynamic tree's function
         // kind (the checked-dynamic function boundary, ir.ts).
         const funcOk =
@@ -5128,7 +5132,7 @@ function validateFunction(
         // Runtime HANDLE targets unwrap the checked-dynamic tree's handle kind by tag (a
         // retained reference, no copy — DYN_HANDLE_KINDS).
         const handleOk = DYN_HANDLE_KINDS.has(e.type.kind);
-        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !classOk && !funcOk && !handleOk) {
+        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !classOk && !brandedOk && !funcOk && !handleOk) {
           err(`dynCheck against non-JSON-representable type ${e.type.kind}`, e.loc);
         }
         break;

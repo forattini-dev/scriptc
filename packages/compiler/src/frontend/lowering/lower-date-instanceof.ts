@@ -3,13 +3,18 @@ import { BOOL, type IrExpr } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
 
-/** Native Date tags distinguish objects from numeric timestamps without coercion. */
+/** Native object tags distinguish branded values without coercion. */
 export function lowerNativeDateRegexInstanceof(L: Lowerer, expr: ts.BinaryExpression): IrExpr | null {
   const kind = L.isStdlibGlobal(expr.right, "Date") ? "date"
-    : L.isStdlibGlobal(expr.right, "RegExp") ? "regex" : null;
+    : L.isStdlibGlobal(expr.right, "RegExp") ? "regex"
+    : L.isStdlibGlobal(expr.right, "URL") ? "url" : null;
   if (!kind || L.caughtLocalOf(expr.left)) return null;
   const value = L.lowerExpr(expr.left), loc = locOf(expr);
-  if (value.type.kind === "dyn") return kind === "date" ? { kind: "dynTest", test: "date", value, type: BOOL, loc } : null;
+  if (value.type.kind === "dyn") {
+    if (kind === "date") return { kind: "dynTest", test: "date", value, type: BOOL, loc };
+    if (L.nativeDynamicBuiltinInstanceof) return { kind: "dynTest", test: kind, value, type: BOOL, loc };
+    return null;
+  }
   if (value.type.kind === "union") {
     const union = L.unions.get(value.type.unionId);
     const tag = union?.arms.findIndex(arm => arm.kind === kind) ?? -1;

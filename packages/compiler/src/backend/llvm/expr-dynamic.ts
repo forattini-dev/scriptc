@@ -518,7 +518,7 @@ export function emitDynamicExpr(host: LlvmEmitterContext, e: ExprOf<"dynFrom" | 
         B.line(`${neg} = xor i1 ${test}, true`);
         return { name: neg, type: e.type };
       }
-      case "dynTest": { if (e.test === "bigint" || e.test === "date" || e.test === "finite" || e.test === "nan" || e.test === "safeInteger") throw new LlvmUnsupportedError("this checked-dynamic predicate requires --backend rust", e.loc);
+      case "dynTest": { if (e.test === "bigint" || e.test === "date" || e.test === "regex" || e.test === "url" || e.test === "finite" || e.test === "nan" || e.test === "safeInteger") throw new LlvmUnsupportedError("this checked-dynamic predicate requires --backend rust", e.loc);
         // A pure kind compare on the dyn node — borrowed; only the truthy
         // form also reads a scalar payload (the runtime's ToBoolean).
         const d = host.emitExpr(e.value);

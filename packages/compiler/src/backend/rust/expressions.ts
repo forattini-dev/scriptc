@@ -303,6 +303,8 @@ export class RustExpressionEmitter {
         switch (expr.test) {
           case "number": test = `matches!(&${value}, ${name}::Number(..))`; break;
           case "date": test = `matches!(&${value}, ${name}::Date(..))`; break;
+          case "regex": test = `matches!(&${value}, ${name}::Regex(..))`; break;
+          case "url": test = `matches!(&${value}, ${name}::Url(..))`; break;
           case "bigint": test = `matches!(&${value}, ${name}::BigInt(..))`; break;
           case "symbol": test = `matches!(&${value}, ${name}::Symbol(..))`; break;
           case "integer": test = `matches!(&${value}, ${name}::Number(number) if runtime::number_is_integer(*number))`; break;
