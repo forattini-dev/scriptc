@@ -1,4 +1,4 @@
-pub struct MapData<K: Clone + 'static, V: HeapValue> {
+pub struct MapData<K: HeapValue, V: HeapValue> {
     entries: Vec<Option<(K, V)>>,
     view: Option<Rc<dyn MapView<K, V>>>,
     live: usize,
@@ -10,10 +10,11 @@ pub struct MapData<K: Clone + 'static, V: HeapValue> {
     prototype: Option<V>,
 }
 
-impl<K: Clone + 'static, V: HeapValue> Trace for MapData<K, V> {
+impl<K: HeapValue, V: HeapValue> Trace for MapData<K, V> {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         if let Some(view) = &self.view { view.trace(tracer); }
-        for (_, value) in self.entries.iter().flatten() {
+        for (key, value) in self.entries.iter().flatten() {
+            key.trace_value(tracer);
             value.trace_value(tracer);
         }
         if let Some(prototype) = &self.prototype {
@@ -22,7 +23,7 @@ impl<K: Clone + 'static, V: HeapValue> Trace for MapData<K, V> {
     }
 }
 
-impl<K: Clone + 'static, V: HeapValue> ClearEdges for MapData<K, V> {
+impl<K: HeapValue, V: HeapValue> ClearEdges for MapData<K, V> {
     fn clear_edges(&mut self) {
         self.entries.clear();
         self.view = None;
@@ -32,7 +33,7 @@ impl<K: Clone + 'static, V: HeapValue> ClearEdges for MapData<K, V> {
 
 pub type JsMap<K, V> = Gc<MapData<K, V>>;
 
-pub fn map_new<K: Clone + 'static, V: HeapValue>() -> JsMap<K, V> {
+pub fn map_new<K: HeapValue, V: HeapValue>() -> JsMap<K, V> {
     Gc::new(MapData {
         entries: Vec::new(),
         view: None,
@@ -45,12 +46,12 @@ pub fn map_new<K: Clone + 'static, V: HeapValue>() -> JsMap<K, V> {
     })
 }
 
-pub fn map_mark_null_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+pub fn map_mark_null_prototype<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) {
     if let Some(view) = map_view(map) { view.mark_null_prototype(); return; }
     map.with_mut(|data| data.null_prototype = true);
 }
 
-pub fn map_has_null_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> bool {
+pub fn map_has_null_prototype<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> bool {
     if let Some(view) = map_view(map) { return view.has_null_prototype(); }
     map.with(|data| data.null_prototype)
 }
@@ -62,7 +63,7 @@ pub fn map_mark_module_namespace<V: HeapValue>(map: &JsMap<JsString, V>) {
     map_mark_namespace_by(map, &|left, right| left.encode_utf16().cmp(right.encode_utf16()));
 }
 
-fn map_mark_namespace_by<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, compare: MapKeyCompare<'_, K>) {
+fn map_mark_namespace_by<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, compare: MapKeyCompare<'_, K>) {
     if let Some(view) = map_view(map) { view.mark_namespace(compare); return; }
     map.with_mut(|data| {
         data.module_namespace = true;
@@ -77,24 +78,24 @@ fn map_mark_namespace_by<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, co
     });
 }
 
-pub fn map_is_module_namespace<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> bool {
+pub fn map_is_module_namespace<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> bool {
     if let Some(view) = map_view(map) { return view.is_namespace(); }
     map.with(|data| data.module_namespace)
 }
 
 /// Tracks descriptor invariants that the native Proxy slice cannot yet enforce.
 /// This mark follows aliases and projections; it is not an implementation of freeze.
-pub fn map_mark_proxy_restricted<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+pub fn map_mark_proxy_restricted<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) {
     if let Some(view) = map_view(map) { return view.mark_proxy_restricted(); }
     map.with_mut(|data| data.proxy_restricted = true);
 }
 
-pub fn map_is_proxy_restricted<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> bool {
+pub fn map_is_proxy_restricted<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> bool {
     if let Some(view) = map_view(map) { return view.is_proxy_restricted(); }
     map.with(|data| data.proxy_restricted)
 }
 
-pub fn map_set_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, prototype: V) {
+pub fn map_set_prototype<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, prototype: V) {
     if map_is_module_namespace(map) {
         throw_type_error("[object Module] is not extensible".to_owned());
     }
@@ -102,14 +103,14 @@ pub fn map_set_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, pr
     map.with_mut(|data| data.prototype = Some(prototype));
 }
 
-pub fn map_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> Option<V> {
+pub fn map_prototype<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> Option<V> {
     if let Some(view) = map_view(map) { return view.prototype(); }
     map.with(|data| data.prototype.clone())
 }
 
 pub fn map_set_by<K, V, F>(map: &JsMap<K, V>, key: K, value: V, equal: F)
 where
-    K: Clone + 'static,
+    K: HeapValue,
     V: HeapValue,
     F: Fn(&K, &K) -> bool,
 {
@@ -134,7 +135,7 @@ where
 
 pub fn map_get_by<K, V, F>(map: &JsMap<K, V>, key: &K, equal: F) -> Option<V>
 where
-    K: Clone + 'static,
+    K: HeapValue,
     V: HeapValue,
     F: Fn(&K, &K) -> bool,
 {
@@ -150,7 +151,7 @@ where
 
 pub fn map_has_by<K, V, F>(map: &JsMap<K, V>, key: &K, equal: F) -> bool
 where
-    K: Clone + 'static,
+    K: HeapValue,
     V: HeapValue,
     F: Fn(&K, &K) -> bool,
 {
@@ -165,7 +166,7 @@ where
 
 pub fn map_delete_by<K, V, F>(map: &JsMap<K, V>, key: &K, equal: F) -> bool
 where
-    K: Clone + 'static,
+    K: HeapValue,
     V: HeapValue,
     F: Fn(&K, &K) -> bool,
 {
@@ -190,12 +191,12 @@ where
     })
 }
 
-pub fn map_size<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> f64 {
+pub fn map_size<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> f64 {
     if let Some(view) = map_view(map) { return view.size(); }
     map.with(|data| data.live as f64)
 }
 
-pub fn map_clear<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+pub fn map_clear<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) {
     if let Some(view) = map_view(map) { view.clear(); return; }
     if map_is_module_namespace(map) {
         throw_type_error("Cannot modify module namespace".to_owned());
@@ -212,18 +213,18 @@ pub fn map_clear<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
     });
 }
 
-pub fn map_iter_count<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> f64 {
+pub fn map_iter_count<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> f64 {
     if let Some(view) = map_view(map) { return view.iter_count(); }
     map.with(|data| data.entries.len() as f64)
 }
 
-pub fn map_iter_live<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> bool {
+pub fn map_iter_live<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> bool {
     if let Some(view) = map_view(map) { return view.iter_live(index); }
     let index = array_index(index, false, map.with(|data| data.entries.len()));
     map.with(|data| data.entries[index].is_some())
 }
 
-pub fn map_iter_key<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> K {
+pub fn map_iter_key<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> K {
     if let Some(view) = map_view(map) { return view.iter_key(index); }
     let index = array_index(index, false, map.with(|data| data.entries.len()));
     map.with(|data| {
@@ -235,7 +236,7 @@ pub fn map_iter_key<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: 
     })
 }
 
-pub fn map_iter_value<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> V {
+pub fn map_iter_value<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> V {
     if let Some(view) = map_view(map) { return view.iter_value(index); }
     let index = array_index(index, false, map.with(|data| data.entries.len()));
     map.with(|data| {
@@ -247,12 +248,12 @@ pub fn map_iter_value<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index
     })
 }
 
-pub fn map_iter_enter<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+pub fn map_iter_enter<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) {
     if let Some(view) = map_view(map) { view.iter_enter(); return; }
     map.with_mut(|data| data.iteration_depth += 1);
 }
 
-pub fn map_iter_exit<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+pub fn map_iter_exit<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) {
     if let Some(view) = map_view(map) { view.iter_exit(); return; }
     map.with_mut(|data| {
         data.iteration_depth = data
@@ -318,13 +319,13 @@ pub fn map_string_entries_js_order<V: HeapValue>(
 
 pub type JsSet<T> = JsMap<T, bool>;
 
-pub fn set_new<T: Clone + 'static>() -> JsSet<T> {
+pub fn set_new<T: HeapValue>() -> JsSet<T> {
     map_new()
 }
 
 pub fn set_from_array_by<T, N, F>(source: &JsArray<T>, normalize: N, equal: F) -> JsSet<T>
 where
-    T: ArrayElement,
+    T: ArrayElement + HeapValue,
     N: Fn(T) -> T,
     F: Fn(&T, &T) -> bool + Copy,
 {
@@ -338,7 +339,7 @@ where
 
 pub fn set_add_by<T, F>(set: &JsSet<T>, value: T, equal: F)
 where
-    T: Clone + 'static,
+    T: HeapValue,
     F: Fn(&T, &T) -> bool,
 {
     map_set_by(set, value, true, equal);
@@ -346,7 +347,7 @@ where
 
 pub fn set_has_by<T, F>(set: &JsSet<T>, value: &T, equal: F) -> bool
 where
-    T: Clone + 'static,
+    T: HeapValue,
     F: Fn(&T, &T) -> bool,
 {
     map_has_by(set, value, equal)
@@ -354,13 +355,13 @@ where
 
 pub fn set_delete_by<T, F>(set: &JsSet<T>, value: &T, equal: F) -> bool
 where
-    T: Clone + 'static,
+    T: HeapValue,
     F: Fn(&T, &T) -> bool,
 {
     map_delete_by(set, value, equal)
 }
 
-pub fn set_to_array<T: ArrayElement>(set: &JsSet<T>) -> JsArray<T> {
+pub fn set_to_array<T: ArrayElement + HeapValue>(set: &JsSet<T>) -> JsArray<T> {
     let values = set.with(|data| {
         (0..data.entry_count()).filter_map(|index| data.entry_key(index))
             .collect()

@@ -15,12 +15,12 @@ pub fn effect_array_iterator<T: ArrayElement>(items: &JsArray<T>) -> impl Iterat
     })
 }
 
-struct EffectMapIterator<K: Clone + 'static, V: HeapValue> {
+struct EffectMapIterator<K: HeapValue, V: HeapValue> {
     source: Option<JsMap<K, V>>,
     index: f64,
 }
 
-impl<K: Clone + 'static, V: HeapValue> Iterator for EffectMapIterator<K, V> {
+impl<K: HeapValue, V: HeapValue> Iterator for EffectMapIterator<K, V> {
     type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -37,7 +37,7 @@ impl<K: Clone + 'static, V: HeapValue> Iterator for EffectMapIterator<K, V> {
     }
 }
 
-impl<K: Clone + 'static, V: HeapValue> EffectMapIterator<K, V> {
+impl<K: HeapValue, V: HeapValue> EffectMapIterator<K, V> {
     fn release(&mut self) {
         if let Some(map) = self.source.take() {
             map_iter_exit(&map);
@@ -45,7 +45,7 @@ impl<K: Clone + 'static, V: HeapValue> EffectMapIterator<K, V> {
     }
 }
 
-impl<K: Clone + 'static, V: HeapValue> Drop for EffectMapIterator<K, V> {
+impl<K: HeapValue, V: HeapValue> Drop for EffectMapIterator<K, V> {
     fn drop(&mut self) {
         self.release();
     }
@@ -53,7 +53,7 @@ impl<K: Clone + 'static, V: HeapValue> Drop for EffectMapIterator<K, V> {
 
 /// Keep tombstones stable until iteration finishes or its fiber unwinds.
 /// Drop releases the guard on failure, interruption and callback panics too.
-pub fn effect_map_iterator<K: Clone + 'static, V: HeapValue>(
+pub fn effect_map_iterator<K: HeapValue, V: HeapValue>(
     map: &JsMap<K, V>,
 ) -> impl Iterator<Item = (K, V)> + use<K, V> {
     map_iter_enter(map);

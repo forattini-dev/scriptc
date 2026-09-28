@@ -4,7 +4,7 @@
 type MapKeyEqual<'a, K> = &'a dyn Fn(&K, &K) -> bool;
 type MapKeyCompare<'a, K> = &'a dyn Fn(&K, &K) -> std::cmp::Ordering;
 
-trait MapView<K: Clone + 'static, V: HeapValue>: Trace {
+trait MapView<K: HeapValue, V: HeapValue>: Trace {
     fn source(&self) -> &dyn std::any::Any;
     fn identity(&self) -> usize;
     fn get(&self, key: &K, equal: MapKeyEqual<'_, K>) -> Option<V>;
@@ -29,17 +29,17 @@ trait MapView<K: Clone + 'static, V: HeapValue>: Trace {
     fn prototype(&self) -> Option<V>;
 }
 
-struct MappedMap<K: Clone + 'static, S: HeapValue, T: HeapValue> {
+struct MappedMap<K: HeapValue, S: HeapValue, T: HeapValue> {
     source: JsMap<K, S>,
     read: fn(S) -> T,
     write: fn(T) -> S,
 }
 
-impl<K: Clone + 'static, S: HeapValue, T: HeapValue> Trace for MappedMap<K, S, T> {
+impl<K: HeapValue, S: HeapValue, T: HeapValue> Trace for MappedMap<K, S, T> {
     fn trace(&self, tracer: &mut Tracer<'_>) { tracer.edge(&self.source); }
 }
 
-impl<K: Clone + 'static, S: HeapValue, T: HeapValue> MapView<K, T> for MappedMap<K, S, T> {
+impl<K: HeapValue, S: HeapValue, T: HeapValue> MapView<K, T> for MappedMap<K, S, T> {
     fn source(&self) -> &dyn std::any::Any { &self.source }
     fn identity(&self) -> usize { map_identity(&self.source) }
     fn get(&self, key: &K, equal: MapKeyEqual<'_, K>) -> Option<T> {
@@ -68,7 +68,7 @@ impl<K: Clone + 'static, S: HeapValue, T: HeapValue> MapView<K, T> for MappedMap
     fn prototype(&self) -> Option<T> { map_prototype(&self.source).map(self.read) }
 }
 
-impl<K: Clone + 'static, V: HeapValue> MapData<K, V> {
+impl<K: HeapValue, V: HeapValue> MapData<K, V> {
     fn entry_count(&self) -> usize {
         self.view.as_ref().map_or(self.entries.len(), |view| view.iter_count() as usize)
     }
@@ -86,19 +86,19 @@ impl<K: Clone + 'static, V: HeapValue> MapData<K, V> {
     }
 }
 
-fn map_view<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> Option<Rc<dyn MapView<K, V>>> {
+fn map_view<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> Option<Rc<dyn MapView<K, V>>> {
     map.with(|data| data.view.clone())
 }
 
-pub fn map_identity<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> usize {
+pub fn map_identity<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> usize {
     map.with(|data| data.view.as_ref().map_or_else(|| map.identity(), |view| view.identity()))
 }
 
-pub fn map_ptr_eq<K: Clone + 'static, S: HeapValue, T: HeapValue>(left: &JsMap<K, S>, right: &JsMap<K, T>) -> bool {
+pub fn map_ptr_eq<K: HeapValue, S: HeapValue, T: HeapValue>(left: &JsMap<K, S>, right: &JsMap<K, T>) -> bool {
     map_identity(left) == map_identity(right)
 }
 
-pub fn map_mapped<K: Clone + 'static, S: HeapValue, T: HeapValue>(
+pub fn map_mapped<K: HeapValue, S: HeapValue, T: HeapValue>(
     source: JsMap<K, S>, read: fn(S) -> T, write: fn(T) -> S,
 ) -> JsMap<K, T> {
     Gc::new(MapData {
@@ -109,7 +109,7 @@ pub fn map_mapped<K: Clone + 'static, S: HeapValue, T: HeapValue>(
 }
 
 /// Recover the original storage on a return crossing without copying entries.
-pub fn map_mapped_source<K: Clone + 'static, S: HeapValue, T: HeapValue>(map: &JsMap<K, T>) -> Option<JsMap<K, S>> {
+pub fn map_mapped_source<K: HeapValue, S: HeapValue, T: HeapValue>(map: &JsMap<K, T>) -> Option<JsMap<K, S>> {
     let direct: &dyn std::any::Any = map;
     map.with(|data| data.view.as_ref()?.source().downcast_ref::<JsMap<K, S>>().cloned())
         .or_else(|| direct.downcast_ref::<JsMap<K, S>>().cloned())
