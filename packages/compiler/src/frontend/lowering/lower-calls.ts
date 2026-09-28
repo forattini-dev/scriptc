@@ -4059,8 +4059,8 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
           return { kind: "libCall", fn: "number.isFinite", args: [probed], type: BOOL, loc };
         }
       }
-      // STATIC encodeURIComponent/encodeURI/decodeURIComponent
-      // (str.encodeUriComponent / str.encodeUri / str.decodeUriComponent —
+      // STATIC encodeURIComponent/encodeURI/decodeURIComponent/decodeURI
+      // (str.encodeUriComponent / str.encodeUri / str.decodeUriComponent / str.decodeUri —
       // scr_string.c; ECMA-exact over the runtime's UTF-8 strings, Node
       // is the oracle). Provenance like parseInt: a user function
       // shadowing the name has a different, non-stdlib symbol. The
@@ -4073,7 +4073,8 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
       if (
         (expr.expression.text === "encodeURIComponent" ||
           expr.expression.text === "encodeURI" ||
-          expr.expression.text === "decodeURIComponent") &&
+          expr.expression.text === "decodeURIComponent" ||
+          (expr.expression.text === "decodeURI" && lowerer.nativeDecodeUri)) &&
         lowerer.isStdlibSymbol(lowerer.resolveValueSymbol(expr.expression) ?? undefined)
       ) {
         const name = expr.expression.text;
@@ -4085,10 +4086,10 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
         }
         const loc = locOf(expr);
         const argNode = expr.arguments[0]!;
-        if (name === "decodeURIComponent") {
+        if (name === "decodeURIComponent" || name === "decodeURI") {
           const d = optionalCallValue(lowerer, argNode) ?? lowerer.lowerExpr(argNode);
           const s = lowerer.ensureString(d, argNode);
-          return { kind: "libCall", fn: "str.decodeUriComponent", args: [s], type: STRING, loc };
+          return { kind: "libCall", fn: name === "decodeURI" ? "str.decodeUri" : "str.decodeUriComponent", args: [s], type: STRING, loc };
         }
         const value = optionalCallValue(lowerer, argNode) ?? lowerer.lowerExpr(argNode);
         const s = lowerer.ensureString(value, argNode);

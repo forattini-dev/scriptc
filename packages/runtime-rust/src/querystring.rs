@@ -3,7 +3,7 @@ pub fn querystring_escape(value: &JsString) -> JsString {
 }
 
 pub fn querystring_unescape(value: &JsString) -> JsString {
-    if let Some(decoded) = string_decode_uri_component_try(value) {
+    if let Some(decoded) = decode_uri_try(value, false) {
         return decoded;
     }
 

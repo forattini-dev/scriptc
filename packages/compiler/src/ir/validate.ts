@@ -268,6 +268,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "str.btoa": { argTypes: [DYN], result: STRING },
   "str.b64Missing": { argTypes: [], result: STRING },
   "str.decodeUriComponent": { argTypes: [STRING], result: STRING },
+  "str.decodeUri": { argTypes: [STRING], result: STRING },
   "str.encodeUri": { argTypes: [STRING], result: STRING },
   "regexp.escape": { argTypes: [STRING], result: STRING },
   "num.toExponential": { argTypes: [F64], result: STRING },

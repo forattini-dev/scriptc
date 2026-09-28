@@ -41,6 +41,11 @@ export function nativeModuleBackendDiagnostics(
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
       return;
     }
+    if (node.kind === "libCall" && node.fn === "str.decodeUri") {
+      feature = "decodeURI";
+      loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+      return;
+    }
     if (node.kind === "libCall" && (node.fn === "module.import" || node.fn === "module.namespace" || node.fn === "promise.view")) {
       if (node.fn === "promise.view") feature = "Promise payload views";
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };

@@ -2202,6 +2202,8 @@ export type IrLibFn =
    * spec's URIError ("URI malformed"), catchable. Borrow; results +1. */
   | "str.encodeUriComponent"
   | "str.decodeUriComponent"
+  /** decodeURI, preserving escaped URI-reserved ASCII exactly as written. */
+  | "str.decodeUri"
   /** Annex B String.prototype.substr, implemented by the Rust runtime. */
   | "str.substr"
   /** String.concat over a checked-dynamic spread argument vector (Rust). */
@@ -7801,6 +7803,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // decodeURIComponent throws the spec's URIError on bad hex/invalid
   // UTF-8 octets (encodeURIComponent never throws — see the IrLibFn doc).
   "str.decodeUriComponent",
+  "str.decodeUri",
   "str.normalize",
   // The base64 globals: atob/btoa throw the catchable DOMException
   // InvalidCharacterError on malformed input; the zero-argument form

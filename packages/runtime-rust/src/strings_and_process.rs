@@ -107,7 +107,7 @@ fn uri_hex_byte(bytes: &[u8], index: usize) -> Option<u8> {
     Some((high << 4) | low)
 }
 
-fn string_decode_uri_component_try(value: &JsString) -> Option<JsString> {
+fn decode_uri_try(value: &JsString, keep_reserved: bool) -> Option<JsString> {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0usize;
@@ -119,9 +119,14 @@ fn string_decode_uri_component_try(value: &JsString) -> Option<JsString> {
         }
 
         let leading = uri_hex_byte(bytes, index)?;
+        let escape_start = index;
         index += 3;
         if leading < 0x80 {
-            decoded.push(leading);
+            if keep_reserved && matches!(leading, b';' | b'/' | b'?' | b':' | b'@' | b'&' | b'=' | b'+' | b'$' | b',' | b'#') {
+                decoded.extend_from_slice(&bytes[escape_start..index]);
+            } else {
+                decoded.push(leading);
+            }
             continue;
         }
 
@@ -154,7 +159,12 @@ fn string_decode_uri_component_try(value: &JsString) -> Option<JsString> {
 }
 
 pub fn string_decode_uri_component(value: &JsString) -> JsString {
-    string_decode_uri_component_try(value)
+    decode_uri_try(value, false)
+        .unwrap_or_else(|| throw_uri_error("URI malformed".to_owned()))
+}
+
+pub fn string_decode_uri(value: &JsString) -> JsString {
+    decode_uri_try(value, true)
         .unwrap_or_else(|| throw_uri_error("URI malformed".to_owned()))
 }
 

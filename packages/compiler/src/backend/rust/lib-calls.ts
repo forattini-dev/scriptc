@@ -308,6 +308,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "str.decodeUriComponent" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::string_decode_uri_component(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "str.decodeUri" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::string_decode_uri(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "str.substr" && expr.args.length === 3 && arg?.type.kind === "string" && secondArg !== undefined && expr.args[2] !== undefined) {
     return `runtime::string_substr(&(${context.emitExpr(arg)}), ${context.emitExpr(secondArg)}, ${context.emitExpr(expr.args[2])})`;
   }
