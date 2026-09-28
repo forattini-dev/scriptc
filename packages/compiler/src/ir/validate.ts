@@ -2803,7 +2803,10 @@ function validateFunction(
           err(`mapNew must be map-typed, got ${e.type.kind}`, e.loc);
           break;
         }
-        if (!isSupportedMapKey(e.type.key)) {
+        // Checked-dynamic keys are a backend capability selected before IR
+        // validation. They remain invalid in frontend modes that cannot
+        // produce them, while valid Rust IR must round-trip through here.
+        if (!isSupportedMapKey(e.type.key, true)) {
           err(`mapNew key kind ${e.type.key.kind} (frontend must fence)`, e.loc);
         }
         if (!isSupportedMapValue(e.type.value)) {

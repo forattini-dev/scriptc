@@ -422,6 +422,8 @@ export interface TypeMapperCtx {
   nativeCollectionArrays: boolean;
   /** Rust's traced generic Set can store checked-dynamic values. */
   nativeDynamicSets: boolean;
+  /** Rust's traced generic Map can store checked-dynamic keys. */
+  nativeDynamicMaps: boolean;
   /** Successful context-free mappings, keyed by dynamic posture + the
    * TypeScript server's stable type id. A generated facade can reference the
    * same large record/function type thousands of times; remapping its full
@@ -1454,13 +1456,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
     if (args.length !== 2) return null;
     const key = mapType(args[0]!, ctx);
-    if (!key || !isSupportedMapKey(key)) return null;
+    if (!key || !isSupportedMapKey(key, ctx.nativeDynamicMaps)) return null;
     const value = mapType(args[1]!, ctx);
     if (!value || !isSupportedMapValue(value)) return null;
     return mapOf(key, value);
   }
   // Set<T>: Map's sibling — same provenance rule, with f64/string
-  // callbacks, symbols, server handles). Anything else stays unmapped; the `new Set`
+  // callbacks, symbols, server handles, and Rust checked-dynamic values). Anything else stays unmapped; the `new Set`
   // lowering names the offending element type specifically.
   if (isStdlibInterface("Set") || isStdlibInterface("ReadonlySet")) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
@@ -1477,7 +1479,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // RegExp: a reference to the lib RegExp interface — provenance, not the
   // name (a user's own `interface RegExp` maps as a record). Regex values
   // are literals interned as immortal statics; the kind is fenced out of
-  // array elements, union arms, and Map keys/values above/below.
+  // array elements, union arms, and portable Map keys/values above/below.
   if (isStdlibInterface("RegExp")) {
     return { kind: "regex" };
   }
@@ -3633,8 +3635,8 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
       if (!mapped) {
         return `the ${container} shape is supported, but its ${role} type '${text(arg)}' does not compile`;
       }
-      if ((container === "Map" || container === "ReadonlyMap") && i === 0 && !isSupportedMapKey(mapped)) {
-        return `the ${container} shape is supported, but keys are limited to numbers and strings — '${text(arg)}' is outside that domain`;
+      if ((container === "Map" || container === "ReadonlyMap") && i === 0 && !isSupportedMapKey(mapped, ctx.nativeDynamicMaps)) {
+        return `the ${container} shape is supported, but keys are limited to native scalar keys${ctx.nativeDynamicMaps ? " and checked-dynamic values" : ""} — '${text(arg)}' is outside that domain`;
       }
       if ((container === "Map" || container === "ReadonlyMap") && i === 1 && !isSupportedMapValue(mapped)) {
         return `the ${container} shape is supported, but '${text(arg)}' values have no Map slot yet (functions, promises, and nested Maps stay out)`;

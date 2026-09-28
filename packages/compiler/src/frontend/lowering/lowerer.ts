@@ -353,6 +353,8 @@ export interface LowerOptions {
   nativeClassDynamicRefs?: boolean;
   /** Rust's traced generic Set can store checked-dynamic values. */
   nativeDynamicSets?: boolean;
+  /** Rust's traced generic Map can store checked-dynamic keys. */
+  nativeDynamicMaps?: boolean;
   /** Rust implements the Annex B String.prototype.substr operation. */
   nativeStringSubstr?: boolean;
   /** Rust can concatenate a checked-dynamic spread argument vector. */
@@ -457,6 +459,8 @@ export interface LowererMode {
   nativeClassDynamicRefs?: boolean;
   /** Rust's traced generic Set can store checked-dynamic values. */
   nativeDynamicSets?: boolean;
+  /** Rust's traced generic Map can store checked-dynamic keys. */
+  nativeDynamicMaps?: boolean;
   /** Rust implements the Annex B String.prototype.substr operation. */
   nativeStringSubstr?: boolean;
   /** Rust can concatenate a checked-dynamic spread argument vector. */
@@ -574,6 +578,7 @@ export function lowerToIr(
     nativeCollectionArrays: options.nativeCollectionArrays ?? false,
     nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
     nativeDynamicSets: options.nativeDynamicSets ?? false,
+    nativeDynamicMaps: options.nativeDynamicMaps ?? false,
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
     nativeStringNormalize: options.nativeStringNormalize ?? false,
@@ -601,6 +606,7 @@ export function lowerToIr(
         nativeCollectionArrays: options.nativeCollectionArrays ?? false,
         nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
         nativeDynamicSets: options.nativeDynamicSets ?? false,
+        nativeDynamicMaps: options.nativeDynamicMaps ?? false,
         nativeStringSubstr: options.nativeStringSubstr ?? false,
         nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
         nativeStringNormalize: options.nativeStringNormalize ?? false,
@@ -636,6 +642,7 @@ export function lowerToIr(
       nativeCollectionArrays: options.nativeCollectionArrays ?? false,
       nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
       nativeDynamicSets: options.nativeDynamicSets ?? false,
+      nativeDynamicMaps: options.nativeDynamicMaps ?? false,
       nativeStringSubstr: options.nativeStringSubstr ?? false,
       nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
       nativeStringNormalize: options.nativeStringNormalize ?? false,
@@ -665,6 +672,7 @@ export function lowerToIr(
     nativeCollectionArrays: options.nativeCollectionArrays ?? false,
     nativeClassDynamicRefs: options.nativeClassDynamicRefs ?? false,
     nativeDynamicSets: options.nativeDynamicSets ?? false,
+    nativeDynamicMaps: options.nativeDynamicMaps ?? false,
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
     nativeStringNormalize: options.nativeStringNormalize ?? false,
@@ -1083,6 +1091,7 @@ export class Lowerer {
   readonly nativeCollectionArrays: boolean;
   readonly nativeClassDynamicRefs: boolean;
   readonly nativeDynamicSets: boolean;
+  readonly nativeDynamicMaps: boolean;
   readonly nativeStringSubstr: boolean;
   readonly nativeStringConcatDyn: boolean;
   readonly nativeStringNormalize: boolean;
@@ -1855,6 +1864,7 @@ export class Lowerer {
     this.nativeCollectionArrays = mode.nativeCollectionArrays ?? false;
     this.nativeClassDynamicRefs = mode.nativeClassDynamicRefs ?? false;
     this.nativeDynamicSets = mode.nativeDynamicSets ?? false;
+    this.nativeDynamicMaps = mode.nativeDynamicMaps ?? false;
     this.nativeStringSubstr = mode.nativeStringSubstr ?? false;
     this.nativeStringConcatDyn = mode.nativeStringConcatDyn ?? false;
     this.nativeStringNormalize = mode.nativeStringNormalize ?? false;
@@ -1895,6 +1905,7 @@ export class Lowerer {
       dynamic: this.dynamic,
       nativeCollectionArrays: this.nativeCollectionArrays,
       nativeDynamicSets: this.nativeDynamicSets,
+      nativeDynamicMaps: this.nativeDynamicMaps,
       typeMemo: this.typeMemo,
       canMemoizeType: () =>
         this.typeParamBindings === null &&

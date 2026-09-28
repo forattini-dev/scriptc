@@ -4890,12 +4890,12 @@ export function lowerNew(lowerer: Lowerer, expr: ts.NewExpression): IrExpr {
           return { kind: "dynObjLit", type: DYN, loc };
         }
         const keyIr = targs[0] ? lowerer.mapTypeOf(targs[0]) : null;
-        if (targs[0] && (!keyIr || !isSupportedMapKey(keyIr))) {
+        if (targs[0] && (!keyIr || !isSupportedMapKey(keyIr, lowerer.nativeDynamicMaps))) {
           lowerer.unsupported(
             "SC1090",
             expr,
             `Map keys of type '${lowerer.checker.typeToString(targs[0])}' ` +
-              `(Map keys must be string or number)`,
+              `(Map keys must be native scalar keys or checked-dynamic values)`,
           );
         }
         if (targs[1]) {

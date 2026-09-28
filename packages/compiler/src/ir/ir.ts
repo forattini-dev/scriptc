@@ -251,7 +251,7 @@ export type IrType =
    * completed ctor signature to equal C's), which is what makes `newValue`
    * completion against C's one signature sound. Allowed in locals,
    * globals, params, returns, class/record fields, capture boxes, array
-   * elements, Map VALUES, and union arms; fenced out of Map keys, Set
+   * elements, Map values, and union arms; fenced out of portable Map keys and Set
    * elements, JSON, dyn/jsval conversion, and ToString. */
   | { kind: "classval"; className: string }
   /** An ECMAScript module namespace object for one statically-known module.
@@ -548,14 +548,15 @@ export function setOf(elem: IrType): IrType {
   return { kind: "set", elem };
 }
 
-/** The Map KEY fence: string (content), number (SameValueZero), or symbol
- * identity — the kinds a value/identity hash is honest for. Booleans,
- * objects, and the rest of JS's anything-goes keys stay out. Shared by the
- * frontend's type mapping/diagnostics and the validator. Set ELEMENTS use the same
+/** The portable Map KEY fence: string (content), number (SameValueZero), or
+ * symbol identity — the kinds a value/identity hash is honest for. Rust can
+ * additionally retain a checked-dynamic key and compare it with JS strict
+ * identity/value semantics. Shared by frontend mapping and validation. Set ELEMENTS use the same
  * fence: a set is hashed storage of its elements exactly as a map is of
  * its keys (isSupportedSetElem is this predicate under its own name). */
-export function isSupportedMapKey(t: IrType): boolean {
-  return t.kind === "f64" || t.kind === "string" || t.kind === "symbol";
+export function isSupportedMapKey(t: IrType, nativeDynamicMaps = false): boolean {
+  return t.kind === "f64" || t.kind === "string" || t.kind === "symbol" ||
+    (nativeDynamicMaps && t.kind === "dyn");
 }
 
 /** The Set ELEMENT fence — Map's key fence plus reference-identity
