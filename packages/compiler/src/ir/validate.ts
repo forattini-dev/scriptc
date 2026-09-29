@@ -6,7 +6,7 @@ import { regexCaptureLayout } from "./regex-captures.js";
 import { FS_WRITE_LIB_SIGS } from "./fs-write-signatures.js";
 import { validateModuleInitCaches } from "./validate-module-inits.js";
 import { validRecordDiscriminant } from "./record-discriminant.js";
-import { nativeArrayCheckSupported, nativeTupleCheckSupported } from "./native-record.js";
+import { nativeArrayCheckSupported, nativeRecordCheckSupported, nativeTupleCheckSupported } from "./native-record.js";
 import type { IrFamily } from "./ir.js"; import { validateCallFamily, validateFamilyClosure } from "./validate-families.js";
 import { validateEffectUnitArgument } from "./validate-effect-units.js";
 import type {
@@ -5169,6 +5169,7 @@ function validateFunction(
           (e.type.kind === "set" && e.type.elem.kind === "dyn");
         const nativeContainerOk =
           nativeArrayCheckSupported(e.type, (id) => records.get(id)) ||
+          nativeRecordCheckSupported(e.type, (id) => records.get(id), (id) => unions.get(id)) ||
           nativeTupleCheckSupported(e.type, (id) => records.get(id));
         // ADAPTABLE function targets unwrap or wrap the checked-dynamic tree's function
         // kind (the checked-dynamic function boundary, ir.ts).
