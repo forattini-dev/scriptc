@@ -569,12 +569,13 @@ function runFrontendWithDeclarations(
     const reasons = new Map<string, string>(npmStaticOffenders());
     for (const d of preflight) {
       const pkg = npmStaticPackageOfPath(d.loc.file);
-      if (pkg !== null && !reasons.has(pkg)) reasons.set(pkg, `${d.code}: ${d.message}`);
+      if (pkg !== null && !reasons.has(pkg)) reasons.set(pkg, `${d.code}: ${d.message}${process.env["SCRIPTC_TRACE_FENCE"] ? ` [${d.loc.file}:${d.loc.start}]` : ""}`);
     }
     if (![...reasons.keys()].some((p) => effective.has(p))) {
       const named = new Map<string, number>();
       for (const d of preflight) {
         if (d.code !== "SC0001") continue;
+        if (process.env["SCRIPTC_TRACE_FENCE"]) process.stderr.write(`[sc0001] ${d.loc.file.split("/").slice(-3).join("/")}: ${d.message.slice(0, 200)}\n`);
         for (const pkg of packagesNamedByDiag(d.message, effective)) {
           named.set(pkg, (named.get(pkg) ?? 0) + 1);
         }

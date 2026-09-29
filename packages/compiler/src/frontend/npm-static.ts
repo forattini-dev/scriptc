@@ -354,7 +354,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
           if (source !== null) {
             const answer = rewriteBundlerCjsExports(source, path);
             if (answer !== null && typeof answer === "object") {
-              reportNpmStaticOffender(target.pkg, answer.degrade);
+              reportNpmStaticOffender(target.pkg, process.env["SCRIPTC_TRACE_FENCE"] ? `${answer.degrade} [${path}]` : answer.degrade);
             } else {
               rewritten = path.endsWith(".cjs") ? answer : types.append(path, answer ?? source, target.pkg);
             }
