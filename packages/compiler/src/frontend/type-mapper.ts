@@ -3649,7 +3649,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
       const role = spec.role(i);
       const mapped = mapType(arg, ctx);
       if (!mapped) {
-        return `the ${container} shape is supported, but its ${role} type '${text(arg)}' does not compile`;
+        return `the ${container} shape is supported, but its ${role} type '${text(arg)}' does not compile${nestedBlocker(arg, ctx)}`;
       }
       if ((container === "Map" || container === "ReadonlyMap") && i === 0 && !isSupportedMapKey(mapped, ctx.nativeDynamicMaps)) {
         return `the ${container} shape is supported, but keys are limited to native scalar keys${ctx.nativeDynamicMaps ? " and checked-dynamic values" : ""} — '${text(arg)}' is outside that domain`;
@@ -3674,7 +3674,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
     if (elemTs === undefined) return null;
     const elem = mapType(elemTs, ctx);
     if (!elem) {
-      return `the array shape is supported, but its element type '${text(elemTs)}' does not compile`;
+      return `the array shape is supported, but its element type '${text(elemTs)}' does not compile${nestedBlocker(elemTs, ctx)}`;
     }
     return `the array shape is supported, but '${text(elemTs)}' elements have no array representation yet`;
   }
@@ -3687,7 +3687,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
       const et = mapType(arg, ctx);
       if (et?.kind === "void" && isUnitOnlyTsType(arg)) continue;
       if (!et || et.kind === "void") {
-        return `the tuple shape is supported, but its element type '${text(arg)}' does not compile`;
+        return `the tuple shape is supported, but its element type '${text(arg)}' does not compile${nestedBlocker(arg, ctx)}`;
       }
     }
     return null;
