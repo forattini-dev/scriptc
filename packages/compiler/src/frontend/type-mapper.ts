@@ -2354,7 +2354,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const callSigs = checker.getCallSignatures(widened);
   if (callSigs.length === 1) {
     const sig = callSigs[0]!;
-    if (sig.getTypeParameters().length) { const fid = ctx.dynamic ? null : familyIdOf(checker, widened); if (fid !== null) ctx.noteFamily?.(fid); return fid === null ? null : { kind: "genericFunc", familyId: fid }; } // a generic function VALUE rides its closure family (lower-families.ts)
+    if (sig.getTypeParameters().length) { const fid = familyIdOf(checker, widened); if (fid !== null) ctx.noteFamily?.(fid); return fid === null ? null : { kind: "genericFunc", familyId: fid }; } // a generic function VALUE rides its closure family (lower-families.ts)
     // A SYNTHESIZED rest param (tsc's JS inference for a function body
     // reading `arguments` — `(...args: any[]) => any` whose args symbol
     // has no declaration): the dotDotDot check below can't see it, and a
@@ -3494,7 +3494,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // slot (lower-families.ts — one body per demanded instantiation); an
       // overloaded one (or a dynamic build) leaves the shape, and calls
       // monomorphize against the defining object literal's declaration. OPTIONAL generic members stay out (no slot).
-      if (isGenericCallableMemberType(fieldTs, checker) && (ctx.dynamic || !isFamilySlotMember(checker, widened, p))) continue;
+      if (isGenericCallableMemberType(fieldTs, checker) && !isFamilySlotMember(checker, widened, p)) continue;
       let pt = (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)
         ? DYN
         : mapJsArrayField(p, fieldTs, ctx, (type) => mapType(type, ctx)) ?? mapType(fieldTs, ctx); // effect's phantom `tag?: T` belongs to the native checked-dynamic model even in a hybrid build
@@ -3801,7 +3801,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
       return null;
     }
     const fieldTs = checker.getTypeOfSymbol(p);
-    if (isGenericCallableMemberType(fieldTs, checker) && (ctx.dynamic || !isFamilySlotMember(checker, widened, p))) continue;
+    if (isGenericCallableMemberType(fieldTs, checker) && !isFamilySlotMember(checker, widened, p)) continue;
     let pt = (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p) ? DYN : mapType(fieldTs, ctx); // effect's phantom `tag?: T` stays native checked-dynamic in hybrid builds
     if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
     if (!pt || pt.kind === "void") {
