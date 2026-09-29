@@ -1244,6 +1244,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return { kind: "object", className: RUNTIME_EMITTER_CLASS };
   }
+  // stream.Stream: the legacy base class every node:stream class extends (`class Stream extends EventEmitter`). A value
+  // typed `Stream` (a `stdio` option, a pipe target) is one of the runtime stream classes, all of which sit under the
+  // runtime emitter base, so the type maps to that base and every concrete stream upcasts into it.
+  if (
+    psym?.name === "Stream" &&
+    checker.declarationsOf(psym).some(
+      (d) => ts.isClassDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()) && isDeclaredInAmbientModule(d, "stream"),
+    )
+  ) {
+    return { kind: "object", className: RUNTIME_EMITTER_CLASS };
+  }
   // readline.Interface: the interface value is an f64 handle into the
   // runtime's registry (the Timeout-id precedent). The NAME is generic,
   // so the provenance check adds the enclosing ambient module, like
