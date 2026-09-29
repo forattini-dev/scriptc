@@ -68,6 +68,9 @@ import { lowerFamilyCall } from "./lower-families.js";
  * (the call site built it), so the field's concrete signature comes from the value's IR shape. */
 function lowerInstantiatedRecordFieldCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
   if (call.questionDotToken || access.questionDotToken) return null;
+  // Only the monomorphized-generic case (`options.run(...)` on a parameter): probing lowers the whole receiver, so
+  // running it for every call whose receiver merely fails to map (dyn/any values, method chains) is quadratic or worse.
+  if (L.instantiationContext === null || !ts.isIdentifier(access.expression)) return null;
   const probed = probeLower(L, access.expression);
   if (probed?.type.kind !== "record") return null;
   const shape = L.shapes.get(probed.type.shapeId);
