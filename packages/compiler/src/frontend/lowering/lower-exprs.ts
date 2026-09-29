@@ -6849,6 +6849,17 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
           `number, string, boolean, records, arrays, and unions of those)`,
       );
     }
+    // The validator's own predicate: a target the checked-dynamic tree cannot be validated against (a record carrying
+    // function members, e.g. a service key cast to its interface) must fence HERE, not reach the IR validator as an ICE.
+    if (!canDynCheckTo(target, (id) => lowerer.shapes.get(id), (id) => lowerer.unions.get(id))) {
+      lowerer.unsupported(
+        "SC1090",
+        expr,
+        `a checked cast of a dynamic value to '${lowerer.fmt(target)}' ` +
+          `(a dynamic value can only be validated against JSON-representable types: ` +
+          `number, string, boolean, records, arrays, and unions of those)`,
+      );
+    }
     return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };
   }
 
