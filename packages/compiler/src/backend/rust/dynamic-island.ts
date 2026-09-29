@@ -84,6 +84,9 @@ export function rustIslandDynamicTest(test: Extract<IrExpr, { kind: "dynTest" }>
     case "date": return `runtime::island_instance_of(${value}, &runtime::island_global_get("Date"))`;
     case "regex": return `runtime::island_instance_of(${value}, &runtime::island_global_get("RegExp"))`;
     case "url": return `runtime::island_instance_of(${value}, &runtime::island_global_get("URL"))`;
+    case "searchParams": return `runtime::island_instance_of(${value}, &runtime::island_global_get("URLSearchParams"))`;
+    case "map": return `runtime::island_instance_of(${value}, &runtime::island_global_get("Map"))`;
+    case "set": return `runtime::island_instance_of(${value}, &runtime::island_global_get("Set"))`;
     case "array": return `runtime::island_exit_boolean(&runtime::island_call_method(&runtime::island_global_get("Array"), "isArray", &[${value}.clone()]))`;
     case "bytes": return `runtime::island_exit_boolean(&runtime::island_call_method(&runtime::island_global_get("ArrayBuffer"), "isView", &[${value}.clone()]))`;
     case "integer": return `(runtime::island_value_typeof(${value}).as_ref() == "number" && runtime::number_is_integer(runtime::island_exit_number(${value})))`;

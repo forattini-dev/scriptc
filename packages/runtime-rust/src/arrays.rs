@@ -43,7 +43,7 @@ where
 
 enum ArrayAux<T: ArrayElement> {
     Raw(JsArray<T>),
-    RegexMatch { index: f64, input: JsString },
+    RegexMatch { index: f64, input: JsString, groups: Vec<(JsString, usize)> },
 }
 
 const ARRAY_HOLE: u8 = 0;
@@ -66,6 +66,7 @@ struct ArraySparse {
 pub struct ArrayData<T: ArrayElement> {
     elements: Vec<T>,
     auxiliary: Option<Rc<ArrayAux<T>>>,
+    properties: Option<Box<Vec<(JsString, T)>>>,
     view: Option<Rc<dyn ArrayView<T>>>,
     sparse: Option<Box<ArraySparse>>,
 }
@@ -77,6 +78,9 @@ impl<T: ArrayElement> Trace for ArrayData<T> {
         }
         if let Some(view) = &self.view { view.trace(tracer); }
         if let Some(ArrayAux::Raw(raw)) = self.auxiliary.as_deref() { tracer.edge(raw); }
+        if let Some(properties) = &self.properties {
+            for (_, value) in properties.iter() { value.trace_element(tracer); }
+        }
     }
 }
 
@@ -84,6 +88,7 @@ impl<T: ArrayElement> ClearEdges for ArrayData<T> {
     fn clear_edges(&mut self) {
         self.elements.clear();
         self.auxiliary = None;
+        self.properties = None;
         self.view = None;
         self.sparse = None;
     }
@@ -213,6 +218,7 @@ pub fn array_new<T: ArrayElement>(elements: Vec<T>) -> JsArray<T> {
     Gc::new(ArrayData {
         elements,
         auxiliary: None,
+        properties: None,
         view: None,
         sparse: None,
     })
@@ -226,6 +232,7 @@ pub fn array_new_with_raw<T: ArrayElement>(
     Gc::new(ArrayData {
         elements,
         auxiliary: Some(Rc::new(ArrayAux::Raw(raw))),
+        properties: None,
         view: None,
         sparse: None,
     })
@@ -237,6 +244,27 @@ pub fn array_raw<T: ArrayElement>(array: &JsArray<T>) -> Option<JsArray<T>> {
 
 pub fn array_set_raw<T: ArrayElement>(array: &JsArray<T>, raw: JsArray<T>) {
     array.with_mut(|data| data.auxiliary = Some(Rc::new(ArrayAux::Raw(raw))));
+}
+
+pub fn array_property_get<T: ArrayElement>(array: &JsArray<T>, key: &JsString) -> Option<T> {
+    array.with(|data| data.properties.as_ref().and_then(|properties|
+        properties.iter().find(|(name, _)| name.as_ref() == key.as_ref()).map(|(_, value)| value.clone())))
+}
+
+pub fn array_property_has<T: ArrayElement>(array: &JsArray<T>, key: &JsString) -> bool {
+    array.with(|data| data.properties.as_ref().is_some_and(|properties|
+        properties.iter().any(|(name, _)| name.as_ref() == key.as_ref())))
+}
+
+pub fn array_property_set<T: ArrayElement>(array: &JsArray<T>, key: JsString, value: T) {
+    array.with_mut(|data| {
+        let properties = data.properties.get_or_insert_with(|| Box::new(Vec::new()));
+        if let Some((_, current)) = properties.iter_mut().find(|(name, _)| name.as_ref() == key.as_ref()) {
+            *current = value;
+        } else {
+            properties.push((key, value));
+        }
+    });
 }
 
 pub fn array_len<T: ArrayElement>(array: &JsArray<T>) -> f64 {
@@ -389,7 +417,7 @@ pub fn array_with_undefined<T: ArrayElement>(array: &JsArray<T>, index: f64) -> 
             throw_error_code("array.with over a huge sparse array is not supported yet".to_owned(), "SC3001");
         }
         sparse.tail_undefined.extend(sparse.states.len()..length);
-        Gc::new(ArrayData { elements: data.elements.clone(), auxiliary: None, view: None, sparse: Some(Box::new(sparse)) })
+        Gc::new(ArrayData { elements: data.elements.clone(), auxiliary: None, properties: None, view: None, sparse: Some(Box::new(sparse)) })
     });
     array_set_undefined(&copy, actual);
     copy
@@ -623,6 +651,7 @@ pub fn array_slice<T: ArrayElement>(array: &JsArray<T>, start: f64, end: f64) ->
         let mut copy = ArrayData {
             elements,
             auxiliary: None,
+            properties: None,
             view: None,
             sparse: Some(Box::new(ArraySparse { length: end - start, states, tail_undefined })),
         };
@@ -688,6 +717,7 @@ fn array_from_slots<T: ArrayElement>(slots: Vec<Option<T>>) -> JsArray<T> {
         return Gc::new(ArrayData {
             elements: Vec::new(),
             auxiliary: None,
+            properties: None,
             view: None,
             sparse: Some(Box::new(ArraySparse { length, states: Vec::new(), tail_undefined: (0..length).collect() })),
         });
@@ -701,6 +731,7 @@ fn array_from_slots<T: ArrayElement>(slots: Vec<Option<T>>) -> JsArray<T> {
     Gc::new(ArrayData {
         elements,
         auxiliary: None,
+        properties: None,
         view: None,
         sparse: Some(Box::new(ArraySparse { length, states, tail_undefined: std::collections::BTreeSet::new() })),
     })

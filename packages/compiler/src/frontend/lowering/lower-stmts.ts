@@ -5030,14 +5030,22 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           // PROBED (probeLower) and claimed exactly when it lowers to
           // dyn; typed receivers keep their own lowerings and fences.
           if (!expr.left.questionDotToken) {
-            const recv = probeLower(lowerer, expr.left.expression);
-            if (recv && recv.type.kind === "dyn") {
+            let recvNode = expr.left.expression;
+            while (ts.isParenthesizedExpression(recvNode) || ts.isAssertionExpression(recvNode) || ts.isNonNullExpression(recvNode)) {
+              recvNode = recvNode.expression;
+            }
+            const recv = probeLower(lowerer, recvNode);
+            if (recv && (recv.type.kind === "dyn" ||
+                (lowerer.nativeDenseArrays && recv.type.kind === "array" && recv.type.elem.kind === "dyn"))) {
               const loc = locOf(expr);
               const key: IrExpr = { kind: "strLit", value: expr.left.name.text, type: STRING, loc: locOf(expr.left.name) };
               const value = lowerer.lowerExprExpecting(expr.right, DYN);
+              const receiver: IrExpr = recv.type.kind === "dyn"
+                ? recv
+                : { kind: "dynFrom", value: recv, type: DYN, loc, liveRef: true };
               return {
                 kind: "exprStmt",
-                expr: { kind: "libCall", fn: "dyn.keySet", args: [recv, key, value], type: VOID, loc },
+                expr: { kind: "libCall", fn: "dyn.keySet", args: [receiver, key, value], type: VOID, loc },
                 loc,
               };
             }

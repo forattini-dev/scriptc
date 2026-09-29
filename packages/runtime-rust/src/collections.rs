@@ -1,5 +1,9 @@
 pub struct MapData<K: HeapValue, V: HeapValue> {
     entries: Vec<Option<(K, V)>>,
+    // Object maps keep symbol-keyed properties outside the string-key
+    // enumeration table. Retaining the Rc symbol prevents allocator address
+    // reuse from ever aliasing a dead key with a later Symbol.
+    symbol_entries: Vec<(JsSymbol, V)>,
     view: Option<Rc<dyn MapView<K, V>>>,
     live: usize,
     iteration_depth: usize,
@@ -17,6 +21,10 @@ impl<K: HeapValue, V: HeapValue> Trace for MapData<K, V> {
             key.trace_value(tracer);
             value.trace_value(tracer);
         }
+        for (key, value) in &self.symbol_entries {
+            key.trace_value(tracer);
+            value.trace_value(tracer);
+        }
         if let Some(prototype) = &self.prototype {
             prototype.trace_value(tracer);
         }
@@ -26,6 +34,7 @@ impl<K: HeapValue, V: HeapValue> Trace for MapData<K, V> {
 impl<K: HeapValue, V: HeapValue> ClearEdges for MapData<K, V> {
     fn clear_edges(&mut self) {
         self.entries.clear();
+        self.symbol_entries.clear();
         self.view = None;
         self.prototype = None;
     }
@@ -36,6 +45,7 @@ pub type JsMap<K, V> = Gc<MapData<K, V>>;
 pub fn map_new<K: HeapValue, V: HeapValue>() -> JsMap<K, V> {
     Gc::new(MapData {
         entries: Vec::new(),
+        symbol_entries: Vec::new(),
         view: None,
         live: 0,
         iteration_depth: 0,
@@ -106,6 +116,30 @@ pub fn map_set_prototype<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, prototyp
 pub fn map_prototype<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> Option<V> {
     if let Some(view) = map_view(map) { return view.prototype(); }
     map.with(|data| data.prototype.clone())
+}
+
+pub fn map_symbol_get<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, key: &JsSymbol) -> Option<V> {
+    if let Some(view) = map_view(map) { return view.symbol_get(key); }
+    map.with(|data| data.symbol_entries.iter().find(|(stored, _)| symbol_ptr_eq(stored, key)).map(|(_, value)| value.clone()))
+}
+
+pub fn map_symbol_has<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, key: &JsSymbol) -> bool {
+    if let Some(view) = map_view(map) { return view.symbol_has(key); }
+    map.with(|data| data.symbol_entries.iter().any(|(stored, _)| symbol_ptr_eq(stored, key)))
+}
+
+pub fn map_symbol_set<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, key: JsSymbol, value: V) {
+    if let Some(view) = map_view(map) { view.symbol_set(key, value); return; }
+    if map_is_module_namespace(map) {
+        throw_type_error("Cannot modify module namespace".to_owned());
+    }
+    map.with_mut(|data| {
+        if let Some((_, stored)) = data.symbol_entries.iter_mut().find(|(stored, _)| symbol_ptr_eq(stored, &key)) {
+            *stored = value;
+        } else {
+            data.symbol_entries.push((key, value));
+        }
+    });
 }
 
 pub fn map_set_by<K, V, F>(map: &JsMap<K, V>, key: K, value: V, equal: F)
@@ -202,6 +236,7 @@ pub fn map_clear<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) {
         throw_type_error("Cannot modify module namespace".to_owned());
     }
     map.with_mut(|data| {
+        data.symbol_entries.clear();
         data.live = 0;
         if data.iteration_depth == 0 {
             data.entries.clear();

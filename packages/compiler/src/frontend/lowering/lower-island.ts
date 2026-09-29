@@ -3410,5 +3410,5 @@ export { lowerDynamicImportCall } from "./lower-dynamic-import.js";
     const decls = sym ? lowerer.checker.declarationsOf(sym) : undefined;
     if (!decls || decls.length === 0) return null;
     if (!decls.every((d) => lowerer.isNpmFile(d.getSourceFile()))) return null;
-    const pkg = npmPackageNameOf(decls[0]!.getSourceFile().fileName); return pkg !== null && !lowerer.dynamic && isKernelModule(pkg) ? null : pkg;
+    const pkg = npmPackageNameOf(decls[0]!.getSourceFile().fileName); return pkg !== null && isKernelModule(pkg) ? null : pkg;
   }

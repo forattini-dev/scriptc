@@ -5,7 +5,50 @@ pub struct RegexData {
     unicode: bool,
     global: bool,
     sticky: bool,
+    named_groups: Vec<(JsString, usize)>,
     last_index: Cell<f64>,
+}
+
+fn regex_named_capture_groups(pattern: &str) -> Vec<(JsString, usize)> {
+    let bytes = pattern.as_bytes();
+    let mut groups = Vec::new();
+    let mut capture_index = 0usize;
+    let mut in_class = false;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index = (index + 2).min(bytes.len()),
+            b']' if in_class => { in_class = false; index += 1; }
+            b'[' if !in_class => { in_class = true; index += 1; }
+            b'(' if !in_class => {
+                if bytes.get(index + 1) != Some(&b'?') {
+                    capture_index += 1;
+                    index += 1;
+                    continue;
+                }
+                if bytes.get(index + 2) == Some(&b'<') &&
+                    !matches!(bytes.get(index + 3), Some(b'=') | Some(b'!'))
+                {
+                    let start = index + 3;
+                    let Some(end) = bytes[start..].iter().position(|byte| *byte == b'>').map(|offset| start + offset) else {
+                        return Vec::new();
+                    };
+                    let Ok(name) = std::str::from_utf8(&bytes[start..end]) else { return Vec::new(); };
+                    // Escaped group names need ECMAScript identifier escape
+                    // decoding. Keep the runtime claim narrow rather than
+                    // exposing a wrongly named property.
+                    if name.contains('\\') { return Vec::new(); }
+                    capture_index += 1;
+                    groups.push((string(name), capture_index));
+                    index = end + 1;
+                    continue;
+                }
+                index += 2;
+            }
+            _ => index += 1,
+        }
+    }
+    groups
 }
 
 pub type JsRegex = Rc<RegexData>;
@@ -50,6 +93,7 @@ pub fn regex_new<S: JsStringSource + ?Sized>(pattern: &S, flags: &str) -> JsRege
     let flags = validate_regex_flags(flags);
     let pattern = pattern.to_js_string();
     let source = if pattern.is_empty() { string("(?:)") } else { pattern };
+    let named_groups = regex_named_capture_groups(&source.to_utf8_lossy());
     let parsed_flags = regress::Flags::from(flags.as_str());
     let unicode = flags.contains('u') || flags.contains('v');
     let compiled = if unicode {
@@ -65,6 +109,7 @@ pub fn regex_new<S: JsStringSource + ?Sized>(pattern: &S, flags: &str) -> JsRege
         unicode,
         global: flags.contains('g'),
         sticky: flags.contains('y'),
+        named_groups,
         last_index: Cell::new(0.0),
     })
 }
@@ -108,6 +153,25 @@ pub fn string_from_char_codes(codes: &JsArray<f64>) -> JsString {
     let units = (0..array_len(codes) as usize)
         .map(|index| to_uint32(array_get(codes, index as f64)) as u16)
         .collect::<Vec<_>>();
+    string_from_utf16(&units)
+}
+
+pub fn string_from_code_points(codes: &JsArray<f64>) -> JsString {
+    let mut units = Vec::with_capacity(array_len(codes) as usize);
+    for index in 0..array_len(codes) as usize {
+        let value = array_get(codes, index as f64);
+        if !value.is_finite() || value.fract() != 0.0 || !(0.0..=0x10ffff as f64).contains(&value) {
+            throw_range_error(format!("Invalid code point {}", format_number(value)));
+        }
+        let point = value as u32;
+        if point <= 0xffff {
+            units.push(point as u16);
+        } else {
+            let astral = point - 0x10000;
+            units.push(0xd800 | (astral >> 10) as u16);
+            units.push(0xdc00 | (astral & 0x3ff) as u16);
+        }
+    }
     string_from_utf16(&units)
 }
 
@@ -192,7 +256,7 @@ pub fn regex_match<T: ArrayElement>(
     }
     matched.map(|matched| {
         let row = regex_match_row(&units, &matched, &capture);
-        array_set_regex_metadata(&row, matched.start() as f64, subject.clone());
+        array_set_regex_metadata(&row, matched.start() as f64, subject.clone(), regex.named_groups.clone());
         row
     })
 }
@@ -226,7 +290,7 @@ fn regex_match_all_impl<T: ArrayElement>(
             array_push(indices, start as f64);
         }
         let row = regex_match_row(&units, &matched, &capture);
-        array_set_regex_metadata(&row, matched.start() as f64, subject.clone());
+        array_set_regex_metadata(&row, matched.start() as f64, subject.clone(), regex.named_groups.clone());
         rows.push(row);
         position = if start == end {
             advance_string_index(&units, end, regex.unicode)
@@ -390,6 +454,38 @@ pub fn regex_replace_all(subject: &JsString, regex: &JsRegex, replacement: &JsSt
     regex_replace_impl(subject, regex, replacement, true)
 }
 
+pub fn regex_replace_callback(
+    subject: &JsString,
+    regex: &JsRegex,
+    replacement: Rc<dyn Fn(JsString) -> JsString>,
+) -> JsString {
+    let units: Vec<u16> = subject.encode_utf16().collect();
+    let mut output = Vec::new();
+    let mut next = 0usize;
+    let mut position = if regex.sticky && !regex.global { regex_start_index(regex) } else { 0 };
+    if regex.global { regex.last_index.set(0.0); }
+    while position <= units.len() {
+        let Some(matched) = regex_find(regex, &units, position, regex.sticky) else {
+            if regex.global || regex.sticky { regex.last_index.set(0.0); }
+            break;
+        };
+        let range = matched.range();
+        if regex.global || regex.sticky { regex.last_index.set(range.end as f64); }
+        output.extend_from_slice(&units[next..range.start]);
+        output.extend((replacement(string_from_utf16(&units[range.clone()]))).encode_utf16());
+        next = range.end;
+        if !regex.global { break; }
+        position = if range.start == range.end {
+            advance_string_index(&units, range.end, regex.unicode)
+        } else {
+            range.end
+        };
+    }
+    if regex.global { regex.last_index.set(0.0); }
+    output.extend_from_slice(&units[next..]);
+    string_from_utf16(&output)
+}
+
 pub fn regex_split(subject: &JsString, regex: &JsRegex, limit: f64) -> JsArray<JsString> {
     let limit = to_uint32(limit) as usize;
     if limit == 0 {
@@ -465,7 +561,7 @@ pub fn regex_exec<T: ArrayElement>(regex: &JsRegex, subject: &JsString,
     if stateful { regex.last_index.set(matched.as_ref().map_or(0.0, |m| m.end() as f64)); }
     matched.map(|matched| {
         let row = regex_match_row(&units, &matched, &capture);
-        array_set_regex_metadata(&row, matched.start() as f64, subject.clone());
+        array_set_regex_metadata(&row, matched.start() as f64, subject.clone(), regex.named_groups.clone());
         row
     })
 }

@@ -1658,6 +1658,11 @@ export class Lowerer {
    * engine handle (a dynamic import's namespace object) — paramShape's
    * early-out. */
   readonly jsvalParamOverrides = new Set<ts.ParameterDeclaration>();
+  /** Callbacks whose ABI return is pinned by the call's explicit type
+   * argument (`.flatMap<U>(cb)` → `U[]`): the checker infers a union of
+   * per-literal array types there, which has no mapping, while the
+   * declared `U` is the type every return path coerces into. */
+  readonly lambdaReturnOverrides = new WeakMap<ts.Node, IrType>();
   /** File → qualifier prefix: "" for the entry, "%mI." otherwise. */
   readonly fileTag = new Map<ts.SourceFile, string>();
   /** Namespace ModuleBlocks this program lowers, filled by splitFiles:
@@ -2840,7 +2845,7 @@ export class Lowerer {
       this.diags.length > 0
         ? null
         : {
-            irVersion: 11,
+            irVersion: 12,
             sourceFile: this.entry.fileName,
             runtimeTarget: runtimeTargetIr(activeRuntimeTarget()),
             ...(!isNodeEsmFile(this.entry) ? { entryCommonJs: true as const } : {}),

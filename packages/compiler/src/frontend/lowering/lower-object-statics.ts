@@ -7,7 +7,7 @@ import { preserveNativeFreeze } from "./lower-native-freeze.js";
 import { lowerTypedObjectIteration } from "./lower-object-iteration.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DYN, IrExpr, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, canBoxFuncIntoDyn, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/ir.js";
+import { BOOL, DYN, IrExpr, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, canBoxFuncIntoDyn, canConvertToDyn, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/ir.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { lowerNativeNamespaceObjectWalk } from "./lower-native-namespace.js";
 import { NARROW_FIRST } from "./surfaces.js";
@@ -219,6 +219,29 @@ import { lowerSqlClientDecorate } from "./lower-sql-client.js";
         "the operands must share one comparable kind (numbers, strings, booleans, units, one union shape, or one reference type)",
       );
     }
+    // Object.getPrototypeOf over native checked-dynamic values. The Rust
+    // backend preserves explicit map prototypes and represents built-in
+    // prototype identities with object-kind sentinels. Static native values
+    // that can cross the dyn boundary use the same dispatch; unsupported
+    // representations keep the existing named stdlib fence.
+    if (member === "getPrototypeOf") {
+      if (call.arguments.length !== 1 || call.arguments.some((a) => ts.isSpreadElement(a))) {
+        lowerer.noLowering(`Object.getPrototypeOf with ${call.arguments.length} arguments`, call);
+      }
+      const argumentNode = call.arguments[0]!;
+      let argument = probeLower(lowerer, argumentNode);
+      if (argument?.type.kind !== "dyn" && argument && canConvertToDyn(
+        argument.type,
+        (id) => lowerer.shapes.get(id),
+        (id) => lowerer.unions.get(id),
+      )) {
+        argument = { kind: "dynFrom", value: argument, type: DYN, loc: locOf(argumentNode) };
+      }
+      if (argument?.type.kind === "dyn") {
+        return { kind: "libCall", fn: "dyn.getPrototypeOf", args: [argument], type: DYN, loc: locOf(call) };
+      }
+      return null;
+    }
     // Object.create — the null-prototype DICTIONARY (`Object.create(null)`
     // then keyed assignment, the memo-table idiom prettier's index/
     // group-mode maps spell) and, under --dynamic, the engine's own
@@ -246,6 +269,18 @@ import { lowerSqlClientDecorate } from "./lower-sql-client.js";
       let protoNode: ts.Expression = call.arguments[0]!;
       while (ts.isParenthesizedExpression(protoNode)) protoNode = protoNode.expression;
       const nullProto = protoNode.kind === ts.SyntaxKind.NullKeyword;
+      // A direct checked cast of a freshly-created null-prototype object to
+      // an index-signature record is sound without validating any values:
+      // the object is observably empty at this point. Build the native empty
+      // dictionary at its asserted type, so recursive dictionaries may later
+      // receive values that deliberately do not belong to the JSON/dyn tree.
+      const asserted = ts.isAsExpression(call.parent) || ts.isTypeAssertion(call.parent)
+        ? lowerer.mapTypeOf(lowerer.typeOf(call.parent))
+        : null;
+      const assertedShape = asserted?.kind === "record" ? lowerer.shapes.get(asserted.shapeId) : undefined;
+      if (nullProto && asserted?.kind === "record" && assertedShape?.indexValue !== undefined && assertedShape.fields.length === 0) {
+        return { kind: "recordLit", fields: [], type: asserted, loc };
+      }
       if (lowerer.dynamic) {
         // The checker types the result `any` — an ENGINE value under
         // --dynamic — and the engine's own Object.create answers with
@@ -292,18 +327,33 @@ import { lowerSqlClientDecorate } from "./lower-sql-client.js";
       if (sqlClient) return sqlClient;
       const hybrid = lowerObjectAssignHybrid(lowerer, call);
       if (hybrid) return hybrid;
-      // `Object.assign({}, lit)` — an EMPTY fresh-literal target and one
-      // object-literal source: the result is a fresh object carrying
-      // exactly the source literal's properties, which IS the source
-      // literal evaluated (both fresh, no alias can tell them apart).
-      // Everything else keeps the spread hint (stdlibMemberFence).
+      // `Object.assign({}, lit)` and
+      // `Object.assign(Object.create(null) as Record<string, T>, lit)` —
+      // an EMPTY fresh target and one object-literal source. The result is
+      // a fresh object carrying exactly the source literal's properties,
+      // which IS the source literal evaluated (both fresh, no alias can
+      // tell them apart). Native records have no prototype chain, so the
+      // null-prototype spelling is represented exactly too. Everything
+      // else keeps the spread hint (stdlibMemberFence).
       if (call.arguments.length === 2 && !call.arguments.some((a) => ts.isSpreadElement(a))) {
         let target: ts.Expression = call.arguments[0]!;
-        while (ts.isParenthesizedExpression(target)) target = target.expression;
+        while (
+          ts.isParenthesizedExpression(target) ||
+          ts.isAsExpression(target) ||
+          ts.isTypeAssertion(target)
+        ) target = target.expression;
         let source: ts.Expression = call.arguments[1]!;
         while (ts.isParenthesizedExpression(source)) source = source.expression;
+        const freshNullPrototype = (() => {
+          if (!ts.isCallExpression(target) || target.arguments.length !== 1) return false;
+          const callee = target.expression;
+          return ts.isPropertyAccessExpression(callee) &&
+            callee.name.text === "create" &&
+            lowerer.isStdlibGlobal(callee.expression, "Object") &&
+            target.arguments[0]!.kind === ts.SyntaxKind.NullKeyword;
+        })();
         if (
-          ts.isObjectLiteralExpression(target) && target.properties.length === 0 &&
+          ((ts.isObjectLiteralExpression(target) && target.properties.length === 0) || freshNullPrototype) &&
           ts.isObjectLiteralExpression(source)
         ) {
           return lowerer.lowerExpr(source);
@@ -457,6 +507,44 @@ import { lowerSqlClientDecorate } from "./lower-sql-client.js";
     if (member === "defineProperty" && call.arguments.length === 3 &&
         !call.arguments.some((a) => ts.isSpreadElement(a))) {
       const keyNode = call.arguments[1]!;
+      const symbolKey = probeLower(lowerer, keyNode);
+      if (symbolKey?.type.kind === "symbol") {
+        let target = probeLower(lowerer, call.arguments[0]!);
+        if (target && target.type.kind !== "dyn" && canConvertToDyn(
+          target.type,
+          (id) => lowerer.shapes.get(id),
+          (id) => lowerer.unions.get(id),
+        )) target = { kind: "dynFrom", value: target, type: DYN, loc: locOf(call.arguments[0]!) };
+        let descriptorNode = call.arguments[2]!;
+        while (ts.isParenthesizedExpression(descriptorNode)) descriptorNode = descriptorNode.expression;
+        if (target?.type.kind === "dyn" && ts.isObjectLiteralExpression(descriptorNode)) {
+          let valueNode: ts.Expression | null = null;
+          let valid = true;
+          for (const property of descriptorNode.properties) {
+            if (!ts.isPropertyAssignment(property) ||
+                !(ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name))) {
+              valid = false;
+              break;
+            }
+            const name = property.name.text;
+            if (name === "value") valueNode = property.initializer;
+            else if (name === "writable" || name === "enumerable" || name === "configurable") {
+              if (property.initializer.kind !== ts.SyntaxKind.FalseKeyword) valid = false;
+            } else valid = false;
+          }
+          if (valid && valueNode !== null) {
+            let value = lowerer.lowerExpr(valueNode);
+            if (value.type.kind !== "dyn" && (isUnitType(value.type) || canConvertToDyn(
+              value.type,
+              (id) => lowerer.shapes.get(id),
+              (id) => lowerer.unions.get(id),
+            ))) value = { kind: "dynFrom", value, type: DYN, loc: locOf(valueNode) };
+            if (value.type.kind === "dyn") {
+              return { kind: "libCall", fn: "dyn.defineSymbolValue", args: [target, symbolKey, value], type: DYN, loc: locOf(call) };
+            }
+          }
+        }
+      }
       if (ts.isStringLiteralLike(keyNode)) {
         let target = probeLower(lowerer, call.arguments[0]!);
         if (

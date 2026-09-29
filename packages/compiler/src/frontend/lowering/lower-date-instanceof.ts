@@ -3,11 +3,14 @@ import { BOOL, type IrExpr } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
 
-/** Native object tags distinguish branded values without coercion. */
+/** Native object tags distinguish branded values and collections without coercion. */
 export function lowerNativeDateRegexInstanceof(L: Lowerer, expr: ts.BinaryExpression): IrExpr | null {
   const kind = L.isStdlibGlobal(expr.right, "Date") ? "date"
     : L.isStdlibGlobal(expr.right, "RegExp") ? "regex"
-    : L.isStdlibGlobal(expr.right, "URL") ? "url" : null;
+    : L.isStdlibGlobal(expr.right, "URL") ? "url"
+    : L.isStdlibGlobal(expr.right, "Map") ? "map"
+    : L.isStdlibGlobal(expr.right, "Set") ? "set"
+    : L.isStdlibGlobal(expr.right, "URLSearchParams") ? "searchParams" : null;
   if (!kind || L.caughtLocalOf(expr.left)) return null;
   const value = L.lowerExpr(expr.left), loc = locOf(expr);
   if (value.type.kind === "dyn") {

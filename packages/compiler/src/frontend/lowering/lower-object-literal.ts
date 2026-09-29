@@ -413,7 +413,8 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
             }
             throw shapeMismatch(prop);
           }
-          const absent = lowerer.wrappedUndefined(fieldType, locOf(prop));
+          const absent = lowerer.wrappedUndefined(fieldType, locOf(prop)) ??
+            (fieldType.kind === "dyn" ? dynUndefinedExpr(locOf(prop)) : null);
           if (!absent) {
             lowerer.unsupported(
               "SC1090",
@@ -517,7 +518,32 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         // are pure, so the reorder into the ternary is unobservable).
         if (srcType?.kind === "union") {
           const def = lowerer.unions.get(srcType.unionId);
-          const recArms = def?.arms.filter((a) => a.kind === "record") ?? [];
+          // A conditional object expression such as
+          // `condition ? { logs } : {}` is represented by tsc as
+          // `{ logs: T } | { logs?: undefined }`. The second constituent
+          // maps to a record shape as well, even though it contributes no
+          // represented value to a spread. Treat that checker-proven
+          // optional-undefined-only shape like the existing unit arms so
+          // the productive record arm can use the same present/absent
+          // merge below. Do not generalize this to arbitrary optional
+          // records: `{ x?: number }` can contribute a real property.
+          const undefinedOnly = (value: ts.Type): boolean => {
+            if (value.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Never)) return true;
+            return value.isUnionType() && ts.constituentTypes(value).every(undefinedOnly);
+          };
+          const emptySpreadShapes = new Set(
+            (srcTsType.isUnionType() ? ts.constituentTypes(srcTsType) : [srcTsType]).flatMap((part) => {
+              const mappedPart = lowerer.mapTypeOf(part);
+              if (mappedPart?.kind !== "record") return [];
+              const props = lowerer.checker.getPropertiesOfType(part);
+              const empty = props.every((field) =>
+                (field.flags & ts.SymbolFlags.Optional) !== 0 &&
+                undefinedOnly(lowerer.checker.getTypeOfSymbolAtLocation(field, srcNode)),
+              );
+              return empty ? [mappedPart.shapeId] : [];
+            }),
+          );
+          const recArms = def?.arms.filter((a) => a.kind === "record" && !emptySpreadShapes.has(a.shapeId)) ?? [];
           if (
             !def ||
             recArms.length !== 1 ||

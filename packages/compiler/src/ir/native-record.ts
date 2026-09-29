@@ -66,6 +66,33 @@ export function nativeRecordCheckSupported(
   return !!shape && nativeRecordShapeSupported(shape, { get: getUnion }, getRecord);
 }
 
+/** Heterogeneous scalar tuples can be validated directly from a checked-
+ * dynamic array without routing through JSON. This is intentionally
+ * narrower than ordinary record checks: it exists for native callback
+ * boundaries such as Object.entries(unknown).map(([key, value]) => ...),
+ * where `[string, unknown]` must retain the unknown value by reference. */
+export function nativeTupleCheckSupported(
+  type: IrType,
+  getRecord: (id: string) => IrRecordShape | undefined,
+): boolean {
+  const shape = type.kind === "record" ? getRecord(type.shapeId) : undefined;
+  if (!shape?.tuple || shape.indexValue !== undefined || shape.fields.length === 0) return false;
+  const fields = [...shape.fields].sort((left, right) => Number(left.name) - Number(right.name));
+  return fields.every((field, index) =>
+    field.name === String(index) && ["f64", "bool", "string", "dyn"].includes(field.type.kind),
+  );
+}
+
+/** Arrays of directly checkable heterogeneous tuples retain the dynamic
+ * outer storage and validate each tuple lazily through a mapped view. */
+export function nativeArrayCheckSupported(
+  type: IrType,
+  getRecord: (id: string) => IrRecordShape | undefined,
+): boolean {
+  return type.kind === "array" &&
+    (nativeArrayViewSupported(type) || nativeTupleCheckSupported(type.elem, getRecord));
+}
+
 /** Native array views can check and box each element without composite copies. */
 export function nativeArrayViewSupported(type: IrType): boolean {
   return type.kind === "array" && (nativeArrayViewSupported(type.elem) ||

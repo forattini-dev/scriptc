@@ -355,6 +355,48 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.sqlReserve":
       if (first === undefined) break;
       return `runtime::${expr.fn === "effect.sqlReserve" ? "effect_sql_client_reserve" : "effect_sql_client_transaction_key"}(&${context.emitExpr(first)})`;
+    case "effect.httpRequestMake":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_http_request_make(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.httpRequestSetUrlParam":
+    case "effect.httpRequestAppendUrlParam":
+    case "effect.httpRequestSetHeader": {
+      const third = expr.args[2];
+      if (first === undefined || second === undefined || third === undefined) break;
+      const suffix = expr.fn === "effect.httpRequestSetUrlParam" ? "set_url_param"
+        : expr.fn === "effect.httpRequestAppendUrlParam" ? "append_url_param" : "set_header";
+      return `runtime::effect_http_request_${suffix}(&${context.emitExpr(first)}, &${context.emitExpr(second)}, &${context.emitExpr(third)})`;
+    }
+    case "effect.httpRequestSetHeaders":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_http_request_set_headers(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.httpRequestBodyJson":
+      if (first === undefined || second === undefined) break;
+      return `{ let sc_value = ${context.emitExpr(second)}; let sc_body = sc_dyn_to_json(&sc_value, "$").map(|sc_node| runtime::json_stringify(&sc_node)).map_err(|sc_error| sc_error); runtime::effect_http_request_body_json(&${context.emitExpr(first)}, sc_body) }`;
+    case "effect.httpClientLayer":
+      return "runtime::effect_http_client_layer()";
+    case "effect.httpClientExecute":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_http_client_execute(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.httpResponseStatus":
+      if (first === undefined) break;
+      return `runtime::effect_http_response_status(&${context.emitExpr(first)})`;
+    case "effect.httpResponseHeader":
+      if (first === undefined || second === undefined) break;
+      return optionalOf(context, expr, `runtime::effect_http_response_header(&${context.emitExpr(first)}, &${context.emitExpr(second)})`);
+    case "effect.httpResponseStream":
+      if (first === undefined) break;
+      return `runtime::effect_http_response_stream(&${context.emitExpr(first)})`;
+    case "effect.httpStreamRunForEach": {
+      if (first === undefined || second === undefined || second.type.kind !== "func" || second.type.params[0]?.kind !== "bytes") break;
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, second.type, ["sc_chunk"], expr.loc);
+      return `{ let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::effect_http_stream_run_for_each(&${context.emitExpr(first)}, std::rc::Rc::new(move |sc_chunk: runtime::JsBytes<u8>| ${dispatch}), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${keep}))) }`;
+    }
+    case "effect.httpClientErrorReason":
+      if (first === undefined) break;
+      return `runtime::effect_http_client_error_reason(&${context.emitExpr(first)})`;
     case "effect.referenceKey": {
       if (first === undefined || second === undefined || second.type.kind !== "func") break;
       const callback = context.nextTemporary();
@@ -633,7 +675,9 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "option.getOrElse": {
       if (first === undefined || second === undefined || second.type.kind !== "func") break;
       const callback = context.nextTemporary();
-      const dispatch = context.emitClosureDispatch(callback, second.type, [], expr.loc);
+      const called = context.emitClosureDispatch(callback, second.type, [], expr.loc);
+      // `Option.getOrElse(unknownOption, () => text)`: the site is `unknown`, so a statically typed fallback enters the dynamic value.
+      const dispatch = expr.type.kind === "dyn" && second.type.ret.kind !== "dyn" ? context.emitDynFromValue(second.type.ret, called, expr.loc) : called;
       return `{ let ${callback} = ${context.emitExpr(second)}; match runtime::option_get(&${context.emitExpr(first)}) { Some(sc_v) => ${unbox(context, expr.type, "&sc_v", expr.loc)}, None => ${dispatch} } }`;
     }
     case "option.map": {
@@ -758,6 +802,20 @@ function emitRustSchemaCall(expr: RustLibCallExpr, context: RustLibCallContext):
       // The props (as a dynamic value) with the Struct's constructor defaults applied, converted to the site's Type.
       if (first === undefined || second === undefined) break;
       return context.emitDynCheckValue(expr.type, `runtime::schema_make(&${context.emitExpr(first)}, &${context.emitExpr(second)})`, expr.loc);
+    case "schema.toType":
+      if (first === undefined) break;
+      return `runtime::schema_to_type(&${context.emitExpr(first)})`;
+    case "schema.jsonFromOpenApi3_0":
+    case "schema.jsonFromOpenApi3_1":
+    case "schema.jsonFromDraft07":
+    case "schema.jsonFromDraft2020_12": {
+      if (first === undefined) break;
+      const convert = { "schema.jsonFromOpenApi3_0": "openapi3_0", "schema.jsonFromOpenApi3_1": "openapi3_1", "schema.jsonFromDraft07": "draft07", "schema.jsonFromDraft2020_12": "draft2020_12" }[expr.fn];
+      return context.emitDynCheckValue(expr.type, `runtime::json_schema_from_${convert}::<${context.dynTypeName()}>(&${context.emitExpr(first)})`, expr.loc);
+    }
+    case "schema.toJsonSchemaDocument":
+      if (first === undefined) break;
+      return context.emitDynCheckValue(expr.type, `runtime::schema_to_json_document::<${context.dynTypeName()}>(&${context.emitExpr(first)})`, expr.loc);
     case "schema.decodeSync":
     case "schema.decodeOption":
     case "schema.decodeEffect":
@@ -802,6 +860,7 @@ function emitRustSchemaCall(expr: RustLibCallExpr, context: RustLibCallContext):
  * only says "handle". */
 function decodeValueType(context: RustLibCallContext, expr: RustLibCallExpr): IrType {
   const carrier = expr.args[1];
+  if (carrier?.kind === "strLit" && carrier.value === "$dyn") return DYN;
   if (carrier === undefined || carrier.type.kind !== "array") return context.unsupported("a schema decoder without its value carrier", expr.loc);
   return carrier.type.elem;
 }

@@ -738,6 +738,61 @@ pub fn number_to_exponential(value: f64) -> JsString {
     JsString::from(output)
 }
 
+pub fn number_to_exponential_digits(value: f64, fraction_digits: f64) -> JsString {
+    let fraction_digits = if fraction_digits.is_nan() {
+        0.0
+    } else {
+        fraction_digits.trunc()
+    };
+    if !value.is_finite() {
+        return JsString::from(format_number(value));
+    }
+    if !(0.0..=100.0).contains(&fraction_digits) {
+        throw_range_error("toExponential() argument must be between 0 and 100".to_owned());
+    }
+
+    let fraction_count = fraction_digits as usize;
+    let precision = fraction_count + 1;
+    let negative = value < 0.0;
+    let magnitude = value.abs();
+    let mut exponent = if magnitude == 0.0 {
+        0
+    } else {
+        decimal_exponent(magnitude)
+    };
+    let mut digits = if magnitude == 0.0 {
+        "0".repeat(precision)
+    } else {
+        let mut rounded = rounded_decimal_integer(magnitude, precision as i32 - exponent - 1);
+        let mut rendered = rounded.to_radix_string(10);
+        if rendered.len() > precision {
+            assert_eq!(rounded.divide_small(10), 0);
+            exponent += 1;
+            rendered = rounded.to_radix_string(10);
+        }
+        while rendered.len() < precision {
+            rendered.insert(0, '0');
+        }
+        rendered
+    };
+
+    let mut output = String::with_capacity(precision + exponent.unsigned_abs() as usize + 8);
+    if negative {
+        output.push('-');
+    }
+    output.push(digits.remove(0));
+    if fraction_count > 0 {
+        output.push('.');
+        output.push_str(&digits);
+    }
+    output.push('e');
+    if exponent >= 0 {
+        output.push('+');
+    }
+    output.push_str(&exponent.to_string());
+    JsString::from(output)
+}
+
 pub fn number_to_precision(value: f64, precision: f64) -> JsString {
     let precision = if precision.is_nan() {
         0.0

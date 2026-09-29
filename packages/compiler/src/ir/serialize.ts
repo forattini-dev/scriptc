@@ -1,21 +1,18 @@
 import { InternalCompilerError } from "../errors.js";
-/* IR ↔ JSON. The IR is plain JSON-safe data by construction; the value of
- * this module is the version fence and the finiteness assertion (numLit
- * holds a JS number — NaN/Infinity literals cannot appear in source, but
- * a frontend bug producing one must not silently become `null` in JSON).
+/* IR ↔ JSON. The IR is plain JSON-safe data except for the complete f64
+ * literal domain. JavaScript globals can produce NaN and ±Infinity, and -0
+ * has an observable sign, so those values use an explicit sentinel instead
+ * of JSON.stringify's lossy null/zero encodings.
  */
 import type { IrModule } from "./ir.js";
 
-export const IR_VERSION = 11 as const;
+export const IR_VERSION = 12 as const;
 
 export function serializeModule(mod: IrModule): string {
   return JSON.stringify(mod, (_key, value) => {
     if (typeof value === "number" && !Number.isFinite(value)) {
-      // ±Infinity numLits are real (the global `Infinity`); JSON cannot
-      // spell them, so they ride a sentinel object no other IR value can
-      // be (numbers never serialize as objects). NaN stays a bug.
-      if (Number.isNaN(value)) throw new InternalCompilerError("IR contains NaN; refusing to serialize");
-      return { $nonfinite: value > 0 ? "inf" : "-inf" };
+      // The sentinel object cannot collide with a number-valued IR field.
+      return { $nonfinite: Number.isNaN(value) ? "nan" : value > 0 ? "inf" : "-inf" };
     }
     // JSON.stringify(-0) prints "0", silently losing the sign a numLit's
     // f64 semantics depend on (String(-0) is "0" but 1/-0 is -Infinity) —
@@ -31,7 +28,11 @@ export function deserializeModule(json: string): IrModule {
   const mod = JSON.parse(json, (_key, value: unknown) => {
     if (typeof value === "object" && value !== null && "$nonfinite" in value) {
       const tag = (value as { $nonfinite: string }).$nonfinite;
-      return tag === "inf" ? Infinity : tag === "-0" ? -0 : -Infinity;
+      if (tag === "nan") return NaN;
+      if (tag === "inf") return Infinity;
+      if (tag === "-inf") return -Infinity;
+      if (tag === "-0") return -0;
+      throw new InternalCompilerError(`unknown non-finite IR number tag '${tag}'`);
     }
     return value;
   }) as IrModule;

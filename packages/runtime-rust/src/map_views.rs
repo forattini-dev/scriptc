@@ -27,6 +27,9 @@ trait MapView<K: HeapValue, V: HeapValue>: Trace {
     fn is_proxy_restricted(&self) -> bool;
     fn set_prototype(&self, value: V);
     fn prototype(&self) -> Option<V>;
+    fn symbol_get(&self, key: &JsSymbol) -> Option<V>;
+    fn symbol_set(&self, key: JsSymbol, value: V);
+    fn symbol_has(&self, key: &JsSymbol) -> bool;
 }
 
 struct MappedMap<K: HeapValue, S: HeapValue, T: HeapValue> {
@@ -66,6 +69,9 @@ impl<K: HeapValue, S: HeapValue, T: HeapValue> MapView<K, T> for MappedMap<K, S,
     fn is_proxy_restricted(&self) -> bool { map_is_proxy_restricted(&self.source) }
     fn set_prototype(&self, value: T) { map_set_prototype(&self.source, (self.write)(value)); }
     fn prototype(&self) -> Option<T> { map_prototype(&self.source).map(self.read) }
+    fn symbol_get(&self, key: &JsSymbol) -> Option<T> { map_symbol_get(&self.source, key).map(self.read) }
+    fn symbol_set(&self, key: JsSymbol, value: T) { map_symbol_set(&self.source, key, (self.write)(value)); }
+    fn symbol_has(&self, key: &JsSymbol) -> bool { map_symbol_has(&self.source, key) }
 }
 
 impl<K: HeapValue, V: HeapValue> MapData<K, V> {
@@ -102,7 +108,7 @@ pub fn map_mapped<K: HeapValue, S: HeapValue, T: HeapValue>(
     source: JsMap<K, S>, read: fn(S) -> T, write: fn(T) -> S,
 ) -> JsMap<K, T> {
     Gc::new(MapData {
-        entries: Vec::new(), live: 0, iteration_depth: 0, null_prototype: false,
+        entries: Vec::new(), symbol_entries: Vec::new(), live: 0, iteration_depth: 0, null_prototype: false,
         module_namespace: false, proxy_restricted: false, prototype: None,
         view: Some(Rc::new(MappedMap { source, read, write })),
     })

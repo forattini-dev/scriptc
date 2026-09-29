@@ -4,7 +4,7 @@ import { F64, BYTES_U8, STRING, BOOL, VOID } from "./type-constants.js";
 import type { IrUrlLibFn } from "./url-signatures.js"; import { SQLITE_MAY_THROW_LIB_FNS, type IrSqliteLibFn } from "./sqlite-signatures.js"; import type { IrEffectContextLibFn } from "./effect-context-signatures.js";
 import { THROWING_COERCION_FNS } from "./coercion-names.js";
 import type { IrNumericCoercionFn } from "./numeric-coercion.js";
-import { nativeArrayViewSupported, nativeRecordCheckSupported } from "./native-record.js";
+import { nativeArrayCheckSupported, nativeArrayViewSupported, nativeRecordCheckSupported, nativeTupleCheckSupported } from "./native-record.js";
 import type { IrFunction } from "./functions.js";
 export type { IrFunction } from "./functions.js";
 import { InternalCompilerError } from "../errors.js";
@@ -784,7 +784,7 @@ export function isRefCounted(t: IrType): boolean {
 /* ── module ────────────────────────────────────────────────────────────── */ export interface IrFamily { id: string; impls: { name: string; captures: IrParam[] }[]; instances: { key: string; params: IrType[]; ret: IrType; targets: string[] }[] }
 export interface IrModule {
   /** Bumped on any breaking IR change; serialize.ts refuses mismatches. */
-  irVersion: 11;
+  irVersion: 12;
   sourceFile: string;
   /** The runtime target the program was lowered for (--target): the
    * backends configure the runtime's per-runtime semantic switches from
@@ -1901,6 +1901,8 @@ export type IrLibFn =
   | "module.import"
   | "module.namespace" | "promise.view"
   | "effect.succeed" | "effect.sync" | "effect.map" | "effect.flatMap" | "effect.runSync" | "effect.runSyncExit" | "effect.runPromise" | "effect.gen" | "effect.fail" | "effect.die" | "effect.orDie" | "effect.catchAll" | "effect.mapError" | "effect.promise" | "effect.tryPromise" | "effect.fn" | "effect.void" | "effect.as" | "effect.asVoid" | "effect.ignore" | "effect.andThenEffect" | "effect.serviceKey" | "effect.serviceKeyIdentity" | "effect.provide" | "effect.provideService" | "layer.empty" | "layer.succeed" | "layer.effect" | "layer.provide" | "layer.provideMerge" | "layer.merge" | "effect.forEach" | "effect.all" | "effect.log" | "effect.tap" | "effect.tapError" | "effect.suspend" | "effect.sleep" | "effect.scoped" | "effect.addFinalizer" | "effect.ensuring" | "effect.acquireRelease" | "effect.acquireUseRelease" | "effect.exit" | "effect.exitSucceed" | "effect.exitFail" | "effect.exitIsSuccess" | "effect.exitIsFailure" | "effect.dataTag" | "effect.exitValue" | "effect.try" | "effect.orElseSucceed" | "effect.catchIf" | "effect.catchTag" | "layer.effectDiscard" | "effect.dataMessage" | "effect.fnPipe" | "effect.durationMillis" | "effect.durationZero" | "effect.durationToMillis" | "effect.refMake" | "effect.refMakeUnsafe" | "effect.syncRefMake" | "effect.syncRefMakeUnsafe" | "effect.refGet" | "effect.refSet" | "effect.refUpdate" | "effect.refUpdateEffect" | "effect.deferredMake" | "effect.deferredAwait" | "effect.deferredSettle" | "effect.deferredIsDone" | "effect.semaphoreMake" | "effect.semaphoreMakeUnsafe" | "effect.semaphoreWithPermits" | "effect.queueMake" | "effect.queueTake" | "effect.queueOffer" | "effect.queueSize" | "effect.queueShutdown" | "effect.pubsubMake" | "effect.pubsubPublish" | "effect.pubsubSubscribe" | "effect.pubsubShutdown" | "effect.tryPromiseUnknown" | "effect.catchCause" | "effect.tapErrorCause" | "effect.causeFail" | "effect.causeSquash" | "effect.causeHas" | "schema.unknownFromJsonString" | "schema.prim" | "schema.literal" | "schema.struct" | "schema.array" | "schema.record" | "schema.union" | "schema.tuple" | "schema.decodeTo" | "schema.filterPattern" | "schema.filterBetween" | "schema.wrap" | "schema.filter" | "schema.check" | "schema.decodeSync" | "schema.decodeOption" | "schema.decodeEffect" | "schema.decodeExit" | "schema.is" | "schema.test" | "schema.encodeSync" | "schema.make" | "option.some" | "option.none" | "option.isSome" | "option.getOrUndefined" | "option.getOrElse" | "option.map" | "option.match" // the effect kernel (static builds; lower-effect.ts)
+  | "schema.toType" | "schema.toJsonSchemaDocument"
+  | "schema.jsonFromOpenApi3_0" | "schema.jsonFromOpenApi3_1" | "schema.jsonFromDraft07" | "schema.jsonFromDraft2020_12"
   /** Native static fetch and its Web-platform companions. fetch.start
    * answers once the response head arrives; the response body readers
    * consume the native body stream. AbortSignal and ReadableStream values
@@ -1990,6 +1992,11 @@ export type IrLibFn =
    * (Node's TypeError texts; accessors use the unsupported Error).
    * Included in the may-throw seed set. */
   | "dyn.defineProps"
+  /** Object.defineProperty(target, symbol, { value }) for the native
+   * checked-dynamic object tree. Symbol identity is preserved separately
+   * from string-key enumeration; the property is non-enumerable, matching
+   * an omitted descriptor's flags. Rust-only. */
+  | "dyn.defineSymbolValue"
   | "dyn.proxyNew"
   /** Bare `typeof v` on a dyn value AS A STRING (arg: the dyn value,
    * borrowed; result: an owned string) — the dyn kind's JS answer:
@@ -2236,7 +2243,8 @@ export type IrLibFn =
   | "str.b64Missing"
   /** Number.prototype formatters (scr_lib.c/scr_dtoa.c), JS-exact:
    * num.toExponential is toExponential() with the spec's "as many digits
-   * as necessary"; num.toFixed0 is the non-throwing omitted-argument
+   * as necessary"; num.toExponentialDigits implements an explicit
+   * fractionDigits and THROWS outside 0..100; num.toFixed0 is the non-throwing omitted-argument
    * toFixed() fast path; num.toFixed implements an explicit fractionDigits
    * with exact binary-value rounding and THROWS RangeError outside 0..100.
    * num.toPrecision implements the explicit significant-digit form and
@@ -2245,6 +2253,7 @@ export type IrLibFn =
    * THROWS outside 2..36.
    * Successful results +1. */
   | "num.toExponential"
+  | "num.toExponentialDigits"
   | "num.toFixed0"
   | "num.toFixed"
   | "num.toPrecision"
@@ -3811,6 +3820,12 @@ export type IrLibFn =
    * and deepStrictEqual's prototype gate. Never throws. Static builds
    * only; --dynamic routes Object.create through the engine instead. */
   | "dyn.objCreateNullProto"
+  /** The built-in Object.prototype identity and Object.getPrototypeOf over
+   * checked-dynamic values. Native prototype identities are immutable
+   * runtime sentinels: equality is by prototype name, while their JS kind
+   * remains object (never a constructor/function stand-in). */
+  | "dyn.objectPrototype"
+  | "dyn.getPrototypeOf"
   | "dyn.objValues"
   | "dyn.objEntries"
   /** structuredClone over the checked-dynamic tree (scr_json.c): the JSON-safe subset plus
@@ -3835,6 +3850,8 @@ export type IrLibFn =
    * The result TYPE is the regex kind, so the link switch pulls the
    * engine exactly like a literal. */
   | "regex.new"
+  /** Rust-native RegExp replacement callback, currently the common one-argument `(match) => string` shape. */
+  | "regex.replaceCallback"
   /** structuredClone with a NON-EMPTY transfer array of static values:
    * nothing static is transferable, so the call always throws Node's
    * catchable DataCloneError ("Found invalid value in transferList.") —
@@ -4455,6 +4472,10 @@ export type IrLibFn =
    * (-1 when absent; the empty needle finds the clamped position).
    * Borrowed args; +1 string / plain f64; neither throws. */
   | "string.fromCharCode"
+  /** String.fromCodePoint over one packed f64[] argument. Every value must
+   * be an integral Unicode scalar in 0..0x10ffff or the runtime throws the
+   * catchable RangeError. Valid astral scalars expand to a UTF-16 pair. */
+  | "string.fromCodePoint"
   /** lastIndexOf returns the last UTF-16 start index, or -1. The two-arg
    * form searches at or before its numeric position; NaN starts at the end.
    * String arguments are borrowed and neither form throws. */
@@ -5281,7 +5302,7 @@ export type IrExpr =
    * "function"` — true exactly for the checked-dynamic tree's function kind (boxed
    * closures); function values are truthy and answer FALSE to the
    * `"object"` test, JS-exact. */
-  | { kind: "dynTest"; test: "date" | "regex" | "url" | "bigint" | "symbol" | "string" | "number" | "integer" | "finite" | "nan" | "safeInteger" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "date" | "regex" | "url" | "searchParams" | "map" | "set" | "bigint" | "symbol" | "string" | "number" | "integer" | "finite" | "nan" | "safeInteger" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string, symbol, or dyn-typed (ToPropertyKey); `type` is always dyn. An
@@ -5537,8 +5558,9 @@ export type IrExpr =
    * BORROWED; the result string is owned (+1). Never throws. */
   | { kind: "jsonStringify"; value: IrExpr; type: IrType; loc: SrcLoc }
   /** The dynamic-boundary check — a CHECKED cast `dynValue as T`: validate
-   * the dyn value's JSON dyn against `type` (a non-dyn, JSON-representable
-   * IR type) and BUILD the typed value (+1), or THROW a catchable
+   * the dyn value against `type` (JSON-representable data plus the native
+   * brands/handles explicitly retained by the checked-dynamic tree) and
+   * BUILD the typed value (+1), or THROW a catchable
    * TypeError-flavored, path-annotated string ("TypeError: expected number
    * at $.items[2].price, got string") through the exception cell. Semantics:
    * numbers/strings/bools match strictly (no coercions); records are
@@ -6089,6 +6111,8 @@ export function canConvertToDyn(
   visiting: Set<string> = new Set(),
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion)) return true;
+  if ((t.kind === "map" && t.key.kind === "dyn" && t.value.kind === "dyn") ||
+      (t.kind === "set" && t.elem.kind === "dyn") || t.kind === "searchParams") return true;
   // bytes<u8>, branded native objects, and boxable functions are dyn kinds the walker boxes
   // ANYWHERE (Rust shares bytes; functions retain identity), including nested
   // in records/arrays/unions. isJsonSafeType rejects them, but dynFrom
@@ -6158,6 +6182,12 @@ function canBoxDynComposite(
       return canBoxFuncIntoDyn(t, getRecord, getUnion);
     case "array":
       return canBoxDynComposite(t.elem, getRecord, getUnion, visiting);
+    case "map":
+      return t.key.kind === "dyn" && t.value.kind === "dyn";
+    case "set":
+      return t.elem.kind === "dyn";
+    case "searchParams":
+      return true;
     case "record": {
       const shape = getRecord(t.shapeId);
       if (!shape) return false;
@@ -6189,7 +6219,9 @@ export function canDynCheckTo(
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
 ): boolean {
-  if (isJsonSafeType(t, getRecord, getUnion) || nativeArrayViewSupported(t) || nativeRecordCheckSupported(t, getRecord, getUnion)) return true;
+  if (isJsonSafeType(t, getRecord, getUnion) || nativeArrayCheckSupported(t, getRecord) || nativeRecordCheckSupported(t, getRecord, getUnion) || nativeTupleCheckSupported(t, getRecord)) return true;
+  if ((t.kind === "map" && t.key.kind === "dyn" && t.value.kind === "dyn") ||
+      (t.kind === "set" && t.elem.kind === "dyn") || t.kind === "searchParams") return true;
   if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
   if (t.kind === "object" && t.className === "%Error") return true;
   if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);
@@ -7825,6 +7857,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.objKeys",
   "dyn.hasOwn",
   "dyn.hasKey", // Engine proxy traps can throw during membership tests.
+  "dyn.getPrototypeOf",
   "dyn.assign",
   // variadic Object.assign: spread flattening throws V8's spread-call
   // TypeErrors; the final copy throws ToObject on a nullish target

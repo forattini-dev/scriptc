@@ -207,6 +207,10 @@ export class RustFunctionValueEmitter {
     if (shape.runtimeCallback === true) {
       arms.push(`${this.context.closureName(shape)}::RuntimeCallback { callback, .. } => callback.as_ref().expect("scriptc: cleared live runtime callback")(${args.join(", ")})`);
     }
+    // A function type nothing in this program ever constructs (a callback supplied by the host of a library build, e.g. a
+    // record field the caller fills): its closure enum has no variants, so no value of it can exist and the dispatch is
+    // unreachable. `match *closure {}` is the legal spelling of that impossibility on an empty enum.
+    if (arms.length === 0) return `${callee}.with(|closure| match *closure {})`;
     return `${callee}.with(|closure| match closure { ${arms.join(", ")} })`;
   }
 

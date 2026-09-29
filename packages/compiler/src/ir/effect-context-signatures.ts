@@ -1,4 +1,4 @@
-import { DYN, EFFECT_T, F64, STRING } from "./type-constants.js";
+import { DYN, EFFECT_T, F64, STRING, VOID } from "./type-constants.js";
 
 export type IrEffectContextLibFn =
   /** `Context.Reference(id, { defaultValue })`: a service key whose lookup answers the (lazily computed, then
@@ -53,7 +53,21 @@ export type IrEffectContextLibFn =
   | "effect.sqlReserve"
   /** `new SqlError({ reason: classifySqliteError(cause, { message }) })`: the error handle, carrying the message
    * effect derives from the reason. Programs that read `reason` itself keep their own refusal. */
-  | "effect.sqlErrorNew";
+  | "effect.sqlErrorNew"
+  | "effect.httpRequestMake"
+  | "effect.httpRequestSetUrlParam"
+  | "effect.httpRequestAppendUrlParam"
+  | "effect.httpRequestSetHeader"
+  | "effect.httpRequestSetHeaders"
+  | "effect.httpRequestBodyJson"
+  /** The built-in Fetch transport layer and its response surface. */
+  | "effect.httpClientLayer"
+  | "effect.httpClientExecute"
+  | "effect.httpResponseStatus"
+  | "effect.httpResponseHeader"
+  | "effect.httpResponseStream"
+  | "effect.httpStreamRunForEach"
+  | "effect.httpClientErrorReason";
 
 export const EFFECT_CONTEXT_LIB_FN_SIGS = {
   "effect.referenceKey": { argTypes: [STRING, null], result: EFFECT_T },
@@ -81,4 +95,17 @@ export const EFFECT_CONTEXT_LIB_FN_SIGS = {
   "effect.sqlTransactionKey": { argTypes: [EFFECT_T], result: EFFECT_T },
   "effect.sqlReserve": { argTypes: [EFFECT_T], result: EFFECT_T },
   "effect.sqlErrorNew": { argTypes: [STRING], result: EFFECT_T },
+  "effect.httpRequestMake": { argTypes: [STRING, STRING], result: EFFECT_T },
+  "effect.httpRequestSetUrlParam": { argTypes: [EFFECT_T, STRING, STRING], result: EFFECT_T },
+  "effect.httpRequestAppendUrlParam": { argTypes: [EFFECT_T, STRING, STRING], result: EFFECT_T },
+  "effect.httpRequestSetHeader": { argTypes: [EFFECT_T, STRING, STRING], result: EFFECT_T },
+  "effect.httpRequestSetHeaders": { argTypes: [EFFECT_T, null], result: EFFECT_T },
+  "effect.httpRequestBodyJson": { argTypes: [EFFECT_T, DYN], result: EFFECT_T },
+  "effect.httpClientLayer": { argTypes: [], result: EFFECT_T },
+  "effect.httpClientExecute": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T },
+  "effect.httpResponseStatus": { argTypes: [EFFECT_T], result: F64 },
+  "effect.httpResponseHeader": { argTypes: [EFFECT_T, STRING], result: VOID },
+  "effect.httpResponseStream": { argTypes: [EFFECT_T], result: EFFECT_T },
+  "effect.httpStreamRunForEach": { argTypes: [EFFECT_T, null], result: EFFECT_T },
+  "effect.httpClientErrorReason": { argTypes: [EFFECT_T], result: EFFECT_T },
 };

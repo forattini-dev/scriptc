@@ -23,6 +23,9 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   if (usesEmbeddedModules) context.line(`(${name}::Island(left), ${name}::Island(right)) => runtime::island_strict_equal(left, right),`);
   context.line(`(${name}::Regex(left), ${name}::Regex(right)) => std::rc::Rc::ptr_eq(left, right),`);
   context.line(`(${name}::Url(left), ${name}::Url(right)) => std::rc::Rc::ptr_eq(left, right),`);
+  context.line(`(${name}::SearchParams(left), ${name}::SearchParams(right)) => std::rc::Rc::ptr_eq(left, right) || (deep && runtime::search_params_to_string(left) == runtime::search_params_to_string(right)),`);
+  context.line(`(${name}::Map(left), ${name}::Map(right)) => runtime::map_ptr_eq(left, right),`);
+  context.line(`(${name}::Set(left), ${name}::Set(right)) => runtime::map_ptr_eq(left, right),`);
   context.line(`(${name}::Promise(left), ${name}::Promise(right)) => runtime::promise_handle_identity(left) == runtime::promise_handle_identity(right),`);
   context.line(`(${name}::NetServer(left), ${name}::NetServer(right)) => left.ptr_eq(right),`);
   context.line(`(${name}::NetSocket(left), ${name}::NetSocket(right)) => left.ptr_eq(right),`);
@@ -47,6 +50,7 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   context.line(`(${name}::TypedBytes(left), ${name}::TypedBytes(right)) => runtime::typed_bytes_ptr_eq(left, right) || (deep && runtime::typed_bytes_deep_equals(left, right)),`);
   context.line(`(${name}::Buffer(left), ${name}::Buffer(right)) => left.ptr_eq(right) || (deep && runtime::bytes_deep_equals(left, right)),`);
   context.line(`(${name}::NativeConstructor(left), ${name}::NativeConstructor(right)) => left == right,`);
+  context.line(`(${name}::NativePrototype(left), ${name}::NativePrototype(right)) => left == right,`);
   context.line(`(${name}::NativeMethod(left), ${name}::NativeMethod(right)) => left == right,`);
   context.line(`(${name}::ArrayIterator(left), ${name}::ArrayIterator(right)) => left.ptr_eq(right),`);
   context.line(`(${name}::Array(left), ${name}::Array(right)) => {`);

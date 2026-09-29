@@ -22,7 +22,7 @@ test("fib module JSON round-trips", () => {
 test("validator rejects type mismatches and bad references", () => {
   const loc = { file: "t.ts", start: 0, end: 0 };
   const bad: IrModule = {
-    irVersion: 11,
+    irVersion: 12,
     sourceFile: "t.ts",
     entry: "__main",
     functions: [
@@ -54,7 +54,7 @@ test("validator rejects type mismatches and bad references", () => {
   ]);
 });
 
-test("serializer round-trips ±Infinity and refuses NaN", () => {
+test("serializer round-trips the complete non-finite f64 domain", () => {
   const mod = structuredClone(fibModule);
   const fn = mod.functions[0]!;
   const stmt = fn.body[0]!;
@@ -79,11 +79,15 @@ test("serializer round-trips ±Infinity and refuses NaN", () => {
   if (stmt.kind === "if" && stmt.cond.kind === "bin" && stmt.cond.right.kind === "numLit") {
     stmt.cond.right.value = NaN;
   }
-  expect(() => serializeModule(mod)).toThrow(/NaN/);
+  const back3 = deserializeModule(serializeModule(mod));
+  const stmt4 = back3.functions[0]!.body[0]!;
+  if (stmt4.kind === "if" && stmt4.cond.kind === "bin" && stmt4.cond.right.kind === "numLit") {
+    expect(stmt4.cond.right.value).toBeNaN();
+  }
 });
 
 test("deserializer rejects the previous IR version", () => {
-  const json = serializeModule(fibModule).replace('"irVersion": 11', '"irVersion": 10');
+  const json = serializeModule(fibModule).replace('"irVersion": 12', '"irVersion": 11');
   expect(() => deserializeModule(json)).toThrow(/version mismatch/);
 });
 

@@ -3159,7 +3159,7 @@ function emitDynamicExpr(
               : `(${d.name}->kind == SCR_DYN_BOOL && ${d.name}->v.b == ${s.name})`;
         return emitter.newTemp(e.type, e.negated ? `!${test}` : test);
       }
-      case "dynTest": { if (e.test === "bigint" || e.test === "date" || e.test === "regex" || e.test === "url" || e.test === "symbol" || e.test === "finite" || e.test === "nan" || e.test === "safeInteger") throw new Error("this checked-dynamic predicate requires --backend rust");
+      case "dynTest": { if (e.test === "bigint" || e.test === "date" || e.test === "regex" || e.test === "url" || e.test === "searchParams" || e.test === "map" || e.test === "set" || e.test === "symbol" || e.test === "finite" || e.test === "nan" || e.test === "safeInteger") throw new Error("this checked-dynamic predicate requires --backend rust");
         // A pure kind compare on the dyn node — borrowed; only the truthy
         // form also reads a scalar payload. ISLAND-held nodes (the jsval
         // kind — engine objects/arrays/functions only, scalars normalize
@@ -3441,6 +3441,9 @@ function emitSerializationExpr(
 ): Temp {
   switch (e.kind) {
       case "jsonStringify": {
+        if ((e as typeof e & { runtimeIndent?: IrExpr }).runtimeIndent !== undefined) {
+          throw new InternalCompilerError("JSON.stringify with runtime spacing needs --backend rust");
+        }
         // Type-directed serialization: the STATIC type picks an emitted
         // serializer (interned per type) — no dyn, no runtime dispatch. The
         // value temp is BORROWED (released with this statement's frame);

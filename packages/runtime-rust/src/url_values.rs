@@ -41,6 +41,17 @@ pub fn url_new_base(input: &JsString, base: &JsString) -> JsUrl {
     url_from_parsed(value)
 }
 
+/// `URL.parse(input)`: the constructor parser without its exception edge.
+pub fn url_parse(input: &JsString) -> Option<JsUrl> {
+    url::Url::parse(input).ok().map(url_from_parsed)
+}
+
+/// `URL.parse(input, base)`: base validation and relative resolution are
+/// shared with the constructor, but invalid input is represented by `None`.
+pub fn url_parse_base(input: &JsString, base: &JsString) -> Option<JsUrl> {
+    parse_url_with_base(input, base).ok().map(url_from_parsed)
+}
+
 pub fn url_can_parse_base(input: &JsString, base: &JsString) -> bool {
     parse_url_with_base(input, base).is_ok()
 }

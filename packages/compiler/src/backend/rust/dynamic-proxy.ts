@@ -6,6 +6,10 @@ import type { RustDynamicContext } from "./dynamic-context.js";
 export function emitRustDynamicProxy(context: RustDynamicContext): void {
   const dyn = context.dynTypeName();
   const line = (value: string) => context.line(value);
+  const functionVariants = [...context.dynBoxedFunctionShapes].flatMap((key) => {
+    const shape = context.closureShapes.get(key);
+    return shape === undefined ? [] : [context.dynFunctionVariant(shape)];
+  }).filter((variant, index, variants) => variants.indexOf(variant) === index);
   line(`struct ScDynProxy { target: Option<${dyn}>, handler: Option<${dyn}> }`);
   line("impl runtime::Trace for ScDynProxy { fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
   line("if let Some(value) = &self.target { runtime::Trace::trace(value, tracer); }");
@@ -30,7 +34,11 @@ export function emitRustDynamicProxy(context: RustDynamicContext): void {
   line("_ => sc_dyn_key_get(value, key, false), } }");
   line(`fn sc_dyn_get_key(value: &${dyn}, key: &${dyn}, receiver: &${dyn}) -> ${dyn} { match key {`);
   line(`${dyn}::String(key) => sc_dyn_get(value, key, receiver),`);
-  line(`${dyn}::Symbol(..) => match value { ${dyn}::Proxy(proxy) => sc_dyn_proxy_get(proxy, key, receiver), _ => runtime::throw_error("scriptc: symbol-keyed native object storage is not supported yet".to_owned()), },`);
+  line(`${dyn}::Symbol(symbol) => match value {`);
+  line(`${dyn}::Object(object) => runtime::map_symbol_get(object, symbol).or_else(|| runtime::map_prototype(object).map(|prototype| sc_dyn_get_key(&prototype, key, receiver))).unwrap_or(${dyn}::Undefined),`);
+  for (const variant of functionVariants) line(`${dyn}::${variant}(_, _, properties) => runtime::map_symbol_get(properties, symbol).unwrap_or(${dyn}::Undefined),`);
+  line(`${dyn}::Proxy(proxy) => sc_dyn_proxy_get(proxy, key, receiver),`);
+  line(`_ => ${dyn}::Undefined, },`);
   line(`${dyn}::Undefined | ${dyn}::Null | ${dyn}::Number(..) | ${dyn}::BigInt(..) | ${dyn}::Boolean(..) => sc_dyn_get(value, &sc_dyn_to_string(key), receiver),`);
   line('_ => runtime::throw_error("scriptc: native object property-key coercion is not supported yet".to_owned()), } }');
   line(`fn sc_dyn_proxy_get(proxy: &runtime::Gc<ScDynProxy>, key: &${dyn}, receiver: &${dyn}) -> ${dyn} {`);

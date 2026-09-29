@@ -1,3 +1,4 @@
+import { lowerMapEntriesSpread } from "./lower-collection-materialization.js";
 import { nullishConstantKind } from "./nullish-filter-proof.js";
 import { functionAbi } from "./function-abi.js";
 import { lowerComputedStringKey } from "./lower-computed-string-key.js";
@@ -39,13 +40,14 @@ import * as ts from "../ts7/adapter.js";
 import { dirname, posix } from "node:path";
 import type { Lowerer } from "./lowerer.js";
 import { trapUseThrowExpr } from "./lowerer.js";
-import { trapModuleOf } from "./lower-builtins.js"; import { lowerEffectProperty, lowerServiceKeyRef } from "./lower-effect.js";
+import { trapModuleOf } from "./lower-builtins.js"; import { lowerEffectElement, lowerEffectProperty, lowerServiceKeyRef } from "./lower-effect.js";
 import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLibFn, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, canExitIslandToType, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/ir.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STRING_INDEX_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import {
   UNSUPPORTED,
   blockedBindingUseDiag,
+  isCheckerPanic,
   requiresDynamicPackageDiag,
   unsupportedDiag,
 } from "../../diagnostics/diagnostic.js";
@@ -1900,6 +1902,16 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       }
       const regexState = lowerRegexStateRead(lowerer, expr);
       if (regexState !== null) return regexState;
+      // Object.prototype is a real identity for the Rust checked-dynamic
+      // object model in static and hybrid builds. Engine-owned Object
+      // values are still intercepted by the island paths before this one.
+      if (
+        !expr.questionDotToken &&
+        expr.name.text === "prototype" &&
+        lowerer.isStdlibGlobal(expr.expression, "Object")
+      ) {
+        return { kind: "libCall", fn: "dyn.objectPrototype", args: [], type: DYN, loc };
+      }
       // `arguments.length` in a TYPED function whose signature is
       // FIXED-ARITY (no optional/default/rest parameters): tsc enforces
       // exact arity at every call site and call/apply/bind indirection is
@@ -2511,8 +2523,19 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       // covariant array types into one — `c ? ['sh', []] : ['cmd', ['/d']]`
       // joins as (string | string[])[] whichever arm nests the empty
       // literal), so neither arm's uninhabited never[] reading decides.
+      // Both reads of the ternary's own type ask the checker for the union's constituents, which typescript-go can
+      // panic on for a join of tuple-array arms (`c ? [] : [[k, v] as const]`); the panic answers "no own mapping" and
+      // the arms decide the type below (an empty arm adopts its sibling's array type).
+      const ownMapped = (): IrType | null => {
+        try {
+          return lowerer.mapTypeOf(lowerer.typeOf(expr));
+        } catch (err) {
+          if (isCheckerPanic(err)) return null;
+          throw err;
+        }
+      };
       const ownArrayJoin = (() => {
-        const m = lowerer.mapTypeOf(lowerer.typeOf(expr));
+        const m = ownMapped();
         return m?.kind === "array" ? m : null;
       })();
       let thenRaw: IrExpr;
@@ -2550,7 +2573,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       // stays f64-typed). Arms that AGREE on an array type decide it
       // themselves (a context- or sibling-built literal arm can carry a
       // tagged element type the checker's own type doesn't spell).
-      const own = lowerer.mapTypeOf(lowerer.typeOf(expr));
+      const own = ownMapped();
       const useCtx =
         (ctxMapped?.kind === "record" || ctxMapped?.kind === "union" || ctxMapped?.kind === "object") &&
         (own === null ||
@@ -2568,8 +2591,11 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
         e.type.kind === "dyn" ||
         e.kind === "unitLit" ||
         ((e.kind === "recordLit" || e.kind === "arrayLit") && lowerer.dynConvertible(e.type));
+      // An `Array.isArray(v) ? v : []` ternary under an `unknown`/`ReadonlyArray<unknown>` slot: the checker's own type is
+      // the refinement's `any[]` (a jsval-element array), but the slot is dyn and the dyn arm already IS the value.
+      const anyArrayUnderDynSlot = ctxMapped?.kind === "dyn" && own?.kind === "array" && own.elem.kind === "jsval";
       const dynJoin =
-        own === null &&
+        (own === null || anyArrayUnderDynSlot) &&
         !(useCtx && ctxMapped) &&
         dynish(thenRaw) &&
         dynish(elseRaw) &&
@@ -2719,7 +2745,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       const narrowed = narrowedTs.flags & ts.TypeFlags.Never ? null : lowerer.mapTypeOf(narrowedTs);
       if (
         narrowed &&
-        (narrowed.kind === "date" || narrowed.kind === "regex" || narrowed.kind === "url" || narrowed.kind === "bigint" || narrowed.kind === "symbol" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
+        (narrowed.kind === "date" || narrowed.kind === "regex" || narrowed.kind === "url" || narrowed.kind === "searchParams" || narrowed.kind === "map" || narrowed.kind === "set" || narrowed.kind === "bigint" || narrowed.kind === "symbol" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
       ) {
         return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
       }
@@ -4482,6 +4508,21 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
         return { kind: "recordLit", fields, type: mapped, loc };
       }
     }
+    // `Array.isArray(unknown)` is spelled `any[]` by lib.d.ts even though
+    // the value remains in Rust's checked-dynamic tree. A spread is an
+    // element-wise snapshot into a fresh dynamic array, so use the same
+    // validated iterable pack as dynamic rest arguments instead of
+    // requiring an island solely because the checker introduced `any`.
+    if (
+      lowerer.nativeCollectionArrays &&
+      (lowerer.checkerAnyArrayType(tsType) || lowerer.checkerAnyArrayType(lowerer.typeOf(expr))) &&
+      expr.elements.some(ts.isSpreadElement)
+    ) {
+      if (expr.elements.some(ts.isOmittedExpression)) {
+        lowerer.unsupported("SC1090", expr, "array holes combined with spreads in a dynamic (unknown[]) array literal");
+      }
+      return packDynamicRest(lowerer, expr.elements, expr, loc);
+    }
     if (!mapped || mapped.kind !== "array") {
       // The JS declaration fallback, literal-side: an element type with no
       // static home (a string | string[] mixed command tuple, an evolving
@@ -4592,6 +4633,12 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
             loc: locOf(el),
           };
         }
+        // `[...entries.filter(…).sort(…)]` over a checked-dynamic array (`Object.entries(narrowedRecord)`): the source
+        // stays dyn, so validate it once against the literal's own array type (a non-array or mismatched element
+        // throws the catchable boundary TypeError) and copy like any array source.
+        if (src.type.kind === "dyn") src = { kind: "dynCheck", value: src, type, loc: locOf(el) };
+        // `[...map]` / `[...Map.groupBy(…)]` spreads the entries as `[K, V]` tuples.
+        if (src.type.kind === "map") src = lowerMapEntriesSpread(lowerer, src, locOf(el)) ?? src;
         src = tupleSpreadArray(lowerer, src, type) ?? src;
         // Lift compatible array elements before the spread copies them.
         if (src.type.kind === "array" && !typeEquals(src.type, type)) {
@@ -5206,6 +5253,8 @@ export function fenceClosureProbe(
   export function lowerElementAccess(lowerer: Lowerer, expr: ts.ElementAccessExpression): IrExpr {
     const cachedModule = lowerRequireCacheElement(lowerer, expr);
     if (cachedModule) return cachedModule;
+    const effectElement = lowerEffectElement(lowerer, expr);
+    if (effectElement) return lowerer.maybeNarrow(effectElement, expr);
     // `a?.[i]`: the guard lowers as an optional-chain step around the
     // plain element read below.
     if (expr.questionDotToken && !lowerer.chainHandled.has(expr)) {
@@ -6705,6 +6754,13 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
       if (targetTs.flags & ts.TypeFlags.Any) return inner;
       const target = lowerer.mapTypeOf(targetTs);
       if (!target) lowerer.badType(expr.type, targetTs);
+      // `as unknown` is the lossless island-to-native bridge, not a JSON
+      // extraction. Preserve the engine handle by reference in dyn; later
+      // guards and checked casts can inspect or extract it without copying
+      // package objects such as an Acorn AST.
+      if (target.kind === "dyn") {
+        return { kind: "dynFromJsval", value: inner, type: DYN, loc: locOf(expr) };
+      }
       const callableRecord = lowerIslandCallableRecordCast(lowerer, inner, target, locOf(expr));
       if (callableRecord) return callableRecord;
       if (!lowerer.boundarySafe(target)) {
@@ -6720,6 +6776,11 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
     }
     const targetTs = lowerer.checker.getTypeFromTypeNode(expr.type);
     const target = lowerer.mapTypeOf(targetTs) ?? resolvedReturnAssertion(lowerer, expr, targetTs);
+    // `input as InputType<I>` inside a monomorphized generic body: the checker leaves the conditional type symbolic
+    // (nothing evaluates it against the instance's bindings), so the assertion names no static shape. The value is
+    // already checked-dynamic, and the consumer of the asserted value (the instance's concrete callback parameter)
+    // meets it through its own checked boundary — erase to the dyn value, like `as unknown`.
+    if (!target && inner.type.kind === "dyn" && (targetTs.flags & ts.TypeFlags.Conditional) !== 0) return inner;
     if (!target) lowerer.badType(expr.type, targetTs);
     if (target.kind === "dyn") return inner; // `as unknown`: erasure
     if (target.kind === "void" || !lowerer.jsonSafe(target)) {
@@ -7089,9 +7150,14 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         // RHS value is the expression's value — its OWN type, so the
         // consumer sees exactly what the checker typed.
         if (ts.isPropertyAccessExpression(expr.left) && !expr.left.questionDotToken) {
-          const recv = probeLower(lowerer, expr.left.expression);
-          if (recv && recv.type.kind === "dyn") {
-            const recvTmp = lowerer.declareHiddenLocal("%setRecv", DYN);
+          let recvNode = expr.left.expression;
+          while (ts.isParenthesizedExpression(recvNode) || ts.isAssertionExpression(recvNode) || ts.isNonNullExpression(recvNode)) {
+            recvNode = recvNode.expression;
+          }
+          const recv = probeLower(lowerer, recvNode);
+          if (recv && (recv.type.kind === "dyn" ||
+              (lowerer.nativeDenseArrays && recv.type.kind === "array" && recv.type.elem.kind === "dyn"))) {
+            const recvTmp = lowerer.declareHiddenLocal("%setRecv", recv.type);
             const rhsVal = lowerer.lowerExpr(expr.right);
             const valTmp = lowerer.declareHiddenLocal("%setVal", rhsVal.type);
             const valRef = (): IrExpr => ({ kind: "varRef", localId: valTmp.id, type: rhsVal.type, loc });
@@ -7100,6 +7166,10 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
               lowerer.unsupported("SC1101", expr.right, `assigning '${lowerer.fmt(rhsVal.type)}' values into a checked-dynamic member`);
             }
             const key: IrExpr = { kind: "strLit", value: expr.left.name.text, type: STRING, loc: locOf(expr.left.name) };
+            const recvRef: IrExpr = { kind: "varRef", localId: recvTmp.id, type: recv.type, loc };
+            const dynRecv: IrExpr = recv.type.kind === "dyn"
+              ? recvRef
+              : { kind: "dynFrom", value: recvRef, type: DYN, loc, liveRef: true };
             return {
               kind: "seqExpr",
               stmts: [
@@ -7107,7 +7177,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
                 { kind: "varDecl", localId: valTmp.id, init: rhsVal, loc },
                 {
                   kind: "exprStmt",
-                  expr: { kind: "libCall", fn: "dyn.keySet", args: [{ kind: "varRef", localId: recvTmp.id, type: DYN, loc }, key, stored], type: VOID, loc },
+                  expr: { kind: "libCall", fn: "dyn.keySet", args: [dynRecv, key, stored], type: VOID, loc },
                   loc,
                 },
               ],

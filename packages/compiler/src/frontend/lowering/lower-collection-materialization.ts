@@ -29,6 +29,23 @@ function collectionSource(L: Lowerer, input: ts.Expression): Source | null {
     mode = node.expression.name.text as Mode;
     node = receiver;
   }
+  // `String.prototype.matchAll` is eagerly lowered to a native array of
+  // match rows. The checker intentionally retains its iterator type, so
+  // recognize the direct builtin call before consulting that static shape.
+  if (
+    mode === undefined &&
+    ts.isCallExpression(node) &&
+    !node.questionDotToken &&
+    node.arguments.length === 1 &&
+    ts.isPropertyAccessExpression(node.expression) &&
+    !node.expression.questionDotToken &&
+    node.expression.name.text === "matchAll" &&
+    L.isStdlibMember(node.expression) &&
+    L.mapTypeOf(L.typeOf(node.expression.expression))?.kind === "string"
+  ) {
+    const value = L.lowerExpr(node);
+    if (value.type.kind === "array") return { value, element: value.type.elem, mode: "values" };
+  }
   const mapped = L.mapTypeOf(L.typeOf(node));
   if (!mapped || !["array", "set", "map", "record", "string", "searchParams"].includes(mapped.kind)) return null;
   const shape = mapped.kind === "record" ? L.shapes.get(mapped.shapeId) : undefined;
@@ -50,6 +67,14 @@ function collectionSource(L: Lowerer, input: ts.Expression): Source | null {
     element = { kind: "record", shapeId: L.shapes.intern([{ name: "0", type: key }, { name: "1", type: element }], true) };
   }
   return { value, element, mode };
+}
+
+/** `[...map]`: the Map's live entries snapshot into a fresh `[K, V][]` (insertion order, JS-exact), the same
+ * materialization Array.from(map) uses. Null when the value is not a native Map. */
+export function lowerMapEntriesSpread(L: Lowerer, value: IrExpr, loc: SrcLoc): IrExpr | null {
+  if (value.type.kind !== "map") return null;
+  const element: IrType = { kind: "record", shapeId: L.shapes.intern([{ name: "0", type: value.type.key }, { name: "1", type: value.type.value }], true) };
+  return materialize(L, { value, element, mode: "entries" }, undefined, loc);
 }
 
 /** Seed construction runs no callback, so a Set or tuple can be snapshotted
@@ -79,6 +104,11 @@ export function lowerCollectionFromCall(L: Lowerer, call: ts.CallExpression): Ir
   // String splitting already yields a fresh code-point array; do not copy it
   // a second time when the caller has no mapper.
   if (!mapperNode && L.mapTypeOf(L.typeOf(call.arguments[0]!))?.kind === "string") return source.value;
+  // A capture row has the runtime-honest `(string | undefined)[]` element
+  // type, while TypeScript's RegExpMatchArray index signature still says
+  // `string`. The pure identity mapper cannot observe that declaration lie;
+  // Array.from(source, value => value) is exactly a fresh shallow copy.
+  if (mapperNode && identityMapper(L, mapperNode)) return materialize(L, source, undefined, locOf(call));
   const mapper = mapperNode ? L.lowerExpr(mapperNode) : undefined;
   if (mapper && (mapper.type.kind !== "func" || mapper.type.params.length > 2 ||
       (mapper.type.params.length > 0 && !typeEquals(mapper.type.params[0]!, source.element)) ||
@@ -86,6 +116,9 @@ export function lowerCollectionFromCall(L: Lowerer, call: ts.CallExpression): Ir
     L.noLowering("Array.from with this mapper signature", mapperNode!, "the native mapper accepts the element and optional numeric index");
   }
   const output = mapper?.type.kind === "func" ? mapper.type.ret : source.element;
+  if (mapper && output.kind === "dyn" && source.value.type.kind === "array" && L.nativeCollectionArrays) {
+    return materializeDynamicArray(L, source.value, mapper, locOf(call));
+  }
   if (mapper && output.kind === "dyn" && source.value.type.kind === "map" && L.nativeDynamicMaps) {
     return materializeDynamicMap(L, source, mapper, locOf(call));
   }
@@ -94,6 +127,71 @@ export function lowerCollectionFromCall(L: Lowerer, call: ts.CallExpression): Ir
   }
   fenceProducedArrayElem(L, call, "'Array.from(collection, mapper)'", output);
   return materialize(L, source, mapper, locOf(call));
+}
+
+function identityMapper(L: Lowerer, node: ts.Expression): boolean {
+  let value = node;
+  while (ts.isParenthesizedExpression(value)) value = value.expression;
+  if (!ts.isArrowFunction(value) || value.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)) return false;
+  if (value.parameters.length !== 1 || !ts.isIdentifier(value.parameters[0]!.name) || value.parameters[0]!.initializer || value.parameters[0]!.dotDotDotToken) return false;
+  let body: ts.Expression | ts.ConciseBody = value.body;
+  while (ts.isParenthesizedExpression(body)) body = body.expression;
+  if (!ts.isIdentifier(body)) return false;
+  return L.resolveValueSymbol(value.parameters[0]!.name) === L.resolveValueSymbol(body);
+}
+
+/** Rust-only Array<T> mapping whose callback result is checked-dynamic.
+ * The source length is re-read every iteration, matching ArrayIterator's
+ * live append behavior, while dyn.packPush retains each mapped result. */
+function materializeDynamicArray(L: Lowerer, source: IrExpr, mapper: IrExpr, loc: SrcLoc): IrExpr {
+  if (source.type.kind !== "array" || mapper.type.kind !== "func" || mapper.type.ret.kind !== "dyn") {
+    throw new InternalCompilerError("dynamic Array materialization requires an array and a dyn-returning mapper");
+  }
+  const sourceType = source.type;
+  const mapperType = mapper.type;
+  const key = `materializeDynArray:${typeKey(sourceType)}:${typeKey(mapperType)}`;
+  let helper = L.arrHofHelpers.get(key);
+  if (!helper) {
+    helper = `%collection.fromDynArray.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, helper);
+    const receiver = varRef("source.0", sourceType, loc);
+    const mapperRef = varRef("mapper.0", mapperType, loc);
+    const cursor = varRef("i.0", F64, loc);
+    const out = varRef("out.0", DYN, loc);
+    const element: IrExpr = { kind: "arrayGet", arr: receiver, index: cursor, type: sourceType.elem, loc };
+    const mapped: IrExpr = {
+      kind: "callValue",
+      callee: mapperRef,
+      args: [element, cursor].slice(0, mapperType.params.length),
+      type: DYN,
+      loc,
+    };
+    const length: IrExpr = { kind: "arrIntrinsic", method: "length", receiver, args: [], type: F64, loc };
+    const loop = countedFor(loc, length, () => [
+      { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.packPush", args: [out, mapped], type: VOID, loc }, loc },
+    ]);
+    L.liftedFns.push({
+      name: helper,
+      params: [
+        { localId: "source.0", name: "source", type: sourceType },
+        { localId: "mapper.0", name: "mapper", type: mapperType },
+      ],
+      returnType: DYN,
+      locals: [
+        { id: "source.0", name: "source", type: sourceType, mutable: false },
+        { id: "mapper.0", name: "mapper", type: mapperType, mutable: false },
+        { id: "out.0", name: "out", type: DYN, mutable: false },
+        { id: "i.0", name: "cursor", type: F64, mutable: true },
+      ],
+      body: [
+        { kind: "varDecl", localId: "out.0", init: { kind: "dynArrLit", elems: [], type: DYN, loc }, loc },
+        loop,
+        { kind: "return", value: out, loc },
+      ],
+      loc,
+    });
+  }
+  return { kind: "call", callee: helper, args: [source, mapper], type: DYN, loc };
 }
 
 /** Rust-only Map<dyn, dyn> materialization keeps the outer unknown[] in the

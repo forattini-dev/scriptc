@@ -627,7 +627,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
       // base is its family (whose base is the declared one) — the heritage
       // clause resolved when the family collected.
       let base: ClassInfo | null = inst ? inst.family : mixin ? mixin.base : null;
-      const schema = !lowerer.dynamic && !inst && !mixin ? kernelSchemaClassOf(lowerer.checker, decl) : null;
+      const schema = !inst && !mixin ? kernelSchemaClassOf(lowerer.checker, decl) : null;
       // A family whose `extends` clause mentions its OWN type parameters
       // (`class D<T> extends Box<T>`) would need a different base per
       // instantiation — no single family interval can sit above all of

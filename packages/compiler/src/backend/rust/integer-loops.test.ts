@@ -83,7 +83,7 @@ test("emission uses checked integer byte operations and leaves the shared IR unc
   loop.body.push({ kind: "bytesSet", arr: bytes, index, loc, value: {
     kind: "bytesIntrinsic", receiver: bytes, method: "get", args: [index], type: { kind: "f64" }, loc,
   } });
-  const mod: IrModule = { irVersion: 11, sourceFile: loc.file, entry: fn.name, functions: [fn] };
+  const mod: IrModule = { irVersion: 12, sourceFile: loc.file, entry: fn.name, functions: [fn] };
   expect(validateModule(mod)).toEqual([]);
   const original = structuredClone(mod);
   const rust = emitRustModule(mod);

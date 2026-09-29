@@ -8,7 +8,7 @@ test("scalar fromCharCode avoids a heap argument pack in both backends", () => {
   const loc = { file: "scalar-char.ts", start: 0, end: 0 };
   const value: IrExpr = { kind: "numLit", value: 65, type: F64, loc };
   const mod: IrModule = {
-    irVersion: 11, sourceFile: loc.file, entry: "__main", globals: [],
+    irVersion: 12, sourceFile: loc.file, entry: "__main", globals: [],
     functions: [{
       name: "__main", params: [], returnType: VOID, locals: [], loc,
       body: [{ kind: "exprStmt", loc, expr: {

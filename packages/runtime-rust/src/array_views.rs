@@ -6,6 +6,7 @@ trait ArrayView<T: ArrayElement>: Trace {
     fn identity(&self) -> usize;
     fn raw(&self) -> Option<JsArray<T>>;
     fn regex_metadata(&self) -> Option<(f64, JsString)>;
+    fn regex_groups(&self) -> Option<Vec<(JsString, usize)>>;
     fn len(&self) -> f64;
     fn get(&self, index: f64) -> T;
     fn set(&self, index: f64, value: T);
@@ -34,6 +35,7 @@ impl<S: ArrayElement, T: ArrayElement> ArrayView<T> for MappedArray<S, T> {
         array_raw(&self.source).map(|source| array_mapped(source, self.read, self.write))
     }
     fn regex_metadata(&self) -> Option<(f64, JsString)> { array_regex_metadata(&self.source) }
+    fn regex_groups(&self) -> Option<Vec<(JsString, usize)>> { array_regex_groups(&self.source) }
     fn len(&self) -> f64 { array_len(&self.source) }
     fn get(&self, index: f64) -> T { (self.read)(array_get(&self.source, index)) }
     fn set(&self, index: f64, value: T) { array_set(&self.source, index, (self.write)(value)); }
@@ -79,7 +81,7 @@ pub fn array_mapped<S: ArrayElement, T: ArrayElement>(
     source: JsArray<S>, read: fn(S) -> T, write: fn(T) -> S,
 ) -> JsArray<T> {
     Gc::new(ArrayData {
-        elements: Vec::new(), auxiliary: None, sparse: None,
+        elements: Vec::new(), auxiliary: None, properties: None, sparse: None,
         view: Some(Rc::new(MappedArray { source, read, write })),
     })
 }
@@ -93,15 +95,27 @@ pub fn array_mapped_source<S: ArrayElement, T: ArrayElement>(array: &JsArray<T>)
 
 // Reuse the optional auxiliary slot: ordinary arrays pay no extra field
 // for regex metadata, and typed/dynamic projections share its identity.
-fn array_set_regex_metadata<T: ArrayElement>(array: &JsArray<T>, index: f64, input: JsString) {
-    array.with_mut(|data| data.auxiliary = Some(Rc::new(ArrayAux::RegexMatch { index, input })));
+fn array_set_regex_metadata<T: ArrayElement>(
+    array: &JsArray<T>, index: f64, input: JsString, groups: Vec<(JsString, usize)>,
+) {
+    array.with_mut(|data| data.auxiliary = Some(Rc::new(ArrayAux::RegexMatch { index, input, groups })));
 }
 
 pub fn array_regex_metadata<T: ArrayElement>(array: &JsArray<T>) -> Option<(f64, JsString)> {
     array.with(|data| match &data.view {
         Some(view) => view.regex_metadata(),
         None => match data.auxiliary.as_deref() {
-            Some(ArrayAux::RegexMatch { index, input }) => Some((*index, input.clone())),
+            Some(ArrayAux::RegexMatch { index, input, .. }) => Some((*index, input.clone())),
+            _ => None,
+        },
+    })
+}
+
+pub fn array_regex_groups<T: ArrayElement>(array: &JsArray<T>) -> Option<Vec<(JsString, usize)>> {
+    array.with(|data| match &data.view {
+        Some(view) => view.regex_groups(),
+        None => match data.auxiliary.as_deref() {
+            Some(ArrayAux::RegexMatch { groups, .. }) if !groups.is_empty() => Some(groups.clone()),
             _ => None,
         },
     })

@@ -22,7 +22,7 @@ export function lowerRegexStateRead(L: Lowerer, node: ts.PropertyAccessExpressio
     return { kind: "regexIntrinsic", method: "lastIndex", receiver: L.lowerExpr(node.expression), args: [], type: F64, loc };
   }
   const symbol = type.getSymbol();
-  if ((node.name.text !== "index" && node.name.text !== "input") ||
+  if ((node.name.text !== "index" && node.name.text !== "input" && node.name.text !== "groups") ||
       (symbol?.name !== "RegExpExecArray" && symbol?.name !== "RegExpMatchArray")) return null;
   const receiver = L.lowerExpr(node.expression);
   return { kind: "dynKeyGet", value: receiver.type.kind === "dyn" ? receiver : { kind: "dynFrom", value: receiver, type: DYN, loc },

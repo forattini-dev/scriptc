@@ -21,6 +21,7 @@ pub trait ParseArgsValue: HeapValue + ArrayElement + Clone {
     fn parse_args_object_entries(&self) -> Option<Vec<(JsString, Self)>>;
     fn parse_args_object_set(&self, key: JsString, value: Self);
     fn parse_args_undefined() -> Self;
+    fn parse_args_null_value() -> Self;
     fn parse_args_number_value(value: f64) -> Self;
     fn parse_args_bool_value(value: bool) -> Self;
     fn parse_args_string_value(value: JsString) -> Self;

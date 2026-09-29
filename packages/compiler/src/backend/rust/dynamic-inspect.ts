@@ -24,6 +24,9 @@ export function emitRustDynamicInspect(
   context.line(`${name}::String(value) => runtime::inspect_string(value),`);
   context.line(`${name}::Regex(value) => runtime::string(&format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value))),`);
   context.line(`${name}::Url(value) => runtime::url_href(value),`);
+  context.line(`${name}::SearchParams(value) => runtime::string(&format!("URLSearchParams {{ '{}' }}", runtime::search_params_to_string(value))),`);
+  context.line(`${name}::Map(value) => runtime::string(&format!("Map({}) {{}}", runtime::map_size(value) as usize)),`);
+  context.line(`${name}::Set(value) => runtime::string(&format!("Set({}) {{}}", runtime::map_size(value) as usize)),`);
   emitTypedArrayInspect(context, `${name}::Bytes(value)`, "runtime::bytes_len(value)", "runtime::bytes_get(value, index)", '"Uint8Array"');
   emitTypedArrayInspect(context, `${name}::TypedBytes(value)`, "runtime::typed_bytes_len(value)", "runtime::typed_bytes_get(value, index)", "runtime::typed_bytes_name(value)");
   context.line(`${name}::Buffer(value) => runtime::inspect_buffer(value),`);
@@ -90,6 +93,7 @@ export function emitRustDynamicInspect(
   context.line(`${name}::HttpResponse(..) => runtime::string("ServerResponse {}"),`);
   context.line(`${name}::HttpAgent(..) => runtime::string("Agent {}"),`);
   context.line(`${name}::NativeConstructor(name) => runtime::string(&format!("[Function: {name}]")),`);
+  context.line(`${name}::NativePrototype(name) => if *name == "Object" { runtime::string("[Object: null prototype] {}") } else { runtime::string(&format!("{} {{}}", name)) },`);
   context.line(`${name}::NativeMethod(method) => runtime::string(&format!("[Function: {}]", method.name())),`);
   context.line(`${name}::Getter(value) => sc_dyn_inspect(value.as_ref(), recurse, depth),`);
   if (usesEmbeddedModules) context.line(`${name}::Island(value) => runtime::island_to_string(value),`);

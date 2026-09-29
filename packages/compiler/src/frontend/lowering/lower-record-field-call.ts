@@ -13,7 +13,7 @@ import { lowerFamilyCall } from "./lower-families.js";
     if (L.chainBlocked(call)) return null;
     const dispatched = lowerGenericRecordUnionCall(L, call, access);
     if (dispatched) return dispatched;
-    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "record") return null;
+    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "record") return lowerInstantiatedRecordFieldCall(L, call, access);
     const target = L.fieldTarget(access);
     // In a monomorphized union-generic body, control-flow can expose a
     // callable field from one constraint arm even when this concrete
@@ -61,3 +61,22 @@ import { lowerFamilyCall } from "./lower-families.js";
     const args = completeFunctionValueArgs(L, call, callee.type);
     return { kind: "callValue", callee, args, type: callee.type.ret, loc: locOf(call) };
   }
+
+/** A callback field read off a receiver whose CHECKER type has no static mapping inside a monomorphized generic body
+ * (`options.run(...)` with `options: Options<I, O, R>` — the alias's members are conditional types over the type
+ * parameters, which the checker leaves unresolved). The instantiation's own value already carries the concrete record
+ * (the call site built it), so the field's concrete signature comes from the value's IR shape. */
+function lowerInstantiatedRecordFieldCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
+  if (call.questionDotToken || access.questionDotToken) return null;
+  const probed = probeLower(L, access.expression);
+  if (probed?.type.kind !== "record") return null;
+  const shape = L.shapes.get(probed.type.shapeId);
+  const field = shape?.fields.find((f) => f.name === access.name.text);
+  if (!shape || shape.tuple || field?.type.kind !== "func") return null;
+  const loc = locOf(access);
+  const receiver = L.lowerExpr(access.expression);
+  if (receiver.type.kind !== "record" || receiver.type.shapeId !== probed.type.shapeId) return null;
+  const callee: IrExpr = { kind: "recordGet", obj: receiver, shapeId: probed.type.shapeId, field: field.name, type: field.type, loc };
+  const args = completeFunctionValueArgs(L, call, field.type);
+  return { kind: "callValue", callee, args, type: field.type.ret, loc: locOf(call) };
+}

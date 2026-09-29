@@ -34,7 +34,7 @@ function fixture() {
       loop, { kind: "return", value: buffer("out"), loc }],
   };
   const main: IrFunction = { name: "main", params: [], locals: [], body: [], returnType: { kind: "void" }, loc };
-  const mod: IrModule = { irVersion: 11, sourceFile: loc.file, functions: [main, fn], entry: "main" };
+  const mod: IrModule = { irVersion: 12, sourceFile: loc.file, functions: [main, fn], entry: "main" };
   return { fn, loop, mod };
 }
 

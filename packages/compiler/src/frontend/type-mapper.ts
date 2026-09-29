@@ -17,7 +17,7 @@ import { isDeclaredInAmbientModule, isDeclaredInAmbientNamespace } from "./ambie
 import { SCHEMA_SLOT, isPhantomAnyMember } from "./kernel-types.js";
 import { familyIdOf, isFamilySlotMember } from "./families.js";
 import { mapAmbientValueType } from "./ambient-values.js";
-import type { IrRecordShape, IrType } from "../ir/ir.js";
+import type { IrRecordShape, IrType, IrUnionDef } from "../ir/ir.js";
 import { arrayOf, BIGINT, BOOL, bytesOf, canConvertToDyn, CHILD_T, CRYPTOHASH_T, CRYPTOHMAC_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/ir.js";
 import { isProjectTypeFile } from "./project-declarations.js";
 import { isRuntimeTypeBridgeFile } from "./npm-static-types.js";
@@ -787,7 +787,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       const sf = d.getSourceFile();
       return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isProjectTypeFile(sf) && !isRuntimeTypeBridgeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
     }) &&
-    (ctx.dynamic || !npmDecls.every((d) => isKernelTypeFile(d.getSourceFile().fileName)))
+    !npmDecls.every((d) => isKernelTypeFile(d.getSourceFile().fileName))
   ) {
     return ctx.dynamic ? JSVAL : null;
   }
@@ -811,7 +811,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       if (partSym) {
         const decls = checker.declarationsOf(partSym);
         if (decls.length > 0) {
-          if (!ctx.dynamic && decls.every((d) => isKernelTypeFile(d.getSourceFile().fileName))) return false; // kernel: structural
+          if (decls.every((d) => isKernelTypeFile(d.getSourceFile().fileName))) return false; // kernel: structural in static and hybrid builds
           return decls.every((d) => {
             const sf = d.getSourceFile();
             return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isProjectTypeFile(sf) && !isRuntimeTypeBridgeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
@@ -1455,9 +1455,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("Map") || isStdlibInterface("ReadonlyMap")) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
     if (args.length !== 2) return null;
-    const key = mapType(args[0]!, ctx);
+    // `unknown instanceof Map` narrows to Map<any, any> in lib.d.ts. Rust's
+    // checked-dynamic collection representation gives those slots an honest
+    // native value domain, so treat the checker's `any` type arguments as
+    // dyn there. Other backends retain the static `any` fence.
+    const key = args[0]!.flags & ts.TypeFlags.Any && ctx.nativeDynamicMaps
+      ? DYN
+      : mapType(args[0]!, ctx);
     if (!key || !isSupportedMapKey(key, ctx.nativeDynamicMaps)) return null;
-    const value = mapType(args[1]!, ctx);
+    const value = args[1]!.flags & ts.TypeFlags.Any && ctx.nativeDynamicMaps
+      ? DYN
+      : mapType(args[1]!, ctx);
     if (!value || !isSupportedMapValue(value)) return null;
     return mapOf(key, value);
   }
@@ -1467,7 +1475,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("Set") || isStdlibInterface("ReadonlySet")) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
     if (args.length !== 1) return null;
-    const elem = mapType(args[0]!, ctx);
+    const elem = args[0]!.flags & ts.TypeFlags.Any && ctx.nativeDynamicSets
+      ? DYN
+      : mapType(args[0]!, ctx);
     if (!elem || !isSupportedSetElem(elem, ctx.nativeDynamicSets)) return null;
     return setOf(elem);
   }
@@ -1985,7 +1995,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("Generator") || isStdlibInterface("AsyncGenerator") || isStdlibInterface("IterableIterator")) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
     // An Effect.gen/fn body (static builds): `Generator<Effect<…> | …, A, never>` (or a never-yielding body keeping the contextual `never` NEXT channel — a plain generator infers `unknown`) is resumed by the kernel with each yielded effect's value: both channels are the opaque handle; the return channel is A (void-like → VOID).
-    if (!ctx.dynamic && args[0] !== undefined && args[1] !== undefined && (((args[0].flags & ts.TypeFlags.Never) !== 0 && args[2] !== undefined && (args[2].flags & ts.TypeFlags.Never) !== 0) || isEffectType(checker, args[0]) || (args[0].isUnionType() && ts.constituentTypes(args[0]).every((t) => isEffectType(checker, t))))) {
+    if (args[0] !== undefined && args[1] !== undefined && (((args[0].flags & ts.TypeFlags.Never) !== 0 && args[2] !== undefined && (args[2].flags & ts.TypeFlags.Never) !== 0) || isEffectType(checker, args[0]) || (args[0].isUnionType() && ts.constituentTypes(args[0]).every((t) => isEffectType(checker, t))))) {
       const retT = (args[1].flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never)) !== 0 ? VOID : mapType(args[1], ctx);
       return retT === null ? null : { kind: "generator", yieldT: EFFECT_T, retT, nextT: EFFECT_T };
     }
@@ -2510,6 +2520,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const sensitivityAtEntry = contextResolutions;
     try {
       const byKey = new Map<string, IrType>();
+      // `T | undefined` with T bound to a DISCRIMINATED record union: the unit arms join the inner arms and the
+      // inner discriminant (a shape-keyed literal field) still tells them apart, so the flattened union keeps it.
+      const soleDataPart = ts.constituentTypes(widened).filter((p) => (p.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Null)) === 0).length === 1;
+      let inheritedDiscriminant: IrUnionDef["discriminant"];
       for (const part of ts.constituentTypes(widened)) {
         // A `void` PART is inhabited only by undefined (`Promise<void> |
         // void` return types, `string | void`): it becomes the undefinedT
@@ -2543,7 +2557,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           }
           return null;
         }
-        const inner = mapped.kind === "union" ? unions.get(mapped.unionId) : undefined; if (inner && inner.arms.length > 0 && !inner.discriminant) { for (const a of inner.arms) byKey.set(typeKey(a), a); } else byKey.set(typeKey(mapped), mapped); // a symbolic part resolving to a plain union (bound `T[K]`) flattens
+        const inner = mapped.kind === "union" ? unions.get(mapped.unionId) : undefined; if (inner && inner.arms.length > 0 && (!inner.discriminant || soleDataPart)) { if (inner.discriminant) inheritedDiscriminant = inner.discriminant; for (const a of inner.arms) byKey.set(typeKey(a), a); } else byKey.set(typeKey(mapped), mapped); // a symbolic part resolving to a plain union (bound `T[K]`) flattens
       }
       const arms = [...byKey.values()];
       // A single surviving UNIT arm cannot stand alone (degenerate — the
@@ -2637,7 +2651,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         if (contextResolutions !== sensitivityAtEntry) return null;
         return { kind: "union", unionId: unions.finalizeRecursive(widened, arms) };
       }
-      return { kind: "union", unionId: unions.intern(arms, recordUnionDiscriminant(widened, arms, ctx, part => mapType(part, ctx))) };
+      return { kind: "union", unionId: unions.intern(arms, recordUnionDiscriminant(widened, arms, ctx, part => mapType(part, ctx)) ?? inheritedDiscriminant) };
     } finally {
       unions.inProgress.delete(widened);
     }
@@ -3481,7 +3495,9 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // overloaded one (or a dynamic build) leaves the shape, and calls
       // monomorphize against the defining object literal's declaration. OPTIONAL generic members stay out (no slot).
       if (isGenericCallableMemberType(fieldTs, checker) && (ctx.dynamic || !isFamilySlotMember(checker, widened, p))) continue;
-      let pt = mapJsArrayField(p, fieldTs, ctx, (type) => mapType(type, ctx)) ?? mapType(fieldTs, ctx); if (pt === null && !ctx.dynamic && (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)) pt = DYN; // a type-parameter member instantiated at `any` is the checked-dynamic value in a static build (effect's phantom `tag?: T`)
+      let pt = (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)
+        ? DYN
+        : mapJsArrayField(p, fieldTs, ctx, (type) => mapType(type, ctx)) ?? mapType(fieldTs, ctx); // effect's phantom `tag?: T` belongs to the native checked-dynamic model even in a hybrid build
       // tsgo PANICS computing `readonly []` through the symbol-type query
       // (the TupleType conversion — the facade's panic fence answers
       // `any`), which would absorb the whole shape into the dynamic tier.
@@ -3786,7 +3802,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     }
     const fieldTs = checker.getTypeOfSymbol(p);
     if (isGenericCallableMemberType(fieldTs, checker) && (ctx.dynamic || !isFamilySlotMember(checker, widened, p))) continue;
-    let pt = mapType(fieldTs, ctx); if (pt === null && !ctx.dynamic && (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)) pt = DYN; // a type-parameter member instantiated at `any` is the checked-dynamic value in a static build (effect's phantom `tag?: T`)
+    let pt = (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p) ? DYN : mapType(fieldTs, ctx); // effect's phantom `tag?: T` stays native checked-dynamic in hybrid builds
     if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
     if (!pt || pt.kind === "void") {
       return `the record shape is supported, but its member '${p.name}' has type '${checker.typeToString(fieldTs)}', which does not compile${nestedBlocker(fieldTs, ctx)}`;

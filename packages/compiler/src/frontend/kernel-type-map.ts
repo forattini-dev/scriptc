@@ -1,7 +1,8 @@
-/* Native kernel and platform types in static builds: the runtime surfaces the type mapper does NOT map structurally.
+/* Native kernel and platform types: the runtime surfaces the type mapper does NOT map structurally.
  * effect's handles and schema values, service-key classes and native SqlClient values become the kernel's opaque
  * handle; effect brands strip and decorated schemas become records with a schema slot; bun:sqlite's Database and
- * Statement become native handles under --target bun. Dynamic builds map none of these here.
+ * Statement become native handles under --target bun. Enabling the dynamic island does not move kernel-owned
+ * values into the engine: one package must have one execution and identity model throughout a build.
  *
  * The type mapper asks at three points, because each rule's place in its order matters:
  *  - mapKernelType, before the npm-package fence: bun-types and effect both ship declaration files, and a program
@@ -33,10 +34,19 @@ const BUN_SQLITE_TYPES: ReadonlyMap<string, IrType> = new Map([
 
 /** The native type of a named kernel or platform type, or undefined when `widened` is not one. */
 export function mapKernelType(widened: ts.Type, ctx: TypeMapperCtx): IrType | undefined {
-  if (ctx.dynamic) return undefined;
   const checker = ctx.checker;
   const symbol = widened.getAliasSymbol() ?? widened.getSymbol();
   const decls = symbol === undefined ? undefined : checker.declarationsOf(symbol);
+  // Schema.Json is an intentionally recursive JSON tree. Represent the
+  // alias and its two recursive carrier interfaces as checked-dynamic data:
+  // this preserves the complete tree without trying to intern an infinite
+  // static union, and feeds directly into the native dyn JSON serializer.
+  if (
+    symbol !== undefined &&
+    decls !== undefined &&
+    (symbol.name === "Json" || symbol.name === "JsonArray" || symbol.name === "JsonObject") &&
+    decls.every((d) => /[\\/]node_modules[\\/]effect[\\/]dist[\\/]Schema\.d\.ts$/.test(d.getSourceFile().fileName))
+  ) return DYN;
   // Effects, layers, exits, causes, options, schema values, filters and SchemaError: the kernel's opaque handle.
   if (symbol !== undefined && decls !== undefined) {
     if (isEffectDataHandleSymbol(symbol, decls) || isKernelSchemaValueSymbol(decls) || isKernelHandleSymbol(decls)) return EFFECT_T;
@@ -52,7 +62,6 @@ export function mapKernelType(widened: ts.Type, ctx: TypeMapperCtx): IrType | un
 /** An intersection the kernel resolves: `string & Brand<"ID">` is its non-brand part, `Schema & { statics }` a record
  * with the schema slot (null when that part does not map). Undefined when the kernel has no rule for it. */
 export function mapKernelIntersection(widened: ts.Type, ctx: TypeMapperCtx): IrType | null | undefined {
-  if (ctx.dynamic) return undefined;
   const kept = withoutKernelBrands(ctx.checker, ts.constituentTypes(widened));
   if (kept.length === 1 && kept[0] !== undefined) return mapType(kept[0], ctx);
   return decoratedSchemaRecord(kept, ctx) ?? undefined;
@@ -61,6 +70,6 @@ export function mapKernelIntersection(widened: ts.Type, ctx: TypeMapperCtx): IrT
 /** A service key class (`class Native extends Context.Service<Native, T>()("id")`): instance and static sides are the
  * key handle. Undefined for any other declaration. */
 export function mapKernelServiceKey(classDecl: ts.Node | undefined, ctx: TypeMapperCtx): IrType | undefined {
-  if (ctx.dynamic || classDecl === undefined || !ts.isClassDeclaration(classDecl)) return undefined;
+  if (classDecl === undefined || !ts.isClassDeclaration(classDecl)) return undefined;
   return kernelServiceIdOf(ctx.checker, classDecl) !== null ? EFFECT_T : undefined;
 }

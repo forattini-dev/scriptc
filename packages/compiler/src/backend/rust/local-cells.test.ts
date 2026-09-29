@@ -15,7 +15,7 @@ function fixture(): { fn: IrFunction; mod: IrModule } {
       { kind: "exprStmt", expr: { kind: "varRef", localId: "value", type: { kind: "f64" }, loc }, loc },
     ],
   };
-  return { fn, mod: { irVersion: 11, sourceFile: loc.file, entry: fn.name, functions: [fn] } };
+  return { fn, mod: { irVersion: 12, sourceFile: loc.file, entry: fn.name, functions: [fn] } };
 }
 
 test("uncaptured scalar cells stay on the stack with an initialization check", () => {

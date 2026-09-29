@@ -1,6 +1,6 @@
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
-import { IrType, isRefCounted, isUnitType, typeEquals } from "../../ir/ir.js";
+import { IrType, isRefCounted, isUnitType, typeEquals, type IrExpr } from "../../ir/ir.js";
 import { mangleRecordNew } from "../mangle.js";
 import { arrNewCall, traceAdapter, traceArg, vAdapters } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
@@ -193,6 +193,9 @@ export function emitSerializationExpr(host: LlvmEmitterContext, e: ExprOf<"jsonS
     const B = host.B;
     switch (e.kind) {
       case "jsonStringify": {
+        if ((e as typeof e & { runtimeIndent?: IrExpr }).runtimeIndent !== undefined) {
+          throw new LlvmUnsupportedError("JSON.stringify:runtime-spacing", e.loc);
+        }
         // Type-directed serialization: the STATIC type picks an emitted
         // serializer (interned per typeKey) — no dyn, no runtime dispatch.
         // The value temp is BORROWED (released with this statement's

@@ -58,7 +58,7 @@ function fixture(): IrModule {
     { kind: "varDecl", localId: "other", init: str("other"), loc },
   );
   return {
-    irVersion: 11,
+    irVersion: 12,
     sourceFile: loc.file,
     entry: "__main",
     globals: [{ id: "%g.e.acc", name: "globalAccumulator", type: STRING, mutable: true }],

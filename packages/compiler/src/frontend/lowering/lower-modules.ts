@@ -108,7 +108,7 @@ export function appendForkModules(
       const fp: FileParts = { sf, fnDecls: [], classDecls: [], topStmts: [] };
       for (const stmt of sf.statements) {
         if (ts.isFunctionDeclaration(stmt)) fp.fnDecls.push(stmt);
-        else if (ts.isClassDeclaration(stmt)) { if (lowerer.dynamic || kernelServiceIdOf(lowerer.checker, stmt) === null) fp.classDecls.push(stmt); } // a kernel service key class is a value, not a class
+        else if (ts.isClassDeclaration(stmt)) { if (kernelServiceIdOf(lowerer.checker, stmt) === null) fp.classDecls.push(stmt); } // a kernel service key class is a value, not a class
         // Namespaces: ambient/type-only ones are zero-runtime and skip;
         // instantiated bodies FLATTEN into this file's parts (functions/
         // classes hoist under namespace-qualified names, statements join
@@ -383,6 +383,10 @@ export function appendForkModules(
         // program-module path too (preflight resolved the file edge).
         if (relIsJs && isNpmStaticPackage(relPkg)) continue;
         if (!npm && !relIsJs && islandDep === undefined) continue;
+        // Native kernels keep their Rust representation in hybrid builds.
+        // Embedding the same package as an island would split value identity
+        // and make its declaration types disagree with its execution home.
+        if (isKernelModule(spec)) continue;
         // An edge Node's RUNTIME resolution refuses at startup (types
         // resolved, but the exports target ships no JS — the types-only
         // package shape): preflight registered Node's startup crash for
@@ -892,6 +896,24 @@ export function appendForkModules(
       if (typeof rec["className"] === "string" && !classNames.has(rec["className"])) {
         classNames.add(rec["className"]);
         pendingClasses.push(rec["className"]);
+      }
+      // dyn.classInstanceof carries its target as a compile-time string
+      // argument so the runtime call stays in the closed libCall family.
+      // That string is nevertheless a real class-layout dependency: Rust
+      // needs the target's preorder interval even when no typed object slot
+      // mentions the class (the common `unknown instanceof ImportedClass`
+      // shape). Keep it in the artifact closure just like a className field.
+      if (rec["kind"] === "libCall" && rec["fn"] === "dyn.classInstanceof") {
+        const args = rec["args"];
+        const target = Array.isArray(args) ? args[1] : undefined;
+        if (target !== null && typeof target === "object") {
+          const targetRec = target as Record<string, unknown>;
+          const name = targetRec["kind"] === "strLit" ? targetRec["value"] : undefined;
+          if (typeof name === "string" && !classNames.has(name)) {
+            classNames.add(name);
+            pendingClasses.push(name);
+          }
+        }
       }
       if (typeof rec["shapeId"] === "string" && !shapeIds.has(rec["shapeId"])) {
         shapeIds.add(rec["shapeId"]);

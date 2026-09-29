@@ -296,6 +296,11 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     const flags = context.nextTemporary();
     return `{ let ${pattern} = ${context.emitExpr(arg)}; let ${flags} = ${context.emitExpr(secondArg)}; runtime::regex_new(&${pattern}, &${flags}) }`;
   }
+  if (expr.fn === "regex.replaceCallback" && expr.args.length === 3 && arg !== undefined && secondArg !== undefined && thirdArg?.type.kind === "func") {
+    const callback = context.nextTemporary();
+    const dispatch = context.emitClosureDispatch(callback, thirdArg.type, ["sc_match"], expr.loc);
+    return `{ let ${callback} = ${context.emitExpr(thirdArg)}; runtime::regex_replace_callback(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}), std::rc::Rc::new(move |sc_match: runtime::JsString| ${dispatch})) }`;
+  }
   if (expr.fn === "regexp.escape" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::regexp_escape(&(${context.emitExpr(arg)}))`;
   }
@@ -378,6 +383,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     }
     context.unsupported("String.fromCharCode source type", expr.loc);
   }
+  if (expr.fn === "string.fromCodePoint" && expr.args.length === 1 && arg?.type.kind === "array" && arg.type.elem.kind === "f64") {
+    return `runtime::string_from_code_points(&(${context.emitExpr(arg)}))`;
+  }
   if ((expr.fn === "num.isNaN" || expr.fn === "number.isNaN") && expr.args.length === 1 && arg !== undefined) {
     return `(${context.emitExpr(arg)}).is_nan()`;
   }
@@ -392,6 +400,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   }
   if (expr.fn === "num.toExponential" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::number_to_exponential(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "num.toExponentialDigits" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+    return `runtime::number_to_exponential_digits(${context.emitExpr(arg)}, ${context.emitExpr(secondArg)})`;
   }
   if (expr.fn === "num.toFixed" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
     return `runtime::number_to_fixed(${context.emitExpr(arg)}, ${context.emitExpr(secondArg)})`;
@@ -730,6 +741,19 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
       expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
     const fn = expr.fn === "url.newBase" ? "url_new_base" : "url_can_parse_base";
     return `runtime::${fn}(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
+  if ((expr.fn === "url.parse" || expr.fn === "url.parseBase") &&
+      expr.args.length === (expr.fn === "url.parse" ? 1 : 2) && arg !== undefined) {
+    if (expr.type.kind !== "union") context.unsupported(`${expr.fn} without a nullable result union`, expr.loc);
+    const union = context.union(expr.type.unionId, expr.loc);
+    const urlTag = union.arms.findIndex((arm) => arm.kind === "url");
+    const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+    if (urlTag < 0 || nullTag < 0) context.unsupported(`${expr.fn} result union shape`, expr.loc);
+    const name = context.unionName(union.id);
+    const runtimeCall = expr.fn === "url.parse"
+      ? `runtime::url_parse(&(${context.emitExpr(arg)}))`
+      : `runtime::url_parse_base(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg!)}))`;
+    return `match ${runtimeCall} { Some(value) => ${name}::${context.unionVariant(urlTag)}(value), None => ${name}::${context.unionVariant(nullTag)}, }`;
   }
   if (expr.fn === "url.setPathname" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
     return `runtime::url_set_pathname(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;

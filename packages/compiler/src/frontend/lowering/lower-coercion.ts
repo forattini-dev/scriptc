@@ -22,7 +22,7 @@ import {
   withUndefinedArm as withUndefinedArmCanonical,
 } from "../type-mapper.js";
 import { rejectNativeImportCopy } from "./lower-native-import-boundary.js";
-import { returnOfFailingYield } from "./lower-schema.js";
+import { returnOfConditionalFailingYield, returnOfFailingYield } from "./lower-schema.js";
 import { bindingNeverReassigned } from "./lower-calls.js";
 import { islandFuncValueFence, islandRegexpOf } from "./lower-island.js";
 import { voidTernaryIfStmtOrExprStmt } from "./lower-stmts.js";
@@ -803,6 +803,7 @@ import { lowerFiniteFromEntriesExpecting } from "./lower-finite-from-entries.js"
    * void-inner returns still resolve a returned promise first. */
   export function lowerReturnStmt(lowerer: Lowerer, node: ts.Expression, loc: SrcLoc): IrStmt {
     const expected = lowerer.ctx.returnType; const failing = returnOfFailingYield(lowerer, node, loc); if (failing !== null) return failing;
+    const splitReturn = returnOfConditionalFailingYield(lowerer, node, (arm) => lowerReturnStmt(lowerer, arm, loc), loc); if (splitReturn !== null) return splitReturn;
     if (expected.kind === "void") {
       let e = lowerer.lowerExpr(node);
       if (lowerer.ctx.isAsync && e.type.kind === "promise") {

@@ -13,6 +13,12 @@ export type IrUrlLibFn =
   /** Resolve a string input against a string base. Both are evaluated
    * before parsing; invalid base or input throws TypeError. Rust native. */
   | "url.newBase"
+  /** URL.parse(input): the non-throwing constructor form. Its result is the
+   * call site's interned `URL | null` union, so VOID is only the validator's
+   * site-typed sentinel. Rust native. */
+  | "url.parse"
+  /** The non-throwing constructor form with a validated string base. */
+  | "url.parseBase"
   | "url.protocol"
   | "url.host"
   | "url.hostname"
@@ -49,6 +55,8 @@ export type IrUrlLibFn =
 export const URL_LIB_FN_SIGS = {
   "url.new": { argTypes: [STRING], result: URL_T },
   "url.newBase": { argTypes: [STRING, STRING], result: URL_T },
+  "url.parse": { argTypes: [STRING], result: VOID },
+  "url.parseBase": { argTypes: [STRING, STRING], result: VOID },
   "url.protocol": { argTypes: [URL_T], result: STRING },
   "url.host": { argTypes: [URL_T], result: STRING },
   "url.hostname": { argTypes: [URL_T], result: STRING },

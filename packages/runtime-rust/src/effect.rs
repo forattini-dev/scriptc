@@ -186,6 +186,15 @@ pub enum KernelData {
     /// `new SqlError({ reason })`: effect derives the wrapper's message from its reason, and programs that only
     /// construct and propagate it (Redcode) read nothing else, so the handle carries that message alone.
     SqlError(JsString),
+    /// An immutable effect/unstable/http request description. Mutators clone
+    /// this value and preserve the source handle, matching Effect's API.
+    HttpRequest(Rc<EffectHttpRequestData>),
+    /// The built-in Fetch transport service and a response returned by it.
+    HttpClient,
+    HttpResponse(JsHttpRequest),
+    HttpStream(JsHttpRequest),
+    HttpClientError(JsString),
+    HttpClientErrorReason(JsString),
     /// A `Queue` (and the per-subscriber queue a `PubSub` hands out): items with waiting takers and offerers.
     Queue(Rc<RefCell<QueueState>>),
     /// The failure `Effect.tryPromise(thunk)` builds from a rejection: effect's `UnknownError`, whose message is
@@ -516,6 +525,8 @@ pub fn effect_data_tag(handle: &JsEffect) -> JsString {
         EffectNode::Data(KernelData::SchemaError(_)) => string("SchemaError"),
         EffectNode::Data(KernelData::SqlError(_)) => string("SqlError"),
         EffectNode::Data(KernelData::Unknown(_)) => string("UnknownError"),
+        EffectNode::Data(KernelData::HttpClientError(_)) => string("HttpClientError"),
+        EffectNode::Data(KernelData::HttpClientErrorReason(tag)) => tag.clone(),
         _ => throw_error("scriptc: a kernel data handle was expected".to_owned()),
     })
 }

@@ -577,6 +577,7 @@ where
         Ok(Self {
             elements: decoded,
             auxiliary: None,
+            properties: None,
             view: None,
             sparse: None,
         })
@@ -606,6 +607,9 @@ where
             view: None,
             live: entries.len(),
             entries,
+            // JSON object names are strings by construction. Symbol-keyed
+            // properties are neither parsed from nor serialized to JSON.
+            symbol_entries: Vec::new(),
             iteration_depth: 0,
             null_prototype: false,
             module_namespace: false,

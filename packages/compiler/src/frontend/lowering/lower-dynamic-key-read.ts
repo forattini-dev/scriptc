@@ -1,4 +1,4 @@
-import type * as ts from "../ts7/adapter.js";
+import * as ts from "../ts7/adapter.js";
 import { DYN, STRING, type IrExpr } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
@@ -22,7 +22,16 @@ export function lowerDynamicKeyRead(L: Lowerer, expr: ts.ElementAccessExpression
 /** Native Proxy reads must retain symbol identity; class hidden slots are
  * handled before this path. Ordinary symbol storage remains a runtime fence. */
 export function lowerNativeSymbolKeyRead(L: Lowerer, expr: ts.ElementAccessExpression, optional: boolean): IrExpr | null {
-  const object = L.lowerExpr(expr.expression);
+  // A PropertyKey index assertion is often used solely to tell TypeScript
+  // that a symbol lookup is legal. The native checked-dynamic receiver
+  // already carries that capability; lower its represented source instead
+  // of trying to materialize Record<PropertyKey, unknown> as a static shape.
+  let receiver = expr.expression;
+  while (
+    ts.isParenthesizedExpression(receiver) || ts.isAssertionExpression(receiver) ||
+    ts.isNonNullExpression(receiver) || ts.isSatisfiesExpression(receiver)
+  ) receiver = receiver.expression;
+  const object = L.lowerExpr(receiver);
   const value: IrExpr | null = object.type.kind === "dyn" ? object
     : object.type.kind === "record" && L.dynConvertible(object.type)
       ? { kind: "dynFrom", value: object, type: DYN, loc: object.loc } : null;

@@ -9,7 +9,7 @@ import { isKernelTypeFile } from "./kernel.js";
  * runtime imports and opaque kernel handles keep their separate checks. */
 export function isUnmappedRecordDeclaration(sf: ts.SourceFile, ctx: TypeMapperCtx): boolean {
   return sf.isDeclarationFile && !isProjectTypeFile(sf) && !ctx.isExternalTypeFile(sf) && !isRuntimeTypeBridgeFile(sf.fileName) &&
-    (ctx.dynamic || !isKernelTypeFile(sf.fileName));
+    !isKernelTypeFile(sf.fileName);
 }
 
 /** True for MAPPED-type results — `Partial<Config>`, `Record<"a", n>`,

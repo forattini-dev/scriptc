@@ -23,7 +23,7 @@ function fixture(): IrModule {
       { kind: "exprStmt", expr: { kind: "bytesIntrinsic", method: "length", receiver: bytes, args: [], type: { kind: "f64" }, loc }, loc },
     ],
   };
-  return { irVersion: 11, sourceFile: loc.file, entry: fn.name, functions: [fn] };
+  return { irVersion: 12, sourceFile: loc.file, entry: fn.name, functions: [fn] };
 }
 
 test("byte reads and length borrow an eligible local without cloning its handle", () => {

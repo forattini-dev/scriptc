@@ -80,6 +80,14 @@ export function emitRustDynamicLibCall(
     const descriptors = context.nextTemporary();
     return `{ let ${target} = ${context.emitExpr(arg)}; let ${descriptors} = ${context.emitExpr(secondArg)}; sc_dyn_define_properties(&${target}, &${descriptors}) }`;
   }
+  if (expr.fn === "dyn.defineSymbolValue" && expr.args.length === 3 &&
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "symbol" &&
+    expr.args[2]?.type.kind === "dyn" && expr.type.kind === "dyn") {
+    const target = context.nextTemporary();
+    const key = context.nextTemporary();
+    const value = context.nextTemporary();
+    return `{ let ${target} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; let ${value} = ${context.emitExpr(expr.args[2])}; sc_dyn_symbol_set(&${target}, ${key}, ${value}); ${target} }`;
+  }
   if (expr.fn === "dyn.assign" && expr.args.length === 2 &&
     arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn" && expr.type.kind === "dyn") {
     const target = context.nextTemporary();
@@ -136,6 +144,14 @@ export function emitRustDynamicLibCall(
     const object = context.nextTemporary();
     const dyn = context.dynTypeName();
     return `{ let ${object}: runtime::JsMap<runtime::JsString, ${dyn}> = runtime::map_new(); sc_dyn_mark_null_proto(&${object}); ${dyn}::Object(${object}) }`;
+  }
+  if (expr.fn === "dyn.objectPrototype" && expr.args.length === 0 && expr.type.kind === "dyn") {
+    return "sc_dyn_native_prototype(\"Object\")";
+  }
+  if (expr.fn === "dyn.getPrototypeOf" && expr.args.length === 1 &&
+    arg?.type.kind === "dyn" && expr.type.kind === "dyn") {
+    const value = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; sc_dyn_get_prototype_of(&${value}) }`;
   }
   if (expr.fn === "dyn.keySet" && expr.args.length === 3 && arg?.type.kind === "dyn") {
     const keyExpr = expr.args[1];

@@ -7,6 +7,7 @@ import { nodeThrowExpr, own } from "../lowerer.js";
 import { isRequireMainFilename } from "../expressions/optional-chains.js";
 import { STRING_INDEX_METHODS, STR_METHODS } from "../surfaces.js";
 import { coerceStringSearchValue, defaultAfterUndefined, lowerOptionalArgument, lowerPositionArgument, lowerStaticallyUndefinedArgument, lowerStringSearchArgument, positionNumber } from "../optional-arguments.js";
+import { regexCaptureArray } from "../../../ir/regex-captures.js";
 
 function lowerSplitLimitArg(lowerer: Lowerer, node: ts.Expression | undefined, loc: SrcLoc): IrExpr {
   const defaultValue: IrExpr = { kind: "numLit", value: 4294967295, type: F64, loc };
@@ -406,7 +407,7 @@ export function lowerRegexMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     }
     const re = lowerReceiver();
     const subject = lowerRegexSubject(lowerer, call.arguments[0], loc);
-    const resultT: IrType = { kind: "union", unionId: lowerer.unions.intern([arrayOf(STRING), { kind: "nullT" }]) };
+    const resultT: IrType = { kind: "union", unionId: lowerer.unions.intern([regexCaptureArray(lowerer.unions), { kind: "nullT" }]) };
     // The shared match intrinsic takes the string first; preserve exec's
     // receiver-before-subject evaluation order before swapping operands.
     const saved = lowerer.declareHiddenLocal("%execReceiver", re.type);
@@ -462,7 +463,7 @@ export function lowerRegexMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     // or when it maps to something WIDER (an optional-chain call node
     // types `s?.match(re)` with the chain's `| undefined`; the intrinsic
     // itself answers string[] | null, and the chain wrapper widens).
-    const exactT: IrType = { kind: "union", unionId: lowerer.unions.intern([arrayOf(STRING), { kind: "nullT" }]) };
+    const exactT: IrType = { kind: "union", unionId: lowerer.unions.intern([regexCaptureArray(lowerer.unions), { kind: "nullT" }]) };
     const mapped = lowerer.mapTypeOf(lowerer.typeOf(call));
     const resultT: IrType = mapped && typeEquals(mapped, exactT) ? mapped : exactT;
     return { kind: "regexIntrinsic", method: "match", receiver, args: [re], type: resultT, loc };
@@ -487,7 +488,7 @@ export function lowerRegexMethodCall(lowerer: Lowerer, call: ts.CallExpression,
       method: "matchAll",
       receiver,
       args: [re],
-      type: arrayOf(arrayOf(STRING)),
+      type: arrayOf(regexCaptureArray(lowerer.unions)),
       loc,
     };
   }
@@ -517,11 +518,13 @@ export function lowerRegexMethodCall(lowerer: Lowerer, call: ts.CallExpression,
       ? [lowerer.lowerExpr(arg0), lowerSplitLimitArg(lowerer, call.arguments[1], loc)]
       : call.arguments.map((a) => lowerer.lowerExpr(a));
     if (name !== "split" && args[1]?.type.kind !== "string") {
-      lowerer.unsupported(
-        "SC1120",
-        call.arguments[1] ?? call,
-        "function replacement values (replacements must be string templates)",
-      );
+      const callback = args[1];
+      if (name === "replace" && callback?.type.kind === "func" && callback.type.params.length === 1 &&
+          callback.type.params[0]?.kind === "string" && callback.type.ret.kind === "string") {
+        return { kind: "libCall", fn: "regex.replaceCallback", args: [receiver, args[0]!, callback], type: STRING, loc };
+      }
+      lowerer.unsupported("SC1120", call.arguments[1] ?? call,
+        "replacement callbacks other than the one-argument `(match) => string` form");
     }
     return {
       kind: "regexIntrinsic",
@@ -595,6 +598,11 @@ export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
   if (concatDyn) {
     const spread = argumentNodes[0] as ts.SpreadElement;
     const values = lowerer.lowerExpr(spread.expression);
+    // A native `string[]` spread contributes its elements in order: `s + a.join("")`.
+    if (values.type.kind === "array" && values.type.elem.kind === "string") {
+      const joined: IrExpr = { kind: "arrIntrinsic", method: "join", receiver: values, args: [{ kind: "strLit", value: "", type: STRING, loc }], type: STRING, loc };
+      return { kind: "strConcat", left: receiver, right: joined, type: STRING, loc };
+    }
     if (values.type.kind !== "dyn") {
       return lowerer.noLowering(`.concat spread of '${lowerer.fmt(values.type)}' values`, call);
     }

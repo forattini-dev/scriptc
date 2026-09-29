@@ -13,7 +13,7 @@ const expr = (value: IrExpr): IrStmt => ({ kind: "exprStmt", expr: value, loc })
 
 function fixture(): IrModule {
   return {
-    irVersion: 11, sourceFile: loc.file, entry: "main",
+    irVersion: 12, sourceFile: loc.file, entry: "main",
     globals: [{ id, name: "table", type, mutable: false }],
     functions: [{ name: "main", params: [], returnType: VOID, locals: [], body: [
       { kind: "assign", localId: id, value: { kind: "arrayLit", elems: [num(2), num(-0), num(Infinity)], type, loc }, loc },

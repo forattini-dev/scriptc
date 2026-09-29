@@ -8,6 +8,7 @@ import { InternalCompilerError } from "../../errors.js";
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { overrideParamType } from "./lower-effect.js";
 import { BOOL, BYTES_U8, CAUGHT, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, funcOf, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/ir.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable } from "./lower-exprs.js";
@@ -359,6 +360,22 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
       // ICE). Consumers validate the dyn result where a static type is
       // required (dynCheck — the member-read discipline).
       if (receiver.type.kind === "dyn") {
+        // Object.entries(checkedDynamic).reduce(...): the checker supplies
+        // the concrete `[string, V][]` consumer type. Validate that shape
+        // once at the boundary, then run the ordinary native reduce loop;
+        // sending the reducer through dynInvoke would erase its typed
+        // accumulator and reject closures whose union cannot be boxed.
+        if ((name === "reduce" || name === "reduceRight") && receiverIr.kind === "array") {
+          const validated: IrExpr = { kind: "dynCheck", value: receiver, type: receiverIr, loc };
+          return lowerArrayReduceCall(
+            lowerer,
+            call,
+            access,
+            name,
+            receiverIr.elem,
+            validated,
+          );
+        }
         const dispatched = lowerDynDispatchMethodCall(lowerer, call, access, receiver, true);
         if (dispatched) return dispatched;
         lowerer.noLowering(
@@ -367,16 +384,17 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
           "assign it to an array-typed binding first (the validated extraction), then call the method",
         );
       }
-      // An evolving-`any` array binding under --dynamic whose flow type
-      // EVOLVED past `any[]` (`const fns = []; fns.push(() => 1);
-      // fns.map(...)` — the binding lowered array<jsval> at its `any[]`
-      // declaration, while tsc's evolving-array analysis answers the
-      // pushed element type at this site): the VALUE's element type is
-      // the truth — ride the explicit-`any[]` handle-element lowering
-      // (pushes marshal in, HOF callbacks bind the handle, results exit
-      // per the checker type), never a typed intrinsic over a jsval-
-      // element array (the validator ICE).
-      if (receiver.type.kind === "array" && receiver.type.elem.kind === "jsval" && !typeEquals(receiverIr, receiver.type)) {
+      // When control-flow produces a concrete native array behind a
+      // checker `any[]` view, the VALUE's element ABI is authoritative.
+      // This covers both evolving-any storage (`array<jsval>`) and an
+      // Array.isArray refinement whose later property test proves a typed
+      // native array. Never specialize a helper for the checker's stale
+      // element type and pass it a differently represented array.
+      if (
+        receiver.type.kind === "array" &&
+        !typeEquals(receiverIr, receiver.type) &&
+        (receiver.type.elem.kind === "jsval" || lowerer.checkerAnyArray(access.expression))
+      ) {
         receiverIr = receiver.type;
         elem = receiver.type.elem;
       }
@@ -1301,12 +1319,13 @@ function arraySearchHelper(
    * visited), elements are read fresh each iteration, callbacks run
    * left-to-right and receive whatever prefix of (element, index, array)
    * they declare. */
-  function lowerArrayHofCall(lowerer: Lowerer, call: ts.CallExpression,
+  export function lowerArrayHofCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,
     method: "map" | "filter" | "forEach",
-    elem: IrType,): IrExpr {
+    elem: IrType,
+    receiverOverride?: IrExpr,): IrExpr {
     const loc = locOf(call);
-    const receiver = lowerer.lowerExpr(access.expression);
+    const receiver = receiverOverride ?? lowerer.lowerExpr(access.expression);
     const argNode = call.arguments[0];
     if (!argNode) lowerer.unsupported("SC1090", call, "this call form"); // tsc-guarded
     const booleanFilter =
@@ -1550,7 +1569,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     if (lowerer.chainBlocked(access, call)) return null;
     const name = access.name.text;
     if (name === "join") return lowerTupleJoinCall(lowerer, call, access);
-    if (name !== "slice" && name !== "includes" && name !== "map" && name !== "every") return null;
+    if (name !== "slice" && name !== "includes" && name !== "map" && name !== "every" && name !== "flatMap") return null;
     if (!lowerer.isStdlibMember(access)) return null;
     let receiverIr = lowerer.mapTypeOf(lowerer.typeOf(access.expression));
     let receiver: IrExpr | null = null;
@@ -1643,6 +1662,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     if (name === "every") {
       return lowerArrayFindLikeOnReceiver(lowerer, call, snapshot, name, snapshotElem);
     }
+    if (name === "flatMap") return lowerArrayFlatMapCall(lowerer, call, access, snapshotElem, snapshot);
     // map
     if (call.arguments.length !== 1) {
       lowerer.noLowering(`.map with ${call.arguments.length} arguments`, call, "the thisArg parameter has no lowering — use an arrow function");
@@ -1960,6 +1980,12 @@ export function tryLowerNumericIndexRead(lowerer: Lowerer, operand: IrExpr, loc:
     if (resultT.kind !== "union") lowerer.badType(call, lowerer.typeOf(call)); // defensive: T | undefined always maps to a union
     const undefTag = lowerer.armTag(resultT.unionId, UNDEFINED_T);
     if (undefTag < 0) lowerer.badType(call, lowerer.typeOf(call));
+    if (elem.kind === "union" && !typeEquals(elem, resultT)) {
+      const present = (lowerer.unions.get(resultT.unionId)?.arms ?? []).filter((a) => a.kind !== "undefinedT");
+      if (present.length !== 1 || lowerer.armTag(elem.unionId, present[0]!) < 0) {
+        lowerer.unsupported("SC1090", call, "'.find()' over a union-element array whose result is not one of its arms (narrow with a type-guard predicate, or loop)");
+      }
+    }
     const helper = findHelper(lowerer, elem, resultT, undefTag, fnRet, arity, last, loc);
     return { kind: "call", callee: helper, args: [receiver, fnArg], type: resultT, loc };
   }
@@ -1996,7 +2022,26 @@ export function tryLowerNumericIndexRead(lowerer: Lowerer, operand: IrExpr, loc:
 
     const valueT = arrayValueType(lowerer, elem);
     const v = varRef("v.0", valueT, loc);
-    const found = lowerer.coerceToExpected(v, resultT);
+    // A union ELEMENT whose result union differs (`find((i): i is Error => …)` over `(string | Error)[]` answers
+    // `Error | undefined`): the guard proves the found element is the result's single present arm, so extract that arm
+    // from the element union (checked — a lying predicate throws the catchable TypeError) and wrap it into the result.
+    let found: IrExpr;
+    if (valueT.kind === "union" && !typeEquals(valueT, resultT)) {
+      const present = (lowerer.unions.get(resultT.unionId)?.arms ?? []).filter((a) => a.kind !== "undefinedT");
+      const arm = present.length === 1 ? present[0]! : null;
+      const extract = arm && lowerer.armTag(valueT.unionId, arm) >= 0 ? lowerer.narrowedArmHelper(valueT.unionId, arm, loc) : null;
+      if (!arm || !extract) throw new InternalCompilerError("find over a union element: result arm unchecked"); // fenced by the caller
+      found = {
+        kind: "unionWrap",
+        unionId: resultT.unionId,
+        tag: lowerer.armTag(resultT.unionId, arm),
+        value: { kind: "call", callee: extract, args: [v], type: arm, loc },
+        type: resultT,
+        loc,
+      };
+    } else {
+      found = lowerer.coerceToExpected(v, resultT);
+    }
     const miss: IrExpr = {
       kind: "unionWrap",
       unionId: resultT.unionId,
@@ -2167,20 +2212,31 @@ export function tryLowerNumericIndexRead(lowerer: Lowerer, operand: IrExpr, loc:
     return name;
   }
 
+  function pinFlatMapCallbackReturn(lowerer: Lowerer, call: ts.CallExpression, argNode: ts.Expression): void {
+    const typeArg = call.typeArguments?.length === 1 ? call.typeArguments[0]! : null;
+    if (!typeArg || !(ts.isArrowFunction(argNode) || ts.isFunctionExpression(argNode)) || argNode.type) return;
+    const u = lowerer.mapTypeOf(lowerer.checker.getTypeFromTypeNode(typeArg));
+    if (u && isSupportedArrayElem(u) && u.kind !== "jsval") lowerer.lambdaReturnOverrides.set(argNode, arrayOf(u));
+  }
+
 /** `a.flatMap(f)` — map plus a one-level flatten. A callback returning
    * `U[]` appends the returned array's elements per receiver element; a
    * callback returning a non-array U doesn't flatten (JS pushes it as-is),
    * which IS map — those calls share map's interned helper. A union return
    * mixing array and non-array arms would need a per-value flatten decision
    * — fenced. */
-  function lowerArrayFlatMapCall(lowerer: Lowerer, call: ts.CallExpression,
+  export function lowerArrayFlatMapCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,
-    elem: IrType,): IrExpr {
+    elem: IrType,
+    receiverOverride?: IrExpr,): IrExpr {
     const loc = locOf(call);
-    const receiver = lowerer.lowerExpr(access.expression);
+    const receiver = receiverOverride ?? lowerer.lowerExpr(access.expression);
     const arrT = arrayOf(elem);
     const argNode = call.arguments[0];
     if (!argNode) lowerer.unsupported("SC1090", call, "this call form"); // tsc-guarded
+    // `.flatMap<U>(cb)` with an unannotated callback: the explicit U pins the
+    // callback's ABI return to `U[]` (each returned literal builds as U[]).
+    pinFlatMapCallbackReturn(lowerer, call, argNode);
     const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [arrayValueType(lowerer, elem)], arrT);
     const fnRet = fnArg.type.ret;
     if (fnRet.kind === "union") {
@@ -2319,12 +2375,13 @@ export function tryLowerNumericIndexRead(lowerer: Lowerer, operand: IrExpr, loc:
    * initial value, the element type without one. The callback may declare
    * any prefix of (acc, element, index, array). Without an initial value an
    * empty receiver throws Node's exact TypeError at runtime. */
-  function lowerArrayReduceCall(lowerer: Lowerer, call: ts.CallExpression,
+  export function lowerArrayReduceCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,
     method: "reduce" | "reduceRight",
-    elem: IrType,): IrExpr {
+    elem: IrType,
+    receiverOverride?: IrExpr,): IrExpr {
     const loc = locOf(call);
-    const receiver = lowerer.lowerExpr(access.expression);
+    const receiver = receiverOverride ?? lowerer.lowerExpr(access.expression);
     const arrT = arrayOf(elem);
     const argNode = call.arguments[0];
     if (!argNode) lowerer.unsupported("SC1090", call, "this call form"); // tsc-guarded
@@ -4942,7 +4999,27 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         // checker's own element type — the [K, V] tuple for pair yields,
         // T otherwise — built/read once into a hidden per-iteration
         // local, the array for-of's exact desugar.
-        const elemT = lowerer.mapTypeOf(lowerer.checker.getTypeAtLocation(decl!.name));
+        const checkerElemT = lowerer.checker.getTypeAtLocation(decl!.name);
+        let elemT = lowerer.mapTypeOf(checkerElemT);
+        // lib.d.ts exposes iteration from a checker-narrowed Map/Set as
+        // `any` slots. The container has already been validated as the
+        // Rust-native dyn collection, so recover the precise IR yield type
+        // from it instead of reopening an island at the binding site.
+        if (
+          yieldsPair && keyT.kind === "dyn" && secondT.kind === "dyn" &&
+          (checkerElemT.flags & ts.TypeFlags.Any) !== 0
+        ) {
+          elemT = {
+            kind: "record",
+            shapeId: lowerer.shapes.intern([{ name: "0", type: keyT }, { name: "1", type: secondT }], true),
+          };
+        } else if (
+          !yieldsPair &&
+          singleT.kind === "dyn" &&
+          (checkerElemT.flags & ts.TypeFlags.Any) !== 0
+        ) {
+          elemT = singleT;
+        }
         if (yieldsPair) {
           const shape = elemT?.kind === "record" ? lowerer.shapes.get(elemT.shapeId) : null;
           if (
@@ -4950,10 +5027,10 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
             !typeEquals(shape.fields.find((f) => f.name === "0")!.type, keyT) ||
             !typeEquals(shape.fields.find((f) => f.name === "1")!.type, secondT)
           ) {
-            lowerer.badType(decl!.name, lowerer.checker.getTypeAtLocation(decl!.name)); // defensive: the lib declares [K, V]
+            lowerer.badType(decl!.name, checkerElemT); // defensive: the lib declares [K, V]
           }
         } else if (!elemT || !typeEquals(elemT, singleT)) {
-          lowerer.badType(decl!.name, lowerer.checker.getTypeAtLocation(decl!.name)); // defensive: the lib declares T
+          lowerer.badType(decl!.name, checkerElemT); // defensive: the lib declares T
         }
         const elemInit: IrExpr = yieldsPair
           ? {
@@ -6591,7 +6668,7 @@ export { objectIterOverIndexShape } from "./lower-object-index-iteration.js";
    * value slot (dyn slots convert JSON-safe values, identity otherwise).
    * The `as ModelPricing` reshape AFTER it is the width-coercion capture
    * (lowerRecordOvfCaptureHelper). Null when the argument or result shape
-   * is outside this (Maps, richer iterables → the SC2020 fence). */
+   * is outside this (richer iterables → the SC2020 fence). */
   export function lowerObjectFromEntriesCall(lowerer: Lowerer, call: ts.CallExpression,
     callee: ts.Expression,): IrExpr | null {
     if (!ts.isPropertyAccessExpression(callee)) return null;
@@ -6601,6 +6678,9 @@ export { objectIterOverIndexShape } from "./lower-object-index-iteration.js";
     if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) return null;
     const argNode = call.arguments[0]!;
     const argIr = lowerer.mapTypeOf(lowerer.typeOf(argNode));
+    if (argIr?.kind === "map" && argIr.key.kind === "string" && isSupportedIndexValue(argIr.value)) {
+      return lowerFromEntriesMap(lowerer, call, argNode, argIr);
+    }
     if (argIr?.kind !== "array") return null;
     // `Object.fromEntries(rows)` over a `string[][]` VALUE — the env-line
     // idiom (`envArray.map((env) => env.split('='))`). The checker has no
@@ -6646,7 +6726,15 @@ export { objectIterOverIndexShape } from "./lower-object-index-iteration.js";
         `Object.fromEntries over '${lowerer.fmt(argIr)}' (the tuple's '${lowerer.fmt(valT)}' value cannot flow into the '${lowerer.fmt(iv)}' signature slot)`,
       );
     }
-    const receiver = lowerer.lowerExpr(argNode);
+    let receiver = lowerer.lowerExpr(argNode);
+    // Inferred containers carrying unknown stay in checked-dynamic storage
+    // until a typed consumer needs them. Object.entries(unknown).map(...)
+    // is such a value: validate its outer array and heterogeneous tuple
+    // elements here before the native fromEntries loop consumes them.
+    receiver = receiver.type.kind === "dyn"
+      ? { kind: "dynCheck", value: receiver, type: argIr, loc }
+      : lowerer.coerceInto(argNode, receiver, argIr);
+    if (!typeEquals(receiver.type, argIr)) lowerer.requireExactShape(argNode, receiver.type, argIr);
     const key = `obj.fromEntries:${argIr.elem.shapeId}:${resultT.shapeId}`;
     let helper = lowerer.arrHofHelpers.get(key);
     if (!helper) {
@@ -6683,6 +6771,62 @@ export { objectIterOverIndexShape } from "./lower-object-index-iteration.js";
           { id: "out.0", name: "out", type: resultT, mutable: false },
           { id: "i.0", name: "i", type: F64, mutable: true },
           { id: "t.0", name: "t", type: tupleT, mutable: false },
+        ],
+        body,
+        loc,
+      });
+    }
+    return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
+  }
+
+  /** `Object.fromEntries(new Map<string, V>())`: Map already owns the exact
+   * ordered key/value sequence the operation consumes. Copy each live entry
+   * into a fresh pure index-signature record; this preserves insertion order
+   * and the last value at an overwritten key without allocating tuple rows. */
+  function lowerFromEntriesMap(lowerer: Lowerer, call: ts.CallExpression,
+    argNode: ts.Expression, mapT: IrType & { kind: "map" },): IrExpr {
+    const loc = locOf(call);
+    const resultT: IrType & { kind: "record" } = {
+      kind: "record",
+      shapeId: lowerer.shapes.intern([], false, mapT.value, []),
+    };
+    const receiver = lowerer.coerceInto(argNode, lowerer.lowerExpr(argNode), mapT);
+    const key = `obj.fromEntries:map:${typeKey(mapT)}:${resultT.shapeId}`;
+    let helper = lowerer.arrHofHelpers.get(key);
+    if (!helper) {
+      helper = `%obj.fromEntries.${lowerer.arrHofHelpers.size}`;
+      lowerer.arrHofHelpers.set(key, helper);
+      const map = varRef("m.0", mapT, loc);
+      const cursor = varRef("i.0", F64, loc);
+      const iter = (method: "iterCount" | "iterLive" | "iterKey" | "iterValue", args: IrExpr[], type: IrType): IrExpr => ({
+        kind: "mapIntrinsic", method, receiver: map, args, type, loc,
+      });
+      const body: IrStmt[] = [
+        { kind: "varDecl", localId: "out.0", init: { kind: "recordLit", fields: [], type: resultT, loc }, loc },
+        countedFor(loc, iter("iterCount", [], F64), () => [{
+          kind: "if",
+          cond: iter("iterLive", [cursor], BOOL),
+          then: [{
+            kind: "recordKeySet",
+            obj: varRef("out.0", resultT, loc),
+            shapeId: resultT.shapeId,
+            key: iter("iterKey", [cursor], STRING),
+            value: iter("iterValue", [cursor], mapT.value),
+            loc,
+          }],
+          else_: null,
+          loc,
+        }]),
+        { kind: "return", value: varRef("out.0", resultT, loc), loc },
+      ];
+      lowerer.liftedFns.push({
+        name: helper,
+        params: [{ localId: "m.0", name: "m", type: mapT }],
+        returnType: resultT,
+        locals: [
+          { id: "m.0", name: "m", type: mapT, mutable: false },
+          { id: "out.0", name: "out", type: resultT, mutable: false },
+          { id: "i.0", name: "i", type: F64, mutable: true },
         ],
         body,
         loc,
@@ -7848,6 +7992,7 @@ function dynRecvThrows(dRef: IrExpr, mRef: IrExpr, fullRef: IrExpr, loc: SrcLoc)
     if (call.arguments.length !== 1) return null;
     const argNode = call.arguments[0]!;
     const loc = locOf(call);
+    pinFlatMapCallbackReturn(lowerer, call, argNode);
     const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [DYN], DYN);
     const ret = fnArg.type.ret;
     if (ret.kind !== "array") {
@@ -8005,6 +8150,266 @@ function dynRecvThrows(dRef: IrExpr, mRef: IrExpr, fullRef: IrExpr, loc: SrcLoc)
         { id: "r.0", name: "r", type: retT, mutable: false },
         { id: "rn.0", name: "rn", type: F64, mutable: false },
         { id: "j.0", name: "j", type: F64, mutable: true },
+        { id: "out.0", name: "out", type: outT, mutable: false },
+      ],
+      body,
+      loc,
+    };
+  }
+
+/** `.reduce(f, init)` on a dyn ('unknown'/`any[]`-narrowed) receiver whose
+   * accumulator is statically typed (`value.reduce((req, item) =>
+   * append(req, String(item)), request)`): the checked-dynamic array walks
+   * element-by-element, the callback sees each element as the dyn value
+   * `unknown` code sees, and the accumulator keeps its concrete type — it
+   * never rides a dyn slot. Returns null for the no-init form, a dyn/func
+   * accumulator, or a callback whose return type differs from the
+   * accumulator (those keep the runtime dispatch). */
+  export function lowerDynArrayReduceCall(lowerer: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,
+    recv: IrExpr,): IrExpr | null {
+    if (call.arguments.length !== 2) return null;
+    const argNode = call.arguments[0]!;
+    const loc = locOf(call);
+    // The checker's `reduce(cb: (prev: any, ...) => any, init: any): any`
+    // overload answers `any` for an untyped `any[]` receiver: the concrete
+    // accumulator is then the initial value's own type.
+    let accT = lowerer.irTypeOf(call);
+    if (accT.kind === "dyn" || accT.kind === "jsval") accT = lowerer.irTypeOf(call.arguments[1]!);
+    if (accT.kind === "dyn" || accT.kind === "jsval" || accT.kind === "void" || accT.kind === "func") return null;
+    // An unannotated accumulator param is `any` to the checker: pin it to
+    // the concrete accumulator so the body sees the typed value.
+    if (ts.isArrowFunction(argNode) || ts.isFunctionExpression(argNode)) {
+      const p0 = argNode.parameters[0];
+      if (p0 && ts.isIdentifier(p0.name) && !p0.type && !p0.initializer && !p0.dotDotDotToken &&
+          (lowerer.typeOf(p0.name).flags & ts.TypeFlags.Any) !== 0) {
+        overrideParamType(p0, accT);
+      }
+    }
+    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [accT, DYN], DYN);
+    if (!typeEquals(fnArg.type.ret, accT)) return null;
+    const helper = dynReduceHelper(lowerer, accT, arity, loc);
+    return {
+      kind: "call",
+      callee: helper,
+      args: [
+        recv,
+        fnArg,
+        lowerer.lowerExprExpecting(call.arguments[1]!, accT),
+        { kind: "strLit", value: access.name.text, type: STRING, loc },
+        { kind: "strLit", value: access.getText(), type: STRING, loc },
+      ],
+      type: accT,
+      loc,
+    };
+  }
+
+/** Interned `%dyn.reduce.<n>` — one per (accumulator type, callback arity). */
+  function dynReduceHelper(lowerer: Lowerer, accT: IrType, arity: number, loc: SrcLoc): string {
+    const key = `dynreduce:${typeKey(accT)}:${arity}`;
+    const existing = lowerer.arrHofHelpers.get(key);
+    if (existing) return existing;
+    const name = `%dyn.reduce.${lowerer.arrHofHelpers.size}`;
+    lowerer.arrHofHelpers.set(key, name);
+    lowerer.liftedFns.push(buildDynReduceFn(name, accT, arity, loc));
+    return name;
+  }
+
+/** acc = z; n = d.length; for (i..n) { v = d[i]; acc = f(acc, v, i, d); }
+ * return acc; — the receiver-kind gate up front, the length read once,
+ * elements through the canonical-index keyed read (buildDynFilterFn's
+ * discipline). */
+  function buildDynReduceFn(name: string, accT: IrType, arity: number, loc: SrcLoc): IrFunction {
+    const fnT = funcOf([accT, DYN, F64, DYN].slice(0, arity), accT);
+
+    const d = varRef("d.0", DYN, loc);
+    const body: IrStmt[] = [
+      {
+        kind: "if",
+        cond: { kind: "dynTest", test: "array", negated: true, value: d, type: BOOL, loc },
+        then: dynRecvThrows(d, varRef("m.0", STRING, loc), varRef("full.0", STRING, loc), loc),
+        else_: null,
+        loc,
+      },
+      {
+        kind: "varDecl",
+        localId: "n.0",
+        init: {
+          kind: "dynCheck",
+          value: { kind: "dynKeyGet", key: { kind: "strLit", value: "length", type: STRING, loc }, value: d, type: DYN, loc },
+          type: F64,
+          loc,
+        },
+        loc,
+      },
+      { kind: "varDecl", localId: "acc.0", init: varRef("z.0", accT, loc), loc },
+      countedFor(loc, varRef("n.0", F64, loc), () => [
+          {
+            kind: "varDecl",
+            localId: "v.0",
+            init: { kind: "dynKeyGet", key: { kind: "toString", operand: varRef("i.0", F64, loc), type: STRING, loc }, value: d, type: DYN, loc },
+            loc,
+          },
+          {
+            kind: "assign",
+            localId: "acc.0",
+            value: {
+              kind: "callValue",
+              callee: varRef("f.0", fnT, loc),
+              args: [varRef("acc.0", accT, loc), varRef("v.0", DYN, loc), varRef("i.0", F64, loc), d].slice(0, arity),
+              type: accT,
+              loc,
+            },
+            loc,
+          },
+        ],
+      ),
+      { kind: "return", value: varRef("acc.0", accT, loc), loc },
+    ];
+    return {
+      name,
+      params: [
+        { localId: "d.0", name: "d", type: DYN },
+        { localId: "f.0", name: "f", type: fnT },
+        { localId: "z.0", name: "z", type: accT },
+        { localId: "m.0", name: "m", type: STRING },
+        { localId: "full.0", name: "full", type: STRING },
+      ],
+      returnType: accT,
+      locals: [
+        { id: "d.0", name: "d", type: DYN, mutable: false },
+        { id: "f.0", name: "f", type: fnT, mutable: false },
+        { id: "z.0", name: "z", type: accT, mutable: false },
+        { id: "m.0", name: "m", type: STRING, mutable: false },
+        { id: "full.0", name: "full", type: STRING, mutable: false },
+        { id: "n.0", name: "n", type: F64, mutable: false },
+        { id: "i.0", name: "i", type: F64, mutable: true },
+        { id: "v.0", name: "v", type: DYN, mutable: false },
+        { id: "acc.0", name: "acc", type: accT, mutable: true },
+      ],
+      body,
+      loc,
+    };
+  }
+
+/** `.map(f)` on a dyn ('unknown'/`any[]`-narrowed) receiver whose callback
+   * returns a STATIC type (`value.map(scalar)` with `scalar: (item: unknown)
+   * => string | ToolError`): the checked-dynamic array walks element-by-
+   * element, the callback sees each element as the dyn value `unknown` code
+   * sees, and its typed results collect into a real `R[]` — no validation
+   * needed (only the RECEIVER is dynamic). Non-array receivers throw the
+   * Node-shaped TypeError. Dyn/void-returning callbacks keep the runtime
+   * dispatch. */
+  export function lowerDynArrayMapCall(lowerer: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,
+    recv: IrExpr,): IrExpr | null {
+    if (call.arguments.length !== 1) return null;
+    const argNode = call.arguments[0]!;
+    const loc = locOf(call);
+    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [DYN], DYN);
+    const ret = fnArg.type.ret;
+    if (!isSupportedArrayElem(ret) || ret.kind === "jsval") return null;
+    const helper = dynMapHelper(lowerer, ret, arity, loc);
+    return {
+      kind: "call",
+      callee: helper,
+      args: [
+        recv,
+        fnArg,
+        { kind: "strLit", value: access.name.text, type: STRING, loc },
+        { kind: "strLit", value: access.getText(), type: STRING, loc },
+      ],
+      type: arrayOf(ret),
+      loc,
+    };
+  }
+
+/** Interned `%dyn.map.<n>` — one per (result type, callback arity). */
+  function dynMapHelper(lowerer: Lowerer, retT: IrType, arity: number, loc: SrcLoc): string {
+    const key = `dynmap:${typeKey(retT)}:${arity}`;
+    const existing = lowerer.arrHofHelpers.get(key);
+    if (existing) return existing;
+    const name = `%dyn.map.${lowerer.arrHofHelpers.size}`;
+    lowerer.arrHofHelpers.set(key, name);
+    lowerer.liftedFns.push(buildDynMapFn(name, retT, arity, loc));
+    return name;
+  }
+
+/** out = []; n = d.length; for (i..n) { v = d[i]; out.push(f(v, i, d)); }
+ * return out; — the receiver-kind gate up front, the length read once,
+ * elements through the canonical-index keyed read (buildDynFilterFn's
+ * discipline). */
+  function buildDynMapFn(name: string, retT: IrType, arity: number, loc: SrcLoc): IrFunction {
+    const outT = arrayOf(retT);
+    const fnT = funcOf([DYN, F64, DYN].slice(0, arity), retT);
+
+    const d = varRef("d.0", DYN, loc);
+    const body: IrStmt[] = [
+      {
+        kind: "if",
+        cond: { kind: "dynTest", test: "array", negated: true, value: d, type: BOOL, loc },
+        then: dynRecvThrows(d, varRef("m.0", STRING, loc), varRef("full.0", STRING, loc), loc),
+        else_: null,
+        loc,
+      },
+      {
+        kind: "varDecl",
+        localId: "n.0",
+        init: {
+          kind: "dynCheck",
+          value: { kind: "dynKeyGet", key: { kind: "strLit", value: "length", type: STRING, loc }, value: d, type: DYN, loc },
+          type: F64,
+          loc,
+        },
+        loc,
+      },
+      { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
+      countedFor(loc, varRef("n.0", F64, loc), () => [
+          {
+            kind: "varDecl",
+            localId: "v.0",
+            init: { kind: "dynKeyGet", key: { kind: "toString", operand: varRef("i.0", F64, loc), type: STRING, loc }, value: d, type: DYN, loc },
+            loc,
+          },
+          {
+            kind: "exprStmt",
+            expr: {
+              kind: "arrIntrinsic",
+              method: "push",
+              receiver: varRef("out.0", outT, loc),
+              args: [{
+                kind: "callValue",
+                callee: varRef("f.0", fnT, loc),
+                args: [varRef("v.0", DYN, loc), varRef("i.0", F64, loc), d].slice(0, arity),
+                type: retT,
+                loc,
+              }],
+              type: F64,
+              loc,
+            },
+            loc,
+          },
+        ],
+      ),
+      { kind: "return", value: varRef("out.0", outT, loc), loc },
+    ];
+    return {
+      name,
+      params: [
+        { localId: "d.0", name: "d", type: DYN },
+        { localId: "f.0", name: "f", type: fnT },
+        { localId: "m.0", name: "m", type: STRING },
+        { localId: "full.0", name: "full", type: STRING },
+      ],
+      returnType: outT,
+      locals: [
+        { id: "d.0", name: "d", type: DYN, mutable: false },
+        { id: "f.0", name: "f", type: fnT, mutable: false },
+        { id: "m.0", name: "m", type: STRING, mutable: false },
+        { id: "full.0", name: "full", type: STRING, mutable: false },
+        { id: "n.0", name: "n", type: F64, mutable: false },
+        { id: "i.0", name: "i", type: F64, mutable: true },
+        { id: "v.0", name: "v", type: DYN, mutable: false },
         { id: "out.0", name: "out", type: outT, mutable: false },
       ],
       body,

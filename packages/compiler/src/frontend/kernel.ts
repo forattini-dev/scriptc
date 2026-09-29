@@ -104,6 +104,14 @@ export function isKernelSchemaValueSymbol(decls: readonly ts.Node[]): boolean {
   // one is the interface/class that types the VALUE. A top-level lowercase type ALIAS (`toTaggedUnion<…>`, effect's
   // combinator-result naming) is a value type too; `Struct.Type<F>`-style aliases inside namespaces stay structural.
   if (decls.length === 0 || !decls.every((d) => SCHEMA_DIST.test(d.getSourceFile().fileName))) return false;
+  // Schema.Json's recursive data carriers are type-only structural values,
+  // not schema descriptors. Mapping these interfaces to the opaque Effect
+  // handle collapses the Json union into `... | Effect` and prevents native
+  // serialization of perfectly ordinary JSON trees.
+  if (decls.every((d) =>
+    (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d)) &&
+    (d.name.text === "JsonArray" || d.name.text === "JsonObject")
+  )) return false;
   return decls.some((d) => ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d) || (ts.isTypeAliasDeclaration(d) && ts.isSourceFile(d.parent) && /^[a-z]/.test(d.name.text)));
 }
 

@@ -42,6 +42,21 @@ interface GeneratorFlow {
   emitThrow(reason: string): void;
   emitBreak(): void;
   emitContinue(): void;
+  /** Enclosing labeled loops: `break L` / `continue L` from inside a nested helper resume the labeled loop's own
+   * continuation (its helper's captures and cells are in scope in every nested helper by construction). */
+  readonly labeled?: Readonly<Record<string, { emitBreak(): void; emitContinue(): void }>>;
+}
+
+/** The flow of a loop body: its own break/continue, and — for a labeled loop — the same pair under each label. */
+function loopBodyFlow(flow: GeneratorFlow, labels: readonly string[] | undefined, own: {
+  emitBreak(): void;
+  emitContinue(): void;
+  captures?: GeneratorFlow["captures"];
+}): GeneratorFlow {
+  const entry = { emitBreak: own.emitBreak, emitContinue: own.emitContinue };
+  const labeled = { ...flow.labeled };
+  for (const label of labels ?? []) labeled[label] = entry;
+  return { ...flow, ...(own.captures === undefined ? {} : { captures: own.captures }), emitBreak: own.emitBreak, emitContinue: own.emitContinue, labeled };
 }
 
 function emitGeneratorValue(
@@ -205,8 +220,8 @@ function emitGeneratorWhile(
   flow: GeneratorFlow,
   onComplete: (() => void) | null,
 ): void {
-  if ((statement.labels?.length ?? 0) > 0 || containsYield(statement.cond)) {
-    context.unsupported("labeled generator while or yield in its condition", statement.loc);
+  if (containsYield(statement.cond)) {
+    context.unsupported("generator while with a yield in its condition", statement.loc);
   }
   const helper = context.nextName("sc_generator_while");
   const active = [...locals].map((id) => {
@@ -232,12 +247,11 @@ function emitGeneratorWhile(
     ...active.map((local) => `${mangleLocal(local.id)}.clone()`),
     ...flow.captures.map((capture) => capture.argument),
   ].join(", ")})`;
-  const bodyFlow: GeneratorFlow = {
-    ...flow,
+  const bodyFlow = loopBodyFlow(flow, statement.labels, {
     emitBreak: () => emitGeneratorSequence(fn, remaining, context,
       new Set(locals), flow, onComplete),
     emitContinue: () => context.line(`return ${call};`),
-  };
+  });
   context.line(`fn ${helper}(${params.join(", ")}) -> ${generatorStepType(fn, context)} {`);
   context.pushIndent();
   context.line(`if ${context.emitExpr(statement.cond)} {`);
@@ -314,8 +328,8 @@ function emitGeneratorForOf(
   flow: GeneratorFlow,
   onComplete: (() => void) | null,
 ): void {
-  if ((statement.labels?.length ?? 0) > 0 || containsYield(statement.iterable)) {
-    context.unsupported("labeled generator for-of or suspension in its iterable", statement.loc);
+  if (containsYield(statement.iterable)) {
+    context.unsupported("generator for-of with suspension in its iterable", statement.loc);
   }
   if (statement.iterable.type.kind !== "array") {
     context.unsupported("suspended generator for-of over a non-array", statement.loc);
@@ -352,8 +366,7 @@ function emitGeneratorForOf(
     ...active.map((candidate) => `${mangleLocal(candidate.id)}.clone()`),
     ...flow.captures.map((capture) => capture.argument),
   ].join(", ")})`;
-  const bodyFlow: GeneratorFlow = {
-    ...flow,
+  const bodyFlow = loopBodyFlow(flow, statement.labels, {
     captures: [
       ...flow.captures,
       { parameter: `${array}: ${context.rustType(statement.iterable.type, statement.loc)}`, argument: `${array}.clone()` },
@@ -361,7 +374,7 @@ function emitGeneratorForOf(
     ],
     emitBreak: () => emitGeneratorSequence(fn, remaining, context, new Set(locals), flow, onComplete),
     emitContinue: () => context.line(`return ${call(`${index} + 1.0`)};`),
-  };
+  });
   context.line(`fn ${helper}(${params.join(", ")}) -> ${generatorStepType(fn, context)} {`);
   context.pushIndent();
   context.line(`if ${index} < runtime::array_len(&${array}) {`);
@@ -553,11 +566,10 @@ function emitGeneratorSequence(
       return;
     }
     if (statement.kind === "break" || statement.kind === "continue") {
-      if (statement.label !== undefined) {
-        context.unsupported(`labeled generator ${statement.kind}`, statement.loc);
-      }
-      if (statement.kind === "break") flow.emitBreak();
-      else flow.emitContinue();
+      const target = statement.label === undefined ? flow : flow.labeled?.[statement.label];
+      if (target === undefined) context.unsupported(`labeled generator ${statement.kind} outside its loop`, statement.loc);
+      if (statement.kind === "break") target.emitBreak();
+      else target.emitContinue();
       return;
     }
     if (statement.kind === "tryCatch") {

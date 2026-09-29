@@ -1112,7 +1112,8 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
           }
           throw shapeMismatch(prop);
         }
-        const absent = lowerer.wrappedUndefined(fieldType, locOf(prop));
+        const absent = lowerer.wrappedUndefined(fieldType, locOf(prop)) ??
+          (fieldType.kind === "dyn" ? dynUndefinedExpr(locOf(prop)) : null);
         if (!absent) {
           lowerer.unsupported(
             "SC1090",

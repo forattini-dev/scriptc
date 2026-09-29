@@ -37,6 +37,9 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::String(value) => runtime::assert_inspect_string(value),`);
   context.line(`${name}::Regex(value) => format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value)),`);
   context.line(`${name}::Url(value) => runtime::url_href(value).to_string(),`);
+  context.line(`${name}::SearchParams(value) => format!("URLSearchParams {{ '{}' }}", runtime::search_params_to_string(value)),`);
+  context.line(`${name}::Map(value) => format!("Map({}) {{}}", runtime::map_size(value) as usize),`);
+  context.line(`${name}::Set(value) => format!("Set({}) {{}}", runtime::map_size(value) as usize),`);
   context.line(`${name}::Promise(..) => "Promise { <pending> }".to_owned(),`);
   context.line(`${name}::ArrayIterator(..) => "Object [Array Iterator] {}".to_owned(),`);
   context.line(`${name}::NetServer(..) => "Server {}".to_owned(),`);
@@ -62,6 +65,7 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::TypedBytes(value) => { let length = runtime::typed_bytes_len(value) as usize; let type_name = runtime::typed_bytes_name(value); if length == 0 { return format!("{type_name}(0) []"); } let mut output = format!("{type_name}({length}) ["); for index in 0..length { output.push('\\n'); output.push_str(&" ".repeat(indent + 2)); output.push_str(&runtime::display_number(runtime::typed_bytes_get(value, index as f64))); if index + 1 < length { output.push(','); } } output.push('\\n'); output.push_str(&" ".repeat(indent)); output.push(']'); output },`);
   context.line(`${name}::Buffer(value) => runtime::inspect_buffer(value).to_string(),`);
   context.line(`${name}::NativeConstructor(name) => format!("[Function: {name}]"),`);
+  context.line(`${name}::NativePrototype(name) => if *name == "Object" { "[Object: null prototype] {}".to_owned() } else { format!("{} {{}}", name) },`);
   context.line(`${name}::NativeMethod(method) => format!("[Function: {}]", method.name()),`);
   context.line(`${name}::Getter(value) => sc_dyn_assert_inspect(value.as_ref(), indent),`);
   if (usesEmbeddedModules) context.line(`${name}::Island(value) => runtime::island_to_string(value).to_string(),`);
@@ -93,7 +97,7 @@ export function emitRustDynamicAssertions(
   context.popIndent();
   context.line("}");
 
-  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::ArrayIterator(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
+  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::NativePrototype(..) | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::ArrayIterator(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Url(..) | ${name}::SearchParams(..) | ${name}::Map(..) | ${name}::Set(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
   if (functionPatterns.length === 0) {
     context.line(`fn sc_dyn_assert_is_function(value: &${name}) -> bool { matches!(value, ${name}::NativeConstructor(..) | ${name}::NativeMethod(..)) }`);
   } else {

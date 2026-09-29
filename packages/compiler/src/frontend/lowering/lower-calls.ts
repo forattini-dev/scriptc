@@ -28,7 +28,7 @@ import { STRING_INDEX_METHODS, STR_METHODS, builtinFenceHintOf, builtinModuleFnO
 import { ffiBindingDiag, ffiSignatureDiag, libCallbackDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
-import { dynStringReceiver, lowerArrayConstructor, lowerArrayFromCall, lowerArrayOfCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectFromEntriesCall, lowerTupleReadMethodCall } from "./lower-containers.js";
+import { dynStringReceiver, lowerArrayConstructor, lowerArrayFlatMapCall, lowerArrayHofCall, lowerArrayFromCall, lowerArrayOfCall, lowerArrayReduceCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerDynArrayMapCall, lowerDynArrayReduceCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectFromEntriesCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { bufEncoding } from "./containers/bytes.js";
 import { lowerRegexMethodCall, lowerStringIndexCall, lowerStringMethodCall, lowerStringPaddingCall, lowerStringSplitCall } from "./containers/string-and-regexp.js";
 import { lowerChildStreamMethodCall, lowerChildWriterMethodCall, lowerCreateRequireCall, lowerCryptoHashMethodCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerImportMetaResolveCall, lowerNodeModuleCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerRequireResolveCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js";
@@ -5458,12 +5458,39 @@ function lowerOptionalStringNumber(
       return lowerRegexMethodCall(lowerer, call, access, () => recv) ?? lowerStringMethodCall(lowerer, call, access, () => recv);
     }
     if (recv.type.kind !== "dyn") return null;
+    const typedReceiver = lowerer.mapTypeOf(recvTs);
+    if (access.name.text === "reduce" && (typedReceiver?.kind !== "array" || lowerer.checkerAnyArray(access.expression))) {
+      // Checker `any[]` (an Array.isArray refinement of `unknown`): the
+      // elements stay dyn, the accumulator keeps its concrete type.
+      const walked = lowerDynArrayReduceCall(lowerer, call, access, recv);
+      if (walked) return walked;
+    }
+    if ((access.name.text === "reduce" || access.name.text === "reduceRight") && typedReceiver?.kind === "array") {
+      const checked: IrExpr = { kind: "dynCheck", value: recv, type: typedReceiver, loc: locOf(access.expression) };
+      return lowerArrayReduceCall(lowerer, call, access, access.name.text, typedReceiver.elem, checked);
+    }
     // Typed-destination filter first (validated extraction into a real
     // T[]); an untyped destination falls through to the runtime dispatch
     // below (the survivors stay dyn values).
     if (access.name.text === "filter") {
       const extracted = lowerDynArrayFilterCall(lowerer, call, access, recv);
       if (extracted) return extracted;
+    }
+    if (access.name.text === "map" && typedReceiver?.kind === "array" && !lowerer.checkerAnyArray(access.expression)) {
+      // Same boundary validation as flatMap below: the checker's concrete `T[]` (`Object.entries(record)`) is checked
+      // once and the native map loop runs, so the callback keeps its typed params.
+      const checked: IrExpr = { kind: "dynCheck", value: recv, type: typedReceiver, loc: locOf(access.expression) };
+      return lowerArrayHofCall(lowerer, call, access, "map", typedReceiver.elem, checked);
+    }
+    if (access.name.text === "map") {
+      const walked = lowerDynArrayMapCall(lowerer, call, access, recv);
+      if (walked) return walked;
+    }
+    if (access.name.text === "flatMap" && typedReceiver?.kind === "array" && !lowerer.checkerAnyArray(access.expression)) {
+      // A dyn value the checker types as a concrete `T[]` (`Object.entries(record)`): validate the shape once at the
+      // boundary and run the ordinary native flatMap loop, whose callback keeps its typed `[name, item]` params.
+      const checked: IrExpr = { kind: "dynCheck", value: recv, type: typedReceiver, loc: locOf(access.expression) };
+      return lowerArrayFlatMapCall(lowerer, call, access, typedReceiver.elem, checked);
     }
     if (access.name.text === "flatMap") return lowerDynArrayFlatMapCall(lowerer, call, access, recv);
     // String methods claim only names NO other dyn-representable kind's
@@ -6064,17 +6091,20 @@ const inliningPredicates = new Set<ts.Symbol>();
       if (operand.type.kind !== "f64" || digits.type.kind !== "f64") return null;
       return { kind: "libCall", fn: "num.toFixed", args: [operand, digits], type: STRING, loc };
     }
-    if ((name === "toPrecision" || name === "toString") && recvKind === "f64" &&
+    if ((name === "toPrecision" || name === "toString" ||
+        (name === "toExponential" && lowerer.nativeDenseArrays)) && recvKind === "f64" &&
         call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
       const operand = lowerer.lowerExpr(recv);
       const argument = lowerer.lowerExpr(call.arguments[0]!);
       if (operand.type.kind !== "f64") return null;
-      const defaultResult = (receiver: IrExpr): IrExpr => ({
-        kind: "toString",
-        operand: receiver,
-        type: STRING,
-        loc,
-      });
+      const defaultResult = (receiver: IrExpr): IrExpr => name === "toExponential"
+        ? { kind: "libCall", fn: "num.toExponential", args: [receiver], type: STRING, loc }
+        : { kind: "toString", operand: receiver, type: STRING, loc };
+      const explicitFn = name === "toPrecision"
+        ? "num.toPrecision" as const
+        : name === "toExponential"
+          ? "num.toExponentialDigits" as const
+          : "num.toRadixString" as const;
       if (argument.type.kind === "undefinedT" || argument.type.kind === "void") {
         if (droppableStatic(argument)) return defaultResult(operand);
         const receiverLocal = lowerer.declareHiddenLocal("%numfmt.recv", F64);
@@ -6134,7 +6164,7 @@ const inliningPredicates = new Set<ts.Symbol>();
               then: defaultResult(receiverRef),
               else_: {
                 kind: "libCall",
-                fn: name === "toPrecision" ? "num.toPrecision" : "num.toRadixString",
+                fn: explicitFn,
                 args: [
                   receiverRef,
                   {
@@ -6160,7 +6190,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       if (argument.type.kind !== "f64") return null;
       return {
         kind: "libCall",
-        fn: name === "toPrecision" ? "num.toPrecision" : "num.toRadixString",
+        fn: explicitFn,
         args: [operand, argument],
         type: STRING,
         loc,
@@ -6576,9 +6606,10 @@ function loweredTemplateStrings(
     // is throw-only and the declared return type (ServerHttp2Stream,
     // unmappable) must not decide the ABI — void, the `never` stance.
     let ret =
-      ts.isArrowFunction(node) && !ts.isBlock(node.body) && isStreamUndefCallExpr(lowerer, node.body)
+      lowerer.lambdaReturnOverrides.get(node) ??
+      (ts.isArrowFunction(node) && !ts.isBlock(node.body) && isStreamUndefCallExpr(lowerer, node.body)
         ? VOID
-        : lowerer.declaredReturnType(node, node);
+        : lowerer.declaredReturnType(node, node));
     ret = lowerer.runtimeOptionalFunctionReturnType(node, ret);
     // A contextually-typed arrow/function EXPRESSION whose slot signature
     // returns a UNION the inferred return doesn't spell adopts the slot's

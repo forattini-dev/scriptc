@@ -225,6 +225,8 @@ export class RustExpressionEmitter {
       }
       case "jsonStringify": {
         const value = this.emitExpr(expr.value);
+        const runtimeIndentExpr = (expr as typeof expr & { runtimeIndent?: IrExpr }).runtimeIndent;
+        const runtimeIndent = runtimeIndentExpr === undefined ? null : this.emitExpr(runtimeIndentExpr);
         const indexedDynRecord = expr.value.type.kind === "record" &&
           this.context.records.get(expr.value.type.shapeId)?.indexValue?.kind === "dyn" &&
           this.context.records.get(expr.value.type.shapeId)?.fields.length === 0;
@@ -232,12 +234,23 @@ export class RustExpressionEmitter {
           this.context.unsupported(`JSON.stringify value '${expr.value.type.kind}'`, expr.loc);
         }
         const indent = (expr as typeof expr & { indent?: string }).indent;
+        const dynamicGap = runtimeIndent === null ? null :
+          `{ let sc_space = ${runtimeIndent}; match sc_space { ` +
+          `${this.context.dynTypeName()}::Undefined => runtime::empty_string(), ` +
+          `${this.context.dynTypeName()}::Number(sc_count) => runtime::string_repeat(&runtime::string(" "), sc_count.trunc().clamp(0.0, 10.0)), ` +
+          `${this.context.dynTypeName()}::String(sc_text) => runtime::string_slice(&sc_text, 0.0, 10.0), ` +
+          `sc_other => sc_dyn_arg_type_fail("space", "of type string or number", &sc_other), } }`;
         if (expr.value.type.kind === "dyn") {
           const root = this.context.nextName("sc_json_root");
-          const serialized = indent
+          const serialized = dynamicGap !== null
+            ? `{ let sc_gap = ${dynamicGap}; runtime::json_stringify_indented(&${root}, sc_gap.as_ref()) }`
+            : indent
             ? `runtime::json_stringify_indented(&${root}, "${this.context.rustString(indent)}")`
             : `runtime::json_stringify(&${root})`;
           return `{ let ${root} = ${value}; sc_dyn_json_check_root(&${root}); ${serialized} }`;
+        }
+        if (dynamicGap !== null) {
+          return `{ let sc_value = ${value}; let sc_gap = ${dynamicGap}; runtime::json_stringify_indented(&sc_value, sc_gap.as_ref()) }`;
         }
         return indent
           ? `runtime::json_stringify_indented(&(${value}), "${this.context.rustString(indent)}")`
@@ -305,6 +318,9 @@ export class RustExpressionEmitter {
           case "date": test = `matches!(&${value}, ${name}::Date(..))`; break;
           case "regex": test = `matches!(&${value}, ${name}::Regex(..))`; break;
           case "url": test = `matches!(&${value}, ${name}::Url(..))`; break;
+          case "searchParams": test = `matches!(&${value}, ${name}::SearchParams(..))`; break;
+          case "map": test = `matches!(&${value}, ${name}::Map(..))`; break;
+          case "set": test = `matches!(&${value}, ${name}::Set(..))`; break;
           case "bigint": test = `matches!(&${value}, ${name}::BigInt(..))`; break;
           case "symbol": test = `matches!(&${value}, ${name}::Symbol(..))`; break;
           case "integer": test = `matches!(&${value}, ${name}::Number(number) if runtime::number_is_integer(*number))`; break;
@@ -317,7 +333,7 @@ export class RustExpressionEmitter {
           case "null": test = `matches!(&${value}, ${name}::Null)`; break;
           case "nullish": test = `matches!(&${value}, ${name}::Undefined | ${name}::Null)`; break;
           case "function": test = `(matches!(&${value}, ${name}::Effect(handle) if runtime::effect_reference_typeof(handle) == "function") || matches!(&${value}, ${name}::NativeConstructor(..)${functions.length === 0 ? "" : ` | ${functions.join(" | ")}`}))`; break;
-          case "object": test = `(matches!(&${value}, ${name}::Effect(handle) if runtime::effect_reference_typeof(handle) == "object") || matches!(&${value}, ${name}::Null | ${name}::Date(..) | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Proxy(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)))`; break;
+          case "object": test = `(matches!(&${value}, ${name}::Effect(handle) if runtime::effect_reference_typeof(handle) == "object") || matches!(&${value}, ${name}::Null | ${name}::NativePrototype(..) | ${name}::Date(..) | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Proxy(..) | ${name}::Url(..) | ${name}::SearchParams(..) | ${name}::Map(..) | ${name}::Set(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)))`; break;
           case "array": test = `matches!(&${value}, ${name}::Array(..))`; break;
           case "error": test = `match &${value} { ${name}::Object(object) => runtime::map_has_by(object, &runtime::string("%error"), |left, right| left.as_ref() == right.as_ref()), _ => false }`; break;
           case "bytes": test = `matches!(&${value}, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..))`; break;

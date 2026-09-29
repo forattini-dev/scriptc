@@ -159,6 +159,21 @@ export function schemaInspectBody(L: Lowerer, t: IrType & { kind: "object" }, in
 
 /** `return yield* Effect.fail(…)` in an Effect.gen body: the yield never resumes (its type is never) — the run ends
  * the fiber; what follows is unreachable, spelled as a throw for the backend's typing. Null for any other return. */
+function isFailingYield(L: Lowerer, node: ts.Expression): boolean {
+  return ts.isYieldExpression(node) && node.asteriskToken !== undefined && L.ctx.generator?.yieldT.kind === "effect" &&
+    (L.typeOf(node).flags & ts.TypeFlags.Never) !== 0;
+}
+
+/** `return c ? yield* Effect.fail(e) : ok` (either arm): the failing arm never resumes, so the return splits into an
+ * if/else of per-arm returns — the value join has no representation for a `never` arm. Null for any other return. */
+export function returnOfConditionalFailingYield(L: Lowerer, node: ts.Expression, lowerReturn: (arm: ts.Expression) => IrStmt, loc: SrcLoc): IrStmt | null {
+  while (ts.isParenthesizedExpression(node)) node = node.expression;
+  if (!ts.isConditionalExpression(node)) return null;
+  const strip = (e: ts.Expression): ts.Expression => { while (ts.isParenthesizedExpression(e)) e = e.expression; return e; };
+  if (!isFailingYield(L, strip(node.whenTrue)) && !isFailingYield(L, strip(node.whenFalse))) return null;
+  return { kind: "if", cond: L.lowerCondition(node.condition), then: [lowerReturn(node.whenTrue)], else_: [lowerReturn(node.whenFalse)], loc };
+}
+
 export function returnOfFailingYield(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrStmt | null {
   if (!ts.isYieldExpression(node) || !node.asteriskToken || L.ctx.generator?.yieldT.kind !== "effect" || (L.typeOf(node).flags & ts.TypeFlags.Never) === 0) return null;
   const value = L.lowerExpr(node);
@@ -177,7 +192,7 @@ function lib(fn: IrLibFn, args: IrExpr[], type: IrType, loc: SrcLoc): IrExpr {
 
 const SCHEMA_PRIMS: Record<string, string | undefined> = {
   String: "string", Number: "number", Boolean: "boolean", Unknown: "unknown", Any: "any", Finite: "finite", Int: "int",
-  Null: "null", Undefined: "undefined", NumberFromString: "numberFromString",
+  Null: "null", Undefined: "undefined", Json: "json", NumberFromString: "numberFromString",
 };
 const SCHEMA_WRAPS: Record<string, string | undefined> = {
   NullOr: "nullOr", UndefinedOr: "undefinedOr", optional: "optional", optionalKey: "optionalKey", mutable: "mutable", mutableKey: "mutableKey",
@@ -222,7 +237,7 @@ function handleArg(L: Lowerer, node: ts.Expression, what: string): IrExpr {
  * and the schema in the hidden slot. Null for any other Object.assign (the caller keeps its own rules). */
 export function lowerObjectAssignSchema(L: Lowerer, call: ts.CallExpression): IrExpr | null {
   const [targetNode, sourceNode] = call.arguments;
-  if (L.dynamic || targetNode === undefined || sourceNode === undefined || call.arguments.length !== 2 || !isSchemaLike(L, targetNode)) return null;
+  if (targetNode === undefined || sourceNode === undefined || call.arguments.length !== 2 || !isSchemaLike(L, targetNode)) return null;
   const type = L.mapTypeOf(L.typeOf(call));
   if (type === null || type.kind !== "record" || !isDecoratedSchema(L.shapes, type)) return null;
   const loc = locOf(call);
@@ -273,12 +288,17 @@ function decoder(L: Lowerer, fn: IrLibFn, schema: IrExpr, schemaNode: ts.Express
   if (type === null || type.kind !== "func") L.badType(expr, L.typeOf(expr));
   const args = [schema];
   if (fn === "schema.decodeOption" || fn === "schema.decodeEffect" || fn === "schema.decodeExit") {
-    // The carrier stamps the decoded type as an empty array literal's element, so the type must be one an array can
-    // hold — a checked-dynamic result (`Schema.Unknown`) has no such carrier yet.
-    if (!isSupportedArrayElem(valueType, L.nativeCollectionArrays)) {
+    // Most decoded types ride an empty-array type carrier. `unknown` has a
+    // native Rust representation but is intentionally not a general portable
+    // array element, so stamp that one explicitly instead of manufacturing an
+    // array type solely for metadata.
+    if (valueType.kind === "dyn") {
+      args.push(strLit("$dyn", loc));
+    } else if (!isSupportedArrayElem(valueType, L.nativeCollectionArrays)) {
       L.unsupported("SC1090", expr, `a schema decoder answering an Option/Effect/Exit of '${L.fmt(valueType)}' (the decoded type has no value carrier yet)`);
+    } else {
+      args.push({ kind: "arrayLit", elems: [], type: arrayOf(valueType), loc });
     }
-    args.push({ kind: "arrayLit", elems: [], type: arrayOf(valueType), loc });
   }
   return lib(fn, args, type, loc);
 }
@@ -286,6 +306,54 @@ function decoder(L: Lowerer, fn: IrLibFn, schema: IrExpr, schemaNode: ts.Express
 /** `Schema.member(...)`: constructors, combinators, filters and decoders. */
 export function lowerSchemaMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const first = args[0];
+  if (member === "isSchema" && first !== undefined && args.length === 1) {
+    const value = L.lowerExpr(first);
+    if (value.type.kind === "effect") {
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: value, loc: value.loc }],
+        result: { kind: "boolLit", value: true, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      };
+    }
+    if (value.type.kind === "union") {
+      const union = L.unions.get(value.type.unionId);
+      const tag = union?.arms.findIndex((arm) => arm.kind === "effect") ?? -1;
+      if (tag >= 0) {
+        return {
+          kind: "unionIsTag",
+          unionId: value.type.unionId,
+          tag,
+          negated: false,
+          value,
+          type: BOOL,
+          loc,
+        };
+      }
+    }
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: value, loc: value.loc }],
+      result: { kind: "boolLit", value: false, type: BOOL, loc },
+      type: BOOL,
+      loc,
+    };
+  }
+  if (member === "toType" && first !== undefined && args.length === 1) {
+    return lib("schema.toType", [handleArg(L, first, "Schema.toType")], EFFECT_T, loc);
+  }
+  if (member === "toJsonSchemaDocument" && first !== undefined && args.length === 1) {
+    // Effect's public result is intentionally broad. Preserve an immediate explicit document-shape assertion as the
+    // site's checked result type so the runtime can validate directly into that shape without an intermediate record
+    // layout whose dictionaries are merely `unknown`.
+    const asserted = expr.parent && ts.isAssertionExpression(expr.parent) && expr.parent.expression === expr
+      ? L.checker.getTypeFromTypeNode(expr.parent.type)
+      : undefined;
+    const type = L.mapTypeOf(asserted ?? L.typeOf(expr));
+    if (type === null) L.badType(expr, L.typeOf(expr));
+    return lib("schema.toJsonSchemaDocument", [handleArg(L, first, "Schema.toJsonSchemaDocument")], type, loc);
+  }
   const prim = SCHEMA_PRIMS[member];
   if (prim !== undefined && args.length === 0) return lib("schema.prim", [strLit(prim, loc)], EFFECT_T, loc);
   if (member === "Defect" && args.length === 0) return lib("schema.prim", [strLit("defect", loc)], EFFECT_T, loc);

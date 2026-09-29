@@ -6,6 +6,7 @@ import { regexCaptureLayout } from "./regex-captures.js";
 import { FS_WRITE_LIB_SIGS } from "./fs-write-signatures.js";
 import { validateModuleInitCaches } from "./validate-module-inits.js";
 import { validRecordDiscriminant } from "./record-discriminant.js";
+import { nativeArrayCheckSupported, nativeTupleCheckSupported } from "./native-record.js";
 import type { IrFamily } from "./ir.js"; import { validateCallFamily, validateFamilyClosure } from "./validate-families.js";
 import { validateEffectUnitArgument } from "./validate-effect-units.js";
 import type {
@@ -119,6 +120,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.hasKey": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.toString": { argTypes: [DYN, STRING, STRING], result: STRING },
   "dyn.defineProps": { argTypes: [DYN, DYN], result: DYN },
+  "dyn.defineSymbolValue": { argTypes: [DYN, SYMBOL_T, DYN], result: DYN },
   "dyn.proxyNew": { argTypes: [DYN, DYN], result: DYN },
   "dyn.typeof": { argTypes: [DYN], result: STRING },
   "dyn.objectTag": { argTypes: [DYN], result: STRING },
@@ -272,6 +274,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "str.encodeUri": { argTypes: [STRING], result: STRING },
   "regexp.escape": { argTypes: [STRING], result: STRING },
   "num.toExponential": { argTypes: [F64], result: STRING },
+  "num.toExponentialDigits": { argTypes: [F64, F64], result: STRING },
   "num.toFixed0": { argTypes: [F64], result: STRING },
   "num.toFixed": { argTypes: [F64, F64], result: STRING },
   "num.toPrecision": { argTypes: [F64, F64], result: STRING },
@@ -822,6 +825,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // `number | null` union / the %Error class) — the libCall case checks
   // the shape; the slot here only pins arity and the child receiver.
   "effect.succeed": { argTypes: [null], result: EFFECT_T }, "effect.sync": { argTypes: [null], result: EFFECT_T }, "effect.map": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.flatMap": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.runSync": { argTypes: [EFFECT_T], result: VOID }, "effect.runSyncExit": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.runPromise": { argTypes: [EFFECT_T], result: VOID }, "effect.gen": { argTypes: [null], result: EFFECT_T }, "effect.fail": { argTypes: [null], result: EFFECT_T }, "effect.die": { argTypes: [null], result: EFFECT_T }, "effect.orDie": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.catchAll": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.mapError": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.promise": { argTypes: [null], result: EFFECT_T }, "effect.tryPromise": { argTypes: [null, null], result: EFFECT_T }, "effect.fn": { argTypes: [null], result: VOID }, "effect.fnPipe": { argTypes: [null, null], result: VOID }, "effect.durationZero": { argTypes: [], result: EFFECT_T }, "effect.durationMillis": { argTypes: [F64], result: EFFECT_T }, "effect.durationToMillis": { argTypes: [EFFECT_T], result: F64 }, "effect.refMake": { argTypes: [null], result: EFFECT_T }, "effect.refMakeUnsafe": { argTypes: [null], result: EFFECT_T }, "effect.syncRefMake": { argTypes: [null], result: EFFECT_T }, "effect.syncRefMakeUnsafe": { argTypes: [null], result: EFFECT_T }, "effect.refGet": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.refSet": { argTypes: [EFFECT_T, null, F64], result: EFFECT_T }, "effect.refUpdate": { argTypes: [EFFECT_T, null, F64], result: EFFECT_T }, "effect.refUpdateEffect": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.deferredMake": { argTypes: [], result: EFFECT_T }, "effect.deferredAwait": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.deferredSettle": { argTypes: [EFFECT_T, null, BOOL], result: EFFECT_T }, "effect.deferredIsDone": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.semaphoreMake": { argTypes: [F64], result: EFFECT_T }, "effect.semaphoreMakeUnsafe": { argTypes: [F64], result: EFFECT_T }, "effect.semaphoreWithPermits": { argTypes: [EFFECT_T, F64, EFFECT_T], result: EFFECT_T }, "effect.queueMake": { argTypes: [F64, F64], result: EFFECT_T }, "effect.queueTake": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.queueOffer": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.queueSize": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.queueShutdown": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.pubsubMake": { argTypes: [F64, F64], result: EFFECT_T }, "effect.pubsubPublish": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.pubsubSubscribe": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.pubsubShutdown": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.tryPromiseUnknown": { argTypes: [null], result: EFFECT_T }, "effect.catchCause": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.tapErrorCause": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.causeFail": { argTypes: [null], result: EFFECT_T }, "effect.causeSquash": { argTypes: [EFFECT_T], result: VOID }, "effect.causeHas": { argTypes: [EFFECT_T, F64], result: BOOL }, "effect.void": { argTypes: [], result: EFFECT_T }, "effect.as": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.asVoid": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.ignore": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.andThenEffect": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T }, "effect.serviceKeyIdentity": { argTypes: [STRING, STRING], result: EFFECT_T }, "effect.serviceKey": { argTypes: [STRING], result: EFFECT_T }, "effect.provide": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T }, "effect.provideService": { argTypes: [EFFECT_T, EFFECT_T, null], result: EFFECT_T }, "layer.empty": { argTypes: [], result: EFFECT_T }, "layer.succeed": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "layer.effect": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T }, "layer.provide": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T }, "layer.provideMerge": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T }, "layer.merge": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T }, "effect.forEach": { argTypes: [null, null, null], result: EFFECT_T }, "effect.all": { argTypes: [null, null], result: EFFECT_T }, "effect.log": { argTypes: [STRING, null], result: EFFECT_T }, "effect.tap": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.tapError": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.suspend": { argTypes: [null], result: EFFECT_T }, "effect.sleep": { argTypes: [null], result: EFFECT_T }, "effect.scoped": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.addFinalizer": { argTypes: [null], result: EFFECT_T }, "effect.ensuring": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T }, "effect.acquireRelease": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.acquireUseRelease": { argTypes: [EFFECT_T, null, null], result: EFFECT_T }, "effect.exit": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.exitSucceed": { argTypes: [null], result: EFFECT_T }, "effect.exitFail": { argTypes: [null], result: EFFECT_T }, "effect.exitIsSuccess": { argTypes: [EFFECT_T], result: BOOL }, "effect.exitIsFailure": { argTypes: [EFFECT_T], result: BOOL }, "effect.dataTag": { argTypes: [EFFECT_T], result: STRING }, "effect.exitValue": { argTypes: [EFFECT_T], result: VOID }, "effect.try": { argTypes: [null, null], result: EFFECT_T }, "effect.orElseSucceed": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.catchIf": { argTypes: [EFFECT_T, null, null], result: EFFECT_T }, "effect.catchTag": { argTypes: [EFFECT_T, STRING, null], result: EFFECT_T }, "layer.effectDiscard": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.dataMessage": { argTypes: [EFFECT_T], result: STRING }, "schema.unknownFromJsonString": { argTypes: [], result: EFFECT_T }, "schema.prim": { argTypes: [STRING], result: EFFECT_T }, "schema.literal": { argTypes: [null], result: EFFECT_T }, "schema.struct": { argTypes: [null], result: EFFECT_T }, "schema.array": { argTypes: [EFFECT_T], result: EFFECT_T }, "schema.record": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T }, "schema.union": { argTypes: [null], result: EFFECT_T }, "schema.tuple": { argTypes: [null], result: EFFECT_T }, "schema.decodeTo": { argTypes: [EFFECT_T, EFFECT_T, null], result: EFFECT_T }, "schema.filterPattern": { argTypes: [STRING, STRING], result: EFFECT_T }, "schema.filterBetween": { argTypes: [F64, F64], result: EFFECT_T }, "schema.wrap": { argTypes: [STRING, EFFECT_T], result: EFFECT_T }, "schema.filter": { argTypes: [STRING, F64, STRING], result: EFFECT_T }, "schema.check": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T }, "schema.decodeSync": { argTypes: [EFFECT_T], result: VOID }, "schema.decodeOption": { argTypes: [EFFECT_T, null], result: VOID }, "schema.decodeEffect": { argTypes: [EFFECT_T, null], result: VOID }, "schema.decodeExit": { argTypes: [EFFECT_T, null], result: VOID }, "schema.is": { argTypes: [EFFECT_T], result: VOID }, "schema.test": { argTypes: [EFFECT_T, DYN], result: BOOL }, "schema.make": { argTypes: [EFFECT_T, DYN], result: VOID }, "schema.encodeSync": { argTypes: [EFFECT_T], result: VOID }, "option.some": { argTypes: [null], result: EFFECT_T }, "option.none": { argTypes: [], result: EFFECT_T }, "option.isSome": { argTypes: [EFFECT_T], result: BOOL }, "option.getOrUndefined": { argTypes: [EFFECT_T], result: VOID }, "option.getOrElse": { argTypes: [EFFECT_T, null], result: VOID }, "option.map": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "option.match": { argTypes: [EFFECT_T, null, null], result: VOID },
+  "schema.toType": { argTypes: [EFFECT_T], result: EFFECT_T },
+  "schema.toJsonSchemaDocument": { argTypes: [EFFECT_T], result: VOID },
+  "schema.jsonFromOpenApi3_0": { argTypes: [DYN], result: VOID },
+  "schema.jsonFromOpenApi3_1": { argTypes: [DYN], result: VOID },
+  "schema.jsonFromDraft07": { argTypes: [DYN], result: VOID },
+  "schema.jsonFromDraft2020_12": { argTypes: [DYN], result: VOID },
   "child.onExit": { argTypes: [CHILD_T, null], result: VOID },
   "child.onClose": { argTypes: [CHILD_T, null], result: VOID },
   "child.onError": { argTypes: [CHILD_T, null], result: VOID },
@@ -1047,12 +1056,15 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.packPushSpreadIter": { argTypes: [DYN, DYN], result: VOID },
   "dyn.assignAll": { argTypes: [DYN, DYN], result: DYN },
   "dyn.objCreateNullProto": { argTypes: [], result: DYN },
+  "dyn.objectPrototype": { argTypes: [], result: DYN },
+  "dyn.getPrototypeOf": { argTypes: [DYN], result: DYN },
   "dyn.objValues": { argTypes: [DYN], result: DYN },
   "dyn.objEntries": { argTypes: [DYN], result: DYN },
   "dyn.structuredClone": { argTypes: [DYN, DYN], result: DYN },
   "dyn.cloneMissing": { argTypes: [], result: DYN },
   "dyn.cloneTransferFail": { argTypes: [], result: DYN },
   "regex.new": { argTypes: [STRING, STRING], result: REGEX },
+  "regex.replaceCallback": { argTypes: [STRING, REGEX, null], result: STRING },
   // node:events EventEmitter: receivers are emitter-hierarchy objects and
   // the chaining forms (on/off/removeAll/setMax) return the receiver's
   // own class — program-dependent object types, checked in the libCall
@@ -1312,6 +1324,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // Arg 0 is a packed f64[] OR a bytes value (the spread-typed-array
   // form) — checked in the libCall case.
   "string.fromCharCode": { argTypes: [null], result: STRING },
+  "string.fromCodePoint": { argTypes: [null], result: STRING },
   "string.lastIndexOf": { argTypes: [STRING, STRING], result: F64 },
   "string.lastIndexOfFrom": { argTypes: [STRING, STRING, F64], result: F64 },
   "string.raw": { argTypes: [arrayOf(STRING), arrayOf(STRING)], result: STRING },
@@ -3955,17 +3968,20 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "string.fromCharCode") {
-          // One packed f64[] or one bytes value (the spread form).
+        if (e.fn === "string.fromCharCode" || e.fn === "string.fromCodePoint") {
+          // One packed f64[]; fromCharCode additionally accepts bytes.
           const t = e.args[0]?.type;
           const ok =
-            t && ((t.kind === "array" && t.elem.kind === "f64") || t.kind === "bytes");
+            t && ((t.kind === "array" && t.elem.kind === "f64") ||
+              (e.fn === "string.fromCharCode" && t.kind === "bytes"));
           if (!ok) {
-            err(`libCall string.fromCharCode arg 0: expected number[] or bytes, got ${t?.kind}`, e.loc);
+            err(`libCall ${e.fn} arg 0: expected number[]${e.fn === "string.fromCharCode" ? " or bytes" : ""}, got ${t?.kind}`, e.loc);
           }
           break;
         }
-        if (e.fn === "effect.contextGet" || e.fn === "effect.sqlExtra" ||e.fn === "effect.runSync" || e.fn === "effect.runPromise" || e.fn === "effect.fn" || e.fn === "effect.fnPipe" || e.fn === "effect.exitValue" || e.fn === "effect.causeSquash" || e.fn === "option.getOrUndefined" || e.fn === "option.getOrElse" || e.fn === "option.match" || e.fn.startsWith("schema.decode") || e.fn === "schema.is" || e.fn === "schema.encodeSync" || e.fn === "schema.make") { // site-typed: the success channel (runSync/runPromise), the function value (fn)
+        if (e.fn === "schema.toJsonSchemaDocument") break; // site-typed JSON Schema document
+        if (e.fn.startsWith("schema.jsonFrom")) break; // site-typed JSON Schema document (dyn in, checked record out)
+        if (e.fn === "effect.contextGet" || e.fn === "effect.sqlExtra" || e.fn === "effect.httpResponseHeader" || e.fn === "effect.runSync" || e.fn === "effect.runPromise" || e.fn === "effect.fn" || e.fn === "effect.fnPipe" || e.fn === "effect.exitValue" || e.fn === "effect.causeSquash" || e.fn === "option.getOrUndefined" || e.fn === "option.getOrElse" || e.fn === "option.match" || e.fn.startsWith("schema.decode") || e.fn === "schema.is" || e.fn === "schema.encodeSync" || e.fn === "schema.make") { // site-typed: the success channel (runSync/runPromise), the function value (fn)
           if (e.fn === "effect.runPromise" && e.type.kind !== "promise") err("libCall effect.runPromise must be promise-typed", e.loc);
           if (e.fn === "effect.fn" && e.type.kind !== "func") err("libCall effect.fn must be function-typed", e.loc); break; }
         if (e.fn === "process.envGet") {
@@ -3979,6 +3995,16 @@ function validateFunction(
           if (!ok) {
             err(`libCall process.envGet must return the 'string | undefined' union`, e.loc);
           }
+          break;
+        }
+        if (e.fn === "url.parse" || e.fn === "url.parseBase") {
+          const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
+          const ok =
+            def &&
+            def.arms.length === 2 &&
+            def.arms.some((arm) => arm.kind === "url") &&
+            def.arms.some((arm) => arm.kind === "nullT");
+          if (!ok) err(`libCall ${e.fn} must return the 'URL | null' union`, e.loc);
           break;
         }
         if (e.fn === "process.columns" || e.fn === "process.rows") {
@@ -5078,6 +5104,11 @@ function validateFunction(
       }
       case "jsonStringify": {
         checkExpr(e.value);
+        const runtimeIndent = (e as typeof e & { runtimeIndent?: IrExpr }).runtimeIndent;
+        if (runtimeIndent !== undefined) {
+          checkExpr(runtimeIndent);
+          expectType(runtimeIndent, DYN, "jsonStringify runtime indent");
+        }
         if (e.type.kind !== "string") {
           err(`jsonStringify must be string, got ${e.type.kind}`, e.loc);
         }
@@ -5121,9 +5152,21 @@ function validateFunction(
         // marker object caughtToDyn builds) as a fresh runtime error.
         const errorOk = e.type.kind === "object" && e.type.className === "%Error";
         const classOk = isDynTypedRefType(e.type);
-        // Rust's checked-dynamic value retains these native object brands
-        // and dynCheck validates the tag before restoring the handle.
-        const brandedOk = e.type.kind === "regex" || e.type.kind === "url";
+        // Rust's checked-dynamic value retains native scalar/object brands
+        // and collection handles; dynCheck validates the tag before
+        // restoring the value. Dynamic Maps/Sets use their canonical slot
+        // types because a differently typed native collection cannot cross
+        // this boundary without an element-wise validation pass.
+        const nativeScalarOk =
+          e.type.kind === "effect" || e.type.kind === "date" ||
+          e.type.kind === "bigint" || e.type.kind === "symbol";
+        const brandedOk = e.type.kind === "regex" || e.type.kind === "url" || e.type.kind === "searchParams";
+        const collectionOk =
+          (e.type.kind === "map" && e.type.key.kind === "dyn" && e.type.value.kind === "dyn") ||
+          (e.type.kind === "set" && e.type.elem.kind === "dyn");
+        const nativeContainerOk =
+          nativeArrayCheckSupported(e.type, (id) => records.get(id)) ||
+          nativeTupleCheckSupported(e.type, (id) => records.get(id));
         // ADAPTABLE function targets unwrap or wrap the checked-dynamic tree's function
         // kind (the checked-dynamic function boundary, ir.ts).
         const funcOk =
@@ -5132,7 +5175,7 @@ function validateFunction(
         // Runtime HANDLE targets unwrap the checked-dynamic tree's handle kind by tag (a
         // retained reference, no copy — DYN_HANDLE_KINDS).
         const handleOk = DYN_HANDLE_KINDS.has(e.type.kind);
-        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !classOk && !brandedOk && !funcOk && !handleOk) {
+        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !classOk && !nativeScalarOk && !brandedOk && !collectionOk && !nativeContainerOk && !funcOk && !handleOk) {
           err(`dynCheck against non-JSON-representable type ${e.type.kind}`, e.loc);
         }
         break;

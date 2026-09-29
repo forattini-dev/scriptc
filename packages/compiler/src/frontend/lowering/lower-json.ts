@@ -88,7 +88,8 @@ function lowerOptionalStringifyRoot(L: Lowerer, value: IrExpr, indent: string, l
       const replacerNode = call.arguments[1];
       const replacer = replacerNode && L.checker.getCallSignatures(L.checker.getTypeAtLocation(replacerNode)).length > 0
         ? L.lowerExpr(replacerNode) : null;
-      const indent = stringifySpaceIndent(L, call, replacer !== null);
+      const runtimeIndent = replacer === null ? runtimeStringifySpace(L, call) : null;
+      const indent = runtimeIndent === null ? stringifySpaceIndent(L, call, replacer !== null) : "";
       const argNode = call.arguments[0]!;
       const value = nativeImportHandleType(L, argNode)?.kind === "jsval"
         ? L.coerceToExpected(L.lowerExpr(argNode), DYN) : L.lowerExpr(argNode);
@@ -157,6 +158,9 @@ function lowerOptionalStringifyRoot(L: Lowerer, value: IrExpr, indent: string, l
         );
       }
       const node: IrExpr = { kind: "jsonStringify", value, type: STRING, loc };
+      if (runtimeIndent !== null) {
+        (node as IrExpr & { runtimeIndent?: IrExpr }).runtimeIndent = runtimeIndent;
+      }
       if (indent !== "") {
         // The compile-time-resolved indent rides as an extra property (the
         // node shape in ir/nodes.ts is unchanged); the backend re-indents
@@ -167,6 +171,33 @@ function lowerOptionalStringifyRoot(L: Lowerer, value: IrExpr, indent: string, l
     }
     return null; // unknown members are tsc errors before lowering
   }
+
+function runtimeStringifySpace(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  if (!L.nativeCollectionArrays || call.arguments.length < 3) return null;
+  const replacer = call.arguments[1]!;
+  if (
+    replacer.kind !== ts.SyntaxKind.NullKeyword &&
+    !(ts.isIdentifier(replacer) && replacer.text === "undefined")
+  ) return null;
+  const spaceNode = call.arguments[2]!;
+  if (
+    ts.isNumericLiteral(spaceNode) ||
+    ts.isStringLiteral(spaceNode) ||
+    ts.isNoSubstitutionTemplateLiteral(spaceNode) ||
+    spaceNode.kind === ts.SyntaxKind.NullKeyword ||
+    (ts.isIdentifier(spaceNode) && spaceNode.text === "undefined")
+  ) return null;
+  const space = L.lowerExpr(spaceNode);
+  const valid = (type: typeof space.type): boolean =>
+    type.kind === "f64" || type.kind === "string" || type.kind === "undefinedT";
+  if (space.type.kind === "union") {
+    const def = L.unions.get(space.type.unionId);
+    if (!def || !def.arms.every(valid)) return null;
+  } else if (!valid(space.type)) {
+    return null;
+  }
+  return L.coerceToExpected(space, DYN);
+}
 
 /** The compile-time indent of a `JSON.stringify(v[, replacer[, space]])`
    * call, with Node's space rules applied: a number clamps to 0–10 spaces

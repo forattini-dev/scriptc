@@ -21,8 +21,11 @@ import { lowerUnionRecordSpreadAppend } from "./lower-object-spread.js";
  * literal decides by VALUE (the discriminant), everything else by the
  * widened IR pair under the width-lift relation. Exactly ONE fitting arm
  * answers it; zero or several answer null and the caller keeps its
- * fences. Plain property-assignment/shorthand literals only — spreads,
- * accessors, methods, and unfoldable computed keys keep their own paths. */
+ * fences. Property assignments and shorthands select the arm. Spreads do
+ * not select it themselves, but explicit fields around them still can;
+ * the absent-completion check prevents a required field from being assumed
+ * to come from an opaque spread. Accessors, methods, and unfoldable computed
+ * keys keep their own paths. */
 function literalUnionArmOf(
   lowerer: Lowerer,
   expr: ts.ObjectLiteralExpression,
@@ -36,7 +39,7 @@ function literalUnionArmOf(
       props.push({ name: propNameText(lowerer, p.name), node: p.initializer });
     } else if (ts.isShorthandPropertyAssignment(p) && ts.isIdentifier(p.name)) {
       props.push({ name: p.name.text, node: p.name });
-    } else {
+    } else if (!ts.isSpreadAssignment(p)) {
       return null;
     }
   }

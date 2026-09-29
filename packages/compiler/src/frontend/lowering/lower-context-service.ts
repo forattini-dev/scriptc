@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
  * spelling of a user's method or the broad opaque Effect representation. */
 export function lowerContextServiceUse(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr | null {
   const callee = expr.expression;
-  if (L.dynamic || expr.questionDotToken || !ts.isPropertyAccessExpression(callee) ||
+  if (expr.questionDotToken || !ts.isPropertyAccessExpression(callee) ||
       callee.questionDotToken || !ts.isIdentifier(callee.name) || callee.name.text !== "use") return null;
   const symbol = L.checker.getSymbolAtLocation(callee.name);
   if (!symbol || !L.checker.declarationsOf(symbol).some(decl =>

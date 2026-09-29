@@ -1,5 +1,5 @@
 import * as ts from "../ts7/adapter.js";
-import { BOOL, STRING, URL_T, VOID, type IrExpr } from "../../ir/ir.js";
+import { BOOL, NULL_T, STRING, URL_T, VOID, type IrExpr, type IrType } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import { nodeThrowExpr, type Lowerer } from "./lowerer.js";
 
@@ -43,6 +43,26 @@ export function lowerUrlStaticCall(lowerer: Lowerer, call: ts.CallExpression, ca
   const sym = lowerer.resolveValueSymbol(callee.expression);
   if (!sym || sym.name !== "URL" || !lowerer.isStdlibSymbol(sym)) return null;
   const member = callee.name.text;
+  if (member === "parse") {
+    if (call.arguments.length < 1 || call.arguments.length > 2) {
+      lowerer.noLowering(
+        `URL.parse with ${call.arguments.length} argument${call.arguments.length === 1 ? "" : "s"}`,
+        call,
+        "a string input and an optional string or URL base are the supported forms",
+        sym,
+      );
+    }
+    const input = lowerer.lowerExprExpecting(call.arguments[0]!, STRING);
+    const type: IrType = { kind: "union", unionId: lowerer.unions.intern([URL_T, NULL_T]) };
+    if (call.arguments.length === 2) {
+      const baseNode = call.arguments[1]!;
+      const base: IrExpr = lowerer.mapTypeOf(lowerer.typeOf(baseNode))?.kind === "url"
+        ? { kind: "libCall", fn: "url.href", args: [lowerer.lowerExpr(baseNode)], type: STRING, loc: locOf(baseNode) }
+        : lowerer.lowerExprExpecting(baseNode, STRING);
+      return { kind: "libCall", fn: "url.parseBase", args: [input, base], type, loc: locOf(call) };
+    }
+    return { kind: "libCall", fn: "url.parse", args: [input], type, loc: locOf(call) };
+  }
   if (member === "canParse") {
     if (call.arguments.length < 1 || call.arguments.length > 2) {
       lowerer.noLowering(

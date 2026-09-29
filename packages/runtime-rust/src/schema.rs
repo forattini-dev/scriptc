@@ -18,6 +18,7 @@ pub enum SchemaPrim {
     Unknown,
     Any,
     Defect,
+    Json,
     Null,
     Undefined,
     Finite,
@@ -102,7 +103,11 @@ fn json_node_to_value<T: ParseArgsValue>(node: &JsonNode) -> T {
 }
 
 fn schema_handle(node: SchemaNode) -> JsEffect {
-    effect_new(EffectNode::Data(KernelData::Schema(Rc::new(node))))
+    schema_handle_rc(Rc::new(node))
+}
+
+fn schema_handle_rc(node: Rc<SchemaNode>) -> JsEffect {
+    effect_new(EffectNode::Data(KernelData::Schema(node)))
 }
 
 pub fn schema_node_of(handle: &JsEffect) -> Rc<SchemaNode> {
@@ -110,6 +115,243 @@ pub fn schema_node_of(handle: &JsEffect) -> Rc<SchemaNode> {
         EffectNode::Data(KernelData::Schema(node)) => node.clone(),
         _ => throw_error("scriptc: a schema handle was expected".to_owned()),
     })
+}
+
+/// Effect's `Schema.toType`: strip each encoding and retain its decoded target while preserving the surrounding
+/// schema structure and checks. The descriptor remains immutable; a fresh handle owns the transformed graph.
+fn schema_to_type_node(node: &Rc<SchemaNode>) -> Rc<SchemaNode> {
+    Rc::new(match &**node {
+        SchemaNode::Prim(SchemaPrim::NumberFromString) => SchemaNode::Prim(SchemaPrim::Number),
+        SchemaNode::Prim(prim) => SchemaNode::Prim(*prim),
+        SchemaNode::Literal(values) => SchemaNode::Literal(values.clone()),
+        SchemaNode::Struct(fields) => SchemaNode::Struct(fields.iter().map(|field| SchemaField {
+            name: field.name.clone(),
+            node: schema_to_type_node(&field.node),
+        }).collect()),
+        SchemaNode::Array(item) => SchemaNode::Array(schema_to_type_node(item)),
+        SchemaNode::Record(key, value) => SchemaNode::Record(schema_to_type_node(key), schema_to_type_node(value)),
+        SchemaNode::Union(members) => SchemaNode::Union(members.iter().map(schema_to_type_node).collect()),
+        SchemaNode::NullOr(inner) => SchemaNode::NullOr(schema_to_type_node(inner)),
+        SchemaNode::UndefinedOr(inner) => SchemaNode::UndefinedOr(schema_to_type_node(inner)),
+        SchemaNode::OptionalKey(inner) => SchemaNode::OptionalKey(schema_to_type_node(inner)),
+        SchemaNode::Check(inner, filter) => SchemaNode::Check(schema_to_type_node(inner), filter.clone()),
+        SchemaNode::Filter(filter) => SchemaNode::Filter(filter.clone()),
+        SchemaNode::Named(name, inner) => SchemaNode::Named(name.clone(), schema_to_type_node(inner)),
+        SchemaNode::Tag(literal) => SchemaNode::Tag(literal.clone()),
+        SchemaNode::FromJsonString(inner) => return schema_to_type_node(inner),
+        SchemaNode::Tuple(elements) => SchemaNode::Tuple(elements.iter().map(schema_to_type_node).collect()),
+        SchemaNode::DecodeTo(_, target, _) => return schema_to_type_node(target),
+    })
+}
+
+pub fn schema_to_type(schema: &JsEffect) -> JsEffect {
+    schema_handle_rc(schema_to_type_node(&schema_node_of(schema)))
+}
+
+fn schema_json_object<T: ParseArgsValue>() -> T {
+    T::parse_args_object_value()
+}
+
+fn schema_json_array<T: ParseArgsValue>(values: impl IntoIterator<Item = T>) -> T {
+    let array = T::parse_args_array_value();
+    for value in values {
+        array.parse_args_array_push(value);
+    }
+    array
+}
+
+fn schema_json_set<T: ParseArgsValue>(object: &T, key: &str, value: T) {
+    object.parse_args_object_set(string(key), value);
+}
+
+fn schema_json_string<T: ParseArgsValue>(value: &str) -> T {
+    T::parse_args_string_value(string(value))
+}
+
+fn schema_json_typed<T: ParseArgsValue>(kind: &str) -> T {
+    let out = schema_json_object();
+    schema_json_set(&out, "type", schema_json_string(kind));
+    out
+}
+
+fn schema_json_literal<T: ParseArgsValue>(literal: &SchemaLiteral) -> T {
+    match literal {
+        SchemaLiteral::Str(value) => T::parse_args_string_value(value.clone()),
+        SchemaLiteral::Num(value) => T::parse_args_number_value(*value),
+        SchemaLiteral::Bool(value) => T::parse_args_bool_value(*value),
+    }
+}
+
+fn schema_json_literal_schema<T: ParseArgsValue>(literal: &SchemaLiteral) -> T {
+    let kind = match literal {
+        SchemaLiteral::Str(_) => "string",
+        SchemaLiteral::Num(_) => "number",
+        SchemaLiteral::Bool(_) => "boolean",
+    };
+    let out = schema_json_typed(kind);
+    schema_json_set(&out, "enum", schema_json_array([schema_json_literal(literal)]));
+    out
+}
+
+fn schema_pattern_escape(text: &str) -> String {
+    let mut out = String::new();
+    for ch in text.chars() {
+        if matches!(ch, '\\' | '^' | '$' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn schema_json_constraint<T: ParseArgsValue>(filter: &SchemaFilter) -> T {
+    let out = schema_json_object();
+    match filter {
+        SchemaFilter::StartsWith(text) => schema_json_set(&out, "pattern", schema_json_string(&format!("^{}", schema_pattern_escape(text)))),
+        SchemaFilter::EndsWith(text) => schema_json_set(&out, "pattern", schema_json_string(&format!("{}$", schema_pattern_escape(text)))),
+        SchemaFilter::Includes(text) => schema_json_set(&out, "pattern", schema_json_string(&schema_pattern_escape(text))),
+        SchemaFilter::Gte(value) => schema_json_set(&out, "minimum", T::parse_args_number_value(*value)),
+        SchemaFilter::Lte(value) => schema_json_set(&out, "maximum", T::parse_args_number_value(*value)),
+        SchemaFilter::Gt(value) => schema_json_set(&out, "exclusiveMinimum", T::parse_args_number_value(*value)),
+        SchemaFilter::Lt(value) => schema_json_set(&out, "exclusiveMaximum", T::parse_args_number_value(*value)),
+        SchemaFilter::MinLength(value) => schema_json_set(&out, "minLength", T::parse_args_number_value(*value)),
+        SchemaFilter::MaxLength(value) => schema_json_set(&out, "maxLength", T::parse_args_number_value(*value)),
+        SchemaFilter::Pattern(source, _) => schema_json_set(&out, "pattern", T::parse_args_string_value(source.clone())),
+        SchemaFilter::Between(minimum, maximum) => {
+            schema_json_set(&out, "minimum", T::parse_args_number_value(*minimum));
+            schema_json_set(&out, "maximum", T::parse_args_number_value(*maximum));
+        }
+        SchemaFilter::Int | SchemaFilter::Finite => {}
+    }
+    out
+}
+
+fn schema_json_merge<T: ParseArgsValue>(target: &T, source: &T) {
+    if let Some(entries) = source.parse_args_object_entries() {
+        for (key, value) in entries {
+            target.parse_args_object_set(key, value);
+        }
+    }
+}
+
+/// The draft-2020-12 representation of the native schema subset. Values are built through `ParseArgsValue`, so the
+/// result is the generated program's own dynamic enum and never crosses an untyped or foreign heap boundary.
+fn schema_to_json<T: ParseArgsValue>(node: &SchemaNode) -> T {
+    match node {
+        SchemaNode::Prim(prim) => match prim {
+            SchemaPrim::String | SchemaPrim::NumberFromString => schema_json_typed("string"),
+            SchemaPrim::Boolean => schema_json_typed("boolean"),
+            SchemaPrim::Null | SchemaPrim::Undefined => schema_json_typed("null"),
+            SchemaPrim::Finite => schema_json_typed("number"),
+            SchemaPrim::Int => schema_json_typed("integer"),
+            SchemaPrim::Unknown | SchemaPrim::Any | SchemaPrim::Defect | SchemaPrim::Json => schema_json_object(),
+            SchemaPrim::Number => {
+                let number = schema_json_typed("number");
+                let sentinels = ["NaN", "Infinity", "-Infinity"].into_iter().map(|value| {
+                    let branch = schema_json_typed("string");
+                    schema_json_set(&branch, "enum", schema_json_array([schema_json_string(value)]));
+                    branch
+                });
+                let out = schema_json_object();
+                schema_json_set(&out, "anyOf", schema_json_array(std::iter::once(number).chain(sentinels)));
+                out
+            }
+        },
+        SchemaNode::Literal(values) => {
+            let same_kind = values.first().map(std::mem::discriminant);
+            if !values.is_empty() && values.iter().all(|value| Some(std::mem::discriminant(value)) == same_kind) {
+                let out = schema_json_literal_schema(&values[0]);
+                schema_json_set(&out, "enum", schema_json_array(values.iter().map(schema_json_literal)));
+                out
+            } else {
+                let out = schema_json_object();
+                schema_json_set(&out, "anyOf", schema_json_array(values.iter().map(schema_json_literal_schema)));
+                out
+            }
+        }
+        SchemaNode::Struct(fields) if fields.is_empty() => {
+            let out = schema_json_object();
+            schema_json_set(&out, "anyOf", schema_json_array([schema_json_typed("object"), schema_json_typed("array")]));
+            out
+        }
+        SchemaNode::Struct(fields) => {
+            let out = schema_json_typed("object");
+            let properties: T = schema_json_object();
+            let required: T = T::parse_args_array_value();
+            for field in fields {
+                let (field_schema, optional) = match &*field.node {
+                    SchemaNode::OptionalKey(inner) => (schema_to_json(&**inner), true),
+                    _ => (schema_to_json(&*field.node), false),
+                };
+                properties.parse_args_object_set(field.name.clone(), field_schema);
+                if !optional {
+                    required.parse_args_array_push(T::parse_args_string_value(field.name.clone()));
+                }
+            }
+            schema_json_set(&out, "properties", properties);
+            if required.parse_args_array_len().unwrap_or(0) > 0 {
+                schema_json_set(&out, "required", required);
+            }
+            schema_json_set(&out, "additionalProperties", T::parse_args_bool_value(false));
+            out
+        }
+        SchemaNode::Array(item) => {
+            let out = schema_json_typed("array");
+            schema_json_set(&out, "items", schema_to_json(&**item));
+            out
+        }
+        SchemaNode::Record(_, value) => {
+            let out = schema_json_typed("object");
+            let additional: T = schema_to_json(&**value);
+            if additional.parse_args_object_entries().is_some_and(|entries| !entries.is_empty()) {
+                schema_json_set(&out, "additionalProperties", additional);
+            }
+            out
+        }
+        SchemaNode::Union(members) => {
+            let out = schema_json_object();
+            if members.is_empty() {
+                schema_json_set(&out, "not", schema_json_object());
+            } else {
+                schema_json_set(&out, "anyOf", schema_json_array(members.iter().map(|member| schema_to_json(&**member))));
+            }
+            out
+        }
+        SchemaNode::NullOr(inner) | SchemaNode::UndefinedOr(inner) => {
+            let out = schema_json_object();
+            schema_json_set(&out, "anyOf", schema_json_array([schema_to_json(&**inner), schema_json_typed("null")]));
+            out
+        }
+        SchemaNode::OptionalKey(inner) | SchemaNode::Named(_, inner) => schema_to_json(&**inner),
+        SchemaNode::Check(inner, filter) => {
+            let out = schema_to_json(&**inner);
+            schema_json_merge(&out, &schema_json_constraint(filter));
+            out
+        }
+        SchemaNode::Filter(filter) => schema_json_constraint(filter),
+        SchemaNode::Tag(literal) => schema_json_literal_schema(literal),
+        SchemaNode::FromJsonString(_) => schema_json_typed("string"),
+        SchemaNode::Tuple(elements) => {
+            let out = schema_json_typed("array");
+            if elements.is_empty() {
+                schema_json_set(&out, "items", T::parse_args_bool_value(false));
+            } else {
+                schema_json_set(&out, "prefixItems", schema_json_array(elements.iter().map(|element| schema_to_json(&**element))));
+                schema_json_set(&out, "minItems", T::parse_args_number_value(elements.len() as f64));
+                schema_json_set(&out, "maxItems", T::parse_args_number_value(elements.len() as f64));
+            }
+            out
+        }
+        SchemaNode::DecodeTo(source, _, _) => schema_to_json(&**source),
+    }
+}
+
+pub fn schema_to_json_document<T: ParseArgsValue>(schema: &JsEffect) -> T {
+    let document = schema_json_object();
+    schema_json_set(&document, "dialect", schema_json_string("draft-2020-12"));
+    schema_json_set(&document, "schema", schema_to_json(&*schema_node_of(schema)));
+    schema_json_set(&document, "definitions", schema_json_object());
+    document
 }
 
 pub fn schema_prim(kind: &JsString) -> JsEffect {
@@ -120,6 +362,7 @@ pub fn schema_prim(kind: &JsString) -> JsEffect {
         "unknown" => SchemaPrim::Unknown,
         "any" => SchemaPrim::Any,
         "defect" => SchemaPrim::Defect,
+        "json" => SchemaPrim::Json,
         "null" => SchemaPrim::Null,
         "undefined" => SchemaPrim::Undefined,
         "finite" => SchemaPrim::Finite,
@@ -300,6 +543,7 @@ fn expected_of(node: &SchemaNode) -> String {
             SchemaPrim::Number | SchemaPrim::Finite | SchemaPrim::Int => "number",
             SchemaPrim::Boolean => "boolean",
             SchemaPrim::Unknown | SchemaPrim::Any | SchemaPrim::Defect => "unknown",
+            SchemaPrim::Json => "Json",
             SchemaPrim::Null => "null",
             SchemaPrim::Undefined => "undefined",
             SchemaPrim::NumberFromString => "string",
@@ -386,11 +630,39 @@ impl Decoder<'_> {
         if self.path.is_empty() { message } else { format!("{message}\n  at {}", render_path(&self.path)) }
     }
 
+    fn decode_json_value<T: ParseArgsValue + JsonValue>(&mut self, input: &T) -> Result<T, String> {
+        match input.parse_args_kind() {
+            ParseArgsKind::Null | ParseArgsKind::Number | ParseArgsKind::Boolean | ParseArgsKind::String => Ok(input.clone()),
+            ParseArgsKind::Array => {
+                let length = input.parse_args_array_len().unwrap_or(0);
+                for index in 0..length {
+                    self.path.push(PathSeg::Index(index));
+                    let item = input.parse_args_array_get(index).unwrap_or_else(T::parse_args_undefined);
+                    let result = self.decode_json_value(&item);
+                    self.path.pop();
+                    result?;
+                }
+                Ok(input.clone())
+            }
+            ParseArgsKind::Object => {
+                for (name, value) in input.parse_args_object_entries().unwrap_or_default() {
+                    self.path.push(PathSeg::Key(name.clone()));
+                    let result = self.decode_json_value(&value);
+                    self.path.pop();
+                    result?;
+                }
+                Ok(input.clone())
+            }
+            ParseArgsKind::Undefined | ParseArgsKind::Other => Err(self.issue("Json", input)),
+        }
+    }
+
     fn decode<T: ParseArgsValue + JsonValue>(&mut self, node: &SchemaNode, input: &T) -> Result<T, String> {
         let kind = input.parse_args_kind();
         match node {
             SchemaNode::Prim(prim) => match prim {
                 SchemaPrim::Unknown | SchemaPrim::Any | SchemaPrim::Defect => Ok(input.clone()),
+                SchemaPrim::Json => self.decode_json_value(input),
                 SchemaPrim::String if kind == ParseArgsKind::String => Ok(input.clone()),
                 SchemaPrim::Number if kind == ParseArgsKind::Number => Ok(input.clone()),
                 SchemaPrim::Boolean if kind == ParseArgsKind::Boolean => Ok(input.clone()),

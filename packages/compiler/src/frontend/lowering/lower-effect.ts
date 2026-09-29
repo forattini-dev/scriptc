@@ -1,4 +1,4 @@
-/* The effect kernel's lowering (static builds): `import { Effect } from
+/* The effect kernel's lowering: `import { Effect } from
  * "effect"` binds the package's namespace, and calls on it lower to the
  * native kernel (`effect.*` lib calls over runtime/effect.rs) instead of
  * embedding the package. Membership is by PROVENANCE — the binding's alias
@@ -20,7 +20,7 @@ import { familyToFuncAdapter } from "./lower-function-adapters.js";
 
 /** A named export of the effect package (`import { pipe } from "effect"`): the module it is declared in, by provenance. */
 function effectExportOf(L: Lowerer, node: ts.Expression): { module: string; name: string } | null {
-  if (L.dynamic || !ts.isIdentifier(node)) return null;
+  if (!ts.isIdentifier(node)) return null;
   let symbol = L.checker.getSymbolAtLocation(node);
   if (symbol === undefined) return null;
   if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = L.checker.getAliasedSymbol(symbol);
@@ -32,10 +32,34 @@ function effectExportOf(L: Lowerer, node: ts.Expression): { module: string; name
   return null;
 }
 
+const JSON_SCHEMA_CONVERSIONS: Record<string, IrLibFn | undefined> = {
+  fromSchemaOpenApi3_0: "schema.jsonFromOpenApi3_0",
+  fromSchemaOpenApi3_1: "schema.jsonFromOpenApi3_1",
+  fromSchemaDraft07: "schema.jsonFromDraft07",
+  fromSchemaDraft2020_12: "schema.jsonFromDraft2020_12",
+};
+
+/** `JsonSchema.fromSchemaOpenApi3_0(raw)` and its three siblings (also through a named import): the kernel converts the
+ * program's dynamic JSON Schema value (runtime/json_schema.rs, a port of effect's own conversion) and the document is
+ * validated into the site's checker-typed `Document<"draft-2020-12">`. Null for members the kernel does not cover. */
+function lowerJsonSchemaMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.CallExpression, loc: SrcLoc): IrExpr | null {
+  const fn = JSON_SCHEMA_CONVERSIONS[member];
+  if (fn === undefined || args.length !== 1 || ts.isSpreadElement(args[0]!)) return null;
+  // Effect's public result type spells the schema as an index-signature record; an immediate explicit assertion
+  // (`fromSchemaOpenApi3_0(raw) as { schema: MySchema; … }`) becomes the site's checked result type, so the runtime
+  // validates straight into the caller's own shape (the Schema.toJsonSchemaDocument precedent).
+  const asserted = ts.isAssertionExpression(expr.parent) && expr.parent.expression === expr
+    ? L.checker.getTypeFromTypeNode(expr.parent.type)
+    : undefined;
+  const type = L.mapTypeOf(asserted ?? L.typeOf(expr));
+  if (type === null) L.badType(expr, asserted ?? L.typeOf(expr));
+  return lib(fn, [L.lowerExprExpecting(args[0]!, DYN)], type, loc);
+}
+
 /** The effect namespace an expression names (`Effect`, `Layer`, …), or
  * null: only identifiers whose alias chain ends at effect/dist/<Ns>.d.ts. */
 export function effectNamespaceOf(L: Lowerer, node: ts.Expression): string | null {
-  if (L.dynamic || !ts.isIdentifier(node)) return null;
+  if (!ts.isIdentifier(node)) return null;
   let symbol = L.checker.getSymbolAtLocation(node);
   if (symbol === undefined) return null;
   if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = L.checker.getAliasedSymbol(symbol);
@@ -51,10 +75,22 @@ function lib(fn: IrLibFn, args: IrExpr[], type: IrType, loc: SrcLoc): IrExpr {
   return { kind: "libCall", fn, args, type, loc };
 }
 
+/** The Effect module that declares a structural member. Looking at the member symbol, rather than the receiver's
+ * display name, keeps ordinary user objects with names such as `execute`, `status`, and `headers` out of the kernel. */
+function effectMemberModule(L: Lowerer, node: ts.Node): string | null {
+  let symbol = L.checker.getSymbolAtLocation(node);
+  if (symbol === undefined) return null;
+  if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = L.checker.getAliasedSymbol(symbol);
+  for (const declaration of L.checker.declarationsOf(symbol)) {
+    const module = effectModuleOfFile(declaration.getSourceFile().fileName);
+    if (module !== null) return module;
+  }
+  return null;
+}
+
 /** A reference to a kernel SERVICE KEY class (`Service`, `Config.Service` through a program namespace, an import alias):
  * the key value — an effect that looks the service up. Null for anything else. */
 export function lowerServiceKeyRef(L: Lowerer, node: ts.Identifier | ts.PropertyAccessExpression): IrExpr | null {
-  if (L.dynamic) return null;
   const loc = locOf(node);
   const sqlKey = lowerSqlServiceKey(L, node);
   if (sqlKey !== null) return sqlKey;
@@ -83,6 +119,23 @@ export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
   if (ns === "Schema") return lowerSchemaProperty(L, expr, loc);
   if (ns === "Duration" && expr.name.text === "zero") return lib("effect.durationZero", [], EFFECT_T, loc);
   if (ns === "Scope" && expr.name.text === "Scope") return lib("effect.scopeKey", [], EFFECT_T, loc);
+  if (ns === "http/HttpClient" && expr.name.text === "HttpClient") {
+    return lib("effect.serviceKeyIdentity", [
+      { kind: "strLit", value: "effect/HttpClient", type: STRING, loc },
+      { kind: "strLit", value: "effect/unstable/http:HttpClient", type: STRING, loc },
+    ], EFFECT_T, loc);
+  }
+  if (ns === "http/FetchHttpClient" && expr.name.text === "layer") return lib("effect.httpClientLayer", [], EFFECT_T, loc);
+  const memberModule = effectMemberModule(L, expr.name);
+  if (!expr.questionDotToken && memberModule === "http/HttpClientResponse" && expr.name.text === "status") {
+    return lib("effect.httpResponseStatus", [L.lowerExpr(expr.expression)], { kind: "f64" }, loc);
+  }
+  if (!expr.questionDotToken && memberModule === "http/HttpIncomingMessage" && expr.name.text === "stream") {
+    return lib("effect.httpResponseStream", [L.lowerExpr(expr.expression)], EFFECT_T, loc);
+  }
+  if (!expr.questionDotToken && memberModule === "http/HttpClientError" && expr.name.text === "reason") {
+    return lib("effect.httpClientErrorReason", [L.lowerExpr(expr.expression)], EFFECT_T, loc);
+  }
   const sqlValue = lowerSqlNamespaceProperty(ns, expr.name.text, loc);
   if (sqlValue !== null) return sqlValue;
   // Kernel DATA handles (an Exit): `_tag` and the success `value` read through the kernel, typed by the checker.
@@ -276,9 +329,29 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   const serviceUse = lowerContextServiceUse(L, expr, loc);
   if (serviceUse !== null) return serviceUse;
   const callee = expr.expression;
+  if (ts.isPropertyAccessExpression(callee) && !callee.questionDotToken && callee.name.text === "execute" &&
+      effectMemberModule(L, callee.name) === "http/HttpClient" && expr.arguments.length === 1) {
+    const client = L.lowerExpr(callee.expression);
+    const request = L.lowerExpr(expr.arguments[0]!);
+    if (client.type.kind === "effect" && request.type.kind === "effect") {
+      return lib("effect.httpClientExecute", [client, request], EFFECT_T, loc);
+    }
+    return L.unsupported("SC1090", expr, "HttpClient.execute requires native client and request handles");
+  }
+  // `HttpClientRequest.make(method)(url)`: the constructor is curried in
+  // effect's public API, but the kernel stores the complete immutable value.
+  if (ts.isCallExpression(callee) && ts.isPropertyAccessExpression(callee.expression) &&
+      callee.expression.name.text === "make" && !callee.expression.questionDotToken &&
+      effectNamespaceOf(L, callee.expression.expression) === "http/HttpClientRequest" &&
+      callee.arguments.length === 1 && expr.arguments.length === 1) {
+    return lib("effect.httpRequestMake", [
+      L.lowerExprExpecting(callee.arguments[0]!, STRING),
+      L.lowerExprExpecting(expr.arguments[0]!, STRING),
+    ], EFFECT_T, loc);
+  }
   const asFn = lowerEffectFn(L, expr, loc);
   if (asFn !== null) return asFn;
-  const test = L.dynamic ? null : lowerSchemaTest(L, expr, loc);
+  const test = lowerSchemaTest(L, expr, loc);
   if (test !== null) return test;
   // `pipe(effect, step, …)` (effect's Function.pipe) and `effect.pipe(step, …)` fold the steps left to right.
   const free = effectExportOf(L, callee);
@@ -288,13 +361,14 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
     for (const step of expr.arguments.slice(1)) acc = applyPipeStep(L, acc, step, loc);
     return acc;
   }
+  if (free !== null && free.module === "JsonSchema") return lowerJsonSchemaMember(L, free.name, [...expr.arguments], expr, loc);
   if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && callee.name.text === "pipe" && !callee.questionDotToken && isSchemaLike(L, callee.expression)) {
     let acc = unwrapSchema(L, L.lowerExpr(callee.expression), callee.expression, "pipe");
     for (const step of expr.arguments) acc = applyPipeStep(L, acc, step, loc);
     return acc;
   }
   // `semaphore.withPermits(n)(effect)`: the permit count curries, so the CALL of the call is the whole form.
-  if (!L.dynamic && ts.isCallExpression(callee) && ts.isPropertyAccessExpression(callee.expression) && ts.isIdentifier(callee.expression.name) &&
+  if (ts.isCallExpression(callee) && ts.isPropertyAccessExpression(callee.expression) && ts.isIdentifier(callee.expression.name) &&
     callee.expression.name.text === "withPermits" && callee.arguments.length === 1 && expr.arguments.length === 1) {
     const semaphore = L.lowerExpr(callee.expression.expression);
     const permits = L.lowerExpr(callee.arguments[0]!);
@@ -305,7 +379,7 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   }
   // `semaphore.withPermit(effect)`: the uncurried one-permit spelling of withPermits(1)(effect). Its type parameters
   // only carry the effect's own channels, which the kernel holds opaquely, so the generic member needs no family.
-  if (!L.dynamic && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) &&
+  if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) &&
     callee.name.text === "withPermit" && !callee.questionDotToken && expr.arguments.length === 1 &&
     L.typeOf(callee.expression).getSymbol()?.name === "Semaphore") {
     const semaphore = L.lowerExpr(callee.expression);
@@ -315,7 +389,7 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
     }
   }
   // `semaphore.take(n)` / `semaphore.release(n)` on a Semaphore handle.
-  if (!L.dynamic && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && (callee.name.text === "take" || callee.name.text === "release") &&
+  if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && (callee.name.text === "take" || callee.name.text === "release") &&
     expr.arguments.length === 1 && L.typeOf(callee.expression).getSymbol()?.name === "Semaphore") {
     const semaphore = L.lowerExpr(callee.expression);
     const permits = L.lowerExpr(expr.arguments[0]!);
@@ -326,15 +400,15 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   const sqlCall = lowerSqlHandleCall(L, callee, expr, loc);
   if (sqlCall !== null) return sqlCall;
   if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.name)) return null;
-  if (!L.dynamic && !callee.questionDotToken && (callee.name.text === "make" || callee.name.text === "annotate" || callee.name.text === "check") && isSchemaLike(L, callee.expression)) {
+  if (!callee.questionDotToken && (callee.name.text === "make" || callee.name.text === "annotate" || callee.name.text === "check") && isSchemaLike(L, callee.expression)) {
     const method = lowerSchemaHandleMethod(L, callee.name.text, callee.expression, [...expr.arguments], expr, loc);
     if (method !== null) return method;
   }
-  if (!L.dynamic && !callee.questionDotToken && callee.name.text === "make") {
+  if (!callee.questionDotToken && callee.name.text === "make") {
     const made = lowerSchemaClassMake(L, callee.expression, expr, loc);
     if (made !== null) return made;
   }
-  if (callee.name.text === "of" && expr.arguments.length === 1 && !L.dynamic) {
+  if (callee.name.text === "of" && expr.arguments.length === 1) {
     // `Service.of(impl)` on a kernel service key: effect's `of` is the identity over the service shape.
     const recv = callee.expression;
     const sym = ts.isIdentifier(recv) ? L.resolveValueSymbol(recv) : ts.isPropertyAccessExpression(recv) ? L.checker.getSymbolAtLocation(recv.name) : undefined;
@@ -348,6 +422,7 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === null) return null;
   if (ns === "Layer") return lowerLayerMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
   if (ns === "Schema") return lowerSchemaMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "JsonSchema") return lowerJsonSchemaMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Duration") return lowerDurationMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Exit") return lowerExitMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Option") return lowerOptionMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
@@ -358,6 +433,66 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === "PubSub") return lowerPubSubMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Cause") return lowerCauseMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Context") return lowerContextMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "Stream" && callee.name.text === "runForEach" && expr.arguments.length === 2) {
+    const stream = L.lowerExpr(expr.arguments[0]!);
+    const callback = L.lowerExpr(expr.arguments[1]!);
+    if (stream.type.kind === "effect" && callback.type.kind === "func" && callback.type.params.length === 1 && callback.type.ret.kind === "effect") {
+      return lib("effect.httpStreamRunForEach", [stream, callback], EFFECT_T, loc);
+    }
+    return L.unsupported("SC1090", expr, "Stream.runForEach requires a native stream and a one-argument effect callback");
+  }
+  if (ns === "http/HttpClientRequest") {
+    const args = [...expr.arguments];
+    const request = args[0] === undefined ? null : L.lowerExpr(args[0]);
+    const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover http/HttpClientRequest.${callee.name.text} in this call shape`);
+    if (request?.type.kind !== "effect") return refused();
+    if ((callee.name.text === "setUrlParam" || callee.name.text === "appendUrlParam" || callee.name.text === "setHeader") && args.length === 3) {
+      const name = L.lowerExprExpecting(args[1]!, STRING);
+      const value = L.lowerExprExpecting(args[2]!, STRING);
+      const fn = callee.name.text === "setUrlParam"
+        ? "effect.httpRequestSetUrlParam"
+        : callee.name.text === "appendUrlParam"
+          ? "effect.httpRequestAppendUrlParam"
+          : "effect.httpRequestSetHeader";
+      return lib(fn, [request, name, value], EFFECT_T, loc);
+    }
+    if (callee.name.text === "setHeaders" && args.length === 2) {
+      const headers = L.lowerExpr(args[1]!);
+      const shape = headers.type.kind === "record" ? L.shapes.get(headers.type.shapeId) : undefined;
+      if (shape === undefined || shape.fields.length !== 0 || shape.indexValue?.kind !== "string") return refused();
+      return lib("effect.httpRequestSetHeaders", [request, headers], EFFECT_T, loc);
+    }
+    if (callee.name.text === "bodyJson" && args.length === 2) {
+      return lib("effect.httpRequestBodyJson", [request, L.lowerExprExpecting(args[1]!, DYN)], EFFECT_T, loc);
+    }
+    return refused();
+  }
+  if (ns === "JsonPointer" && callee.name.text === "unescapeToken" &&
+      expr.arguments.length === 1 && !ts.isSpreadElement(expr.arguments[0]!)) {
+    const token = L.lowerExprExpecting(expr.arguments[0]!, STRING);
+    const slash: IrExpr = {
+      kind: "strIntrinsic",
+      method: "replaceAll",
+      receiver: token,
+      args: [
+        { kind: "strLit", value: "~1", type: STRING, loc },
+        { kind: "strLit", value: "/", type: STRING, loc },
+      ],
+      type: STRING,
+      loc,
+    };
+    return {
+      kind: "strIntrinsic",
+      method: "replaceAll",
+      receiver: slash,
+      args: [
+        { kind: "strLit", value: "~0", type: STRING, loc },
+        { kind: "strLit", value: "~", type: STRING, loc },
+      ],
+      type: STRING,
+      loc,
+    };
+  }
   const sqlMade = lowerSqlNamespaceCall(L, ns, callee.name.text, expr, loc);
   if (sqlMade !== null) return sqlMade;
   if (ns === "Fiber" && callee.name.text === "getCurrent" && expr.arguments.length === 0) return asCallType(L, expr, lib("effect.fiberCurrent", [], EFFECT_T, loc));
@@ -379,9 +514,31 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
 }
 
+/** `response.headers[key]`: Headers is structurally a readonly string dictionary, but the native response keeps the
+ * header block on its response handle. Read through that handle without materializing a mutable record. */
+export function lowerEffectElement(L: Lowerer, expr: ts.ElementAccessExpression): IrExpr | null {
+  const headers = expr.expression;
+  if (!ts.isPropertyAccessExpression(headers) || headers.questionDotToken || headers.name.text !== "headers" ||
+      effectMemberModule(L, headers.name) !== "http/HttpIncomingMessage") return null;
+  const mapped = L.mapTypeOf(L.typeOf(expr));
+  if (mapped === null) return L.badType(expr, L.typeOf(expr));
+  // A missing header is `undefined` whatever the dictionary type claims (no noUncheckedIndexedAccess): the read
+  // always answers `string | undefined`, and the site's `?.`/`?? d`/`=== undefined` narrows it like any dictionary read.
+  const type = mapped.kind === "union" ? mapped : (L.withUndefinedArm(mapped) ?? mapped);
+  return lib("effect.httpResponseHeader", [
+    L.lowerExpr(headers.expression),
+    L.lowerExprExpecting(expr.argumentExpression, STRING),
+  ], type, locOf(expr));
+}
+
 /** Parameters the kernel types itself: `restore` in `Effect.uninterruptibleMask((restore) => …)` is an effect → effect
  * closure (the identity, since the kernel has no interruption) whatever its generic declared type says. */
 const EFFECT_PARAM_OVERRIDES = new WeakMap<ts.ParameterDeclaration, IrType>();
+
+/** Pin an unannotated callback parameter's ABI type (a dyn-receiver reduce's accumulator, which the checker spells `any`). */
+export function overrideParamType(param: ts.ParameterDeclaration, type: IrType): void {
+  EFFECT_PARAM_OVERRIDES.set(param, type);
+}
 
 export function effectParamOverride(param: ts.ParameterDeclaration): IrType | undefined {
   return EFFECT_PARAM_OVERRIDES.get(param);

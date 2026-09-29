@@ -126,7 +126,7 @@ export function collectNamespaceStmt(lowerer: Lowerer, decl: ts.ModuleDeclaratio
   lowerer.nsBlocks.set(body, "flattened");
   for (const s of body.statements) {
     if (ts.isFunctionDeclaration(s)) fp.fnDecls.push(s);
-    else if (ts.isClassDeclaration(s)) { if (lowerer.dynamic || kernelServiceIdOf(lowerer.checker, s) === null) fp.classDecls.push(s); }
+    else if (ts.isClassDeclaration(s)) { if (kernelServiceIdOf(lowerer.checker, s) === null) fp.classDecls.push(s); }
     else if (ts.isInterfaceDeclaration(s) || ts.isTypeAliasDeclaration(s)) continue;
     else if (ts.isModuleDeclaration(s)) collectNamespaceStmt(lowerer, s, fp);
     // Everything else — member variables, side-effecting statements,

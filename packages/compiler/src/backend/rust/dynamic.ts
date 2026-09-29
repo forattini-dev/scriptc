@@ -3,7 +3,7 @@ import { emitRustDynamicKindQueries } from "./dynamic-kind.js";
 import { sharedDiscriminatedUnion, discriminatedUnionCheck } from "./discriminated-records.js";
 import { emitNativeUnionCheck } from "./native-union-check.js";
 import { emitNativeMapCheck } from "./native-map-values.js";
-import { nativeArrayViewSupported, nativeIndexedRecordValue } from "../../ir/native-record.js";
+import { nativeArrayCheckSupported, nativeIndexedRecordValue, nativeTupleCheckSupported } from "../../ir/native-record.js";
 import { emitNativeArrayCheck } from "./native-array-values.js";
 import { emitRustDynamicErrorAndCloneHelpers } from "./dynamic-error-clone.js";
 import { emitRustDynamicIslandSupport } from "./dynamic-island.js";
@@ -25,7 +25,9 @@ import { emitRustDynamicProxy } from "./dynamic-proxy.js";
 import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
-import { isSharedRecord, recordCheckName } from "./shared-records.js";
+import type { RustClosureShape } from "./model.js";
+import { isSharedRecord, recordCheckName, recordNewName } from "./shared-records.js";
+import { mangleField, mangleRecordStruct } from "../mangle.js";
 
 export class RustDynamicEmitter {
   private readonly dynFrom: RustDynamicFromEmitter;
@@ -61,9 +63,13 @@ export class RustDynamicEmitter {
     this.context.line("String(runtime::JsString),");
     this.context.line("Regex(runtime::JsRegex),");
     this.context.line("Url(runtime::JsUrl),");
+    this.context.line("SearchParams(runtime::JsSearchParams),");
+    this.context.line(`Map(runtime::JsMap<${name}, ${name}>),`);
+    this.context.line(`Set(runtime::JsSet<${name}>),`);
     this.context.line("Bytes(runtime::JsBytes<u8>),");
     this.context.line("TypedBytes(runtime::JsTypedBytes),");
     this.context.line("Buffer(runtime::JsBytes<u8>),");
+    this.context.line("NativePrototype(&'static str),");
     this.context.line("NativeConstructor(&'static str),");
     this.context.line("NativeMethod(ScDynNativeMethod),");
     this.context.line("Promise(runtime::JsPromiseHandle),");
@@ -101,6 +107,8 @@ export class RustDynamicEmitter {
     this.context.line("Self::Array(value) => tracer.edge(value),");
     this.context.line("Self::ArrayIterator(value) => tracer.edge(value),");
     this.context.line("Self::Object(value) => tracer.edge(value),");
+    this.context.line("Self::Map(value) => tracer.edge(value),");
+    this.context.line("Self::Set(value) => tracer.edge(value),");
     this.context.line("Self::Proxy(value) => tracer.edge(value),");
     this.context.line("Self::Effect(value) => tracer.edge(value),");
     this.context.line("Self::Getter(value) => runtime::Trace::trace(value.as_ref(), tracer),");
@@ -155,6 +163,8 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::String(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Regex(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::Url(..) => { writer.begin_object(); writer.end_object(); },`);
+    this.context.line(`${name}::SearchParams(..) | ${name}::Map(..) | ${name}::Set(..) => { writer.begin_object(); writer.end_object(); },`);
+    this.context.line(`${name}::NativePrototype(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::Bytes(value) => {`);
     this.context.pushIndent();
     this.context.line("writer.begin_object();");
@@ -263,6 +273,7 @@ export class RustDynamicEmitter {
     this.context.line(`fn parse_args_object_entries(&self) -> Option<Vec<(runtime::JsString, Self)>> { if let ${name}::Object(value) = self { Some(runtime::map_string_entries_js_order(value)) } else { None } }`);
     this.context.line(`fn parse_args_object_set(&self, key: runtime::JsString, field: Self) { let ${name}::Object(value) = self else { unreachable!("scriptc: parseArgs set target is not an object") }; runtime::map_set_by(value, key, field, |left, right| left.as_ref() == right.as_ref()); }`);
     this.context.line(`fn parse_args_undefined() -> Self { ${name}::Undefined }`);
+    this.context.line(`fn parse_args_null_value() -> Self { ${name}::Null }`);
     this.context.line(`fn parse_args_number_value(value: f64) -> Self { ${name}::Number(value) }`);
     this.context.line(`fn parse_args_bool_value(value: bool) -> Self { ${name}::Boolean(value) }`);
     this.context.line(`fn parse_args_string_value(value: runtime::JsString) -> Self { ${name}::String(value) }`);
@@ -323,6 +334,9 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
     this.context.line(`${name}::Regex(value) => ${name}::Regex(value.clone()),`);
     this.context.line(`${name}::Url(value) => ${name}::Url(value.clone()),`);
+    this.context.line(`${name}::SearchParams(value) => ${name}::SearchParams(value.clone()),`);
+    this.context.line(`${name}::Map(value) => ${name}::Map(value.clone()),`);
+    this.context.line(`${name}::Set(value) => ${name}::Set(value.clone()),`);
     this.context.line(`${name}::Bytes(value) => ${name}::Bytes(runtime::bytes_copy(value)),`);
     this.context.line(`${name}::TypedBytes(value) => ${name}::TypedBytes(runtime::typed_bytes_copy(value)),`);
     this.context.line(`${name}::Buffer(value) => ${name}::Buffer(runtime::bytes_copy(value)),`);
@@ -365,6 +379,7 @@ export class RustDynamicEmitter {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(value, function_name, properties) => ${name}::${this.context.dynFunctionVariant(shape)}(value.clone(), function_name.clone(), properties.clone()),`);
     }
     this.context.line(`${name}::NativeConstructor(name) => ${name}::NativeConstructor(name),`);
+    this.context.line(`${name}::NativePrototype(name) => ${name}::NativePrototype(name),`);
     this.context.line(`${name}::NativeMethod(method) => ${name}::NativeMethod(*method),`);
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => ${name}::Island(value.clone()),`);
     this.context.popIndent();
@@ -383,8 +398,10 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Effect(..) => Err(format!("native kernel reference at {path} is not JSON data")),`);
     this.context.line(`${name}::Boolean(value) => Ok(runtime::JsonNode::Bool(*value)),`);
     this.context.line(`${name}::String(value) => Ok(runtime::JsonNode::String(value.clone())),`);
+    this.context.line(`${name}::NativePrototype(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::Regex(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::Url(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
+    this.context.line(`${name}::SearchParams(..) | ${name}::Map(..) | ${name}::Set(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::Bytes(..) => Err(format!("bytes at {path} is not JSON data")),`);
     this.context.line(`${name}::TypedBytes(..) => Err(format!("typed array at {path} is not JSON data")),`);
     this.context.line(`${name}::Buffer(..) => Err(format!("buffer at {path} is not JSON data")),`);
@@ -440,6 +457,7 @@ export class RustDynamicEmitter {
     this.context.line("}");
 
     emitRustDynamicKindQueries(this.context, boxedShapes);
+    this.emitNativePrototypeHelpers(name, boxedShapes, usesEmbeddedModules);
     this.context.line(`fn sc_dyn_from_caught(caught: runtime::Caught) -> ${name} {`);
     this.context.pushIndent();
     this.context.line(`if runtime::caught_is::<${name}>(&caught) { runtime::caught_narrow::<${name}>(&caught) }`);
@@ -491,7 +509,7 @@ export class RustDynamicEmitter {
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, true),`);
     this.context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()),`);
-    this.context.line(`${name}::Array(array) => key.as_ref() == "length" || (key.as_ref() == "raw" && runtime::array_raw(array).is_some()) || sc_dyn_key_index(key).is_some_and(|index| index < runtime::array_len(array) as usize),`);
+    this.context.line(`${name}::Array(array) => key.as_ref() == "length" || (key.as_ref() == "raw" && runtime::array_raw(array).is_some()) || runtime::array_property_has(array, key) || sc_dyn_key_index(key).is_some_and(|index| index < runtime::array_len(array) as usize),`);
     this.context.line("_ => false,");
     this.context.popIndent();
     this.context.line("}");
@@ -527,9 +545,10 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line(`if key.as_ref() == "length" { ${name}::Number(runtime::array_len(array)) }`);
     this.context.line(`else if key.as_ref() == "index" || key.as_ref() == "input" { runtime::array_regex_metadata(array).map(|(index, input)| if key.as_ref() == "index" { ${name}::Number(index) } else { ${name}::String(input) }).unwrap_or(${name}::Undefined) }`);
+    this.context.line(`else if key.as_ref() == "groups" { match runtime::array_regex_groups(array) { Some(groups) => { let object: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); sc_dyn_mark_null_proto(&object); for (group, index) in groups { let value = runtime::array_get(array, index as f64); let replace = runtime::map_get_by(&object, &group, |left, right| left.as_ref() == right.as_ref()).map_or(true, |current| matches!(current, ${name}::Undefined)); if replace { runtime::map_set_by(&object, group, value, |left, right| left.as_ref() == right.as_ref()); } } ${name}::Object(object) }, None => ${name}::Undefined } }`);
     this.context.line(`else if key.as_ref() == "raw" { runtime::array_raw(array).map(${name}::Array).unwrap_or(${name}::Undefined) }`);
     this.context.line(`else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::array_len(array) as usize { runtime::array_get(array, index as f64) } else { ${name}::Undefined } }`);
-    this.context.line(`else { ${name}::Undefined }`);
+    this.context.line(`else { runtime::array_property_get(array, key).unwrap_or(${name}::Undefined) }`);
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::String(text) => {`);
@@ -549,6 +568,7 @@ export class RustDynamicEmitter {
     this.context.line("},");
     this.context.line(`${name}::TypedBytes(bytes) => { if key.as_ref() == "length" { ${name}::Number(runtime::typed_bytes_len(bytes)) } else if key.as_ref() == "byteLength" { ${name}::Number(runtime::typed_bytes_byte_len(bytes)) } else if key.as_ref() == "constructor" { ${name}::NativeConstructor(runtime::typed_bytes_name(bytes)) } else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::typed_bytes_len(bytes) as usize { ${name}::Number(runtime::typed_bytes_get(bytes, index as f64)) } else { ${name}::Undefined } } else { ${name}::Undefined } },`);
     this.context.line(`${name}::NativeConstructor(name) => if key.as_ref() == "name" { ${name}::String(runtime::string(name)) } else { ${name}::Undefined },`);
+    this.context.line(`${name}::NativePrototype(..) => ${name}::Undefined,`);
     this.context.line(`${name}::NativeMethod(method) => if key.as_ref() == "name" { ${name}::String(runtime::string(method.name())) } else { ${name}::Undefined },`);
     this.context.line(`${name}::NetSocket(socket) => match key.to_utf8_lossy() {`);
     this.context.pushIndent();
@@ -622,9 +642,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Regex(regex) if key.as_ref() == "lastIndex" => match field { ${name}::Number(value) => runtime::regex_set_last_index(regex, value), _ => runtime::regex_set_last_index(regex, 0.0), },`);
     this.context.line(`${name}::Array(array) => {`);
     this.context.pushIndent();
-    this.context.line("let Some(index) = sc_dyn_key_index(&key) else { sc_dyn_key_set_error(value, &key); };");
-    this.context.line(`while runtime::array_len(array) < index as f64 { runtime::array_push(array, ${name}::Undefined); }`);
-    this.context.line("runtime::array_set(array, index as f64, field);");
+    this.context.line(`if let Some(index) = sc_dyn_key_index(&key) { while runtime::array_len(array) < index as f64 { runtime::array_push(array, ${name}::Undefined); } runtime::array_set(array, index as f64, field); } else { runtime::array_property_set(array, key, field); }`);
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::Bytes(bytes) | ${name}::Buffer(bytes) => {`);
@@ -651,6 +669,20 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`fn sc_dyn_symbol_set(value: &${name}, key: runtime::JsSymbol, field: ${name}) {`);
+    this.context.pushIndent();
+    this.context.line("match value {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Object(object) => runtime::map_symbol_set(object, key, field),`);
+    for (const shape of boxedShapes) {
+      this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, _, properties) => runtime::map_symbol_set(properties, key, field),`);
+    }
+    this.context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("symbol-keyed property assignment"),`);
+    this.context.line(`_ => runtime::throw_type_error("Object.defineProperty called on non-object".to_owned()),`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line(`fn sc_dyn_to_number(value: &${name}) -> f64 {`);
     this.context.line(`if matches!(value, ${name}::Symbol(..)) { runtime::throw_type_error("Cannot convert a Symbol value to a number".to_owned()); }`);
     this.context.line(`if matches!(value, ${name}::BigInt(..)) { runtime::throw_type_error(if runtime::target_runtime_id() == "bun" { "Conversion from 'BigInt' to 'number' is not allowed." } else { "Cannot convert a BigInt value to a number" }.to_owned()); }`);
@@ -673,9 +705,13 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::String(value) => value.clone(),`);
     this.context.line(`${name}::Regex(value) => runtime::string(&format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value))),`);
     this.context.line(`${name}::Url(value) => runtime::url_href(value),`);
+    this.context.line(`${name}::SearchParams(value) => runtime::search_params_to_string(value),`);
+    this.context.line(`${name}::Map(..) => runtime::string("[object Map]"),`);
+    this.context.line(`${name}::Set(..) => runtime::string("[object Set]"),`);
     this.context.line(`${name}::Bytes(value) => runtime::bytes_join(value, &runtime::string(",")),`);
     this.context.line(`${name}::TypedBytes(value) => runtime::typed_bytes_join(value, &runtime::string(",")),`);
     this.context.line(`${name}::Buffer(value) => runtime::bytes_to_string(value, &runtime::string("utf8")),`);
+    this.context.line(`${name}::NativePrototype(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::NativeConstructor(name) => runtime::string(&format!("function {name}() {{ [native code] }}")),`);
     this.context.line(`${name}::NativeMethod(method) => runtime::string(&format!("function {}() {{ [native code] }}", method.name())),`);
     this.context.line(`${name}::Promise(..) => runtime::string("[object Promise]"),`);
@@ -734,9 +770,13 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::String(value) => runtime::dynamic_specific_string(value),`);
     this.context.line(`${name}::Regex(..) => "an instance of RegExp".to_owned(),`);
     this.context.line(`${name}::Url(..) => "an instance of URL".to_owned(),`);
+    this.context.line(`${name}::SearchParams(..) => "an instance of URLSearchParams".to_owned(),`);
+    this.context.line(`${name}::Map(..) => "an instance of Map".to_owned(),`);
+    this.context.line(`${name}::Set(..) => "an instance of Set".to_owned(),`);
     this.context.line(`${name}::Bytes(..) => "an instance of Uint8Array".to_owned(),`);
     this.context.line(`${name}::TypedBytes(value) => format!("an instance of {}", runtime::typed_bytes_name(value)),`);
     this.context.line(`${name}::Buffer(..) => "an instance of Buffer".to_owned(),`);
+    this.context.line(`${name}::NativePrototype(name) => format!("the native {name}.prototype object"),`);
     this.context.line(`${name}::NativeConstructor(name) => format!("function {name}"),`);
     this.context.line(`${name}::NativeMethod(method) => format!("function {}", method.name()),`);
     this.context.line(`${name}::Array(..) => "an instance of Array".to_owned(),`);
@@ -871,6 +911,61 @@ export class RustDynamicEmitter {
     this.context.line("");
   }
 
+  private emitNativePrototypeHelpers(
+    name: string,
+    boxedShapes: readonly RustClosureShape[],
+    usesEmbeddedModules: boolean,
+  ): void {
+    this.context.line(`fn sc_dyn_native_prototype(name: &'static str) -> ${name} { ${name}::NativePrototype(name) }`);
+    this.context.line(`fn sc_dyn_get_prototype_of(value: &${name}) -> ${name} {`);
+    this.context.pushIndent();
+    this.context.line("match value {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
+    this.context.line(`${name}::Object(object) if runtime::map_has_null_prototype(object) => ${name}::Null,`);
+    this.context.line(`${name}::Object(object) => runtime::map_prototype(object).unwrap_or_else(|| sc_dyn_native_prototype("Object")),`);
+    this.context.line(`${name}::NativePrototype("Object") => ${name}::Null,`);
+    this.context.line(`${name}::NativePrototype(..) => sc_dyn_native_prototype("Object"),`);
+    this.context.line(`${name}::Number(..) => sc_dyn_native_prototype("Number"),`);
+    this.context.line(`${name}::BigInt(..) => sc_dyn_native_prototype("BigInt"),`);
+    this.context.line(`${name}::Symbol(..) => sc_dyn_native_prototype("Symbol"),`);
+    this.context.line(`${name}::Boolean(..) => sc_dyn_native_prototype("Boolean"),`);
+    this.context.line(`${name}::String(..) => sc_dyn_native_prototype("String"),`);
+    this.context.line(`${name}::Date(..) => sc_dyn_native_prototype("Date"),`);
+    this.context.line(`${name}::Regex(..) => sc_dyn_native_prototype("RegExp"),`);
+    this.context.line(`${name}::Url(..) => sc_dyn_native_prototype("URL"),`);
+    this.context.line(`${name}::SearchParams(..) => sc_dyn_native_prototype("URLSearchParams"),`);
+    this.context.line(`${name}::Map(..) => sc_dyn_native_prototype("Map"),`);
+    this.context.line(`${name}::Set(..) => sc_dyn_native_prototype("Set"),`);
+    this.context.line(`${name}::Bytes(..) | ${name}::TypedBytes(..) => sc_dyn_native_prototype("Uint8Array"),`);
+    this.context.line(`${name}::Buffer(..) => sc_dyn_native_prototype("Buffer"),`);
+    this.context.line(`${name}::Array(..) => sc_dyn_native_prototype("Array"),`);
+    this.context.line(`${name}::ArrayIterator(..) => sc_dyn_native_prototype("Array Iterator"),`);
+    this.context.line(`${name}::NativeConstructor(..) | ${name}::NativeMethod(..) | ${name}::Getter(..) => sc_dyn_native_prototype("Function"),`);
+    for (const shape of boxedShapes) {
+      this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => sc_dyn_native_prototype("Function"),`);
+    }
+    this.context.line(`${name}::Promise(..) => sc_dyn_native_prototype("Promise"),`);
+    this.context.line(`${name}::NetServer(..) => sc_dyn_native_prototype("Server"),`);
+    this.context.line(`${name}::NetSocket(..) => sc_dyn_native_prototype("Socket"),`);
+    this.context.line(`${name}::AbortController(..) => sc_dyn_native_prototype("AbortController"),`);
+    this.context.line(`${name}::AbortSignal(..) => sc_dyn_native_prototype("AbortSignal"),`);
+    this.context.line(`${name}::HttpRequest(..) => sc_dyn_native_prototype("IncomingMessage"),`);
+    this.context.line(`${name}::HttpHeaders(..) => sc_dyn_native_prototype("Headers"),`);
+    this.context.line(`${name}::FetchBody(..) | ${name}::WebStream(..) => sc_dyn_native_prototype("ReadableStream"),`);
+    this.context.line(`${name}::FetchReader(..) | ${name}::WebReader(..) => sc_dyn_native_prototype("ReadableStreamDefaultReader"),`);
+    this.context.line(`${name}::WebController(..) => sc_dyn_native_prototype("ReadableStreamDefaultController"),`);
+    this.context.line(`${name}::HttpResponse(..) => sc_dyn_native_prototype("ServerResponse"),`);
+    this.context.line(`${name}::HttpAgent(..) => sc_dyn_native_prototype("Agent"),`);
+    this.context.line(`${name}::Effect(value) => if runtime::effect_reference_typeof(value) == "function" { sc_dyn_native_prototype("Function") } else { sc_dyn_native_prototype("Object") },`);
+    this.context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("Object.getPrototypeOf"),`);
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(..) => runtime::throw_error("scriptc: Object.getPrototypeOf on embedded JavaScript values is not supported in the native object path".to_owned()),`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+  }
+
 
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = "", liveRef = false): string {
     return this.dynFrom.emit(type, value, loc, functionName, liveRef);
@@ -897,6 +992,23 @@ export class RustDynamicEmitter {
           ? `, ${name}::Island(value) if runtime::island_instance_of(&value, &runtime::island_global_get("URL")) => runtime::url_new(&runtime::island_exit_string(&runtime::island_get_property(&value, "href")))`
           : "";
         return `{ let value = ${value}; match value { ${name}::Url(value) => value${island}, value => sc_dyn_check_fail_at("URL", &value, ${path}), } }`;
+      }
+      case "searchParams": {
+        const name = this.context.dynTypeName();
+        const island = this.context.hasEmbeddedModules()
+          ? `, ${name}::Island(value) if runtime::island_instance_of(&value, &runtime::island_global_get("URLSearchParams")) => runtime::search_params_parse(&runtime::island_exit_string(&runtime::island_call_method(&value, "toString", &[])))`
+          : "";
+        return `{ let value = ${value}; match value { ${name}::SearchParams(value) => value${island}, value => sc_dyn_check_fail_at("URLSearchParams", &value, ${path}), } }`;
+      }
+      case "map": {
+        if (type.key.kind !== "dyn" || type.value.kind !== "dyn") this.context.unsupported("dynamic checked cast to a Map whose key or value is not unknown", loc);
+        const name = this.context.dynTypeName();
+        return `{ let value = ${value}; match value { ${name}::Map(value) => value, value => sc_dyn_check_fail_at("Map", &value, ${path}), } }`;
+      }
+      case "set": {
+        if (type.elem.kind !== "dyn") this.context.unsupported("dynamic checked cast to a Set whose element is not unknown", loc);
+        const name = this.context.dynTypeName();
+        return `{ let value = ${value}; match value { ${name}::Set(value) => value, value => sc_dyn_check_fail_at("Set", &value, ${path}), } }`;
       }
       case "effect": return `sc_dyn_check_effect_at(${value}, ${path})`;
       case "f64": return `sc_dyn_check_number_at(${value}, ${path})`;
@@ -1001,7 +1113,7 @@ export class RustDynamicEmitter {
       }
       case "array": {
         const name = this.context.dynTypeName();
-        if (nativeArrayViewSupported(type) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayCheck(type, value, name,
+        if (nativeArrayCheckSupported(type, id => this.context.records.get(id)) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayCheck(type, value, name,
           (element, item) => this.emitDynFromValue(element, item, loc), (element, item, itemPath) => this.emitDynCheckValue(element, item, loc, itemPath), path);
         if (type.elem.kind === "dyn" || type.elem.kind === "jsval") {
           return `match ${value} { ${name}::Array(array) => array, value => sc_dyn_check_fail_at("array", &value, ${path}) }`;
@@ -1013,6 +1125,22 @@ export class RustDynamicEmitter {
       case "record": {
         if (type.kind === "record") {
           const shape = this.context.records.get(type.shapeId);
+          if (nativeTupleCheckSupported(type, id => this.context.records.get(id))) {
+            if (!shape) this.context.unsupported(`dynamic checked cast to unknown tuple '${type.shapeId}'`, loc);
+            const fields = [...shape.fields].sort((left, right) => Number(left.name) - Number(right.name));
+            const reads = fields.map((field, index) => {
+              const checked = this.emitDynCheckValue(
+                field.type,
+                `runtime::array_get(&sc_array, ${index}.0)`,
+                loc,
+                `&runtime::json_index_path(sc_path, ${index})`,
+              );
+              const stored = this.context.isEdgeValue(field.type) ? `Some(${checked})` : checked;
+              return `${mangleField(field.name)}: ${stored}`;
+            }).join(", ");
+            const expected = `${fields.length}-element tuple`;
+            return `{ let sc_value = ${value}; let sc_path = ${path}; match sc_value { ${this.context.dynTypeName()}::Array(sc_array) => { if runtime::array_len(&sc_array) != ${fields.length}.0 { sc_dyn_check_fail_at("${expected}", &${this.context.dynTypeName()}::Array(sc_array.clone()), sc_path); } ${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${reads} }) }, sc_other => sc_dyn_check_fail_at("${expected}", &sc_other, sc_path), } }`;
+          }
           if (isSharedRecord(shape)) {
             const input = this.context.hasEmbeddedModules() && this.context.isRustJsonCompatible(type)
               ? `sc_dyn_typed_island_input(${value})` : value;

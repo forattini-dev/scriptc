@@ -194,6 +194,18 @@ fn child_writer_write(writer: &JsChildWriter, data: Vec<u8>) -> bool {
     }
 }
 
+/// The island hosts' `childStdinWrite(id, bytes)`: false once the child's stdin is gone.
+pub fn child_stdin_write(child: &JsChild, data: &JsBytes<u8>) -> bool {
+    child_stdin(child).is_some_and(|writer| child_writer_write_bytes(&writer, data))
+}
+
+/// The island hosts' `childStdinEnd(id)`.
+pub fn child_stdin_end(child: &JsChild) {
+    if let Some(writer) = child_stdin(child) {
+        child_writer_end(&writer);
+    }
+}
+
 pub fn child_writer_write_string(writer: &JsChildWriter, data: &JsString) -> bool {
     child_writer_write(writer, data.as_bytes().to_vec())
 }

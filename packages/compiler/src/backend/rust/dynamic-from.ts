@@ -73,6 +73,15 @@ export class RustDynamicFromEmitter {
       case "symbol": return `${name}::Symbol(${value})`;
       case "regex": return `${name}::Regex(${value})`;
       case "url": return `${name}::Url(${value})`;
+      case "searchParams": return `${name}::SearchParams(${value})`;
+      case "map": {
+        if (type.key.kind !== "dyn" || type.value.kind !== "dyn") this.context.unsupported("dynamic boxing from a Map whose key or value is not unknown", loc);
+        return `${name}::Map(${value})`;
+      }
+      case "set": {
+        if (type.elem.kind !== "dyn") this.context.unsupported("dynamic boxing from a Set whose element is not unknown", loc);
+        return `${name}::Set(${value})`;
+      }
       case "bytes": {
         if (type.elem === "u8") {
           return liveRef ? `{ let source = ${value}; let mirror = runtime::bytes_copy(&source); runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Bytes(mirror) }` : `${name}::Bytes(${value})`;

@@ -90,6 +90,10 @@ fn effect_context_data(handle: &JsEffect) -> Rc<EffectContextData> {
     })
 }
 
+fn effect_in_context(source: &JsEffect, context: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::WithContext(source.clone(), Rc::new(effect_context_data(context).env.clone())))
+}
+
 /// `Context.get/getUnsafe(context, key)`: `Scope.Scope` answers the snapshot's innermost scope.
 pub fn effect_context_get(context: &JsEffect, key: &JsEffect) -> EffectValue {
     let data = effect_context_data(context);

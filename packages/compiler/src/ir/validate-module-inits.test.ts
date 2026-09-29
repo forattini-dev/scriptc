@@ -11,7 +11,7 @@ const init: IrFunction = {
 };
 
 function moduleWith(fn: IrFunction = init, globals: IrGlobal[] = [cache]): IrModule {
-  return { irVersion: 11, sourceFile: loc.file, entry: fn.name, globals, functions: [fn] };
+  return { irVersion: 12, sourceFile: loc.file, entry: fn.name, globals, functions: [fn] };
 }
 
 test("synchronous native module caches validate and survive serialization", () => {

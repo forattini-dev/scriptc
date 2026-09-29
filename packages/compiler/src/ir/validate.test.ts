@@ -13,7 +13,7 @@ function numericReadModule(overrides: Partial<IrExpr & { kind: "arrIntrinsic" }>
     type: F64, loc, ...overrides,
   };
   return {
-    irVersion: 11, sourceFile: loc.file, entry: "main",
+    irVersion: 12, sourceFile: loc.file, entry: "main",
     functions: [{ name: "main", params: [], locals: [], returnType: VOID, body: [{ kind: "exprStmt", expr: read, loc }], loc }],
   };
 }

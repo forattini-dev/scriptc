@@ -19,12 +19,14 @@ export function emitRustDynamicKindQueries(context: RustDynamicContext, boxedSha
   context.line(`${name}::String(..) => "string",`);
   context.line(`${name}::Regex(..) => "object",`);
   context.line(`${name}::Url(..) => "object",`);
+  context.line(`${name}::SearchParams(..) | ${name}::Map(..) | ${name}::Set(..) => "object",`);
   context.line(`${name}::Bytes(..) => "bytes",`);
   context.line(`${name}::TypedBytes(..) => "bytes",`);
   context.line(`${name}::Buffer(..) => "bytes",`);
   context.line(`${name}::Array(..) => "array",`);
   context.line(`${name}::ArrayIterator(..) => "object",`);
   context.line(`${name}::Object(..) => "object",`);
+  context.line(`${name}::NativePrototype(..) => "object",`);
   context.line(`${name}::Getter(..) => "function",`);
   context.line(`${name}::Promise(..) => "promise",`);
   context.line(`${name}::NetServer(..) => "object",`);
@@ -65,6 +67,7 @@ export function emitRustDynamicKindQueries(context: RustDynamicContext, boxedSha
   context.line(`${name}::Effect(value) => runtime::effect_reference_typeof(value),`);
   context.line(`${name}::Boolean(..) => "boolean",`);
   context.line(`${name}::String(..) => "string",`);
+  context.line(`${name}::NativePrototype(..) => "object",`);
   context.line(`${name}::Bytes(..) => "object",`);
   context.line(`${name}::TypedBytes(..) => "object",`);
   context.line(`${name}::Buffer(..) => "object",`);

@@ -1,7 +1,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { locOf } from "../program.js";
-import { DYN, F64, UNDEFINED_T, arrayOf, funcOf, isRefCounted, type IrExpr, type IrFunction, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
+import { DYN, F64, STRING, UNDEFINED_T, VOID, arrayOf, funcOf, isRefCounted, type IrExpr, type IrFunction, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { countedFor, varRef } from "../../ir/build.js";
 import { typeKey } from "../type-mapper.js";
 import { fenceProducedArrayElem, strCharsCall } from "./lower-containers.js";
@@ -28,6 +28,24 @@ export function lowerArrayFromCall(lowerer: Lowerer, call: ts.CallExpression,
   const args = call.arguments;
   const collection = lowerCollectionFromCall(lowerer, call);
   if (collection) return collection;
+  // A checked-dynamic object narrowed by a numeric `.length` guard and
+  // asserted to the standard ArrayLike<unknown> view. The assertion is a
+  // checker-only view: keep the source in dyn, validate length as a number,
+  // then snapshot indexed values into a fresh dyn array. This is the native
+  // Rust counterpart of Array.from's array-like (non-iterator) path.
+  if (args.length === 1) {
+    const arrayLike = dynArrayLikeSource(lowerer, args[0]!);
+    if (arrayLike) {
+      const key = "fromDynArrayLike";
+      let helper = lowerer.arrHofHelpers.get(key);
+      if (!helper) {
+        helper = `%arr.fromDynArrayLike.${lowerer.arrHofHelpers.size}`;
+        lowerer.arrHofHelpers.set(key, helper);
+        lowerer.liftedFns.push(buildDynArrayLikeFn(helper, loc));
+      }
+      return { kind: "call", callee: helper, args: [arrayLike], type: DYN, loc };
+    }
+  }
   // MAPPER-LESS `Array.from({ length: n })` (usually with an explicit
   // type argument — the pMap results-array idiom): a length-n array of
   // ABSENT slots, filled by index before any read. Union elements with
@@ -109,6 +127,70 @@ export function lowerArrayFromCall(lowerer: Lowerer, call: ts.CallExpression,
   return { kind: "call", callee: helper, args: [n, fnArg], type: arrayOf(fnRet), loc };
 }
 
+function dynArrayLikeSource(lowerer: Lowerer, node: ts.Expression): IrExpr | null {
+  let value = node;
+  while (ts.isParenthesizedExpression(value)) value = value.expression;
+  if (!ts.isAssertionExpression(value)) return null;
+  const target = lowerer.checker.getTypeFromTypeNode(value.type);
+  const symbol = target.getSymbol();
+  if (symbol?.name !== "ArrayLike" || !lowerer.isStdlibSymbol(symbol)) return null;
+  const args = lowerer.checker.getTypeArguments(target as ts.TypeReference);
+  if (args.length !== 1 || (args[0]!.flags & ts.TypeFlags.Unknown) === 0) return null;
+  const source = lowerer.lowerExpr(value.expression);
+  return source.type.kind === "dyn" ? source : null;
+}
+
+function buildDynArrayLikeFn(name: string, loc: SrcLoc): IrFunction {
+  const source = varRef("source.0", DYN, loc);
+  const output = varRef("out.0", DYN, loc);
+  const lengthValue: IrExpr = {
+    kind: "dynKeyGet",
+    key: { kind: "strLit", value: "length", type: STRING, loc },
+    value: source,
+    type: DYN,
+    loc,
+  };
+  const body: IrStmt[] = [
+    { kind: "varDecl", localId: "out.0", init: { kind: "dynArrLit", elems: [], type: DYN, loc }, loc },
+    { kind: "varDecl", localId: "n.0", init: { kind: "dynCheck", value: lengthValue, type: F64, loc }, loc },
+    countedFor(
+      loc,
+      { kind: "libCall", fn: "math.floor", args: [varRef("n.0", F64, loc)], type: F64, loc },
+      () => [{
+        kind: "exprStmt",
+        expr: {
+          kind: "libCall",
+          fn: "dyn.packPush",
+          args: [output, {
+            kind: "dynKeyGet",
+            key: { kind: "toString", operand: varRef("i.0", F64, loc), type: STRING, loc },
+            value: source,
+            type: DYN,
+            loc,
+          }],
+          type: VOID,
+          loc,
+        },
+        loc,
+      }],
+    ),
+    { kind: "return", value: output, loc },
+  ];
+  return {
+    name,
+    params: [{ localId: "source.0", name: "source", type: DYN }],
+    returnType: DYN,
+    locals: [
+      { id: "source.0", name: "source", type: DYN, mutable: false },
+      { id: "out.0", name: "out", type: DYN, mutable: false },
+      { id: "n.0", name: "n", type: F64, mutable: false },
+      { id: "i.0", name: "i", type: F64, mutable: true },
+    ],
+    body,
+    loc,
+  };
+}
+
 function lowerLengthProp(lowerer: Lowerer, prop: ts.ObjectLiteralElementLike): IrExpr | null {
   if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) && prop.name.text === "length") {
     return lowerer.lowerExprExpecting(prop.initializer, F64);
@@ -182,4 +264,3 @@ function buildArrayFromLenFn(name: string, fnRet: IrType, arity: number, loc: Sr
     loc,
   };
 }
-

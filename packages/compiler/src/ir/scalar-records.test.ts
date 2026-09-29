@@ -12,7 +12,7 @@ const read = (localId: string, field = "a"): IrExpr => ({ kind: "recordGet", obj
 
 function fixture(): IrModule {
   return {
-    irVersion: 11, sourceFile: loc.file, entry: "main",
+    irVersion: 12, sourceFile: loc.file, entry: "main",
     records: [{ id: "r0", fields: [{ name: "a", type: F64 }, { name: "b", type: F64 }] }],
     functions: [
       {

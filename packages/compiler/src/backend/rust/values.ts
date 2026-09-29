@@ -291,7 +291,10 @@ export class RustValueEmitter {
       case "date": return "runtime::date_value_new(f64::NAN)";
       case "bool": return "false";
       case "string": return "runtime::empty_string()";
+      case "regex": return "runtime::regex_new(&runtime::empty_string(), &runtime::empty_string())";
       case "symbol": return "runtime::symbol_new_anonymous()";
+      case "url": return "runtime::url_new(&runtime::string(\"about:blank\"))";
+      case "searchParams": return "runtime::search_params_new()";
       case "jsval": return `${this.context.dynTypeName()}::Undefined`;
       case "array": return "runtime::array_new(Vec::new())";
       case "bytes": return `runtime::bytes_empty::<${this.rustBytesElement(type.elem)}>()`;
