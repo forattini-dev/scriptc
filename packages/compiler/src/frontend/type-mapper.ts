@@ -2487,6 +2487,32 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       });
     if (childShaped && core >= 2) return CHILD_T;
   }
+  // `ChildProcessWithoutNullStreams` (stdlib): ChildProcess with non-null stdio — a type refinement of the same handle.
+  if (
+    flags & ts.TypeFlags.Object &&
+    psym?.name === "ChildProcessWithoutNullStreams" &&
+    checker.declarationsOf(psym).length > 0 &&
+    checker.declarationsOf(psym).every((d) => ts.isInterfaceDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()))
+  ) {
+    return CHILD_T;
+  }
+  // `ChildProcess & { exited: Promise<number> }` (and the `& ChildProcessWithoutNullStreams` refinement): the process
+  // handle with program-declared properties hung on it. Every component is either the handle itself or an anonymous
+  // type literal (never a declared class/interface, which would carry members the handle does not have), so the type IS
+  // the handle; the extra properties live in the handle's extension slots (child.extGet / child.extSet).
+  if (widened.isIntersectionType() && callSigs.length === 0) {
+    let handle = false;
+    let plain = true;
+    for (const part of ts.constituentTypes(widened)) {
+      if (mapType(part, ctx)?.kind === "child") {
+        handle = true;
+        continue;
+      }
+      const decls = part.getSymbol() !== undefined ? checker.declarationsOf(part.getSymbol()!) : [];
+      if (!(part.flags & ts.TypeFlags.Object) || decls.length === 0 || !decls.every((d) => ts.isTypeLiteralNode(d))) plain = false;
+    }
+    if (handle && plain) return CHILD_T;
+  }
   if (flags & (ts.TypeFlags.Object | ts.TypeFlags.Intersection) && callSigs.length === 0) {
     const viaAlias = mapGenericUtilityAlias(widened, ctx);
     if (viaAlias) return viaAlias;

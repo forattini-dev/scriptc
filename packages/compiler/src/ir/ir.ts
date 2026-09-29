@@ -2487,6 +2487,8 @@ export type IrLibFn =
    * loop runs for other reasons, and one the loop never reaps is left to
    * the OS at exit. All receivers borrowed. */
   | "child.pid"
+  | "child.extGet"
+  | "child.extSet"
   | "child.exitCode"
   | "child.killed"
   | "child.kill"

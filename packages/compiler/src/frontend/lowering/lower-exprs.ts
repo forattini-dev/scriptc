@@ -43,7 +43,7 @@ import { trapUseThrowExpr } from "./lowerer.js";
 import { trapModuleOf } from "./lower-builtins.js"; import { lowerEffectElement, lowerEffectProperty, lowerServiceKeyRef } from "./lower-effect.js";
 import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLibFn, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, canExitIslandToType, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/ir.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
-import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STRING_INDEX_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
+import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildExtensionMember, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STRING_INDEX_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import {
   UNSUPPORTED,
   blockedBindingUseDiag,
@@ -3976,6 +3976,13 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
       kind === "array" &&
       expr.name.text === "length" &&
       lowerer.checker.isTupleType(lowerer.checker.getBaseTypeOfLiteralType(lowerer.typeOf(expr.expression)));
+    if (kind === "child" && !expr.questionDotToken && isChildExtensionMember(lowerer, expr)) {
+      const loc = locOf(expr);
+      const extType = lowerer.mapTypeOf(lowerer.typeOf(expr));
+      if (extType === null) lowerer.badType(expr, lowerer.typeOf(expr));
+      const handle = lowerer.lowerExpr(expr.expression);
+      return { kind: "libCall", fn: "child.extGet", args: [handle, { kind: "strLit", value: expr.name.text, type: STRING, loc }], type: extType, loc };
+    }
     if (kind === "child" ? !isChildSurfaceMember(lowerer, expr) : !tupleLengthOnArray && !lowerer.isStdlibMember(expr)) return null;
     const name = expr.name.text;
     const strictReceiver = (expected: IrType): IrExpr => {

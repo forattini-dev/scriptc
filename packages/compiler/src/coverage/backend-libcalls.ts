@@ -114,6 +114,8 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "child.connected": ["rust"],
   "child.disconnect": ["rust"],
   "child.exitCode": ["c", "llvm", "rust"],
+  "child.extGet": ["rust"],
+  "child.extSet": ["rust"],
   "child.kill": ["c", "llvm", "rust"],
   "child.killNum": ["c", "llvm", "rust"],
   "child.killed": ["c", "llvm", "rust"],

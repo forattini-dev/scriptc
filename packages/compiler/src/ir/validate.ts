@@ -847,6 +847,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // unions (`number | undefined` / `number | null` — the libCall case
   // checks the arms, the spawnRes.status pattern).
   "child.pid": { argTypes: [CHILD_T], result: VOID },
+  "child.extGet": { argTypes: [CHILD_T, STRING], result: VOID },
+  "child.extSet": { argTypes: [CHILD_T, STRING, null], result: VOID },
   "child.exitCode": { argTypes: [CHILD_T], result: VOID },
   // The close-override pair: the bound close's result func type and the
   // override's func argument are program-dependent (the callback union's
@@ -3980,6 +3982,7 @@ function validateFunction(
           break;
         }
         if (e.fn === "schema.toJsonSchemaDocument") break; // site-typed JSON Schema document
+        if (e.fn === "child.extGet") break; // site-typed read of a program-declared handle property
         if (e.fn.startsWith("schema.jsonFrom")) break; // site-typed JSON Schema document (dyn in, checked record out)
         if (e.fn === "effect.contextGet" || e.fn === "effect.sqlExtra" || e.fn === "effect.httpResponseHeader" || e.fn === "effect.runSync" || e.fn === "effect.runPromise" || e.fn === "effect.fn" || e.fn === "effect.fnPipe" || e.fn === "effect.exitValue" || e.fn === "effect.causeSquash" || e.fn === "option.getOrUndefined" || e.fn === "option.getOrElse" || e.fn === "option.match" || e.fn.startsWith("schema.decode") || e.fn === "schema.is" || e.fn === "schema.encodeSync" || e.fn === "schema.make") { // site-typed: the success channel (runSync/runPromise), the function value (fn)
           if (e.fn === "effect.runPromise" && e.type.kind !== "promise") err("libCall effect.runPromise must be promise-typed", e.loc);

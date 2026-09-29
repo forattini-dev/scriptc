@@ -1430,6 +1430,19 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     return lowerer.mapTypeOf(lowerer.checker.getTypeAtLocation(iface.name))?.kind === "child";
   }
 
+/** A property the PROGRAM declared on a process handle: `exited` in `ChildProcess & { exited: Promise<number> }` is a
+   * member of an anonymous type literal, not of the lowered ChildProcess surface. Reads and writes go through the
+   * handle's extension slots (child.extGet / child.extSet). */
+  export function isChildExtensionMember(lowerer: Lowerer, access: ts.PropertyAccessExpression): boolean {
+    if (lowerer.mapTypeOf(lowerer.typeOf(access.expression))?.kind !== "child") return false;
+    const sym = lowerer.checker.getSymbolAtLocation(access.name);
+    const decls = sym ? lowerer.checker.declarationsOf(sym) : [];
+    return (
+      decls.length > 0 &&
+      decls.every((d) => ts.isPropertySignature(d) && ts.isTypeLiteralNode(d.parent) && !lowerer.isStdlibFile(d.getSourceFile()))
+    );
+  }
+
 /** True iff some declaration of the symbol lives in the standard library
    * (shipped ambient or default lib — the provenance half of every
    * supported-surface check). `some`, not `[0]`: divergence overrides merge

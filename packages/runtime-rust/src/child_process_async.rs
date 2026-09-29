@@ -27,6 +27,9 @@ pub struct ChildData {
     exit_listeners: Vec<ChildExitListener>,
     close_listeners: Vec<ChildExitListener>,
     error_listeners: Vec<ChildErrorListener>,
+    /// Program-declared properties hung on the handle (`child.exited = promise` over `ChildProcess & { exited: … }`):
+    /// typed at each site, stored type-erased and read back with the site's own type.
+    ext: std::collections::HashMap<String, Rc<dyn Any>>,
 }
 
 impl Trace for ChildData {
@@ -254,6 +257,7 @@ fn child_register(
         exit_listeners: Vec::new(),
         close_listeners: Vec::new(),
         error_listeners: Vec::new(),
+        ext: std::collections::HashMap::new(),
     });
     ASYNC_CHILDREN.with(|children| children.borrow_mut().push(child.clone()));
     child
@@ -437,6 +441,23 @@ pub fn child_exec_file(
         trace,
     );
     child
+}
+
+pub fn child_ext_set<T: 'static>(child: &JsChild, name: &str, value: T) {
+    let value: Rc<dyn Any> = Rc::new(value);
+    child.with_mut(|child| {
+        child.ext.insert(name.to_owned(), value);
+    });
+}
+
+/// Reads a property the program assigned on the handle. JS answers `undefined` for one never assigned; the type the
+/// site declared has no such arm, so an unassigned read is a program error (a `TypeError`-shaped throw).
+pub fn child_ext_get<T: 'static + Clone>(child: &JsChild, name: &str) -> T {
+    let found = child.with(|child| child.ext.get(name).cloned());
+    match found.as_ref().and_then(|value| value.downcast_ref::<T>()) {
+        Some(value) => value.clone(),
+        None => panic!("scriptc: ChildProcess property '{name}' was read before it was assigned"),
+    }
 }
 
 pub fn child_stdin(child: &JsChild) -> Option<JsChildWriter> {
