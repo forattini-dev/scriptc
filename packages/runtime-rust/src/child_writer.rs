@@ -118,13 +118,19 @@ fn child_writer_new(mut stdin: std::process::ChildStdin) -> JsChildWriter {
     writer
 }
 
+/// The stdin handle of a child whose SPAWN failed. Node hands back a live
+/// ChildProcess with a writable stdin and reports the failure on a later
+/// turn, so the husk starts WRITABLE: a read before the error lands must
+/// answer `true`, exactly like Node's. `children_dispatch_one` destroys it
+/// just before it delivers the error, so a read from inside the `error`
+/// listener answers `false`.
 fn child_writer_husk() -> JsChildWriter {
     Gc::new(ChildWriterData {
         sender: None,
         receiver: None,
         queued: 0,
         needs_drain: false,
-        writable: false,
+        writable: true,
         finished: false,
         drain_listeners: Vec::new(),
         finish_listeners: Vec::new(),
@@ -341,7 +347,12 @@ fn child_writers_dispatch_one() -> bool {
                 writer.needs_drain = false;
                 writer.finished = true;
                 writer.drain_listeners.clear();
-                writer.error_listeners.clear();
+                // The error listeners SURVIVE finish. A `write` performed
+                // from inside the finish listener is Node's
+                // ERR_STREAM_WRITE_AFTER_END, reported on the stream's
+                // error event — clearing them here left
+                // `child_writer_fail` with nobody to call, so it threw the
+                // error uncaught and killed the program mid-output.
                 std::mem::take(&mut writer.finish_listeners)
             });
             child_writer_remove(&writer);

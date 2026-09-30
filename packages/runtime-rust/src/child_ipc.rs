@@ -37,7 +37,15 @@ enum ChildIpcEvent {
 pub struct ChildIpcData {
     sender: Option<std::sync::mpsc::Sender<ChildIpcCommand>>,
     receiver: Option<std::sync::mpsc::Receiver<ChildIpcEvent>>,
+    /// The PUBLIC `connected` flag. Node clears it synchronously inside
+    /// disconnect(), so a read or a send that follows must already see the
+    /// channel as gone.
     connected: bool,
+    /// Whether the channel is still DRAINING. It outlives `connected`: the
+    /// worker thread may still hand over framed messages after a local
+    /// disconnect, and the child exit event stays deferred until this
+    /// clears, so an EOF cannot drop a message that was already framed.
+    open: bool,
     next_send_id: u64,
     send_callbacks: HashMap<u64, ChildIpcSendCallback>,
     message_listeners: Vec<ChildIpcMessageListener>,
@@ -65,6 +73,7 @@ impl ClearEdges for ChildIpcData {
         }
         self.receiver = None;
         self.connected = false;
+        self.open = false;
         self.send_callbacks.clear();
         self.message_listeners.clear();
         self.disconnect_listeners.clear();
@@ -211,6 +220,7 @@ fn child_ipc_new(endpoint: ChildIpcEndpoint) -> JsChildIpc {
         sender: Some(command_sender),
         receiver: Some(event_receiver),
         connected: true,
+        open: true,
         next_send_id: 1,
         send_callbacks: HashMap::new(),
         message_listeners: Vec::new(),
@@ -222,6 +232,12 @@ fn child_ipc_new(endpoint: ChildIpcEndpoint) -> JsChildIpc {
 
 pub fn child_ipc_connected(channel: &JsChildIpc) -> bool {
     channel.with(|channel| channel.connected)
+}
+
+/// Whether the channel still has to be drained — the liveness question, as
+/// opposed to the public `connected` answer.
+pub fn child_ipc_open(channel: &JsChildIpc) -> bool {
+    channel.with(|channel| channel.open)
 }
 
 fn child_ipc_send_inner(
@@ -260,10 +276,31 @@ fn child_ipc_send_inner(
 
 fn child_ipc_disconnect_inner(channel: &JsChildIpc) {
     channel.with_mut(|channel| {
-        if channel.connected
-            && let Some(sender) = &channel.sender
-        {
+        if !channel.connected {
+            return;
+        }
+        // Node closes the channel INSIDE disconnect(): `connected` reads false
+        // and a following send is refused on the spot. `open` stays set, so
+        // the loop still drains whatever the worker thread already framed and
+        // still defers the child exit event until it finishes.
+        channel.connected = false;
+        if let Some(sender) = &channel.sender {
             let _ = sender.send(ChildIpcCommand::Disconnect);
+        }
+        // Node emits `disconnect` on the tick after a LOCAL disconnect(),
+        // not after a round trip to the channel thread. Taking the listeners
+        // here and queueing them keeps that order: anything the caller does
+        // after disconnect() — a refused send, whose callback also settles on
+        // a later tick — is queued behind this. The Disconnected event still
+        // arrives later and still fails the pending send callbacks, but finds
+        // no disconnect listener left to call, so they fire exactly once.
+        let listeners = std::mem::take(&mut channel.disconnect_listeners);
+        if !listeners.is_empty() {
+            process_next_tick(Box::new(move || {
+                for listener in listeners {
+                    (listener.invoke)();
+                }
+            }));
         }
     });
 }
@@ -319,10 +356,14 @@ fn child_ipc_dispatch(channel: &JsChildIpc, event: ChildIpcEvent) {
         }
         ChildIpcEvent::Disconnected => {
             let (callbacks, listeners) = channel.with_mut(|channel| {
-                if !channel.connected {
+                // Guarded on `open`, not `connected`: a local disconnect() has
+                // already cleared `connected`, and the disconnect listeners must
+                // still fire exactly once when the channel actually ends.
+                if !channel.open {
                     return (Vec::new(), Vec::new());
                 }
                 channel.connected = false;
+                channel.open = false;
                 channel.sender = None;
                 let callbacks = std::mem::take(&mut channel.send_callbacks)
                     .into_values()
@@ -362,7 +403,7 @@ fn child_ipc_dispatch_one() -> bool {
 }
 
 fn child_ipc_pending() -> bool {
-    CHILD_IPC_CHANNELS.with(|channels| channels.borrow().iter().any(child_ipc_connected))
+    CHILD_IPC_CHANNELS.with(|channels| channels.borrow().iter().any(child_ipc_open))
 }
 
 fn child_ipc_finish() {

@@ -66,6 +66,9 @@ struct ArraySparse {
 pub struct ArrayData<T: ArrayElement> {
     elements: Vec<T>,
     auxiliary: Option<Rc<ArrayAux<T>>>,
+    // `Box` keeps the common property-free array at its small size, matching
+    // the `sparse` field below; a bare `Vec` would widen every `ArrayData`.
+    #[allow(clippy::box_collection)]
     properties: Option<Box<Vec<(JsString, T)>>>,
     view: Option<Rc<dyn ArrayView<T>>>,
     sparse: Option<Box<ArraySparse>>,
@@ -248,18 +251,18 @@ pub fn array_set_raw<T: ArrayElement>(array: &JsArray<T>, raw: JsArray<T>) {
 
 pub fn array_property_get<T: ArrayElement>(array: &JsArray<T>, key: &JsString) -> Option<T> {
     array.with(|data| data.properties.as_ref().and_then(|properties|
-        properties.iter().find(|(name, _)| name.as_ref() == key.as_ref()).map(|(_, value)| value.clone())))
+        properties.iter().find(|(name, _)| name == key).map(|(_, value)| value.clone())))
 }
 
 pub fn array_property_has<T: ArrayElement>(array: &JsArray<T>, key: &JsString) -> bool {
     array.with(|data| data.properties.as_ref().is_some_and(|properties|
-        properties.iter().any(|(name, _)| name.as_ref() == key.as_ref())))
+        properties.iter().any(|(name, _)| name == key)))
 }
 
 pub fn array_property_set<T: ArrayElement>(array: &JsArray<T>, key: JsString, value: T) {
     array.with_mut(|data| {
         let properties = data.properties.get_or_insert_with(|| Box::new(Vec::new()));
-        if let Some((_, current)) = properties.iter_mut().find(|(name, _)| name.as_ref() == key.as_ref()) {
+        if let Some((_, current)) = properties.iter_mut().find(|(name, _)| name == &key) {
             *current = value;
         } else {
             properties.push((key, value));

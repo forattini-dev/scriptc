@@ -1,40 +1,85 @@
-child-process.ts:10:16 - error SC2020: 'spawn without { stdio: "ignore" }' is part of the standard library types but has no scriptc lowering yet
+child-process.ts:19:19 - error SC2020: 'spawn with a non-literal options argument' is part of the standard library types but has no scriptc lowering yet
 
-   9 | // options never silently loses the child's output.
-  10 | const noOpts = spawn("/bin/echo");
-     |                ^~~~~~~~~~~~~~~~~~
-  11 | 
+  18 | const options: { stdio: "ignore"; detached: boolean } = { stdio: "ignore", detached: true };
+  19 | spawn("true", [], options);
+     |                   ^~~~~~~
+  20 | spawn("printf", ["unsafe"], { stdio: "ignore", shell: true });
 
-  hint: Node's default stdio is "pipe" (streams, no lowering) — pass { stdio: "ignore" } or { stdio: "inherit" } explicitly, or capture with spawnSync
+  hint: pass spawn options inline
 
-child-process.ts:14:47 - error SC2020: 'spawn with stdio: "pipe"' is part of the standard library types but has no scriptc lowering yet
+child-process.ts:20:55 - error SC2020: 'spawn with shell enabled and an args array' is part of the standard library types but has no scriptc lowering yet
 
-  13 | // lowering — each names its gap.
-  14 | const piped = spawn("/bin/echo", [], { stdio: "pipe" });
-     |                                               ^~~~~~
-  15 | const inherited = spawn("/bin/echo", [], { stdio: "inherit" });
+  19 | spawn("true", [], options);
+  20 | spawn("printf", ["unsafe"], { stdio: "ignore", shell: true });
+     |                                                       ^~~~
+  21 | const c = spawn("true", [], { stdio: "ignore" });
 
-  hint: piped STDIN has no lowering — pipe stdout/stderr with the tuple form (stdio: ["ignore", "pipe", "pipe"]), or capture with spawnSync
+  hint: pass one command-line string with spawn(command, { shell: true, stdio: ... })
 
-child-process.ts:23:14 - error SC1090: listeners returning a value (make the callback body a block, or return nothing) is not supported yet
+child-process.ts:27:14 - error SC1090: listeners returning a value (make the callback body a block, or return nothing) is not supported yet
 
-  22 | // as void.
-  23 | c.on("exit", (): number => 5);
+  26 | // as void.
+  27 | c.on("exit", (): number => 5);
      |              ^~~~~~~~~~~~~~~
-  24 | 
+  28 | // Methods have no bound-value form — call on directly.
 
-child-process.ts:26:7 - error SC2007: values of type '{ (event: "exit", listener: (code: number | null, signal: string | null) => void): void; (event: "error", listener: (err: Error) => void): void; (event: "close", listener: (code: number | null, signal: string | null) => void): void; (event: "spawn", listener: () => void): void; }' cannot be compiled: the type declares multiple call signatures (overloads), and a compiled function value is always one concrete signature
+child-process.ts:29:7 - error SC2007: values of type '{ (event: "exit", listener: (code: number | null, signal: string | null) => void): void; (event: "close", listener: (code: number | null, signal: string | null) => void): void; (event: "error", listener: (err: Error) => void): void; (event: "spawn", listener: () => void): void; (event: "message", listener: (message:...' cannot be compiled: the type declares multiple call signatures (overloads), and a compiled function value is always one concrete signature
 
-  25 | // Methods have no bound-value form — call on directly.
-  26 | const f = c.on;
+  28 | // Methods have no bound-value form — call on directly.
+  29 | const f = c.on;
      |       ^
-  27 | 
+  30 | // The callback slice accepts inline utf8/maxBuffer options, but not all of
 
   hint: annotate the slot with the ONE signature the program actually calls (e.g. '(x: number) => string'), or wrap the overloaded function in a single-signature arrow
 
-child-process.ts:26:11 - error SC1090: child methods as values (call 'on' directly) are not supported yet
+child-process.ts:29:11 - error SC1090: child methods as values (call 'on' directly) are not supported yet
 
-  25 | // Methods have no bound-value form — call on directly.
-  26 | const f = c.on;
+  28 | // Methods have no bound-value form — call on directly.
+  29 | const f = c.on;
      |           ^~~~
-  27 | 
+  30 | // The callback slice accepts inline utf8/maxBuffer options, but not all of
+
+child-process.ts:32:1 - error SC2020: 'execFile with 1 arguments' is part of the standard library types but has no scriptc lowering yet
+
+  31 | // Node's options or the optional-callback overload family.
+  32 | execFile("true");
+     | ^~~~~~~~~~~~~~~~
+  33 | execFile("true", [], { cwd: "/tmp" }, () => {});
+
+  hint: use execFile(file, args?, { encoding: "utf8", maxBuffer? }?, callback)
+
+child-process.ts:33:24 - error SC2020: 'execFile with this options shape' is part of the standard library types but has no scriptc lowering yet
+
+  32 | execFile("true");
+  33 | execFile("true", [], { cwd: "/tmp" }, () => {});
+     |                        ^~~~~~~~~~~
+  34 | const bufferLimit = 1024;
+
+  hint: encoding and maxBuffer are the supported callback options
+
+child-process.ts:40:6 - error SC2020: 'fork with a runtime-valued module path' is part of the standard library types but has no scriptc lowering yet
+
+  39 | // build time. The remaining channel is JSON-only and occupies stdio slot 3.
+  40 | fork(process.argv[1]!);
+     |      ^~~~~~~~~~~~~~~~
+  41 | const staticWorker = new URL("./child-process.ts", import.meta.url);
+
+  hint: resolve a relative worker with new URL("./worker.ts", import.meta.url) or fileURLToPath(...)
+
+child-process.ts:42:41 - error SC2020: 'fork with non-JSON serialization' is part of the standard library types but has no scriptc lowering yet
+
+  41 | const staticWorker = new URL("./child-process.ts", import.meta.url);
+  42 | fork(staticWorker, [], { serialization: "advanced" });
+     |                                         ^~~~~~~~~~
+  43 | fork(staticWorker, [], { stdio: ["ignore", "ignore", "ignore", "ignore"] });
+
+  hint: use serialization: "json"
+
+child-process.ts:43:64 - error SC2020: 'fork without a fourth-slot IPC channel' is part of the standard library types but has no scriptc lowering yet
+
+  42 | fork(staticWorker, [], { serialization: "advanced" });
+  43 | fork(staticWorker, [], { stdio: ["ignore", "ignore", "ignore", "ignore"] });
+     |                                                                ^~~~~~~~
+  44 | // Keep each fence on its own statement so diagnostics remain site-specific.
+
+  hint: the fourth slot must be "ipc"

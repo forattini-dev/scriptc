@@ -1,3 +1,4 @@
+// @rust-only
 // child_process.execFile's asynchronous callback slice: the call returns a
 // live ChildProcess immediately, captures utf8 stdout/stderr, fires after
 // the current turn, and reports non-zero/spawn failures through Error.
