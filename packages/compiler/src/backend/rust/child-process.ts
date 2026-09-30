@@ -330,6 +330,12 @@ export function emitRustChildProcessCall(
     }
     return `runtime::child_spawn_options(&(${context.emitExpr(command)}), &(${context.emitExpr(arguments_)}), ${context.emitExpr(stdinMode)}, ${context.emitExpr(stdoutMode)}, ${context.emitExpr(stderrMode)}, ${context.emitExpr(stdoutFd)}, ${context.emitExpr(stderrFd)}, ${context.emitExpr(detached)}, ${context.emitExpr(hasEnv)}, &(${context.emitExpr(envPairs)}), &(${context.emitExpr(cwd)}))`;
   }
+  if (expr.fn === "child.extGet" && expr.args.length === 2 && expr.args[0]?.type.kind === "child" && expr.args[1]?.kind === "strLit") {
+    return `runtime::child_ext_get::<${context.rustType(expr.type, expr.loc)}>(&(${context.emitExpr(expr.args[0])}), ${JSON.stringify(expr.args[1].value)})`;
+  }
+  if (expr.fn === "child.extSet" && expr.args.length === 3 && expr.args[0]?.type.kind === "child" && expr.args[1]?.kind === "strLit" && expr.args[2] !== undefined) {
+    return `runtime::child_ext_set(&(${context.emitExpr(expr.args[0])}), ${JSON.stringify(expr.args[1].value)}, ${context.emitExpr(expr.args[2])})`;
+  }
   if ((expr.fn === "child.pid" || expr.fn === "child.exitCode") && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "child") {
     const empty = expr.fn === "child.pid" ? "undefinedT" : "nullT";

@@ -473,6 +473,48 @@ const TO_ESM_MIXED_DEGRADE =
   "its bundler-emitted export surface cannot be respelled around its __toESM interop imports " +
   "— the package serves from the island instead";
 
+/** rolldown's shared-runtime spelling of the same interop (drizzle-orm@1's dist): the helper lives once in
+ * `_virtual/_rolldown/runtime.cjs` (`exports.__toESM = __toESM`) and every module applies it by REASSIGNING a binding
+ * it already required — `const require_runtime = require("../_virtual/_rolldown/runtime.cjs"); let x = require("x");
+ * x = require_runtime.__toESM(x);`. The wrapper's semantics are esbuild's, so the erasure is too. */
+const ROLLDOWN_RUNTIME_SPEC = /(^|\/)_virtual\/_rolldown\/runtime(\.c?js)?$/;
+const rolldownRuntimeVerified = new Map<string, boolean>();
+
+/** The shared runtime file really defines esbuild's __toESM by structure and exports it — a same-named file with a
+ * different helper must not be erased around. */
+function rolldownRuntimeIsToEsm(fromFile: string, spec: string): boolean {
+  const file = resolveRelativeCjs(fromFile, spec);
+  if (file === null) return false;
+  const cached = rolldownRuntimeVerified.get(file);
+  if (cached !== undefined) return cached;
+  let ok = false;
+  try {
+    const src = trackedReadFile(file);
+    if (src !== null) {
+      const rt = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+      const decls = rt.statements.filter(
+        (st) => ts.isVariableStatement(st) && st.declarationList.declarations.some((d) => ts.isIdentifier(d.name) && d.name.text === "__toESM"),
+      );
+      const exported = rt.statements.some(
+        (st) =>
+          ts.isExpressionStatement(st) &&
+          ts.isBinaryExpression(st.expression) &&
+          st.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isPropertyAccessExpression(st.expression.left) &&
+          isExportsIdent(st.expression.left.expression) &&
+          st.expression.left.name.text === "__toESM" &&
+          ts.isIdentifier(st.expression.right) &&
+          st.expression.right.text === "__toESM",
+      );
+      ok = decls.length === 1 && recognizedToEsmDecl(decls[0]!) && exported;
+    }
+  } catch {
+    ok = false;
+  }
+  rolldownRuntimeVerified.set(file, ok);
+  return ok;
+}
+
 /** The interop-erasure plan for one CJS file (see the section header). */
 function planToEsmInterop(sf: ts.SourceFile): ToEsmPlan {
   const pads: { start: number; end: number }[] = [];
@@ -489,13 +531,34 @@ function planToEsmInterop(sf: ts.SourceFile): ToEsmPlan {
   );
   const refs: ts.Identifier[] = [];
   const calls: ts.CallExpression[] = [];
+  // rolldown: `const H = require(".../_virtual/_rolldown/runtime.cjs")` and its `H.__toESM(x)` call sites.
+  const rdHelpers = new Map<string, { stmt: ts.VariableStatement; spec: string }>();
+  for (const st of sf.statements) {
+    if (!ts.isVariableStatement(st) || st.declarationList.declarations.length !== 1) continue;
+    const d = st.declarationList.declarations[0]!;
+    const spec = ts.isIdentifier(d.name) && d.initializer !== undefined ? bareRequireSpecOf(d.initializer) : null;
+    if (spec !== null && ROLLDOWN_RUNTIME_SPEC.test(spec)) rdHelpers.set((d.name as ts.Identifier).text, { stmt: st, spec });
+  }
+  const rdSites: ts.CallExpression[] = [];
   const collect = (n: ts.Node): void => {
+    if (
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      ts.isIdentifier(n.expression.name) &&
+      n.expression.name.text === "__toESM" &&
+      ts.isIdentifier(n.expression.expression) &&
+      rdHelpers.has(n.expression.expression.text)
+    ) {
+      rdSites.push(n);
+      n.arguments.forEach(collect);
+      return;
+    }
     if (ts.isIdentifier(n) && n.text === "__toESM") refs.push(n);
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "__toESM") calls.push(n);
     ts.forEachChild(n, collect);
   };
   collect(sf);
-  if (calls.length === 0 && refs.length === 0) return plan;
+  if (calls.length === 0 && refs.length === 0 && rdSites.length === 0) return plan;
   // Every reference must be the declarator's own name or a call's callee —
   // a helper that escapes as a VALUE is outside the recognized shape.
   const callees = new Set<ts.Node>(calls.map((c) => c.expression));
@@ -505,9 +568,32 @@ function planToEsmInterop(sf: ts.SourceFile): ToEsmPlan {
       if (ts.isIdentifier(d.name) && d.name.text === "__toESM") declNames.add(d.name);
     }
   }
+  // rolldown's shared runtime file itself: it defines the helper (recognized by structure) and re-exports it
+  // (`exports.__toESM = __toESM`). Nothing to erase here — every importer's `require` of this file is erased at ITS
+  // call sites, so the file is never reached; it is served untouched.
+  const exportsToEsm = (r: ts.Identifier): boolean => {
+    const a = r.parent;
+    return (
+      // the `exports.__toESM` property NAME …
+      (ts.isPropertyAccessExpression(a) && a.name === r && isExportsIdent(a.expression)) ||
+      // … and the `= __toESM` value on its right
+      (ts.isBinaryExpression(a) &&
+        a.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        a.right === r &&
+        ts.isPropertyAccessExpression(a.left) &&
+        isExportsIdent(a.left.expression) &&
+        a.left.name.text === "__toESM")
+    );
+  };
+  if (
+    calls.length === 0 && rdSites.length === 0 && declStmts.length === 1 && recognizedToEsmDecl(declStmts[0]!) &&
+    refs.every((r) => declNames.has(r) || exportsToEsm(r))
+  ) {
+    return plan;
+  }
   if (refs.some((r) => !callees.has(r) && !declNames.has(r))) return fail(TO_ESM_ESCAPE_DEGRADE);
-  if (calls.length === 0) return plan; // declared but never called — dead helper
-  if (declStmts.length !== 1 || !recognizedToEsmDecl(declStmts[0]!)) return fail(TO_ESM_SHAPE_DEGRADE);
+  if (calls.length === 0 && rdSites.length === 0) return plan; // declared but never called — dead helper
+  if (calls.length > 0 && (declStmts.length !== 1 || !recognizedToEsmDecl(declStmts[0]!))) return fail(TO_ESM_SHAPE_DEGRADE);
 
   /** Module-scope interop bindings: name → whether `.default` IS the
    * module (pad the access) rather than a member read of its `default`. */
@@ -552,6 +638,70 @@ function planToEsmInterop(sf: ts.SourceFile): ToEsmPlan {
     pads.push({ start: arg0!.getEnd(), end: call.getEnd() });
   }
 
+  // rolldown call sites: `id = H.__toESM(id)` at module scope over a binding declared by `let id = require("spec")`.
+  const erasedAssignments = new Set<ts.Node>();
+  if (rdSites.length > 0) {
+    for (const [, helper] of rdHelpers) {
+      if (!rolldownRuntimeIsToEsm(sf.fileName, helper.spec)) return fail(TO_ESM_SHAPE_DEGRADE);
+    }
+    for (const call of rdSites) {
+      if (call.arguments.length < 1 || call.arguments.length > 2) return fail(TO_ESM_ARG_DEGRADE);
+      const arg0 = call.arguments[0]!;
+      if (!ts.isIdentifier(arg0)) return fail(TO_ESM_ARG_DEGRADE);
+      let isNodeMode = false;
+      if (call.arguments.length === 2) {
+        const modeArg = call.arguments[1]!;
+        if (ts.isNumericLiteral(modeArg)) isNodeMode = Number(modeArg.text) !== 0;
+        else if (modeArg.kind === ts.SyntaxKind.TrueKeyword) isNodeMode = true;
+        else if (modeArg.kind === ts.SyntaxKind.FalseKeyword) isNodeMode = false;
+        else return fail(TO_ESM_ARG_DEGRADE);
+      }
+      const assign = call.parent;
+      if (
+        !ts.isBinaryExpression(assign) ||
+        assign.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
+        assign.right !== call ||
+        !ts.isIdentifier(assign.left) ||
+        assign.left.text !== arg0.text ||
+        !ts.isExpressionStatement(assign.parent) ||
+        assign.parent.parent !== sf
+      ) {
+        return fail(TO_ESM_ESCAPE_DEGRADE);
+      }
+      const id = arg0.text;
+      const declared = sf.statements.filter(
+        (st): st is ts.VariableStatement =>
+          ts.isVariableStatement(st) &&
+          st.declarationList.declarations.some((d) => ts.isIdentifier(d.name) && d.name.text === id),
+      );
+      const declStmt = declared.length === 1 ? declared[0]! : undefined;
+      const decl = declStmt?.declarationList.declarations.find((d) => ts.isIdentifier(d.name) && d.name.text === id);
+      const spec = decl?.initializer !== undefined ? bareRequireSpecOf(decl.initializer) : null;
+      if (declStmt === undefined || spec === null || declStmt.declarationList.declarations.length !== 1 || declStmt.getEnd() > assign.parent.getStart(sf)) {
+        return fail(TO_ESM_ESCAPE_DEGRADE);
+      }
+      if (bindings.has(id)) return fail(TO_ESM_ESCAPE_DEGRADE);
+      const defaultIsModule = isNodeMode || !requireTargetEsModuleStamped(sf.fileName, spec);
+      bindings.set(id, defaultIsModule);
+      if (defaultIsModule) moduleBindings.add(id);
+      erasedAssignments.add(assign);
+      pads.push({ start: assign.parent.getStart(sf), end: assign.parent.getEnd() });
+    }
+    // The helper binding must have no use besides these call sites (they were not descended into), then it disappears.
+    const escapes = (n: ts.Node): boolean => {
+      if (rdSites.includes(n as ts.CallExpression)) return false;
+      if (ts.isIdentifier(n) && rdHelpers.has(n.text)) {
+        const p = n.parent;
+        return !(ts.isVariableDeclaration(p) && p.name === n);
+      }
+      let found = false;
+      ts.forEachChild(n, (c) => { if (!found && escapes(c)) found = true; });
+      return found;
+    };
+    if (escapes(sf)) return fail(TO_ESM_ESCAPE_DEGRADE);
+    for (const [, helper] of rdHelpers) pads.push({ start: helper.stmt.getStart(sf), end: helper.stmt.getEnd() });
+  }
+
   if (bindings.size > 0) {
     // Binding safety: the erased binding must be declared exactly once and
     // never written — the `.default` mapping below matches receivers by
@@ -578,7 +728,7 @@ function planToEsmInterop(sf: ts.SourceFile): ToEsmPlan {
         ts.isIdentifier(n.left) &&
         bindings.has(n.left.text)
       ) {
-        violated = true;
+        if (!erasedAssignments.has(n)) violated = true;
       } else if (
         (ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) &&
         (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken) &&

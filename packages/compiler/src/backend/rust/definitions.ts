@@ -315,8 +315,13 @@ export class RustDefinitionEmitter {
       } else {
         this.context.line("match self {");
         this.context.pushIndent();
-        for (const { tag } of traced) {
-          this.context.line(`Self::${this.context.unionVariant(tag)}(value) => tracer.edge(value),`);
+        // The catch-value enum (the %Error root's runtime type) is a heap value in its own right, not a `Gc` handle.
+        const errorValue = this.context.errorClassRoots().length > 0 ? this.context.errorValueName() : null;
+        for (const { arm, tag } of traced) {
+          const edge = errorValue !== null && this.context.rustType(arm) === errorValue
+            ? "runtime::Trace::trace(value, tracer)"
+            : "tracer.edge(value)";
+          this.context.line(`Self::${this.context.unionVariant(tag)}(value) => ${edge},`);
         }
         this.context.line("_ => {},");
         this.context.popIndent();

@@ -1244,6 +1244,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return { kind: "object", className: RUNTIME_EMITTER_CLASS };
   }
+  // stream.Stream: the legacy base class every node:stream class extends (`class Stream extends EventEmitter`). A value
+  // typed `Stream` (a `stdio` option, a pipe target) is one of the runtime stream classes, all of which sit under the
+  // runtime emitter base, so the type maps to that base and every concrete stream upcasts into it.
+  if (
+    psym?.name === "Stream" &&
+    checker.declarationsOf(psym).some(
+      (d) => ts.isClassDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()) && isDeclaredInAmbientModule(d, "stream"),
+    )
+  ) {
+    return { kind: "object", className: RUNTIME_EMITTER_CLASS };
+  }
   // readline.Interface: the interface value is an f64 handle into the
   // runtime's registry (the Timeout-id precedent). The NAME is generic,
   // so the provenance check adds the enclosing ambient module, like
@@ -2354,7 +2365,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const callSigs = checker.getCallSignatures(widened);
   if (callSigs.length === 1) {
     const sig = callSigs[0]!;
-    if (sig.getTypeParameters().length) { const fid = ctx.dynamic ? null : familyIdOf(checker, widened); if (fid !== null) ctx.noteFamily?.(fid); return fid === null ? null : { kind: "genericFunc", familyId: fid }; } // a generic function VALUE rides its closure family (lower-families.ts)
+    if (sig.getTypeParameters().length) { const fid = familyIdOf(checker, widened); if (fid !== null) ctx.noteFamily?.(fid); return fid === null ? null : { kind: "genericFunc", familyId: fid }; } // a generic function VALUE rides its closure family (lower-families.ts)
     // A SYNTHESIZED rest param (tsc's JS inference for a function body
     // reading `arguments` — `(...args: any[]) => any` whose args symbol
     // has no declaration): the dotDotDot check below can't see it, and a
@@ -2486,6 +2497,32 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return true;
       });
     if (childShaped && core >= 2) return CHILD_T;
+  }
+  // `ChildProcessWithoutNullStreams` (stdlib): ChildProcess with non-null stdio — a type refinement of the same handle.
+  if (
+    flags & ts.TypeFlags.Object &&
+    psym?.name === "ChildProcessWithoutNullStreams" &&
+    checker.declarationsOf(psym).length > 0 &&
+    checker.declarationsOf(psym).every((d) => ts.isInterfaceDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()))
+  ) {
+    return CHILD_T;
+  }
+  // `ChildProcess & { exited: Promise<number> }` (and the `& ChildProcessWithoutNullStreams` refinement): the process
+  // handle with program-declared properties hung on it. Every component is either the handle itself or an anonymous
+  // type literal (never a declared class/interface, which would carry members the handle does not have), so the type IS
+  // the handle; the extra properties live in the handle's extension slots (child.extGet / child.extSet).
+  if (widened.isIntersectionType() && callSigs.length === 0) {
+    let handle = false;
+    let plain = true;
+    for (const part of ts.constituentTypes(widened)) {
+      if (mapType(part, ctx)?.kind === "child") {
+        handle = true;
+        continue;
+      }
+      const decls = part.getSymbol() !== undefined ? checker.declarationsOf(part.getSymbol()!) : [];
+      if (!(part.flags & ts.TypeFlags.Object) || decls.length === 0 || !decls.every((d) => ts.isTypeLiteralNode(d))) plain = false;
+    }
+    if (handle && plain) return CHILD_T;
   }
   if (flags & (ts.TypeFlags.Object | ts.TypeFlags.Intersection) && callSigs.length === 0) {
     const viaAlias = mapGenericUtilityAlias(widened, ctx);
@@ -3494,7 +3531,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // slot (lower-families.ts — one body per demanded instantiation); an
       // overloaded one (or a dynamic build) leaves the shape, and calls
       // monomorphize against the defining object literal's declaration. OPTIONAL generic members stay out (no slot).
-      if (isGenericCallableMemberType(fieldTs, checker) && (ctx.dynamic || !isFamilySlotMember(checker, widened, p))) continue;
+      if (isGenericCallableMemberType(fieldTs, checker) && !isFamilySlotMember(checker, widened, p)) continue;
       let pt = (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)
         ? DYN
         : mapJsArrayField(p, fieldTs, ctx, (type) => mapType(type, ctx)) ?? mapType(fieldTs, ctx); // effect's phantom `tag?: T` belongs to the native checked-dynamic model even in a hybrid build
@@ -3649,7 +3686,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
       const role = spec.role(i);
       const mapped = mapType(arg, ctx);
       if (!mapped) {
-        return `the ${container} shape is supported, but its ${role} type '${text(arg)}' does not compile`;
+        return `the ${container} shape is supported, but its ${role} type '${text(arg)}' does not compile${nestedBlocker(arg, ctx)}`;
       }
       if ((container === "Map" || container === "ReadonlyMap") && i === 0 && !isSupportedMapKey(mapped, ctx.nativeDynamicMaps)) {
         return `the ${container} shape is supported, but keys are limited to native scalar keys${ctx.nativeDynamicMaps ? " and checked-dynamic values" : ""} — '${text(arg)}' is outside that domain`;
@@ -3674,7 +3711,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
     if (elemTs === undefined) return null;
     const elem = mapType(elemTs, ctx);
     if (!elem) {
-      return `the array shape is supported, but its element type '${text(elemTs)}' does not compile`;
+      return `the array shape is supported, but its element type '${text(elemTs)}' does not compile${nestedBlocker(elemTs, ctx)}`;
     }
     return `the array shape is supported, but '${text(elemTs)}' elements have no array representation yet`;
   }
@@ -3687,7 +3724,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
       const et = mapType(arg, ctx);
       if (et?.kind === "void" && isUnitOnlyTsType(arg)) continue;
       if (!et || et.kind === "void") {
-        return `the tuple shape is supported, but its element type '${text(arg)}' does not compile`;
+        return `the tuple shape is supported, but its element type '${text(arg)}' does not compile${nestedBlocker(arg, ctx)}`;
       }
     }
     return null;
@@ -3801,7 +3838,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
       return null;
     }
     const fieldTs = checker.getTypeOfSymbol(p);
-    if (isGenericCallableMemberType(fieldTs, checker) && (ctx.dynamic || !isFamilySlotMember(checker, widened, p))) continue;
+    if (isGenericCallableMemberType(fieldTs, checker) && !isFamilySlotMember(checker, widened, p)) continue;
     let pt = (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p) ? DYN : mapType(fieldTs, ctx); // effect's phantom `tag?: T` stays native checked-dynamic in hybrid builds
     if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
     if (!pt || pt.kind === "void") {

@@ -2497,6 +2497,10 @@ function preflight7(load: LoadResult): {
               if (dep === null) continue; // offender recorded — the fallback loop reloads
             } else {
               if (bindingKind === "createRequire") continue;
+              // effect is the native KERNEL, not an island or a static package: a static package's
+              // `require("effect/Effect")` is the same kernel import an ESM `import` of it is (JS `require` binds an
+              // alias, so member uses resolve through it to the kernel declarations).
+              if (npmReq !== null && npmReq.packageName === "effect" && npmStaticPackageOfPath(sf.fileName) !== null) continue;
               if (
                 canonicalBuiltinModule(req.spec) === null &&
                 !processModuleAliasRequire7(req.spec, req.decl)

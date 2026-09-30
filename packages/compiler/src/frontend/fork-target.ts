@@ -264,6 +264,10 @@ export function forkTargetPaths(program: ts.Program, files: readonly ts.SourceFi
   const seen = new Set<string>();
   for (const sourceFile of files) {
     if (sourceFile.isDeclarationFile || sourceFile.fileName.endsWith(".json")) continue;
+    // A `child_process` fork call always spells `fork` (the imported member, an alias's import specifier, or the
+    // `.fork` property). Asking the checker about every call of a file that never mentions it would prefetch the
+    // whole file's types and symbols — for a large program, the dominant cost of loading it.
+    if (!sourceFile.text.includes("fork")) continue;
     ts.walkPreorder(sourceFile, (node) => {
       if (!ts.isCallExpression(node)) return undefined;
       const target = forkCallModulePath(program, node);

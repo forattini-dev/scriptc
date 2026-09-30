@@ -24,7 +24,7 @@ import { nativeImportHandleType } from "./lower-native-import-types.js";
 import { varBindingType } from "./lower-variable-types.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
-import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
+import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isChildExtensionMember, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsAliasVarDeclOf, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
@@ -4851,6 +4851,19 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
             return {
               kind: "exprStmt",
               expr: { kind: "libCall", fn: "process.exitCodeSet", args: [value], type: VOID, loc },
+              loc,
+            };
+          }
+          // `child.exited = promise` over `ChildProcess & { exited: … }`: the handle's extension slot.
+          if (!expr.left.questionDotToken && isChildExtensionMember(lowerer, expr.left)) {
+            const loc = locOf(expr);
+            const extType = lowerer.mapTypeOf(lowerer.typeOf(expr.left));
+            if (extType === null) lowerer.badType(expr.left, lowerer.typeOf(expr.left));
+            const handle = lowerer.lowerExpr(expr.left.expression);
+            const value = lowerer.lowerExprExpecting(expr.right, extType);
+            return {
+              kind: "exprStmt",
+              expr: { kind: "libCall", fn: "child.extSet", args: [handle, { kind: "strLit", value: expr.left.name.text, type: STRING, loc }, value], type: VOID, loc },
               loc,
             };
           }
