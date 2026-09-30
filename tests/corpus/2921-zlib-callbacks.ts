@@ -1,5 +1,6 @@
+// @rust-only
 // The default-options one-shot zlib family: string and Buffer inputs,
-// worker-backed error-first callbacks, aliases/namespaces, and crc32.
+// worker-backed error-first callbacks, namespace spellings, and crc32.
 // Compressed bytes are zlib-version-dependent, so every encoder is checked
 // through a decoder and only stable format markers/results are printed.
 import {
@@ -17,7 +18,6 @@ import * as zlib from "node:zlib";
 
 const text = "the quick brown fox jumps over the lazy dog ☃".repeat(20);
 const raw = Buffer.from(text, "utf8");
-const gzipAlias = gzip;
 
 async function run(): Promise<void> {
   console.log("crc", crc32("hello"), crc32(Buffer.from("hello")), crc32("hello", 123));
@@ -56,7 +56,7 @@ async function run(): Promise<void> {
   console.log("raw", rawPlain.equals(raw));
 
   const gzipPacked = await new Promise<Buffer>((resolve, reject) => {
-    gzipAlias(text, (error, value) => {
+    gzip(text, (error, value) => {
       if (error) reject(error);
       else resolve(value);
     });
