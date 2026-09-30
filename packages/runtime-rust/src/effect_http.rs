@@ -36,7 +36,7 @@ fn set_named(entries: &mut Vec<(JsString, JsString)>, name: &JsString, value: &J
     entries.retain(|(current, _)| if ascii_case_insensitive {
         !current.as_ref().eq_ignore_ascii_case(name.as_ref())
     } else {
-        current.as_ref() != name.as_ref()
+        current != name
     });
     entries.push((name.clone(), value.clone()));
 }

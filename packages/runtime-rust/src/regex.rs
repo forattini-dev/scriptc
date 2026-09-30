@@ -93,7 +93,7 @@ pub fn regex_new<S: JsStringSource + ?Sized>(pattern: &S, flags: &str) -> JsRege
     let flags = validate_regex_flags(flags);
     let pattern = pattern.to_js_string();
     let source = if pattern.is_empty() { string("(?:)") } else { pattern };
-    let named_groups = regex_named_capture_groups(&source.to_utf8_lossy());
+    let named_groups = regex_named_capture_groups(source.to_utf8_lossy());
     let parsed_flags = regress::Flags::from(flags.as_str());
     let unicode = flags.contains('u') || flags.contains('v');
     let compiled = if unicode {

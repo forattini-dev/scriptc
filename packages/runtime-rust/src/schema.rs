@@ -280,8 +280,8 @@ fn schema_to_json<T: ParseArgsValue>(node: &SchemaNode) -> T {
             let required: T = T::parse_args_array_value();
             for field in fields {
                 let (field_schema, optional) = match &*field.node {
-                    SchemaNode::OptionalKey(inner) => (schema_to_json(&**inner), true),
-                    _ => (schema_to_json(&*field.node), false),
+                    SchemaNode::OptionalKey(inner) => (schema_to_json(inner), true),
+                    _ => (schema_to_json(&field.node), false),
                 };
                 properties.parse_args_object_set(field.name.clone(), field_schema);
                 if !optional {
@@ -297,12 +297,12 @@ fn schema_to_json<T: ParseArgsValue>(node: &SchemaNode) -> T {
         }
         SchemaNode::Array(item) => {
             let out = schema_json_typed("array");
-            schema_json_set(&out, "items", schema_to_json(&**item));
+            schema_json_set(&out, "items", schema_to_json(item));
             out
         }
         SchemaNode::Record(_, value) => {
             let out = schema_json_typed("object");
-            let additional: T = schema_to_json(&**value);
+            let additional: T = schema_to_json(value);
             if additional.parse_args_object_entries().is_some_and(|entries| !entries.is_empty()) {
                 schema_json_set(&out, "additionalProperties", additional);
             }
@@ -313,18 +313,18 @@ fn schema_to_json<T: ParseArgsValue>(node: &SchemaNode) -> T {
             if members.is_empty() {
                 schema_json_set(&out, "not", schema_json_object());
             } else {
-                schema_json_set(&out, "anyOf", schema_json_array(members.iter().map(|member| schema_to_json(&**member))));
+                schema_json_set(&out, "anyOf", schema_json_array(members.iter().map(|member| schema_to_json(member))));
             }
             out
         }
         SchemaNode::NullOr(inner) | SchemaNode::UndefinedOr(inner) => {
             let out = schema_json_object();
-            schema_json_set(&out, "anyOf", schema_json_array([schema_to_json(&**inner), schema_json_typed("null")]));
+            schema_json_set(&out, "anyOf", schema_json_array([schema_to_json(inner), schema_json_typed("null")]));
             out
         }
-        SchemaNode::OptionalKey(inner) | SchemaNode::Named(_, inner) => schema_to_json(&**inner),
+        SchemaNode::OptionalKey(inner) | SchemaNode::Named(_, inner) => schema_to_json(inner),
         SchemaNode::Check(inner, filter) => {
-            let out = schema_to_json(&**inner);
+            let out = schema_to_json(inner);
             schema_json_merge(&out, &schema_json_constraint(filter));
             out
         }
@@ -336,20 +336,20 @@ fn schema_to_json<T: ParseArgsValue>(node: &SchemaNode) -> T {
             if elements.is_empty() {
                 schema_json_set(&out, "items", T::parse_args_bool_value(false));
             } else {
-                schema_json_set(&out, "prefixItems", schema_json_array(elements.iter().map(|element| schema_to_json(&**element))));
+                schema_json_set(&out, "prefixItems", schema_json_array(elements.iter().map(|element| schema_to_json(element))));
                 schema_json_set(&out, "minItems", T::parse_args_number_value(elements.len() as f64));
                 schema_json_set(&out, "maxItems", T::parse_args_number_value(elements.len() as f64));
             }
             out
         }
-        SchemaNode::DecodeTo(source, _, _) => schema_to_json(&**source),
+        SchemaNode::DecodeTo(source, _, _) => schema_to_json(source),
     }
 }
 
 pub fn schema_to_json_document<T: ParseArgsValue>(schema: &JsEffect) -> T {
     let document = schema_json_object();
     schema_json_set(&document, "dialect", schema_json_string("draft-2020-12"));
-    schema_json_set(&document, "schema", schema_to_json(&*schema_node_of(schema)));
+    schema_json_set(&document, "schema", schema_to_json(&schema_node_of(schema)));
     schema_json_set(&document, "definitions", schema_json_object());
     document
 }

@@ -44,19 +44,18 @@ fn js_copy_with<T: ParseArgsValue>(object: &T, replace: Option<(&str, T)>, skip:
             continue;
         }
         match &replace {
-            Some((target, new_value)) if target.as_ref() == key.as_ref() => {
+            Some((target, new_value)) if *target == key => {
                 out.parse_args_object_set(key, new_value.clone());
                 replaced = true;
             }
             _ => out.parse_args_object_set(key, value),
         }
     }
-    if !replaced {
-        if let Some((key, value)) = replace {
-            if !skip.contains(&{ let text: &str = key.as_ref(); text }) {
-                out.parse_args_object_set(key, value);
-            }
-        }
+    if !replaced
+        && let Some((key, value)) = replace
+        && !skip.contains(&{ let text: &str = key.as_ref(); text })
+    {
+        out.parse_args_object_set(key, value);
     }
     out
 }
