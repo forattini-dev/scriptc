@@ -9,36 +9,14 @@ Write prose paragraphs and list items as single source lines and let editors and
 ## Build and test
 
 ```bash
-pnpm install && pnpm -r build   # build the workspace
-pnpm test:sandbox              # full gate: ~4m custom image, ~9m cold managed fallback
+pnpm install && pnpm -r build                    # build the workspace
+SCRIPTC_TEST_WORKERS=4 pnpm test                 # full gate: plain lane
+SCRIPTC_TEST_WORKERS=4 SCRIPTC_SAN=1 pnpm test   # full gate: sanitized lane
 ```
 
 The ordinary workspace build does not rebuild packaged native artifacts. When changing native assembly/object emission or runtime-pack selection, install CMake, Ninja, the pinned LLVM 22 development package, and Zig 0.16.0, then run the matching `@scriptc/llvm-<platform>` and `@scriptc/runtime-<platform>` `build:native` scripts explicitly. The macOS full test suite also needs its generated artifacts.
 
-Use focused local tests while iterating, then use `pnpm test:sandbox` whenever a
-full validation gate is required. It loads Sandbox configuration from the
-shell and `.env.local`, runs portable coverage across disposable Linux
-Sandboxes, and retains the Darwin-native contracts on macOS. Linux hosts run
-their supported native-clang contracts locally; other hosts retain those
-checks in the Sandboxes. Both lanes green is the bar before shipping any
-change.
-
-`VERCEL_OIDC_TOKEN` is the preferred credential. `VERCEL_TOKEN` remains
-supported with explicit `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID`. The custom
-`SCRIPTC_SANDBOX_IMAGE` is optional: without it, the gate starts from
-`vercel/sandbox/universal` and installs the repository-pinned Node, pnpm, and
-LLVM toolchain plus workspace dependencies before building. Team/project
-selection never comes from the image reference. The legacy VCR image command
-uses `VERCEL_TOKEN` or the existing Vercel CLI login for authentication; OIDC
-claims can still provide its team/project scope.
-
-Only when Vercel Sandbox credentials are unavailable, run the slower local
-fallback:
-
-```bash
-SCRIPTC_TEST_WORKERS=4 pnpm test                 # plain lane
-SCRIPTC_TEST_WORKERS=4 SCRIPTC_SAN=1 pnpm test  # sanitized lane
-```
+Use focused local tests while iterating, then run both full lanes locally before shipping. Both lanes green is the bar before shipping any change. Linux hosts run their supported native-clang contracts locally, and macOS retains the Darwin-native contracts.
 
 `SCRIPTC_TEST_WORKERS` caps the vitest worker pool so concurrent agents don't
 contend for cores. Direct local runs default to two workers, two nested native

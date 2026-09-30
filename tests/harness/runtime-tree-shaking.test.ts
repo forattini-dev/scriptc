@@ -15,12 +15,11 @@ import { compile } from "@scriptc/compiler";
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests/runtime-tree-shaking");
-// These source-toolchain contracts are safe in the Linux Sandboxes used by
-// `test:sandbox`: they deliberately use the C backend and `nm`, both of
-// which are part of that image. Keep the Windows host out of this POSIX
-// fixture (its child program uses /bin/echo), but do not use
-// SCRIPTC_PORTABLE_ONLY here: that marker means "run in a Linux Sandbox",
-// not "skip native executable assertions".
+// These source-toolchain contracts deliberately use the C backend and `nm`.
+// Keep the Windows host out of this POSIX fixture (its child program uses
+// /bin/echo), but do not use SCRIPTC_PORTABLE_ONLY here: that marker means
+// "skip host-specific native contracts", not "skip native executable
+// assertions".
 const sourceToolchainTest = process.platform === "win32" ? test.skip : test;
 
 interface Fixture {

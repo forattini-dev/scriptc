@@ -10,7 +10,7 @@ pnpm test:test262
 
 The vendored inputs are regression fixtures for developing the runner and compiler. Strict variants are checked against `expectations.json`; entries without an expectation require successful completion. Sloppy variants remain visible as exclusions. A recorded refusal remains a refusal, and a different outcome fails the regression gate. An external snapshot survey treats every executed non-pass as a failing exit status. An all-excluded selection also fails, except for empty distributed shards.
 
-The same regression tests and host assertion checks are included in `pnpm test`. `pnpm test:sandbox` partitions the cases across both plain and sanitized lanes. The default backend may fall back from LLVM to C according to the ordinary compiler policy; every executed result records the actual backend. `--backend llvm` or `--backend c` pins a backend, and `SCRIPTC_SAN=1` enables sanitizers.
+The same regression tests and host assertion checks are included in `pnpm test`. The plain and sanitized lanes both cover these cases. The default backend may fall back from LLVM to C according to the ordinary compiler policy; every executed result records the actual backend. `--backend llvm` or `--backend c` pins a backend, and `SCRIPTC_SAN=1` enables sanitizers.
 
 ## Full snapshot surveys
 
