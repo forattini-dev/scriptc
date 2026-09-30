@@ -202,8 +202,7 @@ not a claim established by the default selection.
 
 ```console
 $ pnpm install && pnpm -r build
-$ vercel link && vercel env pull  # writes a project-scoped VERCEL_OIDC_TOKEN
-$ pnpm test:sandbox
+$ SCRIPTC_TEST_WORKERS=4 pnpm test
 ```
 
 The normal workspace build needs no local LLVM installation. To rebuild a
@@ -212,22 +211,9 @@ development package on that target host, then run the matching
 `@scriptc/llvm-<platform>` and `@scriptc/runtime-<platform>` `build:native`
 scripts. The macOS full test suite also uses those generated artifacts.
 
-`pnpm test:sandbox` loads `.env.local`, preflights Vercel authentication and
-project access, and uses the managed `vercel/sandbox/universal` image by
-default. It installs the repository-pinned Node, pnpm, and LLVM toolchain plus
-ScriptC dependencies in each disposable Sandbox before building the uploaded
-worktree. Set
-`SCRIPTC_SANDBOX_IMAGE` to a fully qualified VCR reference only to use the
-optional prebuilt image from `pnpm test:sandbox:image`.
-The prebuilt image keeps the roughly four-minute fast path; cold managed-image
-runs take longer because they install the pinned toolchain in each Sandbox.
-
-`VERCEL_OIDC_TOKEN` is preferred. For access-token authentication, set
-`VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`; team and project are
-never inferred from `SCRIPTC_SANDBOX_IMAGE`. The legacy VCR command used by
-`pnpm test:sandbox:image` cannot authenticate with an OIDC JWT, so image builds
-use `VERCEL_TOKEN` when available or the existing Vercel CLI login; OIDC claims
-still select the VCR team and project. The test corpus runs each program
-under Node and as a compiled native binary, then compares stdout, stderr, and
-exit codes byte for byte. The full gate also runs the corpus with
-AddressSanitizer and the runtime reference-count audit.
+The full gate is the two local lanes. `SCRIPTC_TEST_WORKERS` caps the vitest
+worker pool so concurrent runs do not contend for cores. The test corpus runs
+each program under Node and as a compiled native binary, then compares stdout,
+stderr, and exit codes byte for byte. The sanitized lane
+(`SCRIPTC_SAN=1 pnpm test`) runs the same corpus with AddressSanitizer and the
+runtime reference-count audit.

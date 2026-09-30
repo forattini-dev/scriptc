@@ -35,7 +35,7 @@ Aberto: a Onda 6 do plano de libcall parity nunca rodou. Os critérios de regene
 
 1. Zerar os 23 erros de clippy. Enquanto o gate declarado do runtime está vermelho, nenhum outro sinal é confiável.
 2. Executar a Onda 6: corpus diferencial das 52 libcalls, uma família por commit. IPC precisa de fixtures parent e worker; aleatoriedade de crypto testa invariantes e não bytes específicos; toda callback precisa de prova de disparo único. O objetivo declarado é encontrar bugs nas implementações, não apenas produzir verde.
-3. Rodar `pnpm test:sandbox`, que agora existe e conclui em cerca de quatro minutos. Ele substitui as lanes locais de várias horas que sofriam com OOM e contenção nesta máquina.
+3. Rodar o gate completo, que são as duas lanes locais plain e sanitizada. O harness de Vercel Sandbox foi removido do fork em 30/09 por não haver credenciais nem intenção de usá-lo; as lanes locais são o único gate completo. Elas são longas nesta máquina, então isole `TMPDIR` e `SCRIPTC_CACHE_DIR` e não as rode sob `pnpm limit`.
 4. Retomar o dogfooding nos alvos restantes, `red-dev` e `red-skills`, agora que redcode compila.
 
 ## Pegadinhas operacionais desta máquina

@@ -82,7 +82,7 @@ Concluído quando parent e child distinguirem ausência de IPC de canal desconec
 2. Rodar `pnpm manifest` quando as tabelas de decisão do compiler mudarem e então `pnpm node-compat`; inspecionar o ledger interno, o artefato público e o backlog por mudanças não relacionadas.
 3. Adicionar ou completar corpus diferencial por família. Cobrir sucesso, shapes importantes de erro, callback único, ordem/lifecycle, stdout, stderr e exit code. IPC precisa de fixtures parent/worker e crypto aleatório precisa testar invariantes, não bytes específicos.
 4. Rodar testes focados por família sob `pnpm limit`, depois `cargo test` e `cargo clippy -- -D warnings` no runtime Rust, `pnpm node-compat:check`, build do workspace e gate de docs se artefatos públicos mudarem.
-5. Rodar `pnpm test:sandbox`. Se credenciais Sandbox não existirem, rodar as lanes locais plain e sanitizada prescritas em `AGENTS.md`. Registrar separadamente qualquer limitação real do host para LLVM 22; não classificar ausência de toolchain como regressão de código.
+5. Rodar as lanes locais plain e sanitizada prescritas em `AGENTS.md`, que são o gate completo deste fork. Registrar separadamente qualquer limitação real do host para LLVM 22; não classificar ausência de toolchain como regressão de código.
 
 Concluído quando o gerador não tiver órfãs, as 52 chamadas tiverem lowering Rust, o diff da implementação permanecer fora das lanes C/LLVM, os artefatos gerados estiverem limpos, o runtime Rust continuar sem `unsafe`, todos os gates disponíveis estiverem verdes e `git status` estiver limpo.
 

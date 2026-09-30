@@ -21,8 +21,6 @@
     "inventory:node": "node scripts/node-surface-inventory.mjs",
     "inventory:node:check": "node scripts/node-surface-inventory.mjs --check --offline",
     "test:cache-identity": "node tests/harness/cache-identity.mjs",
-    "test:sandbox": "node scripts/sandbox-test.mjs",
-    "test:sandbox:image": "node scripts/sandbox-image.mjs",
     "test:watch": "vitest",
     "limit": "node scripts/run-resource-limited.mjs",
     "lint": "node scripts/check-rust-file-lines.mjs && node scripts/gen-island-bootstrap.mjs --check && tsx scripts/gen-backend-libcalls.mjs --check && eslint packages/compiler/src packages/cli/src",
