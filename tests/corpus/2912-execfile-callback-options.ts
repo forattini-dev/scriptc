@@ -1,3 +1,4 @@
+// @rust-only
 // The inline utf8/maxBuffer callback shape preserves concurrent execution,
 // streams and error-first result on both successful and failed children.
 import { execFile } from "node:child_process";

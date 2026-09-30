@@ -534,10 +534,10 @@
       "id": "node-builtin.child_process.execFile",
       "kind": "node-builtin",
       "name": "child_process.execFile",
-      "status": "unsupported",
-      "backends": "unknown",
-      "code": "SC2020",
-      "note": "the callback form has no lowering — promisify it: const execFileAsync = promisify(execFile) (from node:util), or use execFileSync"
+      "status": "static",
+      "backends": [
+        "rust"
+      ]
     },
     {
       "id": "node-builtin.child_process.execFileSync",

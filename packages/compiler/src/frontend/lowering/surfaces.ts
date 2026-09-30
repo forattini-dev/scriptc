@@ -128,6 +128,39 @@ export function sideEffectFreeOptionValue(node: ts.Expression): boolean {
   if (ts.isArrayLiteralExpression(e)) {
     return e.elements.every((el) => !ts.isSpreadElement(el) && sideEffectFreeOptionValue(el));
   }
+  // Arithmetic over NUMERIC LITERALS only (`maxBuffer: 64 * 1024 * 1024`).
+  // Deliberately not the general `sideEffectFreeOptionValue` recursion: an
+  // identifier operand is a side-effect-free READ, but arithmetic on it
+  // would call the value's valueOf/toString. Literal operands cannot.
+  if (ts.isBinaryExpression(e) && NUMERIC_FOLD_OPS.has(e.operatorToken.kind)) {
+    return numericLiteralOperand(e.left) && numericLiteralOperand(e.right);
+  }
+  return false;
+}
+
+/** The arithmetic operators a constant numeric option value may use. */
+const NUMERIC_FOLD_OPS: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.PlusToken,
+  ts.SyntaxKind.MinusToken,
+  ts.SyntaxKind.AsteriskToken,
+  ts.SyntaxKind.SlashToken,
+  ts.SyntaxKind.PercentToken,
+  ts.SyntaxKind.AsteriskAsteriskToken,
+]);
+
+/** A numeric literal, a signed one, or arithmetic over those — the operand
+ * shape whose evaluation provably observes nothing. */
+function numericLiteralOperand(node: ts.Expression): boolean {
+  let e = node;
+  while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isTypeAssertion(e)) e = e.expression;
+  if (ts.isNumericLiteral(e)) return true;
+  if (ts.isPrefixUnaryExpression(e) &&
+      (e.operator === ts.SyntaxKind.MinusToken || e.operator === ts.SyntaxKind.PlusToken)) {
+    return numericLiteralOperand(e.operand);
+  }
+  if (ts.isBinaryExpression(e) && NUMERIC_FOLD_OPS.has(e.operatorToken.kind)) {
+    return numericLiteralOperand(e.left) && numericLiteralOperand(e.right);
+  }
   return false;
 }
 
@@ -798,6 +831,13 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     spawnSync: { fn: "cp.spawnSync", params: [STRING, arrayOf(STRING)], result: SPAWNRES_T },
     spawn: { fn: "cp.spawn", params: [STRING, arrayOf(STRING)], result: CHILD_T },
     fork: { fn: "cp.fork", params: [STRING, arrayOf(STRING)], result: CHILD_T },
+    // execFile(file, args?, options?, callback) — the callback form, whose
+    // real shape (the trailing error-first callback, and the
+    // encoding/maxBuffer option literal) lowerExecFileCall owns. Like
+    // spawn/fork above, the entry exists so this member reads as CLAIMED
+    // surface: without it the fence in lower-calls.ts refuses the call
+    // before lowerBuiltinModuleCall's dispatch can run.
+    execFile: { fn: "cp.execFile", params: [STRING, arrayOf(STRING)], result: CHILD_T },
     // execFileSync(file, args?, options?) and execSync(command, options?)
     // share the cp.execSync runtime entry (execSync sets the shell flag);
     // both call completions are special-cased in lowerBuiltinModuleCall.
@@ -1172,11 +1212,6 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     syncBuiltinESMExports:
       "a compiled program has no live builtin ESM namespace bindings to synchronize — " +
       "nothing a compiled surface can mutate makes the call observable; remove it",
-  },
-  child_process: {
-    execFile:
-      "the callback form has no lowering — promisify it: " +
-      "const execFileAsync = promisify(execFile) (from node:util), or use execFileSync",
   },
   crypto: {
     ...Object.fromEntries(
