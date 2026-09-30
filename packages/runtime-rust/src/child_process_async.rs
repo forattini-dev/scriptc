@@ -667,7 +667,7 @@ enum ChildOutcome {
 fn child_poll(child: &JsChild) -> Option<ChildOutcome> {
     child.with_mut(|child| {
         if let Some((code, signal)) = child.pending_exit.clone() {
-            if child.ipc.as_ref().is_some_and(child_ipc_connected) {
+            if child.ipc.as_ref().is_some_and(child_ipc_open) {
                 return None;
             }
             child.pending_exit = None;
@@ -688,7 +688,7 @@ fn child_poll(child: &JsChild) -> Option<ChildOutcome> {
         child.process = None;
         child.exit_code = status.code().map(f64::from);
         let outcome = (child.exit_code, child_exit_signal(&status));
-        if child.ipc.as_ref().is_some_and(child_ipc_connected) {
+        if child.ipc.as_ref().is_some_and(child_ipc_open) {
             child.pending_exit = Some(outcome);
             None
         } else {
