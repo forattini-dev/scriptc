@@ -8,8 +8,9 @@
  * kind. New corpus programs join this lane automatically; nothing is
  * hand-listed.
  *
- * The Rust backend refuses sanitizers, so the SCRIPTC_SAN=1 flavor skips
- * this suite entirely (the C/LLVM lanes carry the sanitized sweep).
+ * The ordinary SCRIPTC_SAN=1 sweep keeps its C/LLVM scope. The explicit
+ * Rust ASan gate sets SCRIPTC_RUST_SAN=1 and requires a dated nightly;
+ * it must execute this same strict corpus, never skip it for sanitization.
  * Binaries run with SCRIPTC_RUST_HEAP_AUDIT=1: a leaked heap object makes
  * the runtime print "Rust heap object(s) still live" on stderr, which the
  * exit-0 stderr parity catches directly and the nonzero-exit branch
@@ -51,6 +52,7 @@ const files = shardSelect(
   (f) => f.slice(corpusDir.length + 1),
 );
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
+const rustSanitize = process.env["SCRIPTC_RUST_SAN"] === "1";
 
 // Same known-env contract as the main differential suite.
 process.env["SCRIPTC_TEST_ENV"] = "from-harness";
@@ -221,6 +223,8 @@ async function build(file: string) {
   const key = hash
     .update(wantsDynamic(file) ? "dyn" : "")
     .update("rust")
+    .update(rustSanitize ? `asan\0${process.env["SCRIPTC_RUST_SAN_TOOLCHAIN"] ?? "missing-pin"}` : "plain")
+    .update(rustSanitize ? `${process.env["CARGO_ENCODED_RUSTFLAGS"] ?? process.env["RUSTFLAGS"] ?? ""}\0${process.env["SCRIPTC_TARGET"] ?? ""}` : "")
     // Engine matrices may share a worktree: generated sources and binaries
     // must not overwrite one another while compiling or running.
     .update(process.env["SCRIPTC_ISLAND_ENGINE"] === "boa" ? "boa" : "v8")
@@ -235,10 +239,11 @@ async function build(file: string) {
   // concurrently with the C/LLVM lanes' binaries for the same fixture
   // (llvm-differential.test.ts documents the observed corruption).
   return compile(file, {
-    outPath: join(outDir, "program-rust"),
+    outPath: join(outDir, rustSanitize ? "program-rust-asan" : "program-rust"),
     outDir,
     backend: "rust",
     optimization: "dev",
+    sanitize: rustSanitize,
     ...(/^\/\/ @no-engine\s*$/m.test(readFileSync(file, "utf8")) ? { allowEngine: false } : {}),
     dynamic: wantsDynamic(file),
     target: targetOf(file),
@@ -257,7 +262,7 @@ function refusalKind(message: string): string {
   return /^rust backend does not support (.+?) yet$/.exec(message)?.[1] ?? message;
 }
 
-describe.skipIf(sanitize)(`rust differential corpus (${files.length} programs${shardSuffix()})`, () => {
+describe.skipIf(sanitize && !rustSanitize)(`rust${rustSanitize ? " ASan" : ""} differential corpus (${files.length} programs${shardSuffix()})`, () => {
   // retry absorbs ORACLE-side nondeterminism under box load, the same
   // stance as differential.test.ts — a deterministic mismatch fails both
   // attempts.
@@ -289,6 +294,11 @@ describe.skipIf(sanitize)(`rust differential corpus (${files.length} programs${s
         runBinary(res.binaryPath, [], stdin),
         runBinary(oracle.executable, nodeOracleArgs(file, oracle.executable), stdin),
       ]);
+      if (rustSanitize) {
+        // ASan normally exits nonzero, but that can equal a fixture's own
+        // expected failure status. Never tolerate its report in that case.
+        expect(rust.stderr.toString("utf8")).not.toMatch(/AddressSanitizer|LeakSanitizer/);
+      }
 
       // stdout: byte parity.
       if (!rust.stdout.equals(node.stdout)) {

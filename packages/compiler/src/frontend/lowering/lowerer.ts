@@ -342,6 +342,12 @@ export interface LowerResult {
 }
 
 export interface LowerOptions {
+  /** Rust models unset exitCode reads and preserves omitted exit arguments. */
+  nativeProcessExitState?: boolean;
+  /** Rust preserves undefined JSON roots instead of converting them to text. */
+  nativeJsonRootUndefined?: boolean;
+  /** Rust can retain per-instance own-key order in shared native records. */
+  nativeRecordOwnOrder?: boolean;
   /** Runtime capability: stateful regex execution and match metadata. */
   statefulRegex?: boolean;
   nativePromiseViews?: boolean;
@@ -455,6 +461,9 @@ type RuntimeFenceTarget =
 
 /** The Lowerer's pass configuration (see lowerToIr). */
 export interface LowererMode {
+  nativeProcessExitState?: boolean;
+  nativeJsonRootUndefined?: boolean;
+  nativeRecordOwnOrder?: boolean;
   statefulRegex?: boolean;
   nativePromiseViews?: boolean;
   /** Rust arrays are dense: synthetic loops never pre-grow an output array. */
@@ -597,6 +606,9 @@ export function lowerToIr(
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
     nativeStringNormalize: options.nativeStringNormalize ?? false,
+    nativeProcessExitState: options.nativeProcessExitState ?? false,
+    nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
+    nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
     targetPlatform,
     startupCrash,
     ffiImports,
@@ -628,6 +640,9 @@ export function lowerToIr(
         nativeStringSubstr: options.nativeStringSubstr ?? false,
         nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
         nativeStringNormalize: options.nativeStringNormalize ?? false,
+        nativeProcessExitState: options.nativeProcessExitState ?? false,
+        nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
+        nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
         targetPlatform,
         startupCrash,
         ffiImports,
@@ -667,6 +682,9 @@ export function lowerToIr(
       nativeStringSubstr: options.nativeStringSubstr ?? false,
       nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
       nativeStringNormalize: options.nativeStringNormalize ?? false,
+      nativeProcessExitState: options.nativeProcessExitState ?? false,
+      nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
+      nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
       targetPlatform,
       startupCrash,
       ffiImports,
@@ -700,6 +718,9 @@ export function lowerToIr(
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
     nativeStringNormalize: options.nativeStringNormalize ?? false,
+    nativeProcessExitState: options.nativeProcessExitState ?? false,
+    nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
+    nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
     targetPlatform,
     ffiImports,
     libraryCallbacks,
@@ -1122,6 +1143,9 @@ export class Lowerer {
   readonly nativeStringSubstr: boolean;
   readonly nativeStringConcatDyn: boolean;
   readonly nativeStringNormalize: boolean;
+  readonly nativeProcessExitState: boolean;
+  readonly nativeJsonRootUndefined: boolean;
+  readonly nativeRecordOwnOrder: boolean;
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
   readonly fnSigsBySymbol = new Map<ts.Symbol, FnSig>();
@@ -1903,6 +1927,9 @@ export class Lowerer {
     this.nativeStringSubstr = mode.nativeStringSubstr ?? false;
     this.nativeStringConcatDyn = mode.nativeStringConcatDyn ?? false;
     this.nativeStringNormalize = mode.nativeStringNormalize ?? false;
+    this.nativeProcessExitState = mode.nativeProcessExitState ?? false;
+    this.nativeJsonRootUndefined = mode.nativeJsonRootUndefined ?? false;
+    this.nativeRecordOwnOrder = mode.nativeRecordOwnOrder ?? false;
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();
@@ -2625,8 +2652,9 @@ export class Lowerer {
       for (const fp of parts) this.checker.prefetchSourceFile(fp.sf);
     }
     this.collectProgram(parts);
-    // Dense native arrays keep typed read/binding ABIs (see lower-dense-array-reads.ts).
-    if (!this.nativeDenseArrays) this.analyzeRuntimeOptionalArrayReads(parts);
+    // Dense native arrays keep typed read/binding ABIs; JSON roots still
+    // propagate absence through bindings, fields and function signatures.
+    if (!this.nativeDenseArrays || this.nativeJsonRootUndefined) this.analyzeRuntimeOptionalArrayReads(parts);
     // Decorated classes analyze AFTER the whole collection pass: a
     // decorator's return type may name a subclass declared below the
     // class, and reference lowering needs each class's rebindability
@@ -3001,8 +3029,9 @@ export class Lowerer {
     // will reuse the same answers later.
     this.prefetchClassCollection(parts.flatMap((fp) => fp.classDecls));
     this.collectProgram(parts);
-    // Dense native arrays keep typed read/binding ABIs (see lower-dense-array-reads.ts).
-    if (!this.nativeDenseArrays) this.analyzeRuntimeOptionalArrayReads(parts);
+    // Dense native arrays keep typed read/binding ABIs; JSON roots still
+    // propagate absence through bindings, fields and function signatures.
+    if (!this.nativeDenseArrays || this.nativeJsonRootUndefined) this.analyzeRuntimeOptionalArrayReads(parts);
     // Decorated classes analyze post-collection here too: the %init seeds
     // lower the decoration calls, whose edges (decorator bodies, construct
     // thunks) reachable emit must see.

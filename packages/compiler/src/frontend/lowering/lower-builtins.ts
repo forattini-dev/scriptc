@@ -6160,6 +6160,12 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
     if (member === "pid") {
       return { kind: "libCall", fn: "process.pid", args: [], type: F64, loc };
     }
+    // An unset exitCode reads as undefined even though the process exits 0.
+    // Numeric assignments are lowered separately to process.exitCodeSet.
+    if (member === "exitCode" && lowerer.nativeProcessExitState) {
+      const type: IrType = { kind: "union", unionId: lowerer.unions.intern([F64, UNDEFINED_T]) };
+      return { kind: "libCall", fn: "process.currentExitCode", args: [], type, loc };
+    }
     // process.version: Node DEFINES it as "v" + process.versions.node, and
     // the invariant is what programs use (`.slice(1)` or a "v"-strip before
     // parseInt). Lowering it as that concatenation keeps the two reads
@@ -6712,12 +6718,9 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
     return { kind: "libCall", fn: "process.envGet", args: [key], type: lowerer.envValueType(), loc };
   }
 
-/** `process.exit(code)` / `process.cwd()` → libCall. The fallback
-   * declaration makes exit's code required; @types/node declares it
-   * optional, and a bare `process.exit()` lowers as exit(0) — exactly
-   * Node's behavior when process.exitCode was never set (setting exitCode
-   * is fenced like every other unsupported process member, so "never set"
-   * always holds in a compiled program). */
+/** Process methods lower to libCalls. Keep omitted exit arguments distinct
+ * from explicit zero: omission preserves both the assigned status and an
+ * unset process.exitCode property. */
   export function lowerProcessMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken) return null;
@@ -7529,10 +7532,14 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
     }
     if (member === "exit") {
       const arg = call.arguments[0];
-      const code: IrExpr =
-        arg !== undefined
-          ? lowerer.lowerExprExpecting(arg, F64)
-          : { kind: "numLit", value: 0, type: F64, loc };
+      if (arg === undefined) {
+        // C/LLVM keep their upstream lowering; this capability is Rust-owned.
+        if (!lowerer.nativeProcessExitState) {
+          return { kind: "libCall", fn: "process.exit", args: [{ kind: "numLit", value: 0, type: F64, loc }], type: VOID, loc };
+        }
+        return { kind: "libCall", fn: "process.exitDefault", args: [], type: VOID, loc };
+      }
+      const code = lowerer.lowerExprExpecting(arg, F64);
       return { kind: "libCall", fn: "process.exit", args: [code], type: VOID, loc };
     }
     return null; // process.argv(...) etc. are tsc errors before lowering

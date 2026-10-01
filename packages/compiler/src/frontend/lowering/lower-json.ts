@@ -7,6 +7,7 @@ import { varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
 import { optionalStringTags } from "./lower-builtins.js";
 import { nativeImportHandleType } from "./lower-native-import-types.js";
+import { lowerUnitJsonRoot, lowerNativeOptionalJsonRoot } from "./lower-json-root.js";
 
 /** `JSON.stringify(s)` over `string | undefined`: the undefined arm answers
  * the undefined value (Node's stringify result), the string arm serializes. */
@@ -72,7 +73,11 @@ function lowerOptionalStringifyRoot(L: Lowerer, value: IrExpr, indent: string, l
       return { kind: "libCall", fn: "json.parse", args: [text], type: DYN, loc };
     }
     if (member === "stringify") {
+      if (L.nativeJsonRootUndefined && call.arguments.length > 3) {
+        L.noLowering("JSON.stringify with more than three arguments", call, "extra argument effects are not modeled by the native serializer");
+      }
       if (call.arguments.length === 0) {
+        if (L.nativeJsonRootUndefined) return lowerUnitJsonRoot(L, null, null, loc);
         // `JSON.stringify()` is `JSON.stringify(undefined)`: Node answers the
         // undefined VALUE, which the statically-`string` result cannot carry —
         // the same deliberate fence as an explicit bare-undefined root. Before
@@ -99,7 +104,12 @@ function lowerOptionalStringifyRoot(L: Lowerer, value: IrExpr, indent: string, l
           L.coerceToExpected(value, DYN), callback, { kind: "strLit", value: indent, type: STRING, loc },
         ], type: STRING, loc };
       }
-      const optionalString = lowerOptionalStringifyRoot(L, value, indent, loc);
+      if (L.nativeJsonRootUndefined && (value.type.kind === "undefinedT" || value.type.kind === "void" || value.type.kind === "nullT")) {
+        return lowerUnitJsonRoot(L, value, runtimeIndent, loc, value.type.kind === "nullT" ? "null" : "undefined");
+      }
+      const optionalString = L.nativeJsonRootUndefined
+        ? lowerNativeOptionalJsonRoot(L, value, indent, runtimeIndent, loc)
+        : lowerOptionalStringifyRoot(L, value, indent, loc);
       if (optionalString) return optionalString;
       // An ISLAND value (`JSON.stringify(err)` on a package handle — the
       // island error-inspection idiom): the ENGINE's own JSON.stringify

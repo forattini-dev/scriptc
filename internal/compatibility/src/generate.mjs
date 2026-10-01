@@ -905,11 +905,48 @@ function publicMetadata(publicRendered, snapshot) {
   };
 }
 
-function checkLocal() {
+function pinnedLocalSnapshot() {
   const snapshot = JSON.parse(readFileSync(internalOutputPath, "utf8"));
-  if (snapshot.nodeVersion !== pin.version || snapshot.nodeCommit !== pin.commit) {
+  if (
+    snapshot.nodeVersion !== pin.version || snapshot.nodeCommit !== pin.commit ||
+    snapshot.sources.allJson.url !== pin.allJsonUrl ||
+    snapshot.sources.indexMarkdown.url !== pin.indexMarkdownUrl
+  ) {
     throw new Error(`snapshot targets Node ${snapshot.nodeVersion}/${snapshot.nodeCommit}, pin targets ${pin.version}/${pin.commit}`);
   }
+  return snapshot;
+}
+
+// Reuse the committed, pinned API census and verified anchors when only
+// implementation ownership/evidence changed. This never updates Node inputs.
+function refreshLocalSnapshot() {
+  const snapshot = pinnedLocalSnapshot();
+  const ctx = classificationContext();
+  const ancestors = [];
+  for (const row of snapshot.rows) {
+    if (row.depth === 0) {
+      ancestors.length = 1;
+      ancestors[0] = row;
+      continue;
+    }
+    const chapter = snapshot.chapters.find(item => item.slug === row.chapter);
+    const parentSignature = ancestors[row.depth - 1]?.signature;
+    row.static = classifyStatic(row, chapter, ctx, parentSignature);
+    row.dynamic = classifyDynamic(row, chapter, ctx, parentSignature);
+    ancestors[row.depth] = row;
+  }
+  for (const chapter of snapshot.chapters) {
+    const rows = snapshot.rows.filter(row => row.chapter === chapter.slug);
+    rows[0].static = summarizeTier(rows, "static", ctx.compilerCompat.chapterPolicies[chapter.slug]);
+    rows[0].dynamic = summarizeTier(rows, "dynamic", ctx.island.chapterPolicies[chapter.slug]);
+    chapter.static = statusCounts(rows, "static");
+    chapter.dynamic = statusCounts(rows, "dynamic");
+  }
+  return snapshot;
+}
+
+function checkLocal() {
+  const snapshot = pinnedLocalSnapshot();
   const ctx = classificationContext();
   if (snapshot.chapters.length !== 62) throw new Error(`expected 62 pinned Node API chapters, found ${snapshot.chapters.length}`);
   const ancestors = [];
@@ -987,23 +1024,28 @@ async function main() {
   const args = new Set(process.argv.slice(2));
   if (args.has("--check-local")) return checkLocal();
 
-  const [allText, indexMarkdown] = await Promise.all([
-    fetchText(pin.allJsonUrl),
-    fetchText(pin.indexMarkdownUrl),
-  ]);
-  const snapshot = buildSnapshot({
-    allJson: JSON.parse(allText),
-    indexMarkdown,
-    allSha256: sha(allText),
-    indexSha256: sha(indexMarkdown),
-  });
-  const htmlByChapter = new Map(
-    await Promise.all(snapshot.chapters.map(async (chapter) => [
-      chapter.slug,
-      verifiedAnchorIds(await fetchText(`${NODE_BASE}${chapter.slug}.html`)),
-    ])),
-  );
-  verifyAnchors(snapshot, htmlByChapter);
+  let snapshot;
+  if (args.has("--offline")) {
+    snapshot = refreshLocalSnapshot();
+  } else {
+    const [allText, indexMarkdown] = await Promise.all([
+      fetchText(pin.allJsonUrl),
+      fetchText(pin.indexMarkdownUrl),
+    ]);
+    snapshot = buildSnapshot({
+      allJson: JSON.parse(allText),
+      indexMarkdown,
+      allSha256: sha(allText),
+      indexSha256: sha(indexMarkdown),
+    });
+    const htmlByChapter = new Map(
+      await Promise.all(snapshot.chapters.map(async (chapter) => [
+        chapter.slug,
+        verifiedAnchorIds(await fetchText(`${NODE_BASE}${chapter.slug}.html`)),
+      ])),
+    );
+    verifyAnchors(snapshot, htmlByChapter);
+  }
   const internalRendered = render(snapshot);
   const backlogRendered = render(buildBacklog(snapshot));
   const publicRendered = render(publicSnapshot(snapshot));

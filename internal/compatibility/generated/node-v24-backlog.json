@@ -8,8 +8,8 @@
     "tiers": {
       "static": {
         "replace-refusal": 49,
-        "verify-gap": 2573,
-        "audit-partial": 589,
+        "verify-gap": 2572,
+        "audit-partial": 590,
         "classify": 3,
         "implement": 81
       },
@@ -6615,7 +6615,9 @@
             "tests/corpus/2895-child-stdin-write-after-end.ts",
             "tests/corpus/2896-child-stdin-write-after-finish.ts",
             "tests/corpus/2897-child-stdin-destroy.ts",
-            "tests/corpus/2898-child-stdin-spawn-failure.ts"
+            "tests/corpus/2898-child-stdin-spawn-failure.ts",
+            "tests/corpus/3310-child-stdin-backpressure-native.ts",
+            "tests/corpus/3311-child-stdin-end-backpressure-native.ts"
           ]
         },
         "dynamic": {
@@ -71092,7 +71094,9 @@
           "source": "surface-manifest:node-builtin.process.exit",
           "tests": [
             "tests/corpus/990-process-basics.ts",
-            "tests/corpus/2314-process-introspection.ts"
+            "tests/corpus/2314-process-introspection.ts",
+            "tests/corpus/3303-process-exit-validation.ts",
+            "tests/corpus/3306-process-exit-wrapped-listener.ts"
           ]
         },
         "dynamic": {
@@ -72575,12 +72579,20 @@
       "priority": "normal",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:process",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "surface-manifest:node-builtin.process.exitCode",
+          "tests": [
+            "tests/corpus/2941-process-exit-code.ts",
+            "tests/corpus/2942-process-exit-code-override.ts",
+            "tests/corpus/2943-process-exit-code-invalid.ts",
+            "tests/corpus/2944-process-exit-code-wrap.ts",
+            "tests/corpus/3300-process-exit-code-read.ts",
+            "tests/corpus/3301-process-exit-code-unset.ts",
+            "tests/corpus/3302-process-exit-code-validation.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -80036,7 +80048,9 @@
           "confidence": "high",
           "source": "compiler-feature:stream.'drain'",
           "tests": [
-            "tests/corpus/2894-child-stdin-backpressure.ts"
+            "tests/corpus/2894-child-stdin-backpressure.ts",
+            "tests/corpus/3310-child-stdin-backpressure-native.ts",
+            "tests/corpus/3311-child-stdin-end-backpressure-native.ts"
           ]
         },
         "dynamic": {

@@ -206,6 +206,7 @@ mod tests {
     include!("map_views.test.rs");
     include!("tests/dgram.rs");
     include!("tests/child_process.rs");
+    include!("child_writer.test.rs");
     include!("tests/tls.rs");
     #[cfg(any(feature = "island-eval", feature = "island-v8"))]
     include!("island_import_eval.test.rs");

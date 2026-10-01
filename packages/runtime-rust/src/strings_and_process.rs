@@ -774,6 +774,11 @@ pub fn process_warning_report(
 }
 
 pub fn process_exit(code: f64) -> ! {
+    process_exit_code_set(code);
+    process_exit_default()
+}
+
+pub fn process_exit_default() -> ! {
     use std::io::Write;
     process_exit_begin();
     #[cfg(feature = "island-v8")]
@@ -784,11 +789,11 @@ pub fn process_exit(code: f64) -> ! {
     terminal_finish();
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
-    std::process::exit(code as i32)
+    std::process::exit(process_exit_code())
 }
 
 thread_local! {
-    static PROCESS_EXIT_CODE: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    static PROCESS_EXIT_CODE: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
     static PROCESS_EXITING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -801,11 +806,29 @@ pub fn process_exiting() -> bool {
 }
 
 pub fn process_exit_code_set(code: f64) {
-    PROCESS_EXIT_CODE.with(|slot| slot.set(to_int32(code)));
+    let requirement = if !code.is_finite() || code.fract() != 0.0 {
+        Some("an integer")
+    } else if code.abs() > 9_007_199_254_740_991.0 {
+        Some(">= -9007199254740991 && <= 9007199254740991")
+    } else {
+        None
+    };
+    if let Some(requirement) = requirement {
+        throw_range_error_code(
+            format!("The value of \"code\" is out of range. It must be {requirement}. Received {}", bytes_received_number(code)),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    PROCESS_EXIT_CODE.with(|slot| slot.set(Some(to_int32(code))));
 }
 
 pub fn process_exit_code() -> i32 {
-    PROCESS_EXIT_CODE.with(std::cell::Cell::get)
+    PROCESS_EXIT_CODE.with(std::cell::Cell::get).unwrap_or(0)
+}
+
+// The public property distinguishes an unset code from an explicit zero.
+pub fn process_exit_code_opt() -> Option<f64> {
+    PROCESS_EXIT_CODE.with(std::cell::Cell::get).map(f64::from)
 }
 
 pub fn process_is_tty(fd: f64) -> bool {
@@ -982,4 +1005,48 @@ pub fn navigator_user_agent() -> JsString {
 
 pub fn process_versions_openssl() -> JsString {
     string("3.5.5")
+}
+
+#[cfg(test)]
+mod process_exit_code_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_exit_code_preserves_state_and_throws_range_error() {
+        std::thread::spawn(|| {
+            process_exit_code_set(7.0);
+            for code in [1.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 9_007_199_254_740_992.0, -9_007_199_254_740_992.0] {
+                let payload = std::panic::catch_unwind(|| process_exit_code_set(code))
+                    .expect_err("invalid exit code must throw");
+                let caught = caught_from_panic(payload);
+                assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
+                assert_eq!(caught_error_code(&caught).map(|code| code.to_string()), Some("ERR_OUT_OF_RANGE".to_owned()));
+                assert_eq!(process_exit_code_opt(), Some(7.0));
+                assert!(!process_exiting());
+            }
+        })
+        .join()
+        .expect("exit-code checks must pass");
+    }
+
+    #[test]
+    fn unset_exit_code_is_distinct_from_explicit_zero() {
+        // A fresh thread has independent process state, so this test cannot
+        // leave an exit code behind for another runtime test.
+        std::thread::spawn(|| {
+            assert_eq!(process_exit_code_opt(), None);
+            assert_eq!(process_exit_code(), 0);
+            process_exit_code_set(0.0);
+            assert_eq!(process_exit_code_opt(), Some(0.0));
+            assert_eq!(process_exit_code(), 0);
+            process_exit_code_set(4_294_967_297.0);
+            assert_eq!(process_exit_code_opt(), Some(1.0));
+            assert_eq!(process_exit_code(), 1);
+            process_exit_code_set(-1.0);
+            assert_eq!(process_exit_code_opt(), Some(-1.0));
+            assert_eq!(process_exit_code(), -1);
+        })
+        .join()
+        .expect("exit-code checks must pass");
+    }
 }

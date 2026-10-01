@@ -16,7 +16,7 @@ struct ChildWriterErrorListener {
 }
 
 enum ChildWriterCommand {
-    Write(Vec<u8>),
+    Write { data: Vec<u8>, length: usize },
     End,
     Destroy,
 }
@@ -30,6 +30,8 @@ enum ChildWriterEvent {
 pub struct ChildWriterData {
     sender: Option<std::sync::mpsc::Sender<ChildWriterCommand>>,
     receiver: Option<std::sync::mpsc::Receiver<ChildWriterEvent>>,
+    #[cfg(unix)]
+    sync_stdin: Option<std::process::ChildStdin>,
     queued: usize,
     needs_drain: bool,
     writable: bool,
@@ -59,6 +61,10 @@ impl ClearEdges for ChildWriterData {
             let _ = sender.send(ChildWriterCommand::Destroy);
         }
         self.receiver = None;
+        #[cfg(unix)]
+        {
+            self.sync_stdin = None;
+        }
         self.queued = 0;
         self.needs_drain = false;
         self.writable = false;
@@ -74,9 +80,48 @@ thread_local! {
     static ASYNC_CHILD_WRITERS: RefCell<Vec<JsChildWriter>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Match Node's libuv stdin transport: its POSIX "pipe" is a socket pair
+/// with 64 KiB send/receive buffers, not an anonymous pipe.
+fn child_writer_stdio() -> std::io::Result<(std::process::Stdio, Option<std::process::ChildStdin>)>
+{
+    #[cfg(unix)]
+    {
+        use std::os::fd::OwnedFd;
+        let (parent, child) = std::os::unix::net::UnixStream::pair()?;
+        for socket in [&parent, &child] {
+            // libuv treats buffer sizing as best-effort too.
+            let _ = rustix::net::sockopt::set_socket_recv_buffer_size(
+                socket,
+                CHILD_WRITER_HIGH_WATER_MARK,
+            );
+            let _ = rustix::net::sockopt::set_socket_send_buffer_size(
+                socket,
+                CHILD_WRITER_HIGH_WATER_MARK,
+            );
+        }
+        Ok((
+            std::process::Stdio::from(OwnedFd::from(child)),
+            Some(std::process::ChildStdin::from(OwnedFd::from(parent))),
+        ))
+    }
+    #[cfg(not(unix))]
+    {
+        Ok((std::process::Stdio::piped(), None))
+    }
+}
+
 fn child_writer_new(mut stdin: std::process::ChildStdin) -> JsChildWriter {
     use std::io::Write;
 
+    #[cfg(unix)]
+    let sync_stdin = {
+        use std::os::fd::AsFd;
+        stdin
+            .as_fd()
+            .try_clone_to_owned()
+            .ok()
+            .map(std::process::ChildStdin::from)
+    };
     let (command_sender, command_receiver) = std::sync::mpsc::channel();
     let (event_sender, event_receiver) = std::sync::mpsc::channel();
     let _ = std::thread::Builder::new()
@@ -84,8 +129,7 @@ fn child_writer_new(mut stdin: std::process::ChildStdin) -> JsChildWriter {
         .spawn(move || {
             while let Ok(command) = command_receiver.recv() {
                 match command {
-                    ChildWriterCommand::Write(data) => {
-                        let length = data.len();
+                    ChildWriterCommand::Write { data, length } => {
                         if stdin.write_all(&data).is_err() {
                             let _ = event_sender.send(ChildWriterEvent::Error);
                             return;
@@ -106,6 +150,8 @@ fn child_writer_new(mut stdin: std::process::ChildStdin) -> JsChildWriter {
     let writer = Gc::new(ChildWriterData {
         sender: Some(command_sender),
         receiver: Some(event_receiver),
+        #[cfg(unix)]
+        sync_stdin,
         queued: 0,
         needs_drain: false,
         writable: true,
@@ -128,6 +174,8 @@ fn child_writer_husk() -> JsChildWriter {
     Gc::new(ChildWriterData {
         sender: None,
         receiver: None,
+        #[cfg(unix)]
+        sync_stdin: None,
         queued: 0,
         needs_drain: false,
         writable: true,
@@ -150,18 +198,25 @@ fn child_writer_error(message: &str, code: &str) -> JsError {
 }
 
 fn child_writer_fail(writer: &JsChildWriter, error: JsError) {
-    let listeners = writer.with_mut(|writer| {
+    writer.with_mut(|writer| {
         writer.sender = None;
         writer.receiver = None;
+        #[cfg(unix)]
+        {
+            writer.sync_stdin = None;
+        }
         writer.queued = 0;
         writer.needs_drain = false;
         writer.writable = false;
         writer.drain_listeners.clear();
         writer.finish_listeners.clear();
-        std::mem::take(&mut writer.error_listeners)
     });
     child_writer_remove(writer);
+    let writer = writer.clone();
     process_next_tick(Box::new(move || {
+        // A synchronous write failure still reports its event on a later
+        // turn, so listeners installed immediately after write must see it.
+        let listeners = writer.with_mut(|writer| std::mem::take(&mut writer.error_listeners));
         if listeners.is_empty() {
             throw_value(error);
         }
@@ -169,6 +224,28 @@ fn child_writer_fail(writer: &JsChildWriter, error: JsError) {
             (listener.invoke)(error.clone());
         }
     }));
+}
+
+/// Only try synchronously while the acknowledged queue is empty, when the
+/// worker cannot be writing. Restore the shared descriptor's blocking mode
+/// before handing any remainder to that worker.
+#[cfg(unix)]
+fn child_writer_try_write(
+    stdin: &mut std::process::ChildStdin,
+    data: &[u8],
+) -> std::io::Result<usize> {
+    use std::io::Write;
+    let flags = rustix::fs::fcntl_getfl(&*stdin)?;
+    rustix::fs::fcntl_setfl(&*stdin, flags | rustix::fs::OFlags::NONBLOCK)?;
+    let result = loop {
+        match stdin.write(data) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break Ok(0),
+            result => break result,
+        }
+    };
+    rustix::fs::fcntl_setfl(&*stdin, flags)?;
+    result
 }
 
 fn child_writer_write(writer: &JsChildWriter, data: Vec<u8>) -> bool {
@@ -183,7 +260,27 @@ fn child_writer_write(writer: &JsChildWriter, data: Vec<u8>) -> bool {
             return Err(Box::new(child_writer_error("write EPIPE", "EPIPE")));
         };
         let length = data.len();
-        if sender.send(ChildWriterCommand::Write(data)).is_err() {
+        #[cfg(unix)]
+        let data = {
+            let mut data = data;
+            if writer.queued == 0
+                && let Some(stdin) = &mut writer.sync_stdin
+            {
+                let written = child_writer_try_write(stdin, &data)
+                    .map_err(|_| Box::new(child_writer_error("write EPIPE", "EPIPE")))?;
+                if written == length {
+                    return Ok(true);
+                }
+                data.drain(..written);
+            }
+            data
+        };
+        // An asynchronous write counts its entire original chunk, including
+        // any synchronously written prefix, until its completion is dispatched.
+        if sender
+            .send(ChildWriterCommand::Write { data, length })
+            .is_err()
+        {
             return Err(Box::new(child_writer_error("write EPIPE", "EPIPE")));
         }
         writer.queued = writer.queued.saturating_add(length);
@@ -226,6 +323,8 @@ pub fn child_writer_end(writer: &JsChildWriter) {
             return None;
         }
         writer.writable = false;
+        // Keep the duplicate until Finished is dispatched. Otherwise the
+        // child can observe EOF and deliver output before our finish event.
         match writer.sender.as_ref() {
             Some(sender) if sender.send(ChildWriterCommand::End).is_ok() => None,
             _ => Some(child_writer_error("write EPIPE", "EPIPE")),
@@ -327,7 +426,7 @@ fn child_writers_dispatch_one() -> bool {
         ChildWriterEvent::Wrote(length) => {
             let listeners = writer.with_mut(|writer| {
                 writer.queued = writer.queued.saturating_sub(length);
-                if !writer.needs_drain || writer.queued >= CHILD_WRITER_HIGH_WATER_MARK {
+                if !writer.needs_drain || writer.queued != 0 || !writer.writable {
                     return Vec::new();
                 }
                 writer.needs_drain = false;
@@ -343,6 +442,10 @@ fn child_writers_dispatch_one() -> bool {
             let listeners = writer.with_mut(|writer| {
                 writer.sender = None;
                 writer.receiver = None;
+                #[cfg(unix)]
+                {
+                    writer.sync_stdin = None;
+                }
                 writer.queued = 0;
                 writer.needs_drain = false;
                 writer.finished = true;

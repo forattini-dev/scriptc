@@ -12,6 +12,9 @@ export function emitRustProcessCall(
   if (expr.fn === "process.exit" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::process_exit(${context.emitExpr(arg)})`;
   }
+  if (expr.fn === "process.exitDefault" && expr.args.length === 0) {
+    return "runtime::process_exit_default()";
+  }
   if (expr.fn === "process.exitCodeSet" && expr.args.length === 1 && arg?.type.kind === "f64") {
     return `runtime::process_exit_code_set(${context.emitExpr(arg)})`;
   }
@@ -19,7 +22,7 @@ export function emitRustProcessCall(
     return `runtime::process_exit_code_set(${context.emitExpr(arg)})`;
   }
   if (expr.fn === "process.currentExitCode" && expr.args.length === 0) {
-    return "f64::from(runtime::process_exit_code())";
+    return emitOptionalUnion(expr, context, "f64", "runtime::process_exit_code_opt()");
   }
   if (expr.fn === "process.forkTarget" && expr.args.length === 1 && arg?.type.kind === "f64") {
     return `runtime::process_fork_target(${context.emitExpr(arg)})`;

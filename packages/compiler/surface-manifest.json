@@ -2268,7 +2268,27 @@
         "llvm",
         "rust"
       ],
-      "note": "process.exit, process.exitCode, and the process._exiting flag read are one surface"
+      "note": "process.exit, process.exitCode assignment, and the process._exiting flag read are one surface"
+    },
+    {
+      "id": "node-builtin.process.exit.default",
+      "kind": "node-builtin",
+      "name": "process.exit()",
+      "status": "static",
+      "backends": [
+        "rust"
+      ],
+      "note": "Rust no-argument exit preserves process.exitCode, runs exit listeners, and uses their final exit status"
+    },
+    {
+      "id": "node-builtin.process.exitCode",
+      "kind": "node-builtin",
+      "name": "process.exitCode",
+      "status": "static",
+      "backends": [
+        "rust"
+      ],
+      "note": "numeric assignment and reads preserving the unset undefined value"
     },
     {
       "id": "node-builtin.process.getgid",

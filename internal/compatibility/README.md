@@ -13,4 +13,6 @@ Statuses are evidence-aware: `supported` and `partial` require test evidence; `r
 
 Run `pnpm node-compat:backlog` from the repository root for a summary. The filters `--tier`, `--action`, `--priority`, `--chapter`, and `--status` compose; use `--format=json` or `--format=tsv` for tooling.
 
+When only implementation manifests or evidence changed, `pnpm node-compat --offline` regenerates classifications from the committed pinned API census, preserving the Node input hashes, hierarchy, stability metadata and verified anchors. It refuses a changed Node pin; use the networked update for new upstream inputs. `--offline --check` verifies that regeneration would leave the artifacts unchanged.
+
 Run `pnpm node-compat` from the repository root after changing the Node pin or either support manifest. `pnpm node-compat:check` is the offline drift/evidence gate; `pnpm --filter @internal/compatibility check:upstream` additionally verifies the pinned upstream inputs over the network.

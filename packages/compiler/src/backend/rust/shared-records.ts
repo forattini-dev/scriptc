@@ -22,7 +22,8 @@ export function recordCheckName(id: string): string { return `sc_check_${mangleR
 
 /** Storage planning is local to one Rust emission. Clone metadata rather
  * than changing the shared IR or the explicit C/LLVM backends. Static-only
- * shapes retain their typed structs; boundary shapes retain an Object or Proxy. */
+ * shapes with canonical order retain typed structs; boundary or noncanonical
+ * instance-order shapes retain an Object or Proxy. */
 export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordShape>, unions: ReadonlyMap<string, IrUnionDef>, explicitThis = false): boolean {
   let selected = false;
   const visited = new Set<string>();
@@ -60,6 +61,19 @@ export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordSh
     if (iterable?.kind === "array") mark(iterable.elem);
     if ((node.kind === "dynFrom" || node.kind === "jsMarshal") && node.value) mark(node.value.type);
     if ((node.kind === "dynCheck" || node.kind === "jsExit") && node.type) mark(node.type);
+    // Structural shape identity does not include an instance's key order.
+    // Keep the ordered native object when a literal differs from the shape's
+    // canonical writer; typed field access and function boundaries share it.
+    if (node.kind === "recordLit" && node.type?.kind === "record") {
+      const shape = records.get(node.type.shapeId);
+      const literal = value as Extract<IrExpr, { kind: "recordLit" }>;
+      if (shape && !shape.tuple) {
+        const actual = literal.fields.filter(field => !field.drop && !field.absent).map(field => field.name);
+        const present = new Set(actual);
+        const expected = (shape.declaredOrder ?? shape.fields.map(field => field.name)).filter(name => present.has(name));
+        if (actual.length !== expected.length || actual.some((name, index) => name !== expected[index])) mark(node.type);
+      }
+    }
     // Record the dependency even before this source becomes shared. A later
     // boundary may discover its storage after this union wrapper was visited.
     if (node.kind === "unionWrap" && node.type?.kind === "union" && unions.get(node.type.unionId)?.discriminant &&

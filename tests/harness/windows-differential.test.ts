@@ -107,6 +107,8 @@ const WINDOWS_SKIPS: Record<string, string> = {
   "1573-promisify-execfile-env-spread.ts": "posix-shaped: the unhandled spawn-ENOENT rejection crashes both sides, rendered differently",
   "1578-exec-input-optional.ts": "posix-shaped: the uncaught cat ENOENT throw crashes both sides, rendered differently (1645 covers input here)",
   "1580-exec-env-conditional-spread.ts": "posix-shaped: the uncaught sh ENOENT throw crashes both sides, rendered differently (1645 covers env here)",
+  "3310-child-stdin-backpressure-native.ts": "posix-shaped: the delayed native counter needs sh, sleep and wc",
+  "3311-child-stdin-end-backpressure-native.ts": "posix-shaped: the delayed native counter needs sh, sleep and wc",
   "1464-env-writes.ts": "posix-shaped: the observing child is ENOENT on Windows, exposing the documented spawn-failure \"\"-vs-null stance",
   // Two programs the events unit's win32 arm surfaced (they compiled for
   // the first time once the events gate lifted): both drive their signal

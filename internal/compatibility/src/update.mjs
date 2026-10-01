@@ -3,7 +3,10 @@
 import { spawnSync } from "node:child_process";
 
 const check = process.argv.slice(2).includes("--check");
-const args = check ? ["--check"] : [];
+const args = [
+  ...(check ? ["--check"] : []),
+  ...(process.argv.includes("--offline") ? ["--offline"] : []),
+];
 
 for (const script of ["generate-island-header.mjs", "generate.mjs"]) {
   const result = spawnSync(process.execPath, [`src/${script}`, ...args], { stdio: "inherit" });

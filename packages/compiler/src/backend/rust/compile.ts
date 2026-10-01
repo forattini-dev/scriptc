@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { mkdir, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { withNativeBuildSlot } from "../native-build-slot.js";
 import { featuresEmbedIsland, type RustRuntimeFeature } from "./runtime-features.js";
@@ -47,6 +47,76 @@ export class RustCompileError extends Error {
   }
 }
 
+/** A provisionable toolchain error, not an unsupported source construct or ICE. */
+export class RustBuildConfigurationError extends RustCompileError {
+  constructor(message: string, stdout = "", stderr = "") {
+    super(message, stdout, stderr);
+    this.name = "RustBuildConfigurationError";
+  }
+}
+
+interface RustSanitizer {
+  toolchain: string;
+  rustcPath: string;
+  target: string;
+  flags: string[];
+  identity: string;
+}
+
+async function rustSanitizer(): Promise<RustSanitizer> {
+  const toolchain = process.env["SCRIPTC_RUST_SAN_TOOLCHAIN"] ?? "";
+  const date = toolchain.slice("nightly-".length);
+  if (!/^nightly-\d{4}-\d{2}-\d{2}$/.test(toolchain) ||
+      Number.isNaN(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) {
+    throw new RustBuildConfigurationError(
+      "Rust AddressSanitizer requires SCRIPTC_RUST_SAN_TOOLCHAIN=nightly-YYYY-MM-DD naming an installed, dated nightly; floating nightly and stable toolchains are not accepted",
+    );
+  }
+  for (const name of ["RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "CARGO_BUILD_RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"]) {
+    if (process.env[name]) throw new RustBuildConfigurationError(
+      `Rust AddressSanitizer cannot verify the pinned compiler while ${name} is set; unset it for the sanitizer build`,
+    );
+  }
+  let version: CommandOutput;
+  try {
+    version = await run("rustup", ["run", toolchain, "rustc", "-vV"], "checking the Rust sanitizer toolchain");
+  } catch (error) {
+    if (!(error instanceof RustCompileError)) throw error;
+    throw new RustBuildConfigurationError(
+      `Rust AddressSanitizer requires the installed toolchain ${toolchain}; provision it with rustup toolchain install ${toolchain} --profile minimal`,
+      error.stdout, error.stderr,
+    );
+  }
+  const target = /^host: (\S+)$/m.exec(version.stdout)?.[1] ?? "";
+  const supported = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin"];
+  if (!/^release: .*nightly/m.test(version.stdout) || !supported.includes(target)) {
+    throw new RustBuildConfigurationError(`Rust AddressSanitizer requires a nightly compiler on a supported native Linux GNU or macOS target; reported host '${target}'`);
+  }
+  let rustcPath: string;
+  try {
+    rustcPath = (await run("rustup", ["which", "--toolchain", toolchain, "rustc"], "locating the pinned Rust sanitizer compiler")).stdout.trim();
+  } catch (error) {
+    if (!(error instanceof RustCompileError)) throw error;
+    throw new RustBuildConfigurationError(`Rust AddressSanitizer could not locate rustc in the installed toolchain ${toolchain}`, error.stdout, error.stderr);
+  }
+  if (!isAbsolute(rustcPath)) throw new RustBuildConfigurationError(`Rust AddressSanitizer requires an absolute rustc path from rustup for ${toolchain}`);
+  const encoded = process.env["CARGO_ENCODED_RUSTFLAGS"];
+  const ambientFlags = encoded !== undefined
+    ? encoded.split("\x1f").filter(Boolean)
+    : (process.env["RUSTFLAGS"] ?? "").trim().split(/\s+/).filter(Boolean);
+  if (ambientFlags.some(flag => flag.startsWith("--target") || flag.includes("sanitizer="))) {
+    throw new RustBuildConfigurationError("Rust AddressSanitizer owns --target and -Zsanitizer; remove conflicting RUSTFLAGS or CARGO_ENCODED_RUSTFLAGS");
+  }
+  const flags = [...ambientFlags, "-Zsanitizer=address", "-C", "force-frame-pointers=yes", "-C", "debuginfo=1"];
+  return { toolchain, rustcPath, target, flags, identity: [toolchain, rustcPath, version.stdout, target, ...flags].join("\0") };
+}
+
+function runRustTool(tool: "cargo" | "rustc", args: string[], purpose: string, sanitizer?: RustSanitizer, environment?: NodeJS.ProcessEnv): Promise<CommandOutput> {
+  return sanitizer === undefined
+    ? run(tool, args, purpose, environment)
+    : run("rustup", ["run", sanitizer.toolchain, tool, ...args], purpose, { ...environment, RUSTUP_TOOLCHAIN: sanitizer.toolchain });
+}
+
 /**
  * Build the cached Rust runtime crate, then let rustc produce the final
  * executable. No C translation unit or C compiler participates in this path.
@@ -71,12 +141,12 @@ async function compileRustUnbounded(options: RustCompileOptions): Promise<void> 
     // the nm/ld localization pass, so this applies to executables only.
     // SCRIPTC_KEEP_SYMBOLS=1 keeps the symbol table in a release binary so
     // perf/gdb can attribute time to runtime and engine functions.
-    ...(options.optimization === "dev" || process.env.SCRIPTC_KEEP_SYMBOLS === "1" ? [] : ["-C", "strip=symbols"]),
+    ...(context.sanitizer !== undefined || options.optimization === "dev" || process.env.SCRIPTC_KEEP_SYMBOLS === "1" ? [] : ["-C", "strip=symbols"]),
     ...(options.linkInputs ?? []).flatMap((input) => ["-C", `link-arg=${input}`]),
     ...(options.systemLibraries ?? []).flatMap((name) => ["-l", name]),
     "-o", options.outPath,
   ];
-  await run("rustc", rustcArgs, "compiling the generated Rust program");
+  await runRustTool("rustc", rustcArgs, "compiling the generated Rust program", context.sanitizer);
 }
 
 /** Compile a generated library-mode module into a C-linkable static archive. */
@@ -91,7 +161,7 @@ async function compileRustLibraryUnbounded(
 ): Promise<void> {
   const context = await prepareRustBuild({ ...options, library: true });
   await mkdir(dirname(options.outPath), { recursive: true });
-  await run(
+  await runRustTool(
     "rustc",
     [
       ...rustcBaseArgs(options.sourcePath, context, options.optimization),
@@ -99,6 +169,7 @@ async function compileRustLibraryUnbounded(
       "-o", options.outPath,
     ],
     "compiling the generated Rust library",
+    context.sanitizer,
   );
   if (options.localizeSymbols !== undefined) {
     await localizeRustLibrary(options.outPath, options.localizeSymbols);
@@ -154,6 +225,7 @@ interface RustBuildContext {
   runtimeRlib: string;
   targetDir: string;
   profile: "debug" | "release";
+  sanitizer?: RustSanitizer;
 }
 
 async function prepareRustBuild(
@@ -165,11 +237,7 @@ async function prepareRustBuild(
   if (target !== undefined && target !== "" && target !== "native") {
     throw new RustCompileError(`rust backend target '${target}' is not implemented yet`);
   }
-  if (options.sanitize) {
-    throw new RustCompileError(
-      "rust backend sanitizers require the pinned nightly lane, which is not wired yet",
-    );
-  }
+  const sanitizer = options.sanitize ? await rustSanitizer() : undefined;
 
   const runtimePackage = require.resolve("@scriptc/runtime-rust/package.json");
   const runtimeRoot = dirname(runtimePackage);
@@ -184,6 +252,7 @@ async function prepareRustBuild(
     await realpath(runtimeRoot),
     runtimeFeatures,
     preserveLibraryObjects,
+    sanitizer?.identity,
   );
   const cargoArgs = [
     "build",
@@ -193,22 +262,35 @@ async function prepareRustBuild(
     // Let Cargo populate cold caches and honor its explicit offline configuration.
     "--message-format=json-render-diagnostics",
     "--no-default-features",
+    ...(sanitizer === undefined ? [] : ["--target", sanitizer.target]),
     ...(runtimeFeatures.length === 0 ? [] : ["--features", runtimeFeatures.join(",")]),
     ...(profile === "release" ? ["--release"] : []),
   ];
-  const cargo = await run(
+  const cargo = await runRustTool(
     "cargo",
     cargoArgs,
     "building the Rust runtime",
-    preserveLibraryObjects
-      ? { CARGO_PROFILE_RELEASE_LTO: "false", CARGO_PROFILE_RELEASE_STRIP: "none" }
-      : undefined,
+    sanitizer,
+    {
+      ...(preserveLibraryObjects ? { CARGO_PROFILE_RELEASE_LTO: "false", CARGO_PROFILE_RELEASE_STRIP: "none" } : {}),
+      ...(sanitizer === undefined ? {} : {
+        // Environment overrides Cargo config files as well as rustup's proxy
+        // selection: an ambient build.rustc/wrapper must not bypass this pin.
+        RUSTC: sanitizer.rustcPath,
+        RUSTC_WRAPPER: "",
+        RUSTC_WORKSPACE_WRAPPER: "",
+        CARGO_ENCODED_RUSTFLAGS: sanitizer.flags.join("\x1f"),
+        CARGO_PROFILE_RELEASE_STRIP: "none",
+        CARGO_PROFILE_RELEASE_DEBUG: "1",
+      }),
+    },
   );
 
   return {
     runtimeRlib: rustRuntimeArtifact(cargo.stdout),
     targetDir,
     profile,
+    ...(sanitizer === undefined ? {} : { sanitizer }),
   };
 }
 
@@ -223,16 +305,20 @@ export function rustRuntimeTargetDir(
   canonicalRuntimeRoot: string,
   runtimeFeatures: readonly RustRuntimeFeature[],
   preserveLibraryObjects: boolean,
+  sanitizerIdentity?: string,
 ): string {
   const identity = createHash("sha256")
     .update(canonicalRuntimeRoot)
     .update("\0")
     .update([...new Set(runtimeFeatures)].sort().join("\0"))
+    .update(sanitizerIdentity === undefined ? "" : `\0asan\0${sanitizerIdentity}`)
     .digest("hex")
     .slice(0, 16);
   return join(
     cacheBase,
-    preserveLibraryObjects ? "rust-runtime-v2-library" : "rust-runtime-v2",
+    sanitizerIdentity === undefined
+      ? (preserveLibraryObjects ? "rust-runtime-v2-library" : "rust-runtime-v2")
+      : (preserveLibraryObjects ? "rust-runtime-v3-asan-library" : "rust-runtime-v3-asan"),
     identity,
   );
 }
@@ -247,9 +333,9 @@ function rustcBaseArgs(
     "--crate-name", "scriptc_program",
     "--edition", "2024",
     "--extern", `scriptc_runtime=${context.runtimeRlib}`,
-    "-L", `dependency=${join(context.targetDir, context.profile, "deps")}`,
+    "-L", `dependency=${join(context.targetDir, ...(context.sanitizer === undefined ? [] : [context.sanitizer.target]), context.profile, "deps")}`,
     "-C", optimization === "dev" ? "opt-level=0" : "opt-level=2",
-    "-C", "debuginfo=0",
+    ...(context.sanitizer === undefined ? ["-C", "debuginfo=0"] : ["--target", context.sanitizer.target, ...context.sanitizer.flags]),
   ];
 }
 

@@ -28,7 +28,7 @@ import { emitCModule } from "./backend/c/c-emitter.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
 import { nativeModuleBackendDiagnostics } from "./backend/native-module-support.js";
 import { moduleWasiUnavailableSurface } from "./backend/wasi-surface.js";
-import { compileRust, compileRustLibrary, RustCompileError } from "./backend/rust/compile.js";
+import { compileRust, compileRustLibrary, RustCompileError, RustBuildConfigurationError } from "./backend/rust/compile.js";
 import { emitRustModule, RustUnsupportedError } from "./backend/rust/emitter.js";
 import { resolveIslandSourceStore, rustRuntimeFeatures, withIslandStore } from "./backend/rust/runtime-features.js";
 import { executionProfile, noEngineDiagnostics, type ExecutionProfile } from "./backend/execution-profile.js";
@@ -832,6 +832,9 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
       dynamic: opts.dynamic ?? false,
       coverage: true,
       statefulRegex: (opts.backend ?? "rust") === "rust", nativePromiseViews: (opts.backend ?? "rust") === "rust", nativeDenseArrays: (opts.backend ?? "rust") === "rust", nativeCollectionArrays: (opts.backend ?? "rust") === "rust", nativeClassDynamicRefs: (opts.backend ?? "rust") === "rust", nativeDynamicSets: (opts.backend ?? "rust") === "rust", nativeDynamicMaps: (opts.backend ?? "rust") === "rust", nativeDynamicNumberPredicates: (opts.backend ?? "rust") === "rust", nativeDecodeUri: (opts.backend ?? "rust") === "rust", nativeDynamicBuiltinInstanceof: (opts.backend ?? "rust") === "rust", nativeStringSubstr: (opts.backend ?? "rust") === "rust", nativeStringConcatDyn: (opts.backend ?? "rust") === "rust", nativeStringNormalize: (opts.backend ?? "rust") === "rust",
+      nativeProcessExitState: (opts.backend ?? "rust") === "rust",
+      nativeJsonRootUndefined: (opts.backend ?? "rust") === "rust",
+      nativeRecordOwnOrder: (opts.backend ?? "rust") === "rust",
       targetPlatform: buildTargetPlatform(),
       ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
     });
@@ -1507,6 +1510,9 @@ async function compileTracked(
       lowered = lowerWithFrontier(fe, {
         dynamic: opts.dynamic ?? false,
         statefulRegex: (opts.backend ?? "rust") === "rust", nativePromiseViews: (opts.backend ?? "rust") === "rust", nativeDenseArrays: (opts.backend ?? "rust") === "rust", nativeCollectionArrays: (opts.backend ?? "rust") === "rust", nativeClassDynamicRefs: (opts.backend ?? "rust") === "rust", nativeDynamicSets: (opts.backend ?? "rust") === "rust", nativeDynamicMaps: (opts.backend ?? "rust") === "rust", nativeDynamicNumberPredicates: (opts.backend ?? "rust") === "rust", nativeDecodeUri: (opts.backend ?? "rust") === "rust", nativeDynamicBuiltinInstanceof: (opts.backend ?? "rust") === "rust", nativeStringSubstr: (opts.backend ?? "rust") === "rust", nativeStringConcatDyn: (opts.backend ?? "rust") === "rust", nativeStringNormalize: (opts.backend ?? "rust") === "rust",
+        nativeProcessExitState: (opts.backend ?? "rust") === "rust",
+        nativeJsonRootUndefined: (opts.backend ?? "rust") === "rust",
+        nativeRecordOwnOrder: (opts.backend ?? "rust") === "rust",
         targetPlatform: buildPlatform,
         ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
       });
@@ -1666,17 +1672,6 @@ async function compileTracked(
         sourceTexts,
       };
     }
-    if (opts.sanitize) {
-      return {
-        ok: false,
-        diagnostics: [{
-          code: "SC3001",
-          message: "rust backend sanitizer support is not wired to the pinned nightly lane yet",
-          loc: { file: entryPath, start: 0, end: 0 },
-        }],
-        sourceTexts,
-      };
-    }
     let rustSource: string;
     try {
       rustSource = emitRustModule(withIslandStore(lowered.module!, opts.islandSourceStore));
@@ -1702,6 +1697,7 @@ async function compileTracked(
         sourcePath,
         outPath: opts.outPath,
         optimization: opts.optimization ?? "release",
+        sanitize: opts.sanitize ?? false,
         runtimeFeatures,
         ...(opts.allowEngine === undefined ? {} : { allowEngine: opts.allowEngine }),
         ...(ffi === null
@@ -1710,6 +1706,9 @@ async function compileTracked(
       });
     } catch (error) {
       if (!(error instanceof RustCompileError)) throw error;
+      if (error instanceof RustBuildConfigurationError) {
+        return { ok: false, diagnostics: [{ code: "SC3002", message: error.message, loc: { file: entryPath, start: 0, end: 0 } }], sourceTexts };
+      }
       if (ffi !== null) {
         return {
           ok: false,
@@ -2570,6 +2569,9 @@ async function compileLibraryTracked(
       });
     } catch (error) {
       if (!(error instanceof RustCompileError)) throw error;
+      if (error instanceof RustBuildConfigurationError) {
+        return fail([{ code: "SC3002", message: error.message, loc: { file: entryPath, start: 0, end: 0 } }]);
+      }
       throw new InternalCompilerError(
         `${error.message}${error.stderr === "" ? "" : `\n${error.stderr}`}`,
       );

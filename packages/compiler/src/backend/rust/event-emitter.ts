@@ -193,6 +193,9 @@ export class RustEventEmitterEmitter {
       case "process.exit": return this.context.usesProcessExitListeners()
         ? this.emitProcessExit(expr)
         : null;
+      case "process.exitDefault": return this.context.usesProcessExitListeners()
+        ? "sc_process_exit(None)"
+        : null;
       case "process.onUnhandledRejection": return this.emitProcessRejectionOn(expr, true);
       case "process.onUncaughtException": return this.emitProcessUncaughtOn(expr);
       case "process.offUncaughtException": return this.emitProcessUncaughtOff(expr);
@@ -497,7 +500,7 @@ export class RustEventEmitterEmitter {
     if (code?.type.kind !== "f64" || expr.args.length !== 1 || expr.type.kind !== "void") {
       this.context.unsupported("process exit shape", expr.loc);
     }
-    return `sc_process_exit(${this.context.emitExpr(code)})`;
+    return `sc_process_exit(Some(${this.context.emitExpr(code)}))`;
   }
 
   private emitProcessExitDefinitions(): void {
@@ -528,10 +531,11 @@ export class RustEventEmitterEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
-    this.context.line("fn sc_process_exit(sc_code: f64) -> ! {");
+    this.context.line("fn sc_process_exit(sc_code: Option<f64>) -> ! {");
     this.context.pushIndent();
-    this.context.line("sc_process_run_exit(sc_code);");
-    this.context.line("runtime::process_exit(sc_code)");
+    this.context.line("if let Some(sc_code) = sc_code { runtime::process_exit_code_set(sc_code); }");
+    this.context.line("sc_process_run_exit(f64::from(runtime::process_exit_code()));");
+    this.context.line("runtime::process_exit_default()");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("");

@@ -3,6 +3,7 @@
  * index-signature helpers; accessors fill the shape %get:/%set: slots; methods and properties lower in source order.
  * The dynamic (JS) and island object literals stay in lower-exprs.ts and lower-island.ts. */
 import { InternalCompilerError } from "../../errors.js";
+import { nativeRecordCheckSupported, nativeRecordShapeSupported } from "../../ir/native-record.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import {
@@ -81,6 +82,18 @@ import { propNameText } from "./lower-exprs.js";
  * (`transformRows: (<A>(rows) => …) | undefined`). lowerExprExpecting joins the family and wraps at the arm's tag. */
 function familyArmedUnion(lowerer: Lowerer, type: IrType | undefined): boolean {
   return type?.kind === "union" && (lowerer.unions.get(type.unionId)?.arms.some((arm) => arm.kind === "genericFunc") ?? false);
+}
+
+/** A native JSON root can be absent despite the checker's string return.
+ * Lower it before coercion so the record's existing optional-field promotion
+ * sees the value's real type rather than an already-narrowed string. */
+function optionalJsonRootCall(lowerer: Lowerer, init: ts.Expression, fieldType: IrType | undefined): boolean {
+  if (!lowerer.nativeJsonRootUndefined || !fieldType || !ts.isCallExpression(init)) return false;
+  const callee = init.expression;
+  if (ts.isPropertyAccessExpression(callee) && callee.name.text === "stringify" && lowerer.isStdlibGlobal(callee.expression, "JSON")) return true;
+  const name = ts.isIdentifier(callee) ? callee : ts.isPropertyAccessExpression(callee) ? callee.name : null;
+  const signature = name && ts.isIdentifier(name) ? lowerer.fnSigOf(name) : null;
+  return !!signature && lowerer.runtimeOptionalWidening(signature.returnType, fieldType) !== null;
 }
 
 export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
@@ -253,6 +266,19 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       }
     }
     const fieldTypes = new Map(shape.fields.map((f) => [f.name, f.type]));
+    // A field-by-field spread loses the source instance's insertion order.
+    // Rust's checked native object keeps CopyDataProperties in source order
+    // and validates a typed view without JSON copies or a JavaScript engine.
+    if (lowerer.nativeRecordOwnOrder && !shape.tuple &&
+      nativeRecordShapeSupported(shape, lowerer.unions, id => lowerer.shapes.get(id)) &&
+      expr.properties.some(ts.isSpreadAssignment) &&
+      expr.properties.every(prop => {
+        if (!ts.isSpreadAssignment(prop)) return ts.isPropertyAssignment(prop) || ts.isShorthandPropertyAssignment(prop);
+        const source = lowerer.mapTypeOf(lowerer.typeOf(prop.expression));
+        return source !== null && nativeRecordCheckSupported(source, id => lowerer.shapes.get(id), id => lowerer.unions.get(id));
+      })) {
+      return { kind: "dynCheck", value: lowerDynObjectLiteral(lowerer, expr), type, loc };
+    }
     // File-scope JavaScript object bindings live in the checked-dynamic tree
     // to preserve open writes and identity. Build an optional-field literal
     // from its actually written keys so Object.hasOwn can distinguish an
@@ -972,7 +998,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         while (ts.isParenthesizedExpression(init)) init = init.expression;
         value =
           fenceClosureProbe(lowerer, prop.initializer, fieldType, () => lowerer.lowerExpr(prop.initializer)) ??
-          (fieldType !== undefined && (ts.isArrayLiteralExpression(init) || ts.isCallExpression(init) || fieldType.kind === "genericFunc" || familyArmedUnion(lowerer, fieldType)) // a family slot — bare or behind a union — takes the value as an implementation
+          (fieldType !== undefined && !optionalJsonRootCall(lowerer, init, fieldType) && (ts.isArrayLiteralExpression(init) || ts.isCallExpression(init) || fieldType.kind === "genericFunc" || familyArmedUnion(lowerer, fieldType)) // a family slot — bare or behind a union — takes the value as an implementation
             ? lowerer.lowerExprExpecting(prop.initializer, fieldType)
             : lowerer.lowerExpr(prop.initializer));
       } else if (ts.isShorthandPropertyAssignment(prop)) {

@@ -8,6 +8,7 @@
     "build": "pnpm -r --filter \"./packages/*\" run build",
     "build:fresh": "rm -rf packages/compiler/dist packages/cli/dist node_modules/.cache/scriptc-tsc && pnpm build",
     "test": "vitest run",
+    "test:rust:san": "node scripts/test-rust-sanitizer.mjs",
     "test:ts7": "node scripts/test-ts7.mjs",
     "test:test262": "tsx tests/test262/run.ts",
     "test:test262:fetch": "node tests/test262/fetch.mjs",

@@ -3,6 +3,29 @@ import { DYN, F64, STRING, VOID, funcOf, type IrModule, type IrRecordShape, type
 import { validateModule } from "../../ir/validate.js";
 import { isSharedRecord, planSharedRecords } from "./shared-records.js";
 
+test.each([
+  { names: ["a", "b"], declaredOrder: ["a", "b"], shared: false },
+  { names: ["b", "a"], declaredOrder: ["a", "b"], shared: true },
+  { names: ["b", "a"], declaredOrder: ["b", "a"], shared: false },
+  { names: ["a", "b"], declaredOrder: ["b", "a"], shared: true },
+])("instance-order storage planning respects the shape fallback: $names / $declaredOrder", ({ names, declaredOrder, shared }) => {
+  const loc = { file: "instance-order.ts", start: 0, end: 1 };
+  const shape: IrRecordShape = { id: "ordered", fields: [{ name: "a", type: F64 }, { name: "b", type: F64 }], declaredOrder };
+  const mod: IrModule = {
+    irVersion: 12, sourceFile: loc.file, records: [shape], entry: "main",
+    functions: [{ name: "main", params: [], locals: [], returnType: VOID, loc, body: [{
+      kind: "exprStmt", loc, expr: { kind: "recordLit", type: { kind: "record", shapeId: shape.id }, loc,
+        fields: names.map(name => ({ name, value: { kind: "numLit", value: 1, type: F64, loc } })),
+      },
+    }] }],
+  };
+  const original = structuredClone(mod);
+  const records = new Map([[shape.id, shape]]);
+  expect(planSharedRecords(mod, records, new Map())).toBe(shared);
+  expect(isSharedRecord(records.get(shape.id))).toBe(shared);
+  expect(mod).toEqual(original);
+});
+
 test.each([false, true])("shared union planning is independent of boundary discovery order: %s", (boundaryFirst) => {
   const loc = { file: "union-view.ts", start: 0, end: 1 };
   const source = { kind: "record", shapeId: "boolean" } as const;

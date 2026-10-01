@@ -1254,10 +1254,10 @@ export interface IrRecordShape {
    * order of the first ts.Type interned to this shape) — metadata, NOT
    * part of the interned identity: a later structurally-equal type with a
    * different member order shares the shape and the first one's order.
-   * JSON.stringify, Object.keys/values/entries, record→dyn conversion,
-   * and util.inspect all emit this order; JS's per-object insertion order
-   * matches it whenever objects are constructed in declaration order
-   * (SEMANTICS.md 36 documents the divergence when they are not).
+   * A fallback order for struct-backed JSON, enumeration, record→dyn
+   * conversion and inspection, not an instance's insertion order. Rust
+   * retains ordered native objects for supported shapes with conflicting
+   * literal orders or checked native spreads; other layouts use this metadata.
    * Absent on tuples (positional by construction). Names the shape's
    * fields carry that declaredOrder OMITS are internal '%'-fields (Dirent's
    * %dtype) — hidden from every key-order surface, JSON included. */
@@ -3477,10 +3477,12 @@ export type IrLibFn =
    * array; never throws. */
   | "process.envPairs"
   | "process.exit"
+  /** Exit without assigning a code, preserving the unset property. */
+  | "process.exitDefault"
   | "process.exitCodeSet"
   /** Numeric process.exitCode write (integer validation, implicit exit status). */
   | "process.setExitCode"
-  /** The code for process.exit() with no argument, or zero when unset. */
+  /** Public process.exitCode read: number | undefined. */
   | "process.currentExitCode"
   | "process.cwd"
   /** getpid(2) / getuid(2): zero args → f64. POSIX-only target, so both
@@ -5544,8 +5546,8 @@ export type IrExpr =
    * reads), everything else is fresh. fs.* members can throw (catchable
    * string payloads formatted like Node's messages) — backends must consult
    * the may-throw seed set (MAY_THROW_LIB_FNS) in their analysis and emit
-   * pending checks; process.* members never throw. `process.exit` flushes
-   * stdout and terminates the process without running exit handlers. */
+   * pending checks. Numeric process exit/code writes can throw validation
+   * errors; successful exit calls run exit listeners before termination. */
   | { kind: "libCall"; fn: IrLibFn; args: IrExpr[]; type: IrType; loc: SrcLoc }
   /** `JSON.stringify(v)` — type-DIRECTED serialization: `value`'s static IR
    * type must be JSON-safe (f64/string/bool/record/array/union of those,
@@ -7575,6 +7577,7 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
+  "process.exit", "process.exitCodeSet", "process.setExitCode",
   ...BIGINT_MAY_THROW, "json.stringifyReplacer",
   "bigint.parse",
   "bigint.fromF64",

@@ -69,7 +69,7 @@ object, performs no link, and prints a versioned JSON recipe with the target,
 libraries. It never reports private scriptc cache paths. See
 <a href="/native-objects">Native Program Objects</a> for complete C-driver and
 direct-linker examples.
-<code>--emit=exe</code> is the default and uses Rust. Explicit LLVM builds on supported targets emit the program object through the helper and link precompiled runtime objects; explicit C and sanitizer builds retain runtime C compilation.
+<code>--emit=exe</code> is the default and uses Rust. Explicit LLVM builds on supported targets emit the program object through the helper and link precompiled runtime objects; explicit C builds and C/LLVM sanitizer builds retain runtime C compilation.
 
 ## scriptc run
 
@@ -109,7 +109,7 @@ Prebuilds release runtime objects and native TLS/dynamic-engine archives for tar
   <dd>Bind signature-only TypeScript declarations to native C ABI symbols and link the manifest's archive, object, and system-library inputs. See <a href="/ffi">Native FFI</a>.</dd>
 
   <dt><code>--backend &lt;c|llvm|rust&gt;</code></dt>
-  <dd>Code generator: <code>rust</code> is the primary and default backend. It emits memory-safe Rust and builds with Cargo/rustc. <code>llvm</code> and <code>c</code> require explicit selection. Unsupported constructs report diagnostics instead of changing backend. Rust currently targets native builds; cross-compilation, WASI and sanitizer builds require an explicitly selected compatible C/LLVM backend. Library profiles name their emission backend explicitly.</dd>
+  <dd>Code generator: <code>rust</code> is the primary and default backend. It emits memory-safe Rust and builds with Cargo/rustc. <code>llvm</code> and <code>c</code> require explicit selection. Unsupported constructs report diagnostics instead of changing backend. Rust currently targets native builds; cross-compilation and WASI require an explicitly selected compatible C/LLVM backend. Experimental native Rust sanitizer builds require an installed, dated nightly. Library profiles name their emission backend explicitly.</dd>
 
   <dt><code>--strip</code></dt>
   <dd>Remove symbol and debug payload when linking an executable, including cross-compiled targets. This opt-in flag works with either backend and <code>--from-c</code> without changing code optimization.</dd>
@@ -127,7 +127,7 @@ Prebuilds release runtime objects and native TLS/dynamic-engine archives for tar
   <dd>Coverage only. Map an exact bare module specifier to a local declaration file supplied by an embedder. Repeat the option for multiple modules. The declaration supplies checker types so application coverage can continue; runtime imports and values remain explicit <code>SC1010</code> blockers. Relative paths resolve from the current working directory. Accepted files end in <code>.d.ts</code>, <code>.d.mts</code>, or <code>.d.cts</code>.</dd>
 
   <dt><code>--sanitize</code></dt>
-  <dd>Build with AddressSanitizer plus the runtime reference-count audit. Select <code>--backend c</code> or <code>--backend llvm</code> explicitly; Rust sanitizer support is unfinished. Useful when a program misbehaves and you want leaks or memory errors to be loud. <code>--emit=asm|obj</code> also refuses sanitizers until the helper supports them.</dd>
+  <dd>Build with AddressSanitizer. The established C/LLVM lanes also enable the runtime reference-count audit. Experimental Rust support instruments the generated program and Rust runtime using the installed, dated nightly named by <code>SCRIPTC_RUST_SAN_TOOLCHAIN</code>; missing or incompatible provisioning reports <code>SC3002</code>. See <a href="/limitations#rust-sanitizer-builds">Rust sanitizer limits</a>. <code>--emit=asm|obj</code> refuses sanitizers until the helper supports them.</dd>
 
   <dt><code>--emit-ir</code></dt>
   <dd>Additive IR side artifact. It is deprecated for executable builds for one release cycle; prefer <code>--emit=ir</code> when IR is the primary output. Library mode retains <code>--emit-ir</code> because <code>--emit</code> does not select library artifacts.</dd>
@@ -155,7 +155,10 @@ Prebuilds release runtime objects and native TLS/dynamic-engine archives for tar
   <dd>Maximum build-cache size in megabytes. The default is <code>4096</code>; the default cache is swept periodically, while an explicitly configured cap is checked after every successful cache write. Least-recently-used entries are removed when the cache exceeds the cap.</dd>
 
   <dt><code>SCRIPTC_CC</code></dt>
-  <dd>The C compiler for explicit C builds, sanitizer builds, and cross-compilation. <code>zigcc</code> selects zig's bundled clang and enables cross-compilation with its bundled sysroots. On macOS arm64, setting <code>SCRIPTC_CC=clang|zigcc</code> selects a deprecated legacy executable path; leave it unset for the bundled helper/runtime-pack route.</dd>
+  <dd>The C compiler for explicit C builds, C/LLVM sanitizer builds, and cross-compilation. <code>zigcc</code> selects zig's bundled clang and enables cross-compilation with its bundled sysroots. On macOS arm64, setting <code>SCRIPTC_CC=clang|zigcc</code> selects a deprecated legacy executable path; leave it unset for the bundled helper/runtime-pack route.</dd>
+
+  <dt><code>SCRIPTC_RUST_SAN_TOOLCHAIN</code></dt>
+  <dd>The installed Rust nightly used exclusively by experimental Rust AddressSanitizer builds, in <code>nightly-YYYY-MM-DD</code> form. Both Cargo and rustc run through rustup with this exact pin. Builds do not install toolchains automatically or change the toolchain of ordinary Rust builds.</dd>
 
   <dt><code>SCRIPTC_LINKER</code></dt>
   <dd>Platform linker driver for ordinary macOS arm64 LLVM-tier executables. The driver receives only the helper-produced program object, precompiled runtime objects/archives, FFI inputs, and system libraries; it locates the platform SDK and CRT inputs but does not compile scriptc-generated or runtime C.</dd>
@@ -186,7 +189,7 @@ $ head -1 fib.c
 
 An explicit <code>--backend llvm</code> pins the LLVM backend and fails with diagnostic SC3001, naming the unsupported construct, instead of falling back — useful for CI lanes that must notice tier changes.
 
-The default Rust backend (also selectable with <code>--backend rust</code>) uses its own toolchain: it needs <code>cargo</code> and <code>rustc</code> instead of clang, emits safe Rust against the <code>#&#33;[forbid(unsafe_code)]</code> runtime crate, and never falls back — an unsupported construct is a loud <code>SC3001</code>. Native targets only; cross-compilation, WASI, and sanitizers stay on the C/LLVM lanes for now.
+The default Rust backend (also selectable with <code>--backend rust</code>) uses its own toolchain: it needs <code>cargo</code> and <code>rustc</code> instead of clang, emits safe Rust against the <code>#&#33;[forbid(unsafe_code)]</code> runtime crate, and never falls back — an unsupported construct is a loud <code>SC3001</code>. Native targets only; cross-compilation and WASI stay on the C/LLVM lanes. Experimental native AddressSanitizer builds use a separately provisioned, dated Rust nightly.
 ## Tool requirements
 
 <table>

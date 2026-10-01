@@ -1004,9 +1004,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.envUnset": { argTypes: [STRING], result: VOID },
   "process.envPairs": { argTypes: [], result: arrayOf(STRING) },
   "process.exit": { argTypes: [F64], result: VOID },
+  "process.exitDefault": { argTypes: [], result: VOID },
   "process.exitCodeSet": { argTypes: [F64], result: VOID },
   "process.setExitCode": { argTypes: [F64], result: VOID },
-  "process.currentExitCode": { argTypes: [], result: F64 },
+  // Site-typed number | undefined, validated structurally below.
+  "process.currentExitCode": { argTypes: [], result: VOID },
   "process.cwd": { argTypes: [], result: STRING },
   "process.pid": { argTypes: [], result: F64 },
   "dyn.this": { argTypes: [], result: DYN },
@@ -4707,9 +4709,10 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "child.pid" || e.fn === "child.exitCode") {
-          // pid: the interned `number | undefined`; exitCode: `number | null`.
-          const wantUnit = e.fn === "child.pid" ? "undefinedT" : "nullT";
+        if (e.fn === "child.pid" || e.fn === "child.exitCode" || e.fn === "process.currentExitCode") {
+          // Process exitCode and child pid read number | undefined;
+          // a child's exitCode reads number | null while it is running.
+          const wantUnit = e.fn === "child.exitCode" ? "nullT" : "undefinedT";
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
           const ok =
             def &&
@@ -5885,7 +5888,7 @@ function alwaysReturns(stmts: IrStmt[], unions: Map<string, IrUnionDef>): boolea
         // like a throw. Mirrors tsc's own never-based reachability, which
         // accepted the function without a trailing return — the
         // parseAsync().catch entry handler ends exactly this way.
-        if (s.expr.kind === "libCall" && s.expr.fn === "process.exit") return true;
+        if (s.expr.kind === "libCall" && (s.expr.fn === "process.exit" || s.expr.fn === "process.exitDefault")) return true;
         break;
       case "tryCatch":
         // Normal completion requires the try body to complete normally (and

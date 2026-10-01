@@ -331,11 +331,23 @@ pub fn child_spawn_options(
     if !cwd.is_empty() {
         child_command.current_dir(cwd.to_utf8_lossy());
     }
-    child_command.stdin(match stdin_mode {
-        1 => Stdio::inherit(),
-        3 => Stdio::piped(),
-        _ => Stdio::null(),
-    });
+    let (stdin, parent_stdin) = match stdin_mode {
+        1 => (Stdio::inherit(), None),
+        3 => match child_writer_stdio() {
+            Ok(pair) => pair,
+            Err(error) => {
+                return child_register(
+                    command,
+                    Err(error),
+                    true,
+                    stdout_mode == 3,
+                    stderr_mode == 3,
+                );
+            }
+        },
+        _ => (Stdio::null(), None),
+    };
+    child_command.stdin(stdin);
     child_command.stdout(match stdout_mode {
         1 => Stdio::inherit(),
         2 => child_stdio_from_fd(stdout_fd),
@@ -351,7 +363,12 @@ pub fn child_spawn_options(
 
     child_register(
         command,
-        child_command.spawn(),
+        child_command.spawn().map(|mut child| {
+            if let Some(stdin) = parent_stdin {
+                child.stdin = Some(stdin);
+            }
+            child
+        }),
         stdin_mode == 3,
         stdout_mode == 3,
         stderr_mode == 3,

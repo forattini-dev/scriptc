@@ -919,9 +919,9 @@
       "apiEntries": 119,
       "static": {
         "supported": 0,
-        "partial": 24,
+        "partial": 25,
         "refused": 0,
-        "not-implemented": 95,
+        "not-implemented": 94,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -14074,7 +14074,9 @@
           "tests/corpus/2898-child-stdin-spawn-failure.ts",
           "tests/corpus/2911-execfile-callback.ts",
           "tests/corpus/2939-child-shell-text.ts",
-          "tests/corpus/2946-child-fork-ipc/main.ts"
+          "tests/corpus/2946-child-fork-ipc/main.ts",
+          "tests/corpus/3310-child-stdin-backpressure-native.ts",
+          "tests/corpus/3311-child-stdin-end-backpressure-native.ts"
         ]
       },
       "dynamic": {
@@ -15077,7 +15079,9 @@
           "tests/corpus/2895-child-stdin-write-after-end.ts",
           "tests/corpus/2896-child-stdin-write-after-finish.ts",
           "tests/corpus/2897-child-stdin-destroy.ts",
-          "tests/corpus/2898-child-stdin-spawn-failure.ts"
+          "tests/corpus/2898-child-stdin-spawn-failure.ts",
+          "tests/corpus/3310-child-stdin-backpressure-native.ts",
+          "tests/corpus/3311-child-stdin-end-backpressure-native.ts"
         ]
       },
       "dynamic": {
@@ -31912,7 +31916,9 @@
         "evidence": "surface-manifest:node-builtin.process.exit",
         "tests": [
           "tests/corpus/990-process-basics.ts",
-          "tests/corpus/2314-process-introspection.ts"
+          "tests/corpus/2314-process-introspection.ts",
+          "tests/corpus/3303-process-exit-validation.ts",
+          "tests/corpus/3306-process-exit-wrapped-listener.ts"
         ]
       },
       "dynamic": {
@@ -86843,7 +86849,16 @@
         "evidence": "derived:descendants",
         "tests": [
           "tests/corpus/2314-process-introspection.ts",
+          "tests/corpus/2941-process-exit-code.ts",
+          "tests/corpus/2942-process-exit-code-override.ts",
+          "tests/corpus/2943-process-exit-code-invalid.ts",
+          "tests/corpus/2944-process-exit-code-wrap.ts",
           "tests/corpus/2946-child-fork-ipc/main.ts",
+          "tests/corpus/3300-process-exit-code-read.ts",
+          "tests/corpus/3301-process-exit-code-unset.ts",
+          "tests/corpus/3302-process-exit-code-validation.ts",
+          "tests/corpus/3303-process-exit-validation.ts",
+          "tests/corpus/3306-process-exit-wrapped-listener.ts",
           "tests/corpus/990-process-basics.ts"
         ]
       },
@@ -87581,7 +87596,9 @@
         "evidence": "surface-manifest:node-builtin.process.exit",
         "tests": [
           "tests/corpus/990-process-basics.ts",
-          "tests/corpus/2314-process-introspection.ts"
+          "tests/corpus/2314-process-introspection.ts",
+          "tests/corpus/3303-process-exit-validation.ts",
+          "tests/corpus/3306-process-exit-wrapped-listener.ts"
         ]
       },
       "dynamic": {
@@ -88823,8 +88840,17 @@
       "anchor": "",
       "nodeStability": null,
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:process"
+        "status": "partial",
+        "evidence": "surface-manifest:node-builtin.process.exitCode",
+        "tests": [
+          "tests/corpus/2941-process-exit-code.ts",
+          "tests/corpus/2942-process-exit-code-override.ts",
+          "tests/corpus/2943-process-exit-code-invalid.ts",
+          "tests/corpus/2944-process-exit-code-wrap.ts",
+          "tests/corpus/3300-process-exit-code-read.ts",
+          "tests/corpus/3301-process-exit-code-unset.ts",
+          "tests/corpus/3302-process-exit-code-validation.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -94846,7 +94872,9 @@
           "tests/corpus/2893-child-stdin-duplex.ts",
           "tests/corpus/2894-child-stdin-backpressure.ts",
           "tests/corpus/2895-child-stdin-write-after-end.ts",
-          "tests/corpus/2897-child-stdin-destroy.ts"
+          "tests/corpus/2897-child-stdin-destroy.ts",
+          "tests/corpus/3310-child-stdin-backpressure-native.ts",
+          "tests/corpus/3311-child-stdin-end-backpressure-native.ts"
         ]
       },
       "dynamic": {
@@ -96977,7 +97005,9 @@
         "status": "partial",
         "evidence": "compiler-feature:stream.'drain'",
         "tests": [
-          "tests/corpus/2894-child-stdin-backpressure.ts"
+          "tests/corpus/2894-child-stdin-backpressure.ts",
+          "tests/corpus/3310-child-stdin-backpressure-native.ts",
+          "tests/corpus/3311-child-stdin-end-backpressure-native.ts"
         ]
       },
       "dynamic": {
