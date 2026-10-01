@@ -273,7 +273,7 @@ test("Rust UTF-16 string methods, array iteration, record arrays, and tuples mat
   }
 }, 120_000);
 
-test("Rust string.at keeps the documented catchable out-of-range divergence", async () => {
+test("Rust string.at matches Node for out-of-range and relative indexes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-string-at-"));
   const entryPath = join(dir, "at-out-of-range.ts");
   await writeFile(entryPath, `
@@ -296,11 +296,13 @@ console.log(value.at(-1));
     ...process.env,
     SCRIPTC_RUST_HEAP_AUDIT: "1",
   });
-  expect(rust).toEqual({
-    stdout: "caught\nc\n",
+  const node = await runToExit(nodeOracleExecutable(), [entryPath], process.env);
+  expect(node).toEqual({
+    stdout: "undefined\nunreachable\nc\n",
     stderr: "",
     exitCode: 0,
   });
+  expect(rust).toEqual(node);
 }, 120_000);
 
 test("Rust array higher-order methods preserve callbacks, references, reductions, and sorting", async () => {
@@ -807,6 +809,7 @@ test.each([
 
 test("Rust record clones preserve evaluation across async suspension", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-record-clone-async-"));
+  await writeFile(join(dir, "package.json"), '{"type":"module"}\n');
   const entryPath = join(dir, "record-clone-async.ts");
   await writeFile(entryPath, `
 interface Config {
@@ -863,13 +866,13 @@ export {};
     result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
   ).toBe(true);
   if (!result.ok || result.backend !== "rust") return;
-  expect(await readFile(result.sourcePath, "utf8")).toContain("sc_async_record_clone_");
   const [node, rust] = await Promise.all([
     execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
   ]);
+  expect(node.stdout).toBe("plain 3 base 1 shared\nsource:plain,label:start,label:end,source:protected,number:start,number:end,finally\n");
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
 }, 120_000);
@@ -1349,6 +1352,7 @@ test("Rust process reads and POSIX path operations match Node", async () => {
 
 test("Rust synchronous filesystem operations match Node and throw catchably", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-fs-sync-"));
+  await writeFile(join(dir, "package.json"), '{"type":"module"}\n');
   for (const fixture of [
     "992-fs-roundtrip.ts",
     "993-fs-readdir.ts",
@@ -2024,6 +2028,7 @@ test("Rust uncaught Error subclass matches the official exit-one corpus", async 
 
 test("Rust typed arrays, byte unions, copies, views, and set match Node", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-bytes-"));
+  await writeFile(join(dir, "package.json"), '{"type":"module"}\n');
   for (const fixture of [
     "1400-typedarray-basics.ts",
     "1401-typedarray-slice-set.ts",

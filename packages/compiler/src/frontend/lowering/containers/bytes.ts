@@ -7,6 +7,7 @@ import { buildBytesSortFn } from "../lower-array-sort.js";
 import { isSafeToDiscard } from "../expressions/evaluation-safety.js";
 import { lowerDynObjectLiteral } from "../expressions/object-literals.js";
 import { defaultAfterUndefined, lowerOptionalArgument, lowerStaticallyUndefinedArgument } from "../optional-arguments.js";
+import { lowerSameKindBytesSetCall } from "../bytes-set.js";
 
 /** Uint8Array.prototype.toSorted. The receiver/comparator expressions are
  * evaluated before entering the helper; the helper snapshots with
@@ -412,23 +413,7 @@ export function lowerBytesMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     const idx = call.arguments.slice(1).map((a) => lowerer.lowerExprExpecting(a, F64));
     return { kind: "bytesIntrinsic", method: "fillElem", receiver, args: [v, ...idx], type: receiverIr, loc };
   }
-  if (name === "set") {
-    if (nArgs < 1 || nArgs > 2) {
-      lowerer.noLowering(`.set with ${nArgs} arguments on typed arrays`, call);
-    }
-    const receiver = lowerer.lowerExpr(access.expression);
-    const src = lowerer.lowerExpr(call.arguments[0]!);
-    if (!typeEquals(src.type, receiverIr)) {
-      lowerer.noLowering(
-        `.set from '${lowerer.fmt(src.type)}' values`,
-        call.arguments[0]!,
-        "only a same-kind typed array copies in (number[] sources have no lowering — narrow unions first)",
-      );
-    }
-    const args = [src];
-    if (nArgs === 2) args.push(lowerer.lowerExprExpecting(call.arguments[1]!, F64));
-    return { kind: "bytesIntrinsic", method: "setFrom", receiver, args, type: VOID, loc };
-  }
+  if (name === "set") return lowerSameKindBytesSetCall(lowerer, call, access, receiverIr);
   if (name === "toString") {
     // Buffer's toString(encoding?) — utf8 by default. A 0-arg toString
     // resolved against the plain Uint8Array interface is JS's

@@ -10,6 +10,7 @@ import { nearestPackageType, resolveBareModule } from "./resolve.js";
 import { npmStaticPackageOfPath } from "./npm-static.js";
 import { trackedReadFile } from "./input-tracker.js";
 import { npmPackageNameOf } from "./workspace-registry.js";
+import { erasedTypeOnlyImport, erasedTypeOnlyReexport } from "./module-erasure.js";
 
 const prunedByProgram = new WeakMap<ts.Program, ReadonlySet<ts.ExportDeclaration>>();
 
@@ -152,13 +153,13 @@ export function planNpmStaticReexports(
       if (ts.isImportDeclaration(stmt)) {
         if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
         const clause = stmt.importClause;
-        if (clause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
+        if (erasedTypeOnlyImport(stmt)) continue;
         const dep = resolveEdge(sf, stmt.moduleSpecifier.text);
         if (
           clause === undefined ||
           (clause.namedBindings !== undefined && (
             ts.isNamespaceImport(clause.namedBindings) ||
-            ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.length === 0
+            ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.every(element => element.isTypeOnly)
           ))
         ) {
           request(dep, null);
@@ -172,9 +173,7 @@ export function planNpmStaticReexports(
         }
       } else if (ts.isExportDeclaration(stmt)) {
         if (
-          stmt.isTypeOnly ||
-          (stmt.exportClause !== undefined && ts.isNamedExports(stmt.exportClause) &&
-            stmt.exportClause.elements.length > 0 && stmt.exportClause.elements.every((element) => element.isTypeOnly)) ||
+          erasedTypeOnlyReexport(stmt) ||
           stmt.moduleSpecifier === undefined || !ts.isStringLiteral(stmt.moduleSpecifier)
         ) continue;
         const dep = resolveEdge(sf, stmt.moduleSpecifier.text);

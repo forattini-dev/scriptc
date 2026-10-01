@@ -654,6 +654,16 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
           if (ts.isIdentifier(node.name) && ts.isObjectLiteralExpression(peel(node.initializer))) {
             const object = peel(node.initializer) as ts.ObjectLiteralExpression;
             for (const prop of object.properties) {
+              if (lowerer.nativeRecordOwnOrder && ts.isSpreadAssignment(prop)) {
+                const source = peel(prop.expression);
+                const symbol = ts.isIdentifier(source) ? symbolOf(source) : null;
+                if (symbol) {
+                  for (const field of optionalFields.get(symbol) ?? []) {
+                    if (noteField(node, field)) changed = true;
+                  }
+                }
+                continue;
+              }
               if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop)) continue;
               const name = prop.name;
               if (!name || !(ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name))) continue;

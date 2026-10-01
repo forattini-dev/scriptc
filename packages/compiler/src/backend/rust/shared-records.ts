@@ -22,8 +22,8 @@ export function recordCheckName(id: string): string { return `sc_check_${mangleR
 
 /** Storage planning is local to one Rust emission. Clone metadata rather
  * than changing the shared IR or the explicit C/LLVM backends. Static-only
- * shapes with canonical order retain typed structs; boundary or noncanonical
- * instance-order shapes retain an Object or Proxy. */
+ * shapes with canonical order and unambiguous presence retain typed structs;
+ * boundary, instance-order or present-undefined shapes retain an Object or Proxy. */
 export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordShape>, unions: ReadonlyMap<string, IrUnionDef>, explicitThis = false): boolean {
   let selected = false;
   const visited = new Set<string>();
@@ -68,10 +68,21 @@ export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordSh
       const shape = records.get(node.type.shapeId);
       const literal = value as Extract<IrExpr, { kind: "recordLit" }>;
       if (shape && !shape.tuple) {
-        const actual = literal.fields.filter(field => !field.drop && !field.absent).map(field => field.name);
+        const fields = literal.fields.filter(field => !field.drop && !field.absent);
+        const actual = fields.map(field => field.name);
         const present = new Set(actual);
         const expected = (shape.declaredOrder ?? shape.fields.map(field => field.name)).filter(name => present.has(name));
-        if (actual.length !== expected.length || actual.some((name, index) => name !== expected[index])) mark(node.type);
+        // A present undefined value and an omitted field have different own
+        // keys. Struct optional slots erase that distinction; keep the map.
+        const presentUndefined = fields.some(({ value: field }) => {
+          if (field.type.kind === "undefinedT") return true;
+          if (field.type.kind !== "union") return false;
+          const arms = unions.get(field.type.unionId)?.arms;
+          return field.kind === "unionWrap"
+            ? arms?.[field.tag]?.kind === "undefinedT"
+            : arms?.some(arm => arm.kind === "undefinedT");
+        });
+        if (presentUndefined || actual.length !== expected.length || actual.some((name, index) => name !== expected[index])) mark(node.type);
       }
     }
     // Record the dependency even before this source becomes shared. A later

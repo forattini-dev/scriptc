@@ -1,4 +1,4 @@
-import { recordNewName } from "./shared-records.js";
+import { isSharedRecord, recordNewName } from "./shared-records.js";
 import type { IrRecordShape, IrType } from "../../ir/ir.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
@@ -88,7 +88,13 @@ function emitNetworkInfoRow(
     if (value === undefined) context.unsupported(`os.networkInterfaces '${entry.name}' field`, expr.loc);
     return `${mangleField(entry.name)}: ${value}`;
   }).join(", ");
-  return `${infoName}::${context.unionVariant(arm.tag)}(${recordNewName(arm.type.shapeId)}(${mangleRecordStruct(arm.type.shapeId)} { ${fields} }))`;
+  const record = `${recordNewName(arm.type.shapeId)}(${mangleRecordStruct(arm.type.shapeId)} { ${fields} })`;
+  // The struct ABI retains undefined for field reads, but the shared
+  // object's own keys must reflect Node's actually absent IPv4 property.
+  const row = !ipv6 && isSharedRecord(arm.shape)
+    ? `{ let sc_info = ${record}; runtime::map_delete_by(sc_info.own_object("Delete"), &runtime::string("scopeid"), |left, right| left == right); sc_info }`
+    : record;
+  return `${infoName}::${context.unionVariant(arm.tag)}(${row})`;
 }
 
 export function emitRustOsCall(

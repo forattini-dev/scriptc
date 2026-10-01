@@ -17,7 +17,7 @@ import { lowerDynamicKeyRead, lowerNativeSymbolKeyRead } from "./lower-dynamic-k
 import { resolvedReturnAssertion } from "./lower-return-assertion.js";
 import { lowerNativeValueProperty } from "./lower-native-value-property.js";
 import { isRegexCaptureRead, narrowRegexCaptureReceiver, regexCaptureConditionalType } from "./lower-regex-captures.js";
-import { denseArrayReadObservesAbsence } from "./lower-dense-array-reads.js"; import { runtimeOptionalFalseIds } from "./lower-runtime-optional-branches.js";
+import { denseArrayReadObservesAbsence, lowerArrayElementReceiver } from "./lower-dense-array-reads.js"; import { runtimeOptionalFalseIds } from "./lower-runtime-optional-branches.js";
 import { regexCaptureArray } from "../../ir/regex-captures.js";
 import { lowerSharedRecordKeyRead, lowerOpenRecordDelete, lowerNativeRecordDynamicEquality, lowerThrowingDynamicValue } from "./lower-open-record.js";
 import { lowerHeterogeneousRecordKeyRead } from "./lower-heterogeneous-record-key.js";
@@ -53,7 +53,7 @@ import {
 } from "../../diagnostics/diagnostic.js";
 import { PoisonError, jsFuncNameOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { lowerNpmStaticSafeIndexRead, lowerSafeIndexRead, strCharsCall, tryLowerNumericIndexRead } from "./lower-containers.js";
-import { arrayValueRead, arrayValueStore } from "./array-values.js";
+import { arrayValueRead, arrayValueStore, orderedArrayValueStore } from "./array-values.js";
 import { tryLowerIndexedComparison } from "./indexed-comparison.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../builtin-modules.js";
@@ -5272,12 +5272,12 @@ export function fenceClosureProbe(
     if (!expr.questionDotToken && chainTailClaimed(lowerer, expr)) {
       return lowerer.lowerOptionalChain(expr);
     }
-    // Enum accesses in element clothing — `E["A"]` forward reads and
-    // `E[0]` reverse-mapping reads — fold to constants (lower-enums.ts),
-    // claimed before any receiver-kind dispatch can see the enum object.
+    // Check optional array-derived receivers before typed member dispatch.
+    // Enum brackets (`E["A"]` / `E[0]`) also fold here before the generic
+    // receiver-kind dispatch can see the enum object.
     {
-      const en = lowerEnumAccess(lowerer, expr);
-      if (en) return en;
+      const special = lowerArrayElementReceiver(lowerer, expr) ?? lowerEnumAccess(lowerer, expr);
+      if (special) return special;
     }
     // Native Web handles use the same supported surface for bracket and dot
     // spellings. Fence a statically-known unsupported key before the generic
@@ -6490,7 +6490,7 @@ export function lowerElementCompound(lowerer: Lowerer, expr: ts.BinaryExpression
     // undefined arm. arrayValueStore turns that arm into the runtime's
     // UNDEFINED state while keeping number[]/string[] payload storage scalar.
     const value = lowerer.lowerExpr(expr.right);
-    return arrayValueStore(lowerer, arr, index, value, receiverIr.elem, locOf(expr));
+    return (lowerer.nativeDenseArrays ? orderedArrayValueStore : arrayValueStore)(lowerer, arr, index, value, receiverIr.elem, locOf(expr));
   }
 
 export function ensureString(lowerer: Lowerer, e: IrExpr, node: ts.Node): IrExpr {

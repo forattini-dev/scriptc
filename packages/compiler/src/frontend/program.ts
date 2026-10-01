@@ -71,6 +71,8 @@ import { ProjectDeclarations } from "./project-declarations.js";
 import { jsoncSyntaxError } from "./config-json.js";
 import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js"; import { calleeChainInert, isDtsMemberCall, isHoistedFunctionBinding, isInertHoistedFunctionCallee, isNamespaceMemberRead, isOutsideClusterProgramCallee, kernelCallHoldsCallbacks, makeReachesCluster } from "./cycle-inert.js";
 import { forkTargetPaths } from "./fork-target.js";
+import { runtimeSourceFiles } from "./runtime-source-files.js";
+import { erasedTypeOnlyImport, erasedTypeOnlyReexport } from "./module-erasure.js";
 
 const BASE_OPTIONS: ts.Ts7CompilerOptions = {
   strict: true,
@@ -1900,7 +1902,7 @@ function preflight7(load: LoadResult): {
         (!isNodeModulesPath(sf.fileName) || npmStaticPackageOfPath(sf.fileName) !== null) &&
         !isIslandJsFile(sf.fileName),
     );
-  const userFiles = npmStaticActive()
+  const candidates = npmStaticActive()
     ? planNpmStaticReexports(
         program,
         entry,
@@ -1909,7 +1911,22 @@ function preflight7(load: LoadResult): {
         (sf, spec) => resolveImport7(program, sf, spec) ?? npmStaticDepSf7(program, sf, spec),
       )
     : programFiles;
-  program.getTypeChecker().prefetchSourceFileStructures(userFiles);
+  program.getTypeChecker().prefetchSourceFileStructures(candidates);
+  const userFiles = runtimeSourceFiles(
+    program, entry, candidates,
+    sf => orderedImportsOf(program, sf).flatMap(({ dep }) => dep === null ? [] : [dep]),
+    (sf, call) => {
+      const arg = call.arguments[0];
+      if (arg === undefined || !ts.isStringLiteralLike(arg)) return null;
+      if (call.expression.kind !== ts.SyntaxKind.ImportKeyword) {
+        if (call.arguments.length !== 1 || call.questionDotToken !== undefined || !ts.isIdentifier(call.expression)) return null;
+        const commonJsRequire = isJsSourceFileName(sf.fileName) && requireSpecOf7(call) !== null;
+        if (!commonJsRequire && !isCreateRequireBinding7(program, call.expression)) return null;
+      }
+      return resolveImport7(program, sf, arg.text) ?? npmStaticDepSf7(program, sf, arg.text) ??
+        resolveProjectImportSf7(program, sf, arg.text) ?? pathAliasesSf7(program, arg.text);
+    },
+  );
 
   // node_modules JS that no --npm-static opt-in claims is NOT program
   // source even when maxNodeModuleJsDepth pulled it into the checker's
@@ -2084,6 +2101,7 @@ function preflight7(load: LoadResult): {
             stmt.exportClause !== undefined &&
             ts.isNamedExports(stmt.exportClause) &&
             !fromSpec.startsWith("#") &&
+            npmStaticReexport === null &&
             resolveNpmImport7(sf.fileName, fromSpec) !== null
           ) {
             continue;
@@ -2836,8 +2854,8 @@ function cjsNamedImportLinkCheck(
     visited.add(sf);
     for (const stmt of sf.statements) {
       if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly)) continue;
-      if (ts.isExportDeclaration(stmt) && isPrunedNpmReexport(program, stmt)) continue;
-      if (ts.isImportDeclaration(stmt) && stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
+      if (ts.isExportDeclaration(stmt) && (isPrunedNpmReexport(program, stmt) || erasedTypeOnlyReexport(stmt))) continue;
+      if (ts.isImportDeclaration(stmt) && erasedTypeOnlyImport(stmt)) continue;
       const specNode = stmt.moduleSpecifier;
       if (specNode === undefined || !ts.isStringLiteral(specNode)) continue;
       const spec = specNode.text;
@@ -2876,7 +2894,8 @@ function cjsNamedImportLinkCheck(
   let flavored = false;
   for (const stmt of entry.statements) {
     if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly)) continue;
-    if (ts.isImportDeclaration(stmt) && stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
+    if (ts.isExportDeclaration(stmt) && erasedTypeOnlyReexport(stmt)) continue;
+    if (ts.isImportDeclaration(stmt) && erasedTypeOnlyImport(stmt)) continue;
     const specNode = stmt.moduleSpecifier;
     if (specNode === undefined || !ts.isStringLiteral(specNode) || specNode.text !== bad.spec) continue;
     if (cjsDepOf(entry, bad.spec) !== null) {
@@ -3084,8 +3103,8 @@ function analyzeEsmNamedImportLinks(
     visited.add(sf);
     for (const stmt of sf.statements) {
       if (!ts.isImportDeclaration(stmt) && !(ts.isExportDeclaration(stmt) && !stmt.isTypeOnly)) continue;
-      if (ts.isExportDeclaration(stmt) && isPrunedNpmReexport(program, stmt)) continue;
-      if (ts.isImportDeclaration(stmt) && stmt.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
+      if (ts.isExportDeclaration(stmt) && (isPrunedNpmReexport(program, stmt) || erasedTypeOnlyReexport(stmt))) continue;
+      if (ts.isImportDeclaration(stmt) && erasedTypeOnlyImport(stmt)) continue;
       const moduleSpecifier = stmt.moduleSpecifier;
       if (moduleSpecifier === undefined || !ts.isStringLiteral(moduleSpecifier)) continue;
       const dep = resolveEdge(sf, moduleSpecifier.text);
@@ -3262,42 +3281,6 @@ export {
  * declare fields by constructor assignment. */
 export function isJsSourceFile(sf: ts.SourceFile): boolean {
   return isJsSourceFileName(sf.fileName);
-}
-
-/** `import type …` declarations and named clauses whose every element is
- * `type`-qualified are ERASED by tsc at emit — Node's module graph has no
- * edge there, so module order, cycle detection, init calls, and the
- * startup-refusal probe must not count them either (zod v4's core modules
- * are "cyclic" only through `import type * as ns` namespaces — 27 phantom
- * SC1016 sites against 1 real value-level cycle; and a type-only import
- * of a module Node cannot resolve is NOT a startup crash — Node never
- * resolves it). Originated as the provenance-sources pilot's flag-gated
- * prototype (SCRIPTC_TYPE_ONLY_EDGES), promoted to always-on with the
- * full-suite differential green. Side-effect imports (no clause) stay
- * real edges. */
-function erasedTypeOnlyImport(stmt: ts.ImportDeclaration): boolean {
-  const clause = stmt.importClause;
-  if (clause === undefined) return false; // side-effect import: a real edge
-  if (clause.phaseModifier === ts.SyntaxKind.TypeKeyword) return true;
-  return (
-    clause.name === undefined &&
-    clause.namedBindings !== undefined &&
-    ts.isNamedImports(clause.namedBindings) &&
-    clause.namedBindings.elements.length > 0 &&
-    clause.namedBindings.elements.every((e) => e.isTypeOnly)
-  );
-}
-
-/** The re-export twin: `export { type X } from "./m"` with every element
- * `type`-qualified erases at emit exactly like `export type { X } from`
- * (which stmt.isTypeOnly already covers) — no module edge. */
-function erasedTypeOnlyReexport(stmt: ts.ExportDeclaration): boolean {
-  return (
-    stmt.exportClause !== undefined &&
-    ts.isNamedExports(stmt.exportClause) &&
-    stmt.exportClause.elements.length > 0 &&
-    stmt.exportClause.elements.every((e) => e.isTypeOnly)
-  );
 }
 
 /** A file's import declarations — and value re-exports with a specifier

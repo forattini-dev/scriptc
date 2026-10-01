@@ -73,6 +73,10 @@ export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | n
       return expr.elems;
     case "recordLit":
       return expr.fields.map((field) => field.value);
+    case "dynObjLit":
+      // Resolve each key before its value, and snapshot both before the next
+      // suspension. The enclosing dyn.assign has already copied prior spreads.
+      return (expr.fields ?? []).flatMap((field) => [field.key, field.value]);
     case "bytesIntrinsic":
       return [expr.receiver, ...expr.args];
     case "dynFrom":
@@ -127,10 +131,7 @@ export class RustAsyncValueEmitter {
       this.emitAsyncValue(expr.value, (value) => consume(`${variant}(${value})`));
       return;
     }
-    if (expr.kind === "seqExpr" && this.context.containsAsyncSuspension(expr.result)) {
-      if (expr.stmts.some((statement) => this.context.containsAsyncSuspension(statement))) {
-        this.context.unsupported("suspending statement inside an async sequence expression", expr.loc);
-      }
+    if (expr.kind === "seqExpr" && this.context.containsAsyncSuspension(expr)) {
       this.context.emitAsyncStatements(expr.stmts, () => this.emitAsyncValue(expr.result, consume));
       return;
     }

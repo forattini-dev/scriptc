@@ -13,6 +13,14 @@ test.each([
   "3330-record-instance-key-order.ts",
   "3331-record-instance-iteration-order.ts",
   "3332-record-order-spread-aliasing.ts",
+  "3333-record-order-spread-json-root.ts",
+  "3334-record-order-spread-contextual-array.ts",
+  "3335-record-json-root-own-presence.ts",
+  "3339-record-order-async-spread.ts",
+  "3340-async-object-key-completions.ts",
+  "3341-record-order-computed-spread.ts",
+  "3342-async-spread-sequence-completions.ts",
+  "3343-process-record-own-order.ts",
 ])("Rust compiles per-instance order regression %s without an engine", async name => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-instance-order-"));
   try {

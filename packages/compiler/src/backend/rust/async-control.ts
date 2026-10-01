@@ -1,5 +1,7 @@
 import { emitProtectedAsyncResult } from "./async-result.js";
 import { emitAsyncNativeArrayLiteral } from "./async-native-array.js";
+import { emitAsyncProtectedSequenceValue } from "./async-sequence.js";
+import { emitAsyncProtectedBlockOrFor } from "./async-protected-block-for.js";
 import type { IrFamily } from "../../ir/ir.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import { mangleLocal } from "../mangle.js";
@@ -623,6 +625,11 @@ export class RustAsyncControlEmitter {
       for (let index = 0; index < statements.length; index += 1) {
         const current = statements[index];
         if (current === undefined) break;
+        if (emitAsyncProtectedBlockOrFor(this, current, statements.slice(index + 1), exitLocals, handlers, loc)) {
+          this.context.line("return runtime::AsyncCompletion::Suspended;");
+          terminal = "await";
+          break;
+        }
         if (current.kind === "while" && this.containsAsyncSuspension(current.body)) {
           emitAsyncProtectedWhile(
             this.context,
@@ -736,7 +743,7 @@ export class RustAsyncControlEmitter {
         if (nested !== null && ((nested.kind === "unionWrap" || nested.kind === "bin" ||
           nested.kind === "toString" || nested.kind === "strConcat" ||
           nested.kind === "arrayGet" || nested.kind === "bytesNew" ||
-          nested.kind === "arrIntrinsic" || nested.kind === "mapIntrinsic" || nested.kind === "recordClone") ||
+          nested.kind === "arrIntrinsic" || nested.kind === "mapIntrinsic" || nested.kind === "recordClone" || nested.kind === "seqExpr") ||
           rustAsyncExpressionOperands(nested) !== null) &&
           this.containsAsyncSuspension(nested)) {
           this.emitAsyncProtectedValue(nested, exitLocals, handlers, (value) => {
@@ -909,6 +916,10 @@ export class RustAsyncControlEmitter {
     if (expr.kind === "dynFrom" && expr.value.kind === "arrayLit" && this.containsAsyncSuspension(expr.value)) {
       emitAsyncNativeArrayLiteral(expr.value, this.context,
         (value, next) => this.emitAsyncProtectedValue(value, exitLocals, handlers, next), consume);
+      return;
+    }
+    if (expr.kind === "seqExpr" && this.containsAsyncSuspension(expr)) {
+      emitAsyncProtectedSequenceValue(this, expr, exitLocals, handlers, consume);
       return;
     }
     if (expr.kind === "unionWrap" && this.containsAsyncSuspension(expr.value)) {

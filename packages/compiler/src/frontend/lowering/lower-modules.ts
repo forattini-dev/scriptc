@@ -32,6 +32,7 @@ import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import { esbuildOnceAssignedClassExpression } from "./esbuild-once.js";
 import { cjsModuleRegistryPrelude } from "./lower-node-module.js";
 import { forkTargetPaths } from "../fork-target.js";
+import { erasedTypeOnlyImport, erasedTypeOnlyReexport } from "../module-erasure.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
 export interface FileParts {
@@ -304,6 +305,7 @@ export function appendForkModules(
         if (dep !== null && dep !== fp.sf && isIslandModulePath(dep.fileName)) islandDeps.set(stmt, dep);
       }
       for (const stmt of fp.sf.statements) {
+        if (ts.isExportDeclaration(stmt) && erasedTypeOnlyReexport(stmt)) continue;
         // NAMED re-exports from npm packages (`export { isUrl } from
         // "url-or-path"` — preflight admitted them): import-plus-export
         // plumbing — the island load registers at this statement's
@@ -317,7 +319,6 @@ export function appendForkModules(
           ts.isStringLiteral(stmt.moduleSpecifier) &&
           stmt.exportClause !== undefined &&
           ts.isNamedExports(stmt.exportClause) &&
-          stmt.exportClause.elements.some((e) => !e.isTypeOnly) &&
           !stmt.moduleSpecifier.text.startsWith("#")
             ? stmt.exportClause
             : null;
@@ -334,15 +335,7 @@ export function appendForkModules(
         const specNode = ts.isImportDeclaration(stmt) || ts.isExportDeclaration(stmt) ? stmt.moduleSpecifier : undefined;
         if (specNode === undefined || !ts.isStringLiteral(specNode)) continue;
         const clause = ts.isImportDeclaration(stmt) ? stmt.importClause : undefined;
-        if (ts.isImportDeclaration(stmt) && clause?.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
-        if (
-          clause?.namedBindings &&
-          ts.isNamedImports(clause.namedBindings) &&
-          !clause.name &&
-          clause.namedBindings.elements.every((e) => e.isTypeOnly)
-        ) {
-          continue;
-        }
+        if (ts.isImportDeclaration(stmt) && erasedTypeOnlyImport(stmt)) continue;
         const spec = specNode.text;
         // --external-types owns this exact module interpretation. Even when
         // an install happens to resolve the same name (or --npm-static auto
@@ -462,13 +455,17 @@ export function appendForkModules(
           continue;
         }
         if (reexport !== null) {
+          if (reexport.elements.every(el => el.isTypeOnly)) {
+            actions.push({ kind: "exprStmt", expr: importExpr("*"), loc });
+          }
           for (const el of reexport.elements) {
             if (el.isTypeOnly) continue;
             bind(el.name, el.propertyName?.text ?? el.name.text);
           }
           continue;
         }
-        if (!clause) {
+        if (!clause || !clause.name && clause.namedBindings !== undefined &&
+            ts.isNamedImports(clause.namedBindings) && clause.namedBindings.elements.every(el => el.isTypeOnly)) {
           // Side-effect import: load for its top-level effects, keep nothing.
           actions.push({ kind: "exprStmt", expr: importExpr("*"), loc });
           continue;

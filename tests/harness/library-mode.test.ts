@@ -960,5 +960,37 @@ describe.each(EMISSIONS)("K14: determinism fences, %s emission", (emission) => {
 
   test("a manifest-id-keyed teachings entry attaches to that surface's own refusal", async () => {
     const diags = await refusal(
-    expect(diags[0]!.code).toBe("SC2012");
-    expect(diags[0]!.note).toBe("from the 'refusal-fixture' profile: replacement is host work");
+      `import { brotliCompressSync } from "node:zlib"; export function f(): number { return brotliCompressSync("abc").length; }\n`,
+      {
+        exports: [{ export: "f", symbol: "kx_f", params: [], returns: "f64" }],
+        determinism: { teachings: { "node-builtin.zlib.brotliCompressSync": "Brotli compression belongs to the host" } },
+      },
+      emission,
+    );
+    // Keep this fixture on an explicitly refused surface, not one that
+    // gained a lowering after the original profile contract was written.
+    expect(diags.map((d) => d.code)).toEqual(["SC2020"]);
+    expect(diags[0]!.message).toContain("zlib.brotliCompressSync");
+    expect(diags[0]!.note).toBe("from the 'refusal-fixture' profile: Brotli compression belongs to the host");
+  });
+
+  test("fencing a surface the static tier refuses anyway preserves its code and message", async () => {
+    const source = `import { brotliCompressSync } from "node:zlib"; export function f(): number { return brotliCompressSync("abc").length; }\n`;
+    const exports = [{ export: "f", symbol: "kx_f", params: [], returns: "f64" }];
+    const baseline = await refusal(source, { exports }, emission);
+    expect(baseline.map((d) => d.code)).toEqual(["SC2020"]);
+    expect(baseline[0]!.message).toContain("zlib.brotliCompressSync");
+    expect(baseline[0]!.note).toBeUndefined();
+    const diags = await refusal(
+      source,
+      {
+        exports,
+        determinism: { fences: [{ id: "node-builtin.zlib.brotliCompressSync", teaching: "Brotli compression is a host effect" }] },
+      },
+      emission,
+    );
+    expect(diags.map((d) => d.code)).toEqual(["SC2020"]);
+    expect(diags[0]!.message).toBe(baseline[0]!.message);
+    expect(diags[0]!.note).toBe("from the 'refusal-fixture' profile: Brotli compression is a host effect");
+  });
+});

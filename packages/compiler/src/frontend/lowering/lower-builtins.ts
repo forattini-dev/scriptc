@@ -7350,7 +7350,7 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
       if (call.arguments.length === 0) {
         return {
           kind: "recordLit",
-          fields: shape.fields.map((f) => ({ name: f.name, value: sampleField(f.name) })),
+          fields: (lowerer.nativeRecordOwnOrder ? ["user", "system"] : shape.fields.map(f => f.name)).map(name => ({ name, value: sampleField(name) })),
           type: t,
           loc,
         };
@@ -7407,7 +7407,7 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
               kind: "return",
               value: {
                 kind: "recordLit",
-                fields: shape.fields.map((f) => ({ name: f.name, value: diffField(f.name) })),
+                fields: (lowerer.nativeRecordOwnOrder ? ["user", "system"] : shape.fields.map(f => f.name)).map(name => ({ name, value: diffField(name) })),
                 type: t,
                 loc,
               },
@@ -7440,11 +7440,11 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
       }
       return {
         kind: "recordLit",
-        fields: shape.fields.map((f) => ({
-          name: f.name,
+        fields: (lowerer.nativeRecordOwnOrder ? RUSAGE_FIELDS : shape.fields.map(f => f.name)).map(name => ({
+          name,
           value: {
             kind: "libCall", fn: "process.rusage",
-            args: [{ kind: "numLit", value: RUSAGE_FIELDS.indexOf(f.name), type: F64, loc }],
+            args: [{ kind: "numLit", value: RUSAGE_FIELDS.indexOf(name), type: F64, loc }],
             type: F64, loc,
           } as IrExpr,
         })),

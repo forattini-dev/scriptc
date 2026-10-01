@@ -20,6 +20,9 @@ export function lowerTypedObjectIteration(
   const resultT = L.irTypeOf(call);
   if (resultT.kind !== "array" && !(resultT.kind === "dyn" && member === "values")) L.badType(call, L.typeOf(call));
   const receiver = L.lowerExpr(call.arguments[0]!);
+  // JSON roots can widen record fields after the checker mapped the source.
+  // The helper ABI must match the actual storage shape, not that stale type.
+  if (L.nativeJsonRootUndefined && receiver.type.kind === "record") argIr = receiver.type;
   if (argIr.kind === "record") return lowerRecordIteration(L, call, member, argIr, receiver, resultT);
   const key = `obj.${member}:union:${argIr.unionId}:${typeKey(resultT)}`;
   let helper = L.arrHofHelpers.get(key);

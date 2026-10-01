@@ -1,14 +1,32 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { hasOptionalIndexContext } from "./lower-contextual-index.js";
+export { lowerArrayElementReceiver } from "./lower-array-element-receiver.js";
 
 /** Dense native arrays (the Rust lane) keep the typed read contract: an
  * ordinary `xs[i]` is the element ABI, and only reads whose consumer
  * observes absence keep the `T | undefined` union — optional-index
  * contexts, fresh/probe results (`filter(...)[0]`, `slice(-1)[0]`), and
- * inferred block-local bindings. */
+ * inferred block-local bindings, direct member receivers, and values
+ * copied into another array slot. */
 export function denseArrayReadObservesAbsence(L: Lowerer, expr: ts.ElementAccessExpression): boolean {
-  return isFreshArrayProbe(expr.expression) || isRuntimeOptionalArrayBinding(L, expr) || hasOptionalIndexContext(L, expr);
+  return isMemberReceiver(expr) || isArrayElementStoreValue(L, expr) || isFreshArrayProbe(expr.expression) || isRuntimeOptionalArrayBinding(L, expr) || hasOptionalIndexContext(L, expr);
+}
+
+function isMemberReceiver(node: ts.Expression): boolean {
+  while (ts.isParenthesizedExpression(node.parent)) node = node.parent;
+  return (ts.isPropertyAccessExpression(node.parent) || ts.isElementAccessExpression(node.parent)) && node.parent.expression === node;
+}
+
+/** Array storage can represent present undefined without widening its payload ABI. */
+function isArrayElementStoreValue(L: Lowerer, node: ts.Expression): boolean {
+  while (ts.isParenthesizedExpression(node.parent)) node = node.parent;
+  const assignment = node.parent;
+  return ts.isBinaryExpression(assignment) &&
+    assignment.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    assignment.right === node &&
+    ts.isElementAccessExpression(assignment.left) &&
+    L.mapTypeOf(L.typeOf(assignment.left.expression))?.kind === "array";
 }
 
 function isFreshArrayProbe(node: ts.Expression): boolean {

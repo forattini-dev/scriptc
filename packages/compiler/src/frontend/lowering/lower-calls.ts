@@ -9179,6 +9179,13 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
     }
     if (!info || !found) return null;
     const method = access.name.text;
+    const strictReceiver = (): IrExpr => {
+      const value = lowerer.lowerExpr(access.expression);
+      const expected: IrType = receiverIr?.kind === "object" ? receiverIr : { kind: "object", className: info.def.name };
+      return lowerer.nativeDenseArrays
+        ? lowerer.runtimeOptionalPropertyReceiver(access.expression, value, expected, method) ?? value
+        : value;
+    };
     if (found.declarer.builtinError) {
       // The one builtin method: Error.prototype.toString, a runtime
       // implementation called directly (overriding it is fenced, so no
@@ -9207,7 +9214,7 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
     }
     if (lowerer.overrideBelow(info, method)) lowerer.noteVirtualEdge(info, method);
     else lowerer.noteEdge(`%${found.declarer.def.name}.${method}`);
-    const receiver = lowerer.lowerExpr(access.expression);
+    const receiver = strictReceiver();
     const args = lowerer.completeArgs(call.arguments, found.sig.params, locOf(call), call);
     // exactInstanceClassOf may resolve below the receiver's annotated
     // class (`const b: Base = new Derived(); b.m()`). In that statically

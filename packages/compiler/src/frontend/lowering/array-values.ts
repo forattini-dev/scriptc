@@ -80,3 +80,20 @@ export function arrayValueStore(lowerer: Lowerer, arr: IrExpr, index: IrExpr, va
   }
   return { kind: "arraySet", arr, index, value: lowerer.coerceToExpected(value, elem), loc };
 }
+
+/** Stabilize a source-level assignment before the undefined-state dispatch. */
+export function orderedArrayValueStore(lowerer: Lowerer, arr: IrExpr, index: IrExpr, value: IrExpr, elem: IrType, loc: SrcLoc): IrStmt {
+  const receiver = lowerer.declareHiddenLocal("%arrayStoreReceiver", arr.type);
+  const key = lowerer.declareHiddenLocal("%arrayStoreIndex", index.type);
+  const stored = lowerer.declareHiddenLocal("%arrayStoreValue", value.type);
+  return {
+    kind: "block",
+    body: [
+      { kind: "varDecl", localId: receiver.id, init: arr, loc },
+      { kind: "varDecl", localId: key.id, init: index, loc },
+      { kind: "varDecl", localId: stored.id, init: value, loc },
+      arrayValueStore(lowerer, varRef(receiver.id, arr.type, loc), varRef(key.id, index.type, loc), varRef(stored.id, value.type, loc), elem, loc),
+    ],
+    loc,
+  };
+}

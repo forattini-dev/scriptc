@@ -277,7 +277,32 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         const source = lowerer.mapTypeOf(lowerer.typeOf(prop.expression));
         return source !== null && nativeRecordCheckSupported(source, id => lowerer.shapes.get(id), id => lowerer.unions.get(id));
       })) {
-      return { kind: "dynCheck", value: lowerDynObjectLiteral(lowerer, expr), type, loc };
+      const properties = new Map<ts.Node, string>();
+      for (const prop of expr.properties) {
+        if (ts.isPropertyAssignment(prop)) {
+          const name = ts.isComputedPropertyName(prop.name)
+            ? literalComputedKey(lowerer, prop.name) : propNameText(lowerer, prop.name);
+          if (name !== null) properties.set(prop.initializer, name);
+        }
+        if (ts.isShorthandPropertyAssignment(prop)) properties.set(prop.name, propNameText(lowerer, prop.name));
+      }
+      const promoteField = (name: string, actual: IrType): void => {
+        const expected = fieldTypes.get(name);
+        const promoted = expected && lowerer.runtimeOptionalWidening(actual, expected);
+        if (promoted) {
+          type = lowerer.runtimeOptionalRecordField(type, name, promoted);
+          fieldTypes.set(name, promoted);
+        }
+      };
+      const value = lowerDynObjectLiteral(lowerer, expr, (node, raw) => {
+        const name = properties.get(node);
+        if (name !== undefined) promoteField(name, raw.type);
+        else if (raw.type.kind === "record") {
+          for (const field of lowerer.shapes.get(raw.type.shapeId)?.fields ?? []) promoteField(field.name, field.type);
+        }
+        return lowerer.coerceToExpected(raw, DYN);
+      });
+      return { kind: "dynCheck", value, type, loc };
     }
     // File-scope JavaScript object bindings live in the checked-dynamic tree
     // to preserve open writes and identity. Build an optional-field literal

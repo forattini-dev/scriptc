@@ -2865,6 +2865,8 @@ ScrCryptoHash *scr_crypto_hash_update_bytes(ScrCryptoHash *h, ScrBytes *data);
 ScrCryptoHash *scr_crypto_hash_copy(ScrCryptoHash *h);
 ScrStr *scr_crypto_hash_digest_string(ScrCryptoHash *h, ScrStr *enc);
 ScrBytes *scr_crypto_hash_digest_buffer(ScrCryptoHash *h);
+ScrBytes *scr_crypto_pbkdf2(ScrBytes *password, ScrBytes *salt,
+                            double iterations, double keylen, ScrStr *digest);
 typedef void (*ScrCryptoBytesFn)(ScrClosure *cb, ScrBytes *value /* moves */);
 void scr_crypto_defer_bytes(ScrBytes *value /* moves */, ScrClosure *cb /* moves */,
                             ScrCryptoBytesFn fn);

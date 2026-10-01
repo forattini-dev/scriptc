@@ -6823,15 +6823,15 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         lowerer.badType(stmt.expression, lowerer.typeOf(stmt.expression));
       }
     }
-    // Native Rust arrays are dense (no holes): the loop binds the element ABI.
-    const elemValueT = lowerer.nativeDenseArrays ? iterable.type.elem : arrayValueType(lowerer, iterable.type.elem);
+    // Iteration observes absence without changing the array's payload ABI.
+    const elemValueT = arrayValueType(lowerer, iterable.type.elem);
     // Native arrays retain their payload ABI; the loop binds the value yielded
     // by Get, which is undefined for both holes and present undefined slots.
     const sourceT = iterable.type;
     const source = lowerer.declareHiddenLocal("%arrayIterator", sourceT);
     const cursor = lowerer.declareHiddenLocal("%arrayCursor", F64);
     cursor.mutable = true;
-    const forValues = (localId: string, body: IrStmt[]): IrStmt => lowerer.nativeDenseArrays
+    const forValues = (localId: string, body: IrStmt[]): IrStmt => lowerer.nativeDenseArrays && typeEquals(elemValueT, sourceT.elem)
       ? { kind: "forOf", localId, iterable, body, ...(labels && { labels }), loc: locOf(stmt) }
       : ({
       kind: "block",

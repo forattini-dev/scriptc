@@ -458,6 +458,7 @@ export type FieldTarget =
       const fieldType = shape?.fields.find((f) => f.name === access.name.text)?.type;
       if (fieldType) {
         let obj = L.lowerExpr(access.expression);
+        if (L.nativeDenseArrays) obj = L.runtimeOptionalPropertyReceiver(access.expression, obj, receiverIr, access.name.text) ?? obj;
         if (obj.type.kind === "union" && L.armTag(obj.type.unionId, UNDEFINED_T) >= 0) {
           // `rows[i].value`: validate the record arm of the unchecked outer
           // read so a missing element raises a catchable TypeError.
@@ -550,6 +551,7 @@ export type FieldTarget =
         };
         if (!nameSym || nameSym.name === ts.InternalSymbolName.Index || canonicalized()) {
           let obj = L.lowerExpr(access.expression);
+          if (L.nativeDenseArrays) obj = L.runtimeOptionalPropertyReceiver(access.expression, obj, receiverIr, access.name.text) ?? obj;
           if (obj.type.kind === "union" && L.armTag(obj.type.unionId, UNDEFINED_T) >= 0) {
             const present = L.stripUndefinedArm(obj.type);
             const helper = present.kind === "record"
