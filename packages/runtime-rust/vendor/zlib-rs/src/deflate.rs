@@ -1799,8 +1799,19 @@ pub(crate) fn fill_window(stream: &mut DeflateStream) {
         // move the upper half to the lower one to make room in the upper half.
         if state.strstart >= wsize + state.max_dist() {
             // shift the window to the left
+            let node_slow = node_slow_level(state.level);
             let (old, new) = state.window.filled_mut()[..2 * wsize].split_at_mut(wsize);
-            old.copy_from_slice(new);
+            if node_slow {
+                // zlib moves only the `wsize - more` bytes that hold data. The
+                // bytes past them keep their previous contents, and the final
+                // `longest_match` tie-breaks of a stream that ends in the first
+                // slide read them, so the full-half copy below changes Node's
+                // output for inputs of about 65274 to 65535 bytes.
+                let used = wsize - more;
+                old[..used].copy_from_slice(&new[..used]);
+            } else {
+                old.copy_from_slice(new);
+            }
 
             if state.match_start >= wsize as u16 {
                 state.match_start -= wsize as u16;

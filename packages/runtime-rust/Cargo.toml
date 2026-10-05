@@ -29,7 +29,7 @@ island-eval = ["dep:boa_engine", "boa_engine/intl_bundled", "boa_engine/temporal
 boa_engine = { version = "=0.22.0", default-features = false, optional = true }
 chrono = { version = "=0.4.39", default-features = false, features = ["clock", "std"] }
 flate2 = { version = "=1.1.9", default-features = false, features = ["zlib-rs"] }
-# Select Node's level-6 and level-9 algorithm (slow matcher, four-byte hash, three-byte tail insertion and distance rule) without changing the numeric level or tuning.
+# Select Node's level-6 and level-9 algorithm (slow matcher, four-byte hash, three-byte tail insertion, distance rule and first-slide window copy) without changing the numeric level or tuning.
 zlib-rs = { version = "=0.6.7", default-features = false, features = ["scriptc-node-level6"] }
 getrandom = "=0.4.3"
 num-bigint = "=0.5.1"

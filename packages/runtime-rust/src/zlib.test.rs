@@ -262,6 +262,71 @@ fn level_zero_cuts_stored_blocks_like_node() {
     assert_eq!(crc32_of(&packed), 2_224_156_836);
 }
 
+/// Four letters drawn from the same xorshift32 stream: the compressible,
+/// match-dense shape that exposed the first-slide divergence.
+fn alpha_four_input(length: usize) -> Vec<u8> {
+    let mut state = 0x2545_f491_u32;
+    (0..length)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            97 + (state & 3) as u8
+        })
+        .collect()
+}
+
+#[test]
+fn levels_six_and_nine_match_node_when_the_first_window_slide_ends_the_stream() {
+    // zlib slides the window once the position passes wsize + MAX_DIST (65274)
+    // and moves only the bytes that hold data. An input that ends inside that
+    // first slide leaves the bytes past the data in place, and the final
+    // `longest_match` reads them. (generator, level, input length, output
+    // length, output CRC-32) from Node 26.8.1 and Node 24.15.0, identical on
+    // both. The first six sit in the affected range (the full-half copy gave
+    // other bytes there); the rest are neighbours on either side of it and in
+    // the second slide range.
+    type Generator = fn(usize) -> Vec<u8>;
+    type ZoneCase = (Generator, f64, usize, usize, u32);
+    let alpha: Generator = alpha_four_input;
+    let copy: Generator = copy_heavy_input;
+    let cases: [ZoneCase; 14] = [
+        (alpha, 9.0, 65_283, 19_639, 4_170_846_241),
+        (alpha, 6.0, 65_283, 19_607, 539_588_531),
+        (copy, 9.0, 65_296, 10_039, 470_470_147),
+        (copy, 6.0, 65_296, 11_741, 3_135_187_304),
+        (copy, 9.0, 65_355, 10_051, 2_599_927_170),
+        (copy, 6.0, 65_355, 11_759, 2_720_624_212),
+        (alpha, 9.0, 65_273, 19_635, 4_075_808_209),
+        (alpha, 6.0, 65_273, 19_603, 1_377_524_771),
+        (alpha, 9.0, 65_540, 19_711, 1_684_639_372),
+        (alpha, 6.0, 65_540, 19_680, 3_252_598_065),
+        (alpha, 9.0, 98_100, 29_125, 3_132_656_234),
+        (alpha, 6.0, 98_100, 29_087, 665_049_235),
+        (copy, 9.0, 98_100, 15_718, 3_323_190_691),
+        (copy, 6.0, 98_100, 18_392, 815_150_518),
+    ];
+    for (generate, level, length, out_length, out_crc) in cases {
+        let source = generate(length);
+        let input = bytes_from_elements(source.clone());
+        let packed = bytes_u8_values(&zlib_deflate_sync_level(&input, level));
+        assert_eq!(packed.len(), out_length, "level {level}, {length} bytes");
+        assert_eq!(crc32_of(&packed), out_crc, "level {level}, {length} bytes");
+        if level == 6.0 {
+            // The default level is level 6 and must take the same path.
+            assert_eq!(
+                bytes_u8_values(&zlib_deflate_sync(&input)),
+                packed,
+                "default level, {length} bytes"
+            );
+        }
+        assert_eq!(
+            bytes_u8_values(&zlib_inflate_sync(&bytes_from_elements(packed))),
+            source
+        );
+    }
+}
+
 #[test]
 fn direct_input_and_offset_views_are_borrowed() {
     let input = bytes_from_elements(vec![11_u8, 22, 33, 44, 55]);
