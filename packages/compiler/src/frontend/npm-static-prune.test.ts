@@ -203,6 +203,7 @@ describe("npm static named re-export pruning", () => {
     expect(plan.files.some((file) => file.endsWith("/cycle-impure/index.js"))).toBe(true);
     expect(plan.pruned).toEqual([]);
   });
+
 });
 
 /** A package's files in the module order, relative to its root. */
@@ -252,6 +253,20 @@ describe("npm static re-export pruning stays inside what the declaration covers"
     expect(packageFiles(plan.files, "cyclebarrel")).toEqual(["a.js", "b.js", "q.js", "index.js"]);
     // r.js reaches no cycle: pruned although a cycle exists elsewhere.
     expect(plan.pruned).toEqual([{ package: "cyclebarrel", modules: ["r.js"] }]);
+  });
+
+  test("an edge whose target closure awaits at the top level is kept, so importers wait as they do in Node", () => {
+    // Node starts an importer's body only after every asynchronous
+    // dependency completed. Dropping tla.js, forawait.js or via-tla.js
+    // (whose import tla-dep.js awaits) would let an importer of the barrel
+    // run before its siblings, whatever the sideEffects declaration says.
+    // nested-await.js awaits only inside a function body: it stays pruned.
+    const plan = moduleOrder("tlabarrel-cli.ts", "tlabarrel");
+    expect(plan.diagnostics).toEqual([]);
+    expect(packageFiles(plan.files, "tlabarrel").sort()).toEqual([
+      "a.js", "forawait.js", "index.js", "tla-dep.js", "tla.js", "via-tla.js",
+    ]);
+    expect(plan.pruned).toEqual([{ package: "tlabarrel", modules: ["nested-await.js"] }]);
   });
 
   test("a re-export edge into another package is never pruned", () => {

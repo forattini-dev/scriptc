@@ -161,4 +161,24 @@ describe("npm static named re-export pruning", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  test.each(TARGETS)("an undemanded module that awaits at the top level stays, so importers wait as in Node (%s)", async (target) => {
+    const directory = await mkdtemp(join(tmpdir(), "scriptc-named-reexport-"));
+    const entry = corpus("3475-npm-reexport-top-level-await");
+    try {
+      const result = await compileEngineFree(entry, target, directory);
+      expect(result.ok, result.ok ? undefined : JSON.stringify(result.diagnostics)).toBe(true);
+      if (!result.ok) return;
+      expect(result.runtimeFences).toEqual([]);
+      // Node runs second.ts before first.ts, which waits for the barrel's
+      // asynchronous late.js although nothing uses `late`.
+      await expectNodeParity(result.binaryPath, entry, target, "second\nfirst alpha\nmain\n");
+      // late.js awaits at the top level and stays; spare.js is pruned.
+      expect(npmStaticStatuses(entry, target).npmStatic).toEqual([
+        { package: "tla-barrel", status: "static", prunedModules: ["spare.js"] },
+      ]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

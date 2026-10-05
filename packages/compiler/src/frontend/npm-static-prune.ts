@@ -14,20 +14,30 @@
  * reproduced, exactly as a bundler does not reproduce them. A package that
  * declares `sideEffects: false` untruthfully diverges here. So does a
  * dependency package outside the program (its files are never scanned)
- * that imports an undeclared package which runs code at load. A nested
+ * that imports an undeclared package which runs code at load, or that
+ * awaits at the top level: only packages in the program are read for
+ * cycles and awaits. A nested
  * format scope's own package.json (dist/esm/package.json) is not
  * consulted: the named package root decides.
  *
- * Two conditions keep the decision from reaching beyond that declaration.
+ * Three conditions keep the decision from reaching beyond that declaration.
  * An edge is pruned only when everything its target can reach is covered
  * by it: no import of a package the purity check did not prove (an
  * undeclared, hoisted or dev dependency would have run its top level in
- * Node), no import Node resolves outside the program, and no import cycle.
+ * Node), no import Node resolves outside the program, no import cycle and
+ * no top-level await.
  * The cycle condition keeps evaluation order exact: dropping a subtree
  * that could enter a cycle through a different module changes which module
  * of the cycle evaluates first, and scriptc's TDZ guard then refuses (or,
- * worse, admits) a program Node runs in another order. Cycle-free pure
- * subtrees only reorder modules that have no effects to order.
+ * worse, admits) a program Node runs in another order. The await condition
+ * does the same for asynchronous modules: Node starts an importer's body
+ * only after every asynchronous dependency completed, so a skipped module
+ * that awaits would let the importers of its barrel run ahead of their
+ * siblings even though awaiting has no effect of its own, and the
+ * declaration, however truthful, says nothing about that order. A pruned
+ * closure that is acyclic, synchronous and covered is a successor-closed
+ * region of modules that have no effects to order, so the modules left in
+ * the program keep their relative order.
  *
  * Keep the decision per tsgo program: preflight, the link checks, and
  * emitted module init headers must see one graph. */
@@ -352,19 +362,41 @@ export function planNpmStaticReexports(
     return rootPath !== null && purePackageTree(rootPath, pureMemo, new Set()).pure;
   };
 
+  /** A module is asynchronous when an await or for-await sits outside every
+   * nested function-like boundary, the same reading the lowering uses to
+   * make a module's init asynchronous (lower-module-init.ts). */
+  const awaitMemo = new Map<ts.SourceFile, boolean>();
+  const awaitsAtTopLevel = (sf: ts.SourceFile): boolean => {
+    let found = awaitMemo.get(sf);
+    if (found === undefined) {
+      found = false;
+      ts.walkPreorder(sf, (node) => {
+        if (node !== sf && ts.isFunctionLike(node)) return "skip";
+        if (ts.isAwaitExpression(node) || (ts.isForOfStatement(node) && node.awaitModifier !== undefined)) {
+          found = true;
+          return "stop";
+        }
+        return undefined;
+      });
+      awaitMemo.set(sf, found);
+    }
+    return found;
+  };
+
   const inProgram = (dep: ts.SourceFile): boolean => dep.fileName.endsWith(".json") || available.has(dep);
   const moduleCovered = (sf: ts.SourceFile): boolean =>
-    modulePackagePure(sf) &&
+    modulePackagePure(sf) && !awaitsAtTopLevel(sf) &&
     moduleEdgesOf(sf).every(({ spec, dep }) => (dep !== null && inProgram(dep)) || unscannedImportCovered(sf, spec));
 
   /** True when everything `root` can load is covered by the purity
-   * declaration and none of it sits on an import cycle: every module it
-   * reaches belongs to a package that makes the whole-tree promise, every
-   * import it makes is a program module, a builtin or a package that
-   * does, and the reachable graph is acyclic. Only then does skipping
-   * `root` neither skip an uncovered module's evaluation nor change the
-   * order in which the remaining modules evaluate. Tarjan, memoized across
-   * roots: a component is final when its root pops. */
+   * declaration and none of it sits on an import cycle or awaits at the top
+   * level: every module it reaches belongs to a package that makes the
+   * whole-tree promise, every import it makes is a program module, a
+   * builtin or a package that does, none of those modules is
+   * asynchronous, and the reachable graph is acyclic. Only then does
+   * skipping `root` neither skip an uncovered module's evaluation nor
+   * change the order in which the remaining modules evaluate. Tarjan,
+   * memoized across roots: a component is final when its root pops. */
   const closureMemo = new Map<ts.SourceFile, boolean>();
   const closureCovered = (root: ts.SourceFile): boolean => {
     if (root.fileName.endsWith(".json")) return true;
@@ -510,7 +542,8 @@ export function planNpmStaticReexports(
   // the demand and are revisited whenever it grows.
   const scanned = new Set<ts.SourceFile>();
   for (let index = 0; index < queue.length; index++) {
-    const sf = queue[index]!;
+    const sf = queue[index];
+    if (sf === undefined) continue;
     for (const stmt of sf.statements) {
       if (!valueReexport(stmt)) continue;
       const dep = edge(sf, stmt.moduleSpecifier.text);
@@ -591,7 +624,9 @@ function prunedPackages(
   };
   for (const target of targets) visit(target);
   for (let index = 0; index < queue.length; index++) {
-    for (const { dep } of edgesOf(queue[index]!)) visit(dep);
+    const sf = queue[index];
+    if (sf === undefined) continue;
+    for (const { dep } of edgesOf(sf)) visit(dep);
   }
   const byPackage = new Map<string, string[]>();
   for (const sf of skipped) {
