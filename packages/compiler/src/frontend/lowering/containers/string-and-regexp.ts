@@ -378,7 +378,7 @@ export function lowerRegexMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     // flow through variables hit the same fence at runtime.
     let recv: ts.Expression = access.expression;
     while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
-    if (ts.isRegularExpressionLiteral(recv)) {
+    if (!lowerer.statefulRegex && ts.isRegularExpressionLiteral(recv)) {
       const flags = recv.text.slice(recv.text.lastIndexOf("/") + 1);
       if (flags.includes("g") || flags.includes("y")) {
         lowerer.unsupported("SC1121", call);
@@ -399,15 +399,17 @@ export function lowerRegexMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     if (call.arguments.length > 1 || call.arguments.some(ts.isSpreadElement)) return null;
     let recv: ts.Expression = access.expression;
     while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
-    if (ts.isRegularExpressionLiteral(recv)) {
+    if (!lowerer.statefulRegex && ts.isRegularExpressionLiteral(recv)) {
       const flags = recv.text.slice(recv.text.lastIndexOf("/") + 1);
       if (flags.includes("g") || flags.includes("y")) {
-        lowerer.unsupported("SC1121", call);
+        lowerer.unsupported("SC1121", call, "'.exec()' on a regex with the 'g' or 'y' flag");
       }
     }
     const re = lowerReceiver();
     const subject = lowerRegexSubject(lowerer, call.arguments[0], loc);
     const resultT: IrType = { kind: "union", unionId: lowerer.unions.intern([regexCaptureArray(lowerer.unions), { kind: "nullT" }]) };
+    // Stateful exec has its own IR operation (lastIndex advances); C/LLVM keep the stateless lowering and its fence.
+    if (lowerer.statefulRegex) return { kind: "regexIntrinsic", method: "exec", receiver: re, args: [subject], type: resultT, loc };
     // The shared match intrinsic takes the string first; preserve exec's
     // receiver-before-subject evaluation order before swapping operands.
     const saved = lowerer.declareHiddenLocal("%execReceiver", re.type);
