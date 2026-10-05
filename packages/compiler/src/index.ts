@@ -69,6 +69,7 @@ import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
 import { checkPreflight, loadProgram } from "./frontend/program.js";
 import { npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
+import { prunedNpmStaticModules } from "./frontend/npm-static-prune.js";
 import { provenanceSources } from "./frontend/provenance-registry.js";
 import { clearResolveCaches } from "./frontend/resolve.js";
 import { retryNpmInferredContext } from "./frontend/npm-static-context.js";
@@ -120,7 +121,7 @@ export {
   renderDiagnostics as renderAll,
   renderDiagnostic,
 } from "./diagnostics/render.js";
-export { renderCoverage, type CoverageInput } from "./coverage/report.js";
+export { renderCoverage, type CoverageInput, type RenderCoverageOptions } from "./coverage/report.js";
 export {
   generateSurfaceManifest,
   renderSurfaceManifest,
@@ -669,8 +670,14 @@ function runFrontendWithDeclarations(
       }
     }
   }
+  // The audit trail of the final program's re-export pruning: a static
+  // package's row names how many of its modules the program leaves
+  // unevaluated (the full list rides the status for verbose renders).
+  const prunedByPackage = new Map(prunedNpmStaticModules(load.program).map((p) => [p.package, p.modules]));
   for (const p of requested) {
-    if (effective.has(p)) statuses.push({ package: p, status: "static" });
+    if (!effective.has(p)) continue;
+    const prunedModules = prunedByPackage.get(p);
+    statuses.push({ package: p, status: "static", ...(prunedModules === undefined ? {} : { prunedModules }) });
   }
 
   const finalLoad = load;

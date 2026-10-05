@@ -68,6 +68,12 @@ export interface NpmStaticStatus {
   status: "static" | "fallback";
   /** The fallback's first refusal reason (fallback rows only). */
   detail?: string;
+  /** Static rows only: the package's modules the program does not
+   * evaluate because only re-export edges nobody demands a name through
+   * reach them — pruned on the package's whole-tree `sideEffects: false`
+   * promise (npm-static-prune.ts). Paths are relative to the package
+   * root. Absent when nothing was pruned. */
+  prunedModules?: readonly string[];
 }
 
 const GREEN = "\x1b[32m";
@@ -92,7 +98,15 @@ interface Blocker {
   count: number;
 }
 
-export function renderCoverage(input: CoverageInput, opts: { color?: boolean; sourceTexts?: Map<string, string> } = {}): string {
+export interface RenderCoverageOptions {
+  color?: boolean;
+  sourceTexts?: Map<string, string>;
+  /** List every pruned npm module under its package row instead of the
+   * count alone (the CLI's SCRIPTC_LIST_PRUNED=1). */
+  listPrunedModules?: boolean;
+}
+
+export function renderCoverage(input: CoverageInput, opts: RenderCoverageOptions = {}): string {
   const c = (code: string, s: string) => (opts.color ? code + s + RESET : s);
   const out: string[] = [];
   out.push(`${c(BOLD, "scriptc coverage")} ${DIMPath(input.file, opts.color ?? false)}`);
@@ -201,17 +215,26 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
 
   // --npm-static outcomes: which opted-in packages compiled statically as
   // program modules and which fell back to the island (with the first
-  // refusal reason) — the flag's honesty section.
+  // refusal reason) — the flag's honesty section. A static package whose
+  // unused re-exports were pruned says how many of its modules the
+  // program never evaluates, so nothing analyzed-looking hides an
+  // unanalyzed module.
   const npmStatic = input.npmStatic ?? [];
   if (npmStatic.length > 0) {
     out.push(`  ${c(DIM, "npm packages compiled statically (--npm-static):")}`);
     const widestP = Math.max(...npmStatic.map((s) => s.package.length));
     for (const s of npmStatic) {
+      const pruned = s.prunedModules ?? [];
       const status =
         s.status === "static"
-          ? c(GREEN, "static")
+          ? c(GREEN, "static") + (pruned.length > 0
+            ? ` ${c(DIM, `(${pruned.length} module${pruned.length === 1 ? "" : "s"} not evaluated: unused re-exports of a sideEffects-free package)`)}`
+            : "")
           : c(YELLOW, "island fallback") + (s.detail !== undefined ? ` ${c(DIM, `(${s.detail})`)}` : "");
       out.push(`    ${s.package.padEnd(widestP)}  ${status}`);
+      if (opts.listPrunedModules === true) {
+        for (const module of pruned) out.push(`      ${c(DIM, `- ${module}`)}`);
+      }
     }
     out.push("");
   }

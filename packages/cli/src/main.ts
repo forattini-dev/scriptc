@@ -325,7 +325,10 @@ async function main(): Promise<number> {
       ...(Object.keys(externalTypes).length > 0 ? { externalTypes } : {}),
     });
     const color = process.stdout.isTTY ?? false;
-    process.stdout.write(renderCoverage(coverage, { color, sourceTexts }) + "\n");
+    // SCRIPTC_LIST_PRUNED=1: name every npm module the program never
+    // evaluates (pruned unused re-exports), not just the per-package count.
+    const listPrunedModules = process.env["SCRIPTC_LIST_PRUNED"] === "1";
+    process.stdout.write(renderCoverage(coverage, { color, sourceTexts, listPrunedModules }) + "\n");
     if (!coverage.preflightFailed) persistTiers();
     return coverage.preflightFailed || ((backend !== undefined || values.engine === false) && coverage.diagnostics.length > 0) ? 1 : 0;
   }

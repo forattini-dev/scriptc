@@ -436,13 +436,15 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   }, 180_000);
 
   test.for([
-    ["purebarrel", "purebarrel-cli.ts"],
-    ["statefulbarrel", "statefulbarrel-cli.ts"],
-    ["statefulbarrel", "statefulbarrel-empty-cli.ts"],
-  ] as const)("%s namespace re-exports byte-match Node", async ([pkg, file]) => {
+    // The pure barrel's status names the module the program never
+    // evaluates; the stateful package evaluates everything.
+    ["purebarrel", "purebarrel-cli.ts", ["dist/esm/spare.js"]],
+    ["statefulbarrel", "statefulbarrel-cli.ts", undefined],
+    ["statefulbarrel", "statefulbarrel-empty-cli.ts", undefined],
+  ] as const)("%s namespace re-exports byte-match Node", async ([pkg, file, prunedModules]) => {
     const entry = join(pilotRoot, file);
     const { coverage } = analyze(entry, { npmStatic: [pkg] });
-    expect(coverage.npmStatic).toEqual([{ package: pkg, status: "static" }]);
+    expect(coverage.npmStatic).toEqual([{ package: pkg, status: "static", ...(prunedModules === undefined ? {} : { prunedModules }) }]);
     expect(coverage.preflightFailed).toBe(false);
     expect(coverage.diagnostics).toHaveLength(0);
     const binary = await buildStatic(entry, [pkg]);
