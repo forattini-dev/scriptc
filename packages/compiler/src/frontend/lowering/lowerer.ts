@@ -378,6 +378,8 @@ export interface LowerOptions {
   nativeStringConcatDyn?: boolean;
   /** Rust provides Unicode String.prototype.normalize. */
   nativeStringNormalize?: boolean;
+  /** Rust reproduces Node's level 0, 6 and 9 deflate streams byte for byte. */
+  nativeDeflateLevels?: boolean;
   /** --dynamic: the island engine is linked, so island constructs
    * (__island_eval) may lower. Off by default — without it they produce a
    * requires-dynamic diagnostic instead. */
@@ -493,6 +495,8 @@ export interface LowererMode {
   nativeStringConcatDyn?: boolean;
   /** Rust provides Unicode String.prototype.normalize. */
   nativeStringNormalize?: boolean;
+  /** Rust reproduces Node's level 0, 6 and 9 deflate streams byte for byte. */
+  nativeDeflateLevels?: boolean;
   /** Names of bodies a prior reachability pass reached; null lowers everything. */
   reachable?: ReadonlySet<string> | null;
   /** Coverage remainder: lower ONLY bodies outside `reachable`, skip the
@@ -611,6 +615,7 @@ export function lowerToIr(
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
     nativeStringNormalize: options.nativeStringNormalize ?? false,
+    nativeDeflateLevels: options.nativeDeflateLevels ?? false,
     nativeProcessExitState: options.nativeProcessExitState ?? false,
     nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
     nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
@@ -645,6 +650,7 @@ export function lowerToIr(
         nativeStringSubstr: options.nativeStringSubstr ?? false,
         nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
         nativeStringNormalize: options.nativeStringNormalize ?? false,
+        nativeDeflateLevels: options.nativeDeflateLevels ?? false,
         nativeProcessExitState: options.nativeProcessExitState ?? false,
         nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
         nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
@@ -687,6 +693,7 @@ export function lowerToIr(
       nativeStringSubstr: options.nativeStringSubstr ?? false,
       nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
       nativeStringNormalize: options.nativeStringNormalize ?? false,
+      nativeDeflateLevels: options.nativeDeflateLevels ?? false,
       nativeProcessExitState: options.nativeProcessExitState ?? false,
       nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
       nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
@@ -723,6 +730,7 @@ export function lowerToIr(
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
     nativeStringNormalize: options.nativeStringNormalize ?? false,
+    nativeDeflateLevels: options.nativeDeflateLevels ?? false,
     nativeProcessExitState: options.nativeProcessExitState ?? false,
     nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
     nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
@@ -1148,6 +1156,7 @@ export class Lowerer {
   readonly nativeStringSubstr: boolean;
   readonly nativeStringConcatDyn: boolean;
   readonly nativeStringNormalize: boolean;
+  readonly nativeDeflateLevels: boolean;
   readonly nativeProcessExitState: boolean;
   readonly nativeJsonRootUndefined: boolean;
   readonly nativeRecordOwnOrder: boolean;
@@ -1939,6 +1948,7 @@ export class Lowerer {
     this.nativeStringSubstr = mode.nativeStringSubstr ?? false;
     this.nativeStringConcatDyn = mode.nativeStringConcatDyn ?? false;
     this.nativeStringNormalize = mode.nativeStringNormalize ?? false;
+    this.nativeDeflateLevels = mode.nativeDeflateLevels ?? false;
     this.nativeProcessExitState = mode.nativeProcessExitState ?? false;
     this.nativeJsonRootUndefined = mode.nativeJsonRootUndefined ?? false;
     this.nativeRecordOwnOrder = mode.nativeRecordOwnOrder ?? false;

@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { analyze } from "../src/index.js";
 
-function coverageOf(source: string) {
+function coverageOf(source: string, backend: "rust" | "c" | "llvm" = "rust") {
   const directory = mkdtempSync(join(tmpdir(), "scriptc-zlib-options-"));
   try {
     const entry = join(directory, "main.ts");
     writeFileSync(entry, source);
-    return analyze(entry, { backend: "rust", allowEngine: false }).coverage;
+    return analyze(entry, { backend, allowEngine: false }).coverage;
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -76,4 +76,21 @@ test.each([
   const refusals = coverage.diagnostics.filter((d) => d.code === "SC2020");
   expect(refusals).toHaveLength(1);
   expect(refusals[0]!.message).toContain(`${member} with explicit options`);
+});
+
+// Only the Rust runtime reproduces Node's level 0, 6 and 9 streams. The C and
+// LLVM runtimes link the system zlib, whose bytes differ for non-trivial
+// inputs, so the fixed-level form must stay refused there instead of
+// compiling into a silently different stream.
+test.each([
+  ["c", "deflateSync(data, { level: 9 })"],
+  ["c", "deflateSync(data, { level: 0 })"],
+  ["c", "deflateSync(data, { level: -1 })"],
+  ["llvm", "deflateSync(data, { level: 9 })"],
+  ["llvm", "deflateSync(data, { level: -1 })"],
+] as const)("the %s backend keeps refusing %s", (backend, call) => {
+  const coverage = coverageOf(program(call), backend);
+  const refusals = coverage.diagnostics.filter((d) => d.code === "SC2020");
+  expect(refusals).toHaveLength(1);
+  expect(refusals[0]!.message).toContain("deflateSync with explicit options");
 });
