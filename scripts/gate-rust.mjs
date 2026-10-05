@@ -34,7 +34,7 @@ import { DRIVER_FIXTURES } from "../tests/harness/driver-fixtures.js";
 import {
   CORPUS_TEST_FILE, REPORT_SCHEMA, USAGE, UsageError,
   baselineReason, corpusShardIndices, corpusTotalProblem, describeCrash, digestVitestResults, emptyBaseline, evaluate, exitStatusProblems, extractFocusLists,
-  formatDuration, moduleFindings, normalizeBaseline, parseArgs, parseCargoTestLog, parseClippyLog, readJsonl, renderSummary,
+  formatDuration, moduleFindings, normalizeBaseline, parseArgs, parseCargoTestLog, parseClippyLog, portableId, readJsonl, renderSummary,
 } from "./gate-rust-core.mjs";
 import { acquireLock } from "./gate-rust-lock.mjs";
 
@@ -613,7 +613,7 @@ async function runFileLane(context, plan) {
     // for no recorded reason is a problem, and a file with a problem is not "completed", so
     // its baseline entries are left alone rather than judged on an unreliable record.
     const found = moduleFindings(entry, outcomes);
-    step.reds.push(...found.reds);
+    step.reds.push(...found.reds.map((red) => ({ ...red, id: portableId(red.id, repoRoot) })));
     for (const message of found.problems) step.problems.push({ id: file, message });
     const failedBeforeCollecting = entry.state === "failed" && entry.collected.length === 0;
     if (!failedBeforeCollecting && executed.length === 0) {
@@ -623,7 +623,7 @@ async function runFileLane(context, plan) {
     if (missing.length > 0) step.problems.push({ id: file, message: `${file}: ${missing.length} test(s) did not run` });
     else if (found.problems.length === 0) step.scope.completedFiles.push(file);
     for (const outcome of outcomes) {
-      const id = `${file} > ${outcome.fullName ?? outcome.name}`;
+      const id = portableId(`${file} > ${outcome.fullName ?? outcome.name}`, repoRoot);
       if (outcome.state === "passed") {
         step.passed.push(id);
         if (outcome.flaky) step.flaky.push({ id, firstLines: outcome.errors[0] ?? "" });

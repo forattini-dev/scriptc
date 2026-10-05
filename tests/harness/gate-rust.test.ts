@@ -28,6 +28,7 @@ import {
   parseArgs,
   parseCargoTestLog,
   parseClippyLog,
+  portableId,
   readJsonl,
   renderSummary,
 } from "../../scripts/gate-rust-core.mjs";
@@ -345,6 +346,15 @@ describe("cargo logs", () => {
     expect(parsed.crashedBinaries).toEqual(["tests/net.rs"]);
     expect(parsed.failedTargetLines).toBe(2);
     expect(parsed.failures.map((failure) => failure.binary)).toEqual(["src/lib.rs"]);
+  });
+});
+
+describe("portable test ids", () => {
+  test("the checkout's absolute path inside an id becomes <repo>, so a baseline entry matches on another checkout", () => {
+    const root = "/home/someone/work/scriptc/";
+    expect(portableId(`packages/compiler/test/x.test.ts > corpus prohibits the engine: ${root}tests/corpus/1-a.ts`, root)).toBe("packages/compiler/test/x.test.ts > corpus prohibits the engine: <repo>tests/corpus/1-a.ts");
+    expect(portableId("plain id", root)).toBe("plain id");
+    expect(portableId("plain id", "")).toBe("plain id");
   });
 });
 

@@ -603,6 +603,14 @@ export function baselineReason(text, repoRoot) {
   return line.length > 200 ? `${line.slice(0, 200)}…` : line;
 }
 
+/** A test id with the checkout's absolute path made portable. Test titles can
+ * embed absolute paths (a corpus path in a title), and an id that names one
+ * checkout never matches the baseline on another, so every file-lane id goes
+ * through this with the repository root. */
+export function portableId(text, repoRoot) {
+  return repoRoot ? String(text).split(repoRoot).join("<repo>") : String(text);
+}
+
 export function describeScope(scope) {
   switch (scope.kind) {
     case "none": return "nothing ran";
