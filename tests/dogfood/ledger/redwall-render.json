@@ -1,10 +1,10 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "redwall-render",
-  "generatedAt": "2026-10-05T16:47:21.850Z",
+  "generatedAt": "2026-10-05T19:24:52.904Z",
   "node": "v26.8.1",
   "compiler": {
-    "head": "38b821dae0a407906c0f69b2a5c08186c8667dfe",
+    "head": "8585bf513a70c9dbbf1bf98db605a77094e39cbb",
     "branch": "dogfood/ledger",
     "dirtyPaths": 0
   },
@@ -90,8 +90,8 @@
       }
     ]
   },
-  "elapsedMs": 6034,
-  "peakRssKiB": 393044,
+  "elapsedMs": 5747,
+  "peakRssKiB": 393192,
   "sources": 105,
   "npmStatic": {
     "static": 0,

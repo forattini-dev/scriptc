@@ -1,10 +1,10 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "redskilled-statusline",
-  "generatedAt": "2026-10-05T16:47:21.731Z",
+  "generatedAt": "2026-10-05T19:20:47.104Z",
   "node": "v26.8.1",
   "compiler": {
-    "head": "38b821dae0a407906c0f69b2a5c08186c8667dfe",
+    "head": "8585bf513a70c9dbbf1bf98db605a77094e39cbb",
     "branch": "dogfood/ledger",
     "dirtyPaths": 0
   },
@@ -39,10 +39,12 @@
   "blockers": {
     "total": 171,
     "loweringDiagnostics": 39,
+    "importFences": 0,
     "reachedFences": 132,
     "fenceMirrors": 0,
-    "postLoweringDiagnostics": 0,
-    "note": "what a no-engine build must clear: the lowering diagnostics plus every reached runtime fence (each becomes an SC3003 once lowering is clean); post-lowering diagnostics are a later wall"
+    "postLoweringDiagnostics": null,
+    "atLeast": true,
+    "note": "what a no-engine build must clear: the lowering diagnostics plus every reached runtime fence (each becomes an SC3003 once lowering is clean). At a frontier the total is a floor: code behind a failing statement is not measured, and IR validation and backend checks (the post-lowering wall, null here) run only once the module lowers."
   },
   "diagnostics": {
     "lowering": {
@@ -159,22 +161,8 @@
         }
       ]
     },
-    "postLowering": {
-      "total": 0,
-      "direct": 0,
-      "cascades": {
-        "total": 0,
-        "distinctBindings": 0
-      },
-      "instantiated": 0,
-      "byCode": {},
-      "byPackage": {},
-      "firstParty": 0,
-      "thirdParty": 0,
-      "familyCount": 0,
-      "families": []
-    },
-    "engineRequired": false
+    "postLowering": null,
+    "engineRequired": null
   },
   "fences": {
     "total": 132,
@@ -705,22 +693,22 @@
       ]
     },
     "fences": {
-      "total": 67,
-      "direct": 54,
+      "total": 65,
+      "direct": 53,
       "cascades": {
-        "total": 13,
-        "distinctBindings": 9,
+        "total": 12,
+        "distinctBindings": 8,
         "bySite": {
           "moduleInit": 0,
-          "function": 13,
+          "function": 12,
           "declaration": 0
         }
       },
-      "instantiated": 6,
+      "instantiated": 5,
       "byCode": {
-        "SC1090": 26,
+        "SC1090": 25,
         "SC2020": 16,
-        "SC2004": 13,
+        "SC2004": 12,
         "SC1031": 4,
         "SC1100": 3,
         "SC1043": 2,
@@ -737,18 +725,17 @@
         "@octokit/plugin-retry": 2,
         "@octokit/request": 2,
         "cli-args-parser": 2,
-        "content-type": 2,
         "@octokit/auth-oauth-device": 1,
         "@octokit/request-error": 1
       },
       "firstParty": 0,
-      "thirdParty": 67,
+      "thirdParty": 65,
       "bySite": {
         "moduleInit": 0,
-        "function": 67,
+        "function": 65,
         "declaration": 0
       },
-      "familyCount": 19,
+      "familyCount": 18,
       "families": [
         {
           "code": "SC2020",
@@ -893,8 +880,8 @@
       ]
     }
   },
-  "elapsedMs": 53450,
-  "peakRssKiB": 712412,
+  "elapsedMs": 61162,
+  "peakRssKiB": 697304,
   "sources": 160,
   "npmStatic": {
     "static": 31,

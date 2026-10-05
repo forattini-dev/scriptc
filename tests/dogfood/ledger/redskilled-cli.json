@@ -1,10 +1,10 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "redskilled-cli",
-  "generatedAt": "2026-10-05T16:47:21.791Z",
+  "generatedAt": "2026-10-05T19:21:49.553Z",
   "node": "v26.8.1",
   "compiler": {
-    "head": "38b821dae0a407906c0f69b2a5c08186c8667dfe",
+    "head": "8585bf513a70c9dbbf1bf98db605a77094e39cbb",
     "branch": "dogfood/ledger",
     "dirtyPaths": 0
   },
@@ -85,8 +85,8 @@
       }
     ]
   },
-  "elapsedMs": 165063,
-  "peakRssKiB": 923788,
+  "elapsedMs": 182937,
+  "peakRssKiB": 917508,
   "sources": 341,
   "npmStatic": {
     "static": 37,

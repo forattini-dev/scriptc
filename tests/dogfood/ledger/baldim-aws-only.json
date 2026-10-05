@@ -1,10 +1,10 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "baldim-aws-only",
-  "generatedAt": "2026-10-05T16:47:21.707Z",
+  "generatedAt": "2026-10-05T19:19:39.731Z",
   "node": "v26.8.1",
   "compiler": {
-    "head": "38b821dae0a407906c0f69b2a5c08186c8667dfe",
+    "head": "8585bf513a70c9dbbf1bf98db605a77094e39cbb",
     "branch": "dogfood/ledger",
     "dirtyPaths": 0
   },
@@ -42,10 +42,12 @@
   "blockers": {
     "total": 1054,
     "loweringDiagnostics": 0,
+    "importFences": 0,
     "reachedFences": 1054,
     "fenceMirrors": 1054,
     "postLoweringDiagnostics": 26,
-    "note": "what a no-engine build must clear: the lowering diagnostics plus every reached runtime fence (each becomes an SC3003 once lowering is clean); post-lowering diagnostics are a later wall"
+    "atLeast": false,
+    "note": "what a no-engine build must clear: the lowering diagnostics plus every reached runtime fence (each becomes an SC3003 once lowering is clean). At a frontier the total is a floor: code behind a failing statement is not measured, and IR validation and backend checks (the post-lowering wall, null here) run only once the module lowers."
   },
   "diagnostics": {
     "lowering": {
@@ -805,64 +807,64 @@
       ]
     },
     "fences": {
-      "total": 535,
-      "direct": 362,
+      "total": 461,
+      "direct": 305,
       "cascades": {
-        "total": 173,
-        "distinctBindings": 45,
+        "total": 156,
+        "distinctBindings": 39,
         "bySite": {
           "moduleInit": 0,
-          "function": 173,
+          "function": 156,
           "declaration": 0
         }
       },
-      "instantiated": 144,
+      "instantiated": 87,
       "byCode": {
-        "SC1090": 209,
-        "SC2004": 173,
-        "SC2020": 79,
-        "SC1052": 24,
-        "SC2011": 19,
-        "SC1043": 13,
-        "SC1031": 4,
+        "SC1090": 190,
+        "SC2004": 156,
+        "SC2020": 65,
+        "SC1052": 22,
+        "SC2011": 11,
+        "SC1043": 5,
         "SC1101": 4,
-        "SC1040": 3,
         "SC1100": 3,
-        "SC1120": 3,
+        "SC1120": 2,
+        "SC1031": 1,
+        "SC1040": 1,
         "SC2012": 1
       },
       "byPackage": {
-        "@smithy/core": 239,
-        "@aws-sdk/core": 193,
+        "@smithy/core": 191,
+        "@aws-sdk/core": 186,
         "@smithy/node-http-handler": 44,
-        "@aws-sdk/checksums": 19,
-        "@smithy/signature-v4": 19,
+        "@smithy/signature-v4": 17,
         "@aws-sdk/middleware-sdk-s3": 6,
         "@aws-sdk/signature-v4-multi-region": 6,
         "@aws/lambda-invoke-store": 6,
-        "@aws-sdk/xml-builder": 3
+        "@aws-sdk/xml-builder": 3,
+        "@aws-sdk/checksums": 2
       },
       "firstParty": 0,
-      "thirdParty": 535,
+      "thirdParty": 461,
       "bySite": {
         "moduleInit": 0,
-        "function": 535,
+        "function": 461,
         "declaration": 0
       },
-      "familyCount": 45,
+      "familyCount": 42,
       "families": [
         {
           "code": "SC1090",
           "family": "method calls like '_'",
-          "count": 83,
+          "count": 80,
           "sites": {
             "moduleInit": 0,
-            "function": 83,
+            "function": 80,
             "declaration": 0
           },
           "packages": {
-            "@smithy/core": 34,
-            "@aws-sdk/core": 33,
+            "@smithy/core": 33,
+            "@aws-sdk/core": 32,
             "@smithy/node-http-handler": 7,
             "@aws/lambda-invoke-store": 6,
             "@aws-sdk/middleware-sdk-s3": 2
@@ -871,14 +873,14 @@
         {
           "code": "SC2020",
           "family": "'_' is part of the standard library types but has no scriptc lowering yet",
-          "count": 60,
+          "count": 47,
           "sites": {
             "moduleInit": 0,
-            "function": 60,
+            "function": 47,
             "declaration": 0
           },
           "packages": {
-            "@smithy/core": 33,
+            "@smithy/core": 20,
             "@aws-sdk/core": 18,
             "@smithy/node-http-handler": 6,
             "@aws-sdk/middleware-sdk-s3": 2,
@@ -888,48 +890,30 @@
         {
           "code": "SC1090",
           "family": "assignment to non-array elements",
-          "count": 48,
+          "count": 42,
           "sites": {
             "moduleInit": 0,
-            "function": 48,
+            "function": 42,
             "declaration": 0
           },
           "packages": {
-            "@aws-sdk/core": 42,
-            "@aws-sdk/checksums": 4,
-            "@smithy/core": 2
+            "@aws-sdk/core": 42
           }
         },
         {
           "code": "SC1052",
           "family": "for-in over '_' receivers (records, index-signature shapes, arrays, and globalThis enumerate)",
-          "count": 24,
+          "count": 22,
           "sites": {
             "moduleInit": 0,
-            "function": 24,
+            "function": 22,
             "declaration": 0
           },
           "packages": {
-            "@smithy/core": 14,
+            "@smithy/core": 13,
             "@aws-sdk/core": 6,
             "@smithy/node-http-handler": 2,
-            "@aws-sdk/middleware-sdk-s3": 1,
-            "@smithy/signature-v4": 1
-          }
-        },
-        {
-          "code": "SC1043",
-          "family": "comparing non-number, non-string values",
-          "count": 13,
-          "sites": {
-            "moduleInit": 0,
-            "function": 13,
-            "declaration": 0
-          },
-          "packages": {
-            "@smithy/core": 8,
-            "@smithy/node-http-handler": 4,
-            "@aws-sdk/checksums": 1
+            "@aws-sdk/middleware-sdk-s3": 1
           }
         },
         {
@@ -950,21 +934,6 @@
           }
         },
         {
-          "code": "SC2011",
-          "family": "the '_' operator on '_'-typed values runs in the embedded dynamic engine, which this build does not include",
-          "count": 10,
-          "sites": {
-            "moduleInit": 0,
-            "function": 10,
-            "declaration": 0
-          },
-          "packages": {
-            "@smithy/core": 5,
-            "@aws-sdk/checksums": 4,
-            "@smithy/signature-v4": 1
-          }
-        },
-        {
           "code": "SC2020",
           "family": "'_' is typed by @types/node but has no scriptc lowering yet",
           "count": 10,
@@ -982,21 +951,6 @@
         {
           "code": "SC1090",
           "family": "'_' on '_' receivers (process.env keys and pure Record<string, T> keys delete)",
-          "count": 9,
-          "sites": {
-            "moduleInit": 0,
-            "function": 9,
-            "declaration": 0
-          },
-          "packages": {
-            "@aws-sdk/core": 6,
-            "@smithy/core": 2,
-            "@aws-sdk/signature-v4-multi-region": 1
-          }
-        },
-        {
-          "code": "SC1090",
-          "family": "'_' right-hand sides other than classes declared in the program",
           "count": 8,
           "sites": {
             "moduleInit": 0,
@@ -1004,16 +958,59 @@
             "declaration": 0
           },
           "packages": {
+            "@aws-sdk/core": 6,
+            "@aws-sdk/signature-v4-multi-region": 1,
+            "@smithy/core": 1
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "the reference to '_' (a binding form with no lowering)",
+          "count": 7,
+          "sites": {
+            "moduleInit": 0,
+            "function": 7,
+            "declaration": 0
+          },
+          "packages": {
             "@smithy/core": 3,
+            "@smithy/signature-v4": 3,
+            "@aws-sdk/checksums": 1
+          }
+        },
+        {
+          "code": "SC2020",
+          "family": "'.set from '_' values' is part of the standard library types but has no scriptc lowering yet",
+          "count": 7,
+          "sites": {
+            "moduleInit": 0,
+            "function": 7,
+            "declaration": 0
+          },
+          "packages": {
+            "@smithy/core": 7
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "'_' right-hand sides other than classes declared in the program",
+          "count": 6,
+          "sites": {
+            "moduleInit": 0,
+            "function": 6,
+            "declaration": 0
+          },
+          "packages": {
             "@smithy/node-http-handler": 3,
-            "@aws-sdk/signature-v4-multi-region": 2
+            "@aws-sdk/signature-v4-multi-region": 2,
+            "@smithy/core": 1
           }
         }
       ]
     }
   },
-  "elapsedMs": 48641,
-  "peakRssKiB": 668832,
+  "elapsedMs": 67006,
+  "peakRssKiB": 662252,
   "sources": 30,
   "npmStatic": {
     "static": 13,

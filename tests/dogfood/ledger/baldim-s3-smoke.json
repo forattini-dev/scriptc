@@ -1,10 +1,10 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "baldim-s3-smoke",
-  "generatedAt": "2026-10-05T16:47:21.650Z",
+  "generatedAt": "2026-10-05T19:16:54.326Z",
   "node": "v26.8.1",
   "compiler": {
-    "head": "38b821dae0a407906c0f69b2a5c08186c8667dfe",
+    "head": "8585bf513a70c9dbbf1bf98db605a77094e39cbb",
     "branch": "dogfood/ledger",
     "dirtyPaths": 0
   },
@@ -43,14 +43,19 @@
       ]
     }
   },
+  "firstPartyPackages": [
+    "@baldim/*"
+  ],
   "stage": "frontier",
   "blockers": {
     "total": 2251,
     "loweringDiagnostics": 5,
+    "importFences": 0,
     "reachedFences": 2246,
     "fenceMirrors": 0,
-    "postLoweringDiagnostics": 0,
-    "note": "what a no-engine build must clear: the lowering diagnostics plus every reached runtime fence (each becomes an SC3003 once lowering is clean); post-lowering diagnostics are a later wall"
+    "postLoweringDiagnostics": null,
+    "atLeast": true,
+    "note": "what a no-engine build must clear: the lowering diagnostics plus every reached runtime fence (each becomes an SC3003 once lowering is clean). At a frontier the total is a floor: code behind a failing statement is not measured, and IR validation and backend checks (the post-lowering wall, null here) run only once the module lowers."
   },
   "diagnostics": {
     "lowering": {
@@ -91,22 +96,8 @@
         }
       ]
     },
-    "postLowering": {
-      "total": 0,
-      "direct": 0,
-      "cascades": {
-        "total": 0,
-        "distinctBindings": 0
-      },
-      "instantiated": 0,
-      "byCode": {},
-      "byPackage": {},
-      "firstParty": 0,
-      "thirdParty": 0,
-      "familyCount": 0,
-      "families": []
-    },
-    "engineRequired": false
+    "postLowering": null,
+    "engineRequired": null
   },
   "fences": {
     "total": 2246,
@@ -169,8 +160,8 @@
       "@aws-sdk/xml-builder": 1,
       "quick-format-unescaped": 1
     },
-    "firstParty": 0,
-    "thirdParty": 2246,
+    "firstParty": 65,
+    "thirdParty": 2181,
     "bySite": {
       "moduleInit": 958,
       "function": 1287,
@@ -684,96 +675,95 @@
       ]
     },
     "fences": {
-      "total": 1193,
-      "direct": 867,
+      "total": 1106,
+      "direct": 797,
       "cascades": {
-        "total": 326,
-        "distinctBindings": 125,
+        "total": 309,
+        "distinctBindings": 119,
         "bySite": {
           "moduleInit": 0,
-          "function": 326,
+          "function": 309,
           "declaration": 0
         }
       },
-      "instantiated": 322,
+      "instantiated": 252,
       "byCode": {
-        "SC1090": 467,
-        "SC2004": 326,
-        "SC2020": 227,
-        "SC1052": 32,
+        "SC1090": 443,
+        "SC2004": 309,
+        "SC2020": 209,
+        "SC1052": 30,
         "SC1100": 29,
-        "SC2011": 27,
-        "SC1043": 21,
+        "SC2011": 19,
+        "SC1043": 13,
         "SC2009": 12,
-        "SC1101": 10,
-        "SC1120": 8,
         "SC2013": 8,
-        "SC1031": 5,
-        "SC1040": 5,
+        "SC1101": 7,
+        "SC1120": 7,
         "SC2012": 4,
+        "SC1040": 3,
         "SC1042": 3,
         "SC1070": 3,
         "SC2002": 3,
-        "SC1030": 1,
+        "SC1031": 2,
         "SC1045": 1,
         "SC2003": 1
       },
       "byPackage": {
-        "recker": 345,
-        "@smithy/core": 242,
-        "@aws-sdk/core": 193,
-        "@baldim/core": 126,
+        "recker": 344,
+        "@smithy/core": 194,
+        "@aws-sdk/core": 186,
+        "@baldim/core": 116,
         "@baldim/adapter-s3": 83,
         "thread-stream": 59,
         "@smithy/node-http-handler": 44,
-        "@smithy/signature-v4": 22,
         "@pinojs/redact": 20,
-        "@aws-sdk/checksums": 19,
-        "lodash-es": 15,
+        "@smithy/signature-v4": 20,
+        "lodash-es": 13,
         "@aws-sdk/middleware-sdk-s3": 6,
         "@aws-sdk/signature-v4-multi-region": 6,
         "@aws/lambda-invoke-store": 6,
         "pino": 4,
-        "@aws-sdk/xml-builder": 3
+        "@aws-sdk/xml-builder": 3,
+        "@aws-sdk/checksums": 2
       },
-      "firstParty": 0,
-      "thirdParty": 1193,
+      "firstParty": 199,
+      "thirdParty": 907,
       "bySite": {
         "moduleInit": 0,
-        "function": 1193,
+        "function": 1106,
         "declaration": 0
       },
-      "familyCount": 80,
+      "familyCount": 77,
       "families": [
         {
           "code": "SC2020",
           "family": "'_' is part of the standard library types but has no scriptc lowering yet",
-          "count": 158,
+          "count": 141,
           "sites": {
             "moduleInit": 0,
-            "function": 158,
+            "function": 141,
             "declaration": 0
           },
           "packages": {
             "thread-stream": 39,
-            "@smithy/core": 33,
             "recker": 29,
-            "@baldim/core": 22,
-            "@aws-sdk/core": 18
+            "@smithy/core": 20,
+            "@aws-sdk/core": 18,
+            "@baldim/core": 18
           }
         },
         {
           "code": "SC1090",
           "family": "method calls like '_'",
-          "count": 97,
+          "count": 94,
           "sites": {
             "moduleInit": 0,
-            "function": 97,
+            "function": 94,
             "declaration": 0
           },
           "packages": {
-            "@smithy/core": 34,
-            "@aws-sdk/core": 33,
+            "@smithy/core": 33,
+            "@aws-sdk/core": 32,
             "recker": 8,
             "@smithy/node-http-handler": 7,
             "@aws/lambda-invoke-store": 6
@@ -782,16 +772,14 @@
         {
           "code": "SC1090",
           "family": "assignment to non-array elements",
-          "count": 48,
+          "count": 42,
           "sites": {
             "moduleInit": 0,
-            "function": 48,
+            "function": 42,
             "declaration": 0
           },
           "packages": {
-            "@aws-sdk/core": 42,
-            "@aws-sdk/checksums": 4,
-            "@smithy/core": 2
+            "@aws-sdk/core": 42
           }
         },
         {
@@ -814,23 +802,6 @@
         {
           "code": "SC1090",
           "family": "'_' right-hand sides other than classes declared in the program",
-          "count": 34,
-          "sites": {
-            "moduleInit": 0,
-            "function": 34,
-            "declaration": 0
-          },
-          "packages": {
-            "recker": 25,
-            "@smithy/core": 3,
-            "@smithy/node-http-handler": 3,
-            "@aws-sdk/signature-v4-multi-region": 2,
-            "lodash-es": 1
-          }
-        },
-        {
-          "code": "SC1052",
-          "family": "for-in over '_' receivers (records, index-signature shapes, arrays, and globalThis enumerate)",
           "count": 32,
           "sites": {
             "moduleInit": 0,
@@ -838,11 +809,28 @@
             "declaration": 0
           },
           "packages": {
-            "@smithy/core": 14,
+            "recker": 25,
+            "@smithy/node-http-handler": 3,
+            "@aws-sdk/signature-v4-multi-region": 2,
+            "@smithy/core": 1,
+            "lodash-es": 1
+          }
+        },
+        {
+          "code": "SC1052",
+          "family": "for-in over '_' receivers (records, index-signature shapes, arrays, and globalThis enumerate)",
+          "count": 30,
+          "sites": {
+            "moduleInit": 0,
+            "function": 30,
+            "declaration": 0
+          },
+          "packages": {
+            "@smithy/core": 13,
             "@aws-sdk/core": 6,
             "@pinojs/redact": 4,
             "@smithy/node-http-handler": 2,
-            "@smithy/signature-v4": 2
+            "pino": 2
           }
         },
         {
@@ -893,8 +881,8 @@
           }
         },
         {
-          "code": "SC1043",
-          "family": "comparing non-number, non-string values",
+          "code": "SC1090",
+          "family": "compound assignment to fields of computed receivers",
           "count": 21,
           "sites": {
             "moduleInit": 0,
@@ -902,18 +890,17 @@
             "declaration": 0
           },
           "packages": {
-            "@smithy/core": 8,
-            "@smithy/node-http-handler": 4,
-            "recker": 4,
-            "thread-stream": 4,
-            "@aws-sdk/checksums": 1
+            "@baldim/core": 7,
+            "recker": 7,
+            "thread-stream": 5,
+            "@baldim/adapter-s3": 2
           }
         }
       ]
     }
   },
-  "elapsedMs": 126686,
-  "peakRssKiB": 817040,
+  "elapsedMs": 164902,
+  "peakRssKiB": 856764,
   "sources": 798,
   "npmStatic": {
     "static": 27,
