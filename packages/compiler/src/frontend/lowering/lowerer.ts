@@ -794,7 +794,7 @@ export function fencesNotAlreadyReached(
   fences.forEach((fence, index) => {
     if (covered.has(siteKey(fence))) return;
     runtimeFences.push(fence);
-    runtimeFenceSites.push(sites[index]!);
+    runtimeFenceSites.push(sites[index] ?? "function"); // parallel to `fences` by construction
   });
   return { runtimeFences, runtimeFenceSites };
 }
