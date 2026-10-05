@@ -545,9 +545,23 @@ describe("full-run corpus accounting", () => {
 describe("command line", () => {
   const tsx = join(repoRoot, "node_modules/tsx/dist/cli.mjs");
   const script = join(repoRoot, "scripts/gate-rust.mjs");
+  /** --dry-run prints only the environment variables that differ from its own, so the plan
+   * assertions below need an ambient environment free of the variables they assert on: the
+   * gate's own lanes (and CI) set several of them, which used to hide them from the delta
+   * when this file ran inside the rust-unit lane. */
+  const ambient = () => ({
+    ...process.env,
+    SCRIPTC_NATIVE_HOST_WORKERS: undefined,
+    SCRIPTC_NODE_ORACLE: undefined,
+    SCRIPTC_RUNTIME_TARGET: undefined,
+    SCRIPTC_TEST_SHARD: undefined,
+    SCRIPTC_REQUIRE_TARGETS: undefined,
+    SCRIPTC_GATE_RESULTS: undefined,
+    SCRIPTC_GATE_PARENT_PID: undefined,
+  });
 
   test("--dry-run prints the plan: one shard process per sample index, each with its own TMPDIR", () => {
-    const output = execFileSync(process.execPath, [tsx, script, "--quick", "--dry-run"], { cwd: repoRoot, encoding: "utf8", env: { ...process.env, SCRIPTC_NATIVE_HOST_WORKERS: undefined } });
+    const output = execFileSync(process.execPath, [tsx, script, "--quick", "--dry-run"], { cwd: repoRoot, encoding: "utf8", env: ambient() });
     const plan = JSON.parse(output);
     expect(plan.mode).toBe("quick");
     expect(plan.steps.map((step: { id: string }) => step.id)).toEqual(["runtime-crate", "corpus", "focus-node26"]);
@@ -570,7 +584,7 @@ describe("command line", () => {
 
   test("every run plans its per-shard TMPDIRs under a tag of its own, so two runs never delete each other's", () => {
     const tmpBase = (out: string) => {
-      const output = execFileSync(process.execPath, [tsx, script, "--quick", "--dry-run", "--out", out], { cwd: repoRoot, encoding: "utf8" });
+      const output = execFileSync(process.execPath, [tsx, script, "--quick", "--dry-run", "--out", out], { cwd: repoRoot, encoding: "utf8", env: ambient() });
       const plan = JSON.parse(output);
       return plan.steps[1].shards[0].env.TMPDIR as string;
     };
@@ -579,7 +593,7 @@ describe("command line", () => {
   });
 
   test("--focus-file replaces the CI list and --steps narrows the plan", () => {
-    const output = execFileSync(process.execPath, [tsx, script, "--dry-run", "--steps", "focus-node24", "--focus-file", "tests/harness/gate-rust.test.ts", "--focus-workers", "1"], { cwd: repoRoot, encoding: "utf8" });
+    const output = execFileSync(process.execPath, [tsx, script, "--dry-run", "--steps", "focus-node24", "--focus-file", "tests/harness/gate-rust.test.ts", "--focus-workers", "1"], { cwd: repoRoot, encoding: "utf8", env: ambient() });
     const plan = JSON.parse(output);
     expect(plan.steps.map((step: { id: string }) => step.id)).toEqual(["focus-node24"]);
     const focus = plan.steps[0];
