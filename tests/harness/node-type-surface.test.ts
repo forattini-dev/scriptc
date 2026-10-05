@@ -11,7 +11,7 @@
  * against their own Node oracle (Node 24 and Node 26): the analysis, the
  * compiled binary, and the pinned refusal shapes. */
 import { execFile } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -88,3 +88,46 @@ test("a declaration the stood-down copy has and the carried copy dropped is an h
   expect(errors[0]!.hint).toContain("checked against @types/node 26.1.2");
   expect(errors[1]!.hint).toBeUndefined();
 });
+
+test.skipIf(sanitize).each(targets)("[%s] a copy vendored outside node_modules and named by typeRoots is the surface: it typechecks, lowers, and matches the Node oracle", async (target) => {
+  // The project's tsconfig points typeRoots at a vendored copy of the real
+  // 24.13.3 (no node_modules path names it): the copy is identified by its
+  // package.json, so the lowering recognizes the Node types it declares.
+  const project = mkdtempSync(join(tmpdir(), "scriptc-node-type-surface-vendored-"));
+  const outDir = mkdtempSync(join(tmpdir(), "scriptc-node-type-surface-vendored-out-"));
+  try {
+    const fixtureModules = join(repoRoot, "tests/fixtures/node-types/node_modules");
+    cpSync(join(fixtureModules, "@types/node"), join(project, "vendor", "node"), { recursive: true });
+    mkdirSync(join(project, "node_modules"));
+    symlinkSync(join(fixtureModules, "undici-types"), join(project, "node_modules", "undici-types"), "dir");
+    writeFileSync(join(project, "tsconfig.json"), JSON.stringify({
+      compilerOptions: { target: "ES2022", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true, allowImportingTsExtensions: true, typeRoots: ["./vendor"], types: ["node"] },
+      include: ["*.ts"],
+    }));
+    const entry = join(project, "main.ts");
+    writeFileSync(entry, [
+      'import { spawn } from "node:child_process";',
+      'const child = spawn("/bin/sh", ["-c", "exit 3"], { stdio: "ignore" });',
+      'child.once("error", (err) => { console.log("child error", err.message); });',
+      'child.on("exit", (code, signal) => { console.log("child exit", code ?? -1, signal ?? "none"); });',
+      "",
+    ].join("\n"));
+    const analysis = analyze(entry, optionsFor(target));
+    expect(analysis.coverage.preflightFailed).toBe(false);
+    expect(analysis.coverage.diagnostics).toEqual([]);
+    expect(analysis.coverage.stats.statementsFailed).toBe(0);
+    const result = await compile(entry, { ...optionsFor(target), outDir, outPath: join(outDir, "main") });
+    expect(result.ok, !result.ok ? JSON.stringify(result.diagnostics, null, 2) : "").toBe(true);
+    if (!result.ok) return;
+    const [node, native] = await Promise.all([
+      execFileAsync(oracleExecutableForTarget(target, NODE_COMPAT_MATRIX), [entry]),
+      execFileAsync(result.binaryPath),
+    ]);
+    expect(node.stdout).toBe("child exit 3 none\n");
+    expect(native.stdout).toBe(node.stdout);
+    expect(native.stderr).toBe(node.stderr);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+}, 120_000);

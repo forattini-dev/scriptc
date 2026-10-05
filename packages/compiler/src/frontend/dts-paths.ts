@@ -51,18 +51,31 @@ const NODE_TYPE_SURFACE_PACKAGES: ReadonlySet<string> = new Set(["@types/node", 
  * install), so a second copy beside the first declares nothing twice. */
 const AMBIENT_SURFACE_PACKAGES: ReadonlySet<string> = new Set(["@types/node", "bun-types", "@types/bun"]);
 
+/** Which declaration files belong to an ambient surface copy that no
+ * node_modules path names (a vendored directory a tsconfig `typeRoots` points
+ * at): memoized per directory for one load, reset by resetNodeTypesPathCache. */
+const vendoredOwnerCache = new Map<string, { name: string; root: string } | null>();
+
+/** Forgets what isNodeTypesPath learned about vendored copies (every load starts clean). */
+export function resetNodeTypesPathCache(): void {
+  vendoredOwnerCache.clear();
+}
+
 /** True for files belonging to the adopted Node type surface: the
  * @types/node package itself and undici-types (its dependency — the
  * web-platform globals: fetch/Response/AbortSignal/ReadableStream/...).
  * The provenance half of the lowering tables' recognition when the
  * fallback declarations stand down, and of the SC2020-family fence for
- * everything else those packages declare. */
+ * everything else those packages declare. A copy outside node_modules (a
+ * vendored directory named by tsconfig `typeRoots`) is recognized by its
+ * package.json name, like the program's election of copies does. */
 export function isNodeTypesPath(file: string): boolean {
   const pkg = npmPackageNameOf(file);
   // bun-types/@types/bun: the Bun type surface (@types/bun → bun-types →
   // @types/node) — the same recognition applies, the lowering tables key
   // by member name + provenance either way.
-  return pkg !== null && NODE_TYPE_SURFACE_PACKAGES.has(pkg);
+  if (pkg !== null) return NODE_TYPE_SURFACE_PACKAGES.has(pkg);
+  return nodeTypeSurfacePackageOf(file, vendoredOwnerCache) !== null;
 }
 
 /** True for a file of the undici-types package (the web-platform half of a

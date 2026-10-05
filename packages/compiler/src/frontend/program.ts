@@ -61,7 +61,7 @@ import { provenanceEntryFor, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import { ADOPTED_OPTIONS, isJsSourceFileName, isRuntimeSourceFileName } from "./tsc-codes.js";
 import { BUN_MODULE_MEMBER_ALIASES, canonicalBuiltinModule, SUPPORTED_NODE_MODULES, isTrapRuntimeModule, unsupportedModuleFeatureOf } from "./builtin-modules.js";
-import { ambientDtsPath, fallbackDtsPath, isNodeTypesPath, nodeTypeSurfacePackageOf, overridesDtsPath, tsgoPath } from "./dts-paths.js";
+import { ambientDtsPath, fallbackDtsPath, isNodeTypesPath, nodeTypeSurfacePackageOf, overridesDtsPath, resetNodeTypesPathCache, tsgoPath } from "./dts-paths.js";
 import { clearWorkspacePackages, isRelativeSpecifier, isWorkspacePackageName, npmPackageNameOf, registerWorkspacePackage } from "./workspace-registry.js";
 import { trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 import { processModuleMemberImport, processModuleMemberRequire } from "./process-module.js";
@@ -728,6 +728,7 @@ export function loadProgram(
   // Non-opted workspace packages register lazily as preflight's own
   // resolver discovers their import edges.
   clearWorkspacePackages();
+  resetNodeTypesPathCache();
   for (const pkg of opts?.npmStatic ?? []) {
     const probe = resolveBareModule(entryPath, pkg);
     if (probe?.workspaceDir !== undefined) registerWorkspacePackage(probe.packageName, probe.workspaceDir);
