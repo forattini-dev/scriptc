@@ -198,6 +198,8 @@ describe("npm static named re-export pruning", () => {
     expect(plan.pruned).toEqual([]);
   });
 
+  // The closure guard also keeps this edge (unused.js imports the impure
+  // package itself); declaredimpure below isolates the dependency-tree rule.
   test("a sideEffects-free package with an impure dependency follows every named re-export", () => {
     const plan = moduleOrder("impurenamed-cli.ts", ["impurenamed", "cycle-impure"]);
     expect(plan.diagnostics).toEqual([]);
@@ -206,6 +208,14 @@ describe("npm static named re-export pruning", () => {
     expect(plan.pruned).toEqual([]);
   });
 
+  test("a declared dependency without the promise keeps every re-export even when no module imports it", () => {
+    // No file of declaredimpure reaches cycle-impure, so only the whole
+    // declared dependency tree can keep unused.js.
+    const plan = moduleOrder("declaredimpure-cli.ts", "declaredimpure");
+    expect(plan.diagnostics).toEqual([]);
+    expect(plan.files.some((file) => file.endsWith("/declaredimpure/unused.js"))).toBe(true);
+    expect(plan.pruned).toEqual([]);
+  });
 });
 
 /** A package's files in the module order, relative to its root. */
