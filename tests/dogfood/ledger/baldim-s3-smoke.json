@@ -1,0 +1,937 @@
+{
+  "schema": 1,
+  "name": "baldim-s3-smoke",
+  "generatedAt": "2026-10-05T16:47:21.650Z",
+  "node": "v26.8.1",
+  "compiler": {
+    "head": "38b821dae0a407906c0f69b2a5c08186c8667dfe",
+    "branch": "dogfood/ledger",
+    "dirtyPaths": 0
+  },
+  "entry": "${baldim}/s3-client.ts",
+  "options": {
+    "backend": "rust",
+    "allowEngine": false,
+    "npmStatic": "auto",
+    "target": "node26",
+    "optimization": "dev"
+  },
+  "consumer": {
+    "kind": "npm",
+    "dir": "${baldim}",
+    "lockfileSha256": "ca3e6c5180bcf4e9bf5bb978ee6362ef96807f5446993d78dc21595fab340b10",
+    "installed": {
+      "@baldim/adapter-s3": "0.1.2",
+      "@baldim/core": "0.2.1",
+      "@aws-sdk/client-s3": "3.1127.0",
+      "@smithy/core": "3.35.1",
+      "lodash-es": "4.18.1",
+      "recker": "1.0.103",
+      "pino": "10.3.1",
+      "@types/node": "25.5.2"
+    },
+    "typesNode": {
+      "distinctVersions": [
+        "25.5.2"
+      ],
+      "roots": [
+        {
+          "version": "25.5.2",
+          "root": "${baldim}/node_modules/@types/node",
+          "files": 80
+        }
+      ]
+    }
+  },
+  "stage": "frontier",
+  "blockers": {
+    "total": 2251,
+    "loweringDiagnostics": 5,
+    "reachedFences": 2246,
+    "fenceMirrors": 0,
+    "postLoweringDiagnostics": 0,
+    "note": "what a no-engine build must clear: the lowering diagnostics plus every reached runtime fence (each becomes an SC3003 once lowering is clean); post-lowering diagnostics are a later wall"
+  },
+  "diagnostics": {
+    "lowering": {
+      "total": 5,
+      "direct": 5,
+      "cascades": {
+        "total": 0,
+        "distinctBindings": 0
+      },
+      "instantiated": 0,
+      "byCode": {
+        "SC2013": 4,
+        "SC2011": 1
+      },
+      "byPackage": {
+        "recker": 4,
+        "<program>": 1
+      },
+      "firstParty": 1,
+      "thirdParty": 4,
+      "familyCount": 2,
+      "families": [
+        {
+          "code": "SC2013",
+          "family": "importing '_' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+          "count": 4,
+          "packages": {
+            "recker": 4
+          }
+        },
+        {
+          "code": "SC2011",
+          "family": "values of type '_' have no static representation but run in the embedded dynamic engine, which this build does not include",
+          "count": 1,
+          "packages": {
+            "<program>": 1
+          }
+        }
+      ]
+    },
+    "postLowering": {
+      "total": 0,
+      "direct": 0,
+      "cascades": {
+        "total": 0,
+        "distinctBindings": 0
+      },
+      "instantiated": 0,
+      "byCode": {},
+      "byPackage": {},
+      "firstParty": 0,
+      "thirdParty": 0,
+      "familyCount": 0,
+      "families": []
+    },
+    "engineRequired": false
+  },
+  "fences": {
+    "total": 2246,
+    "direct": 1782,
+    "cascades": {
+      "total": 464,
+      "distinctBindings": 333,
+      "bySite": {
+        "moduleInit": 173,
+        "function": 291,
+        "declaration": 0
+      }
+    },
+    "instantiated": 527,
+    "byCode": {
+      "SC1090": 1125,
+      "SC2004": 464,
+      "SC2020": 251,
+      "SC2003": 100,
+      "SC1030": 63,
+      "SC2011": 54,
+      "SC1100": 32,
+      "SC1043": 28,
+      "SC1052": 27,
+      "SC2009": 26,
+      "SC1040": 18,
+      "SC1120": 15,
+      "SC1101": 12,
+      "SC1031": 11,
+      "SC1042": 9,
+      "SC2013": 6,
+      "SC1010": 1,
+      "SC1045": 1,
+      "SC1071": 1,
+      "SC2002": 1,
+      "SC2012": 1
+    },
+    "byPackage": {
+      "lodash-es": 731,
+      "@smithy/core": 472,
+      "@aws-sdk/client-s3": 396,
+      "recker": 156,
+      "pino": 100,
+      "@aws-sdk/core": 80,
+      "he": 51,
+      "@baldim/core": 48,
+      "pino-std-serializers": 42,
+      "@aws-sdk/checksums": 35,
+      "@aws-sdk/credential-provider-node": 26,
+      "@aws-sdk/middleware-sdk-s3": 20,
+      "safe-stable-stringify": 18,
+      "@baldim/adapter-s3": 17,
+      "sonic-boom": 16,
+      "@smithy/signature-v4": 13,
+      "@aws/lambda-invoke-store": 7,
+      "on-exit-leak-free": 6,
+      "thread-stream": 4,
+      "@aws-sdk/credential-provider-env": 3,
+      "@smithy/node-http-handler": 3,
+      "@aws-sdk/xml-builder": 1,
+      "quick-format-unescaped": 1
+    },
+    "firstParty": 0,
+    "thirdParty": 2246,
+    "bySite": {
+      "moduleInit": 958,
+      "function": 1287,
+      "declaration": 1
+    },
+    "familyCount": 109,
+    "families": [
+      {
+        "code": "SC1090",
+        "family": "assignment to non-variables",
+        "count": 406,
+        "sites": {
+          "moduleInit": 356,
+          "function": 50,
+          "declaration": 0
+        },
+        "packages": {
+          "lodash-es": 350,
+          "pino-std-serializers": 18,
+          "@baldim/adapter-s3": 8,
+          "@smithy/core": 8,
+          "pino": 7
+        }
+      },
+      {
+        "code": "SC2020",
+        "family": "'_' is part of the standard library types but has no scriptc lowering yet",
+        "count": 166,
+        "sites": {
+          "moduleInit": 48,
+          "function": 118,
+          "declaration": 0
+        },
+        "packages": {
+          "@smithy/core": 64,
+          "lodash-es": 41,
+          "pino-std-serializers": 10,
+          "pino": 9,
+          "@baldim/core": 8
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "extending computed expressions",
+        "count": 113,
+        "sites": {
+          "moduleInit": 112,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "@aws-sdk/client-s3": 112,
+          "@smithy/core": 1
+        }
+      },
+      {
+        "code": "SC2003",
+        "family": "union types must match exactly: expected '_', got '_' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+        "count": 100,
+        "sites": {
+          "moduleInit": 79,
+          "function": 21,
+          "declaration": 0
+        },
+        "packages": {
+          "@aws-sdk/client-s3": 78,
+          "lodash-es": 14,
+          "@smithy/core": 4,
+          "pino": 3,
+          "@baldim/adapter-s3": 1
+        }
+      },
+      {
+        "code": "SC2020",
+        "family": "'_' is typed by @types/node but has no scriptc lowering yet",
+        "count": 74,
+        "sites": {
+          "moduleInit": 9,
+          "function": 65,
+          "declaration": 0
+        },
+        "packages": {
+          "@smithy/core": 44,
+          "recker": 15,
+          "pino": 6,
+          "@baldim/core": 3,
+          "sonic-boom": 2
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "method calls like '_'",
+        "count": 70,
+        "sites": {
+          "moduleInit": 2,
+          "function": 68,
+          "declaration": 0
+        },
+        "packages": {
+          "@smithy/core": 27,
+          "@aws-sdk/core": 9,
+          "@aws-sdk/credential-provider-node": 9,
+          "recker": 9,
+          "pino": 5
+        }
+      },
+      {
+        "code": "SC1030",
+        "family": "the reference to '_' above its '_' declaration (a read there would be '_', which the binding's type cannot hold — annotate it '| undefined' or move the declaration up)",
+        "count": 63,
+        "sites": {
+          "moduleInit": 0,
+          "function": 63,
+          "declaration": 0
+        },
+        "packages": {
+          "lodash-es": 38,
+          "he": 25
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "functions with optional or defaulted parameters as values, except where the target type spells the completed signature with required parameters (a '_' function flows into a '_' slot, and a package/'any' slot takes any signature that can cross the island boundary; otherwise call the function directly)",
+        "count": 59,
+        "sites": {
+          "moduleInit": 53,
+          "function": 6,
+          "declaration": 0
+        },
+        "packages": {
+          "lodash-es": 44,
+          "@smithy/core": 8,
+          "@aws-sdk/core": 4,
+          "@baldim/core": 2,
+          "@aws-sdk/middleware-sdk-s3": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "constructing values other than classes declared in the program",
+        "count": 54,
+        "sites": {
+          "moduleInit": 4,
+          "function": 50,
+          "declaration": 0
+        },
+        "packages": {
+          "lodash-es": 37,
+          "@smithy/core": 7,
+          "@aws-sdk/checksums": 2,
+          "@aws-sdk/middleware-sdk-s3": 2,
+          "@smithy/signature-v4": 2
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "the reference to '_' (a binding form with no lowering)",
+        "count": 36,
+        "sites": {
+          "moduleInit": 6,
+          "function": 30,
+          "declaration": 0
+        },
+        "packages": {
+          "recker": 11,
+          "@aws-sdk/client-s3": 7,
+          "@smithy/core": 7,
+          "@aws-sdk/core": 4,
+          "pino": 2
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "Function.prototype.call on a compiled function value (compiled calls are direct — no runtime '_' or arguments object exists to re-route; spell the call directly: '_')",
+        "count": 34,
+        "sites": {
+          "moduleInit": 1,
+          "function": 33,
+          "declaration": 0
+        },
+        "packages": {
+          "lodash-es": 27,
+          "safe-stable-stringify": 5,
+          "@smithy/core": 1,
+          "he": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "'_' right-hand sides other than classes declared in the program",
+        "count": 30,
+        "sites": {
+          "moduleInit": 1,
+          "function": 29,
+          "declaration": 0
+        },
+        "packages": {
+          "@smithy/core": 10,
+          "lodash-es": 9,
+          "recker": 8,
+          "pino": 2,
+          "@aws-sdk/middleware-sdk-s3": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "Math methods as values (call '_' directly)",
+        "count": 30,
+        "sites": {
+          "moduleInit": 30,
+          "function": 0,
+          "declaration": 0
+        },
+        "packages": {
+          "lodash-es": 30
+        }
+      },
+      {
+        "code": "SC1043",
+        "family": "comparing non-number, non-string values",
+        "count": 28,
+        "sites": {
+          "moduleInit": 0,
+          "function": 28,
+          "declaration": 0
+        },
+        "packages": {
+          "lodash-es": 13,
+          "@smithy/core": 10,
+          "@aws-sdk/core": 3,
+          "recker": 2
+        }
+      },
+      {
+        "code": "SC1052",
+        "family": "for-in over '_' receivers (records, index-signature shapes, arrays, and globalThis enumerate)",
+        "count": 27,
+        "sites": {
+          "moduleInit": 0,
+          "function": 27,
+          "declaration": 0
+        },
+        "packages": {
+          "@smithy/core": 11,
+          "lodash-es": 6,
+          "@smithy/signature-v4": 5,
+          "pino": 2,
+          "@aws-sdk/core": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "the binding '_' captured through a plain nested function (the declaration has no static storage a capture can thread — bind the value through a typed const, or read it in the declaring scope)",
+        "count": 24,
+        "sites": {
+          "moduleInit": 0,
+          "function": 24,
+          "declaration": 0
+        },
+        "packages": {
+          "@smithy/core": 16,
+          "@aws-sdk/core": 3,
+          "@aws-sdk/checksums": 2,
+          "@aws-sdk/middleware-sdk-s3": 2,
+          "@aws-sdk/client-s3": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "redeclaring inherited fields at a different type",
+        "count": 21,
+        "sites": {
+          "moduleInit": 21,
+          "function": 0,
+          "declaration": 0
+        },
+        "packages": {
+          "@aws-sdk/client-s3": 21
+        }
+      },
+      {
+        "code": "SC2011",
+        "family": "values of type '_' have no static representation but run in the embedded dynamic engine, which this build does not include",
+        "count": 21,
+        "sites": {
+          "moduleInit": 2,
+          "function": 18,
+          "declaration": 1
+        },
+        "packages": {
+          "@smithy/core": 7,
+          "@aws-sdk/core": 4,
+          "@aws-sdk/credential-provider-node": 4,
+          "@aws-sdk/credential-provider-env": 1,
+          "@baldim/adapter-s3": 1
+        }
+      },
+      {
+        "code": "SC2009",
+        "family": "values of type '_' cannot be compiled: the function shape is supported, but its parameter '_' has type '_', which does not compile",
+        "count": 19,
+        "sites": {
+          "moduleInit": 12,
+          "function": 7,
+          "declaration": 0
+        },
+        "packages": {
+          "@aws-sdk/client-s3": 9,
+          "@aws-sdk/core": 4,
+          "@smithy/core": 4,
+          "recker": 2
+        }
+      },
+      {
+        "code": "SC1040",
+        "family": "loose equality (== and !=)",
+        "count": 18,
+        "sites": {
+          "moduleInit": 0,
+          "function": 18,
+          "declaration": 0
+        },
+        "packages": {
+          "lodash-es": 14,
+          "he": 2,
+          "@aws-sdk/core": 1,
+          "@smithy/core": 1
+        }
+      },
+      {
+        "code": "SC2011",
+        "family": "the '_' operator on '_'-typed values runs in the embedded dynamic engine, which this build does not include",
+        "count": 18,
+        "sites": {
+          "moduleInit": 0,
+          "function": 18,
+          "declaration": 0
+        },
+        "packages": {
+          "@smithy/core": 8,
+          "lodash-es": 3,
+          "pino-std-serializers": 3,
+          "@aws-sdk/checksums": 2,
+          "@baldim/core": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "indexing with non-number keys",
+        "count": 17,
+        "sites": {
+          "moduleInit": 0,
+          "function": 17,
+          "declaration": 0
+        },
+        "packages": {
+          "@smithy/core": 17
+        }
+      },
+      {
+        "code": "SC1100",
+        "family": "optional chaining on '_' values",
+        "count": 17,
+        "sites": {
+          "moduleInit": 0,
+          "function": 17,
+          "declaration": 0
+        },
+        "packages": {
+          "@smithy/core": 12,
+          "@aws-sdk/core": 3,
+          "@aws-sdk/credential-provider-node": 1,
+          "@aws-sdk/middleware-sdk-s3": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "'_' values where '_' is expected",
+        "count": 16,
+        "sites": {
+          "moduleInit": 1,
+          "function": 15,
+          "declaration": 0
+        },
+        "packages": {
+          "lodash-es": 12,
+          "@smithy/core": 2,
+          "@aws-sdk/core": 1,
+          "recker": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "assignment to non-array elements",
+        "count": 15,
+        "sites": {
+          "moduleInit": 5,
+          "function": 10,
+          "declaration": 0
+        },
+        "packages": {
+          "lodash-es": 11,
+          "@aws-sdk/checksums": 2,
+          "@smithy/core": 2
+        }
+      }
+    ]
+  },
+  "statements": {
+    "total": 16247,
+    "failed": 1845,
+    "island": 6,
+    "passingPct": 88.6,
+    "functionsSkipped": 0
+  },
+  "unreached": {
+    "statements": 8865,
+    "failed": 1076,
+    "island": 0,
+    "functionsSkipped": 163,
+    "diagnostics": {
+      "total": 17,
+      "direct": 16,
+      "cascades": {
+        "total": 1,
+        "distinctBindings": 1
+      },
+      "instantiated": 0,
+      "byCode": {
+        "SC1090": 9,
+        "SC1031": 2,
+        "SC1100": 2,
+        "SC2009": 2,
+        "SC1045": 1,
+        "SC2004": 1
+      },
+      "byPackage": {
+        "@smithy/core": 8,
+        "@smithy/signature-v4": 4,
+        "recker": 4,
+        "@smithy/node-http-handler": 1
+      },
+      "firstParty": 0,
+      "thirdParty": 17,
+      "familyCount": 8,
+      "families": [
+        {
+          "code": "SC1090",
+          "family": "computed method names",
+          "count": 4,
+          "packages": {
+            "@smithy/core": 4
+          }
+        },
+        {
+          "code": "SC1031",
+          "family": "destructuring the field '_' the source's shape does not carry",
+          "count": 2,
+          "packages": {
+            "@smithy/signature-v4": 2
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "computed accessor names",
+          "count": 2,
+          "packages": {
+            "recker": 2
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "extending classes not declared in the program ('_')",
+          "count": 2,
+          "packages": {
+            "@smithy/core": 2
+          }
+        },
+        {
+          "code": "SC1100",
+          "family": "passing '_' values where '_' is expected",
+          "count": 2,
+          "packages": {
+            "@smithy/signature-v4": 2
+          }
+        },
+        {
+          "code": "SC2009",
+          "family": "values of type '_' cannot be compiled: the function shape is supported, but its parameter '_' has type '_', which does not compile",
+          "count": 2,
+          "packages": {
+            "recker": 2
+          }
+        },
+        {
+          "code": "SC1045",
+          "family": "increment/decrement of record fields or elements in expression position",
+          "count": 1,
+          "packages": {
+            "@smithy/node-http-handler": 1
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "'_' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead)",
+          "count": 1,
+          "packages": {
+            "@smithy/core": 1
+          }
+        }
+      ]
+    },
+    "fences": {
+      "total": 1193,
+      "direct": 867,
+      "cascades": {
+        "total": 326,
+        "distinctBindings": 125,
+        "bySite": {
+          "moduleInit": 0,
+          "function": 326,
+          "declaration": 0
+        }
+      },
+      "instantiated": 322,
+      "byCode": {
+        "SC1090": 467,
+        "SC2004": 326,
+        "SC2020": 227,
+        "SC1052": 32,
+        "SC1100": 29,
+        "SC2011": 27,
+        "SC1043": 21,
+        "SC2009": 12,
+        "SC1101": 10,
+        "SC1120": 8,
+        "SC2013": 8,
+        "SC1031": 5,
+        "SC1040": 5,
+        "SC2012": 4,
+        "SC1042": 3,
+        "SC1070": 3,
+        "SC2002": 3,
+        "SC1030": 1,
+        "SC1045": 1,
+        "SC2003": 1
+      },
+      "byPackage": {
+        "recker": 345,
+        "@smithy/core": 242,
+        "@aws-sdk/core": 193,
+        "@baldim/core": 126,
+        "@baldim/adapter-s3": 83,
+        "thread-stream": 59,
+        "@smithy/node-http-handler": 44,
+        "@smithy/signature-v4": 22,
+        "@pinojs/redact": 20,
+        "@aws-sdk/checksums": 19,
+        "lodash-es": 15,
+        "@aws-sdk/middleware-sdk-s3": 6,
+        "@aws-sdk/signature-v4-multi-region": 6,
+        "@aws/lambda-invoke-store": 6,
+        "pino": 4,
+        "@aws-sdk/xml-builder": 3
+      },
+      "firstParty": 0,
+      "thirdParty": 1193,
+      "bySite": {
+        "moduleInit": 0,
+        "function": 1193,
+        "declaration": 0
+      },
+      "familyCount": 80,
+      "families": [
+        {
+          "code": "SC2020",
+          "family": "'_' is part of the standard library types but has no scriptc lowering yet",
+          "count": 158,
+          "sites": {
+            "moduleInit": 0,
+            "function": 158,
+            "declaration": 0
+          },
+          "packages": {
+            "thread-stream": 39,
+            "@smithy/core": 33,
+            "recker": 29,
+            "@baldim/core": 22,
+            "@aws-sdk/core": 18
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "method calls like '_'",
+          "count": 97,
+          "sites": {
+            "moduleInit": 0,
+            "function": 97,
+            "declaration": 0
+          },
+          "packages": {
+            "@smithy/core": 34,
+            "@aws-sdk/core": 33,
+            "recker": 8,
+            "@smithy/node-http-handler": 7,
+            "@aws/lambda-invoke-store": 6
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "assignment to non-array elements",
+          "count": 48,
+          "sites": {
+            "moduleInit": 0,
+            "function": 48,
+            "declaration": 0
+          },
+          "packages": {
+            "@aws-sdk/core": 42,
+            "@aws-sdk/checksums": 4,
+            "@smithy/core": 2
+          }
+        },
+        {
+          "code": "SC2020",
+          "family": "'_' is typed by @types/node but has no scriptc lowering yet",
+          "count": 41,
+          "sites": {
+            "moduleInit": 0,
+            "function": 41,
+            "declaration": 0
+          },
+          "packages": {
+            "recker": 24,
+            "@smithy/core": 5,
+            "@aws-sdk/core": 4,
+            "@baldim/core": 4,
+            "thread-stream": 3
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "'_' right-hand sides other than classes declared in the program",
+          "count": 34,
+          "sites": {
+            "moduleInit": 0,
+            "function": 34,
+            "declaration": 0
+          },
+          "packages": {
+            "recker": 25,
+            "@smithy/core": 3,
+            "@smithy/node-http-handler": 3,
+            "@aws-sdk/signature-v4-multi-region": 2,
+            "lodash-es": 1
+          }
+        },
+        {
+          "code": "SC1052",
+          "family": "for-in over '_' receivers (records, index-signature shapes, arrays, and globalThis enumerate)",
+          "count": 32,
+          "sites": {
+            "moduleInit": 0,
+            "function": 32,
+            "declaration": 0
+          },
+          "packages": {
+            "@smithy/core": 14,
+            "@aws-sdk/core": 6,
+            "@pinojs/redact": 4,
+            "@smithy/node-http-handler": 2,
+            "@smithy/signature-v4": 2
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "element access on non-array values",
+          "count": 26,
+          "sites": {
+            "moduleInit": 0,
+            "function": 26,
+            "declaration": 0
+          },
+          "packages": {
+            "recker": 26
+          }
+        },
+        {
+          "code": "SC1100",
+          "family": "optional chaining on '_' values",
+          "count": 25,
+          "sites": {
+            "moduleInit": 0,
+            "function": 25,
+            "declaration": 0
+          },
+          "packages": {
+            "@baldim/core": 9,
+            "recker": 8,
+            "@baldim/adapter-s3": 5,
+            "@aws-sdk/core": 1,
+            "@smithy/core": 1
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "the reference to '_' (a binding form with no lowering)",
+          "count": 22,
+          "sites": {
+            "moduleInit": 0,
+            "function": 22,
+            "declaration": 0
+          },
+          "packages": {
+            "@baldim/adapter-s3": 6,
+            "@baldim/core": 4,
+            "recker": 4,
+            "@smithy/core": 3,
+            "@smithy/signature-v4": 3
+          }
+        },
+        {
+          "code": "SC1043",
+          "family": "comparing non-number, non-string values",
+          "count": 21,
+          "sites": {
+            "moduleInit": 0,
+            "function": 21,
+            "declaration": 0
+          },
+          "packages": {
+            "@smithy/core": 8,
+            "@smithy/node-http-handler": 4,
+            "recker": 4,
+            "thread-stream": 4,
+            "@aws-sdk/checksums": 1
+          }
+        }
+      ]
+    }
+  },
+  "elapsedMs": 126686,
+  "peakRssKiB": 817040,
+  "sources": 798,
+  "npmStatic": {
+    "static": 27,
+    "fallbackCount": 3,
+    "fallback": [
+      {
+        "package": "css-what",
+        "reason": "SC1013: require() below code that can reach its binding 'types_js_1' (Node initializes the binding AT the require and throws ReferenceError on any earlier access, which is not modeled — move the require above the code that can run first) is not supported yet"
+      },
+      {
+        "package": "css-select",
+        "reason": "SC1013: require() below code that can reach its binding 'querying_js_1' (Node initializes the binding AT the require and throws ReferenceError on any earlier access, which is not modeled — move the require above the code that can run first) is not supported yet"
+      },
+      {
+        "package": "undici",
+        "reason": "SC1012: require() destructuring with defaults, rest, or nested patterns are not supported yet"
+      }
+    ]
+  },
+  "entrySha256": "f60925321aad9b57095872cab51e81b39f22d986a8be76ef1baa9343396a5486"
+}

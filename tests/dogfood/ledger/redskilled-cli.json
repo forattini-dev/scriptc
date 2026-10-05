@@ -1,0 +1,118 @@
+{
+  "schema": 1,
+  "name": "redskilled-cli",
+  "generatedAt": "2026-10-05T16:47:21.791Z",
+  "node": "v26.8.1",
+  "compiler": {
+    "head": "38b821dae0a407906c0f69b2a5c08186c8667dfe",
+    "branch": "dogfood/ledger",
+    "dirtyPaths": 0
+  },
+  "entry": "${red-skills}/apps/redskilled/src/cli.ts",
+  "options": {
+    "backend": "rust",
+    "allowEngine": false,
+    "npmStatic": "auto",
+    "target": "node26",
+    "optimization": "dev"
+  },
+  "consumer": {
+    "kind": "git",
+    "root": "${red-skills}",
+    "head": "b1ed1432cf3fa9c43efef6e43da79f8fbe5995b1",
+    "branch": "main",
+    "dirtyPaths": 0,
+    "typesNode": {
+      "distinctVersions": [
+        "25.9.5",
+        "22.20.1"
+      ],
+      "roots": [
+        {
+          "version": "25.9.5",
+          "root": "${red-skills}/node_modules/.pnpm/@types+node@25.9.5/node_modules/@types/node",
+          "files": 82
+        },
+        {
+          "version": "22.20.1",
+          "root": "${red-skills}/node_modules/.pnpm/@types+node@22.20.1/node_modules/@types/node",
+          "files": 68
+        }
+      ]
+    }
+  },
+  "stage": "preflight-failed",
+  "blockers": {
+    "total": null,
+    "note": "preflight failed: nothing lowered, so the lowering distance is unmeasured"
+  },
+  "preflight": {
+    "total": 25,
+    "byCode": {
+      "SC0001": 25
+    },
+    "byPackage": {
+      "<program>": 25
+    },
+    "firstParty": 25,
+    "thirdParty": 0,
+    "familyCount": 2,
+    "families": [
+      {
+        "code": "SC0001",
+        "pattern": "Property '_' does not exist on type '_'.",
+        "count": 19,
+        "files": 6,
+        "variants": {
+          "once · ChildProcess": 9,
+          "off · ChildProcess": 2,
+          "off · Server": 2,
+          "on · ChildProcess": 2,
+          "on · Server": 2,
+          "once · Server": 2
+        }
+      },
+      {
+        "code": "SC0001",
+        "pattern": "Parameter '_' implicitly has an '_' type.",
+        "count": 6,
+        "files": 4,
+        "variants": {
+          "code · any": 2,
+          "signal · any": 2,
+          "socket · any": 2
+        }
+      }
+    ]
+  },
+  "elapsedMs": 165063,
+  "peakRssKiB": 923788,
+  "sources": 341,
+  "npmStatic": {
+    "static": 37,
+    "fallbackCount": 5,
+    "fallback": [
+      {
+        "package": "zod",
+        "reason": "SC1013: require() below code that can reach its binding 'registries_js_1' (Node initializes the binding AT the require and throws ReferenceError on any earlier access, which is not modeled — move the require above the code that can run first) is not supported yet"
+      },
+      {
+        "package": "@agentclientprotocol/sdk",
+        "reason": "SC1013: namespace imports of CommonJS modules are not supported yet"
+      },
+      {
+        "package": "@modelcontextprotocol/sdk",
+        "reason": "SC1013: require() below code that can reach its binding 'zod_compat_js_1' (Node initializes the binding AT the require and throws ReferenceError on any earlier access, which is not modeled — move the require above the code that can run first) is not supported yet"
+      },
+      {
+        "package": "@reddb-io/toon",
+        "reason": "its inferred export surface breaks 9 import sites in program files — the package serves from the island instead (bundler-emitted surfaces type only as far as inference reaches)"
+      },
+      {
+        "package": "tuiuiu.js",
+        "reason": "its inferred export surface breaks 2 import sites in program files — the package serves from the island instead (bundler-emitted surfaces type only as far as inference reaches)"
+      }
+    ]
+  },
+  "entrySha256": "51ea3c0df308b961bbd865a407adcb7dcb22b8cb4e73316e4b695a051172c5eb"
+}
