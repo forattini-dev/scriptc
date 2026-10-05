@@ -93,6 +93,7 @@ test("deferred fences in unreached JavaScript report in their own group", async 
   const { coverage } = analyze(fixture("js-unreached-fence.js"));
   expect(coverage.runtimeFences).toBeUndefined();
   expect(coverage.unreached?.runtimeFences?.map((d) => d.code)).toEqual(["SC1090", "SC2004"]);
+  expect(coverage.unreached?.runtimeFenceSites).toEqual(["function", "function"]);
 });
 
 test("any-typed checked-dynamic locals honor the --dynamic coverage promise", () => {

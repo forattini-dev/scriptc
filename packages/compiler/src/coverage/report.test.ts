@@ -62,3 +62,19 @@ test("the unreached group follows the blockers and the reached deferrals", () =>
   expect(at("deferred in unreached code")).toBeGreaterThan(at("blockers:"));
   expect(lines[lines.length - 1]).toContain("'Object.setPrototypeOf'");
 });
+
+test("fence sites split the reached deferrals by when they can throw", () => {
+  const fences = [
+    fence("SC1090", "extending computed expressions are not supported yet", 1),
+    fence("SC1090", "spread arguments are not supported yet", 2),
+    fence("SC2004", "uses of 'x' inherit the blocker on its declaration", 3),
+    fence("SC2011", "values of type 'undefined' have no static representation but run in the embedded dynamic engine, which this build does not include", 4),
+  ];
+  const tagged = renderCoverage({ ...base, stats: stats(4, 4), runtimeFences: fences, runtimeFenceSites: ["module-init", "function", "function", "declaration"] });
+  expect(tagged).toContain("deferred to runtime   4 sites (JS statements that throw their fence if executed — 1 in module initialisation, 2 in function bodies, 1 at declaration)");
+  const untagged = renderCoverage({ ...base, stats: stats(4, 4), runtimeFences: fences });
+  expect(untagged).toContain("deferred to runtime   4 sites (JS statements that throw their fence if executed)");
+  // Only the non-zero sites print.
+  const initOnly = renderCoverage({ ...base, stats: stats(1, 1), runtimeFences: [fences[0]!], runtimeFenceSites: ["module-init"] });
+  expect(initOnly).toContain("(JS statements that throw their fence if executed — 1 in module initialisation)");
+});

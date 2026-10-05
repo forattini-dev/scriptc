@@ -21,6 +21,8 @@ test("coverage lowering keeps the unreached remainder's deferred fences", () => 
     expect(unreached.runtimeFences.map((d) => d.code)).toEqual(["SC1090", "SC2004"]);
     expect(unreached.runtimeFences.every((d) => d.loc.file === UNREACHED_FENCE)).toBe(true);
     expect(unreached.stats).toEqual({ statementsTotal: 2, statementsFailed: 2, statementsIsland: 0, functionsSkipped: 0 });
+    // The remainder lowers bodies only, never a module's top level.
+    expect(unreached.runtimeFenceSites).toEqual(["function", "function"]);
   } finally {
     load.dispose();
   }
@@ -35,6 +37,7 @@ test("the coverage remainder never changes the build's own lowering result", () 
       expect(build.unreached).toBeUndefined();
       expect(coverage.diagnostics).toEqual(build.diagnostics);
       expect(coverage.runtimeFences).toEqual(build.runtimeFences);
+      expect(coverage.runtimeFenceSites).toEqual(build.runtimeFenceSites);
       expect(coverage.stats).toEqual(build.stats);
       expect(coverage.module === null).toBe(build.module === null);
       if (build.module !== null && coverage.module !== null) {
@@ -43,5 +46,18 @@ test("the coverage remainder never changes the build's own lowering result", () 
     } finally {
       load.dispose();
     }
+  }
+});
+
+test("runtime fences carry the lowering context they were recorded in", () => {
+  // The escaping builtin alias at the module's top level fences during
+  // init lowering; the sites array stays parallel to the fence list.
+  const load = loadProgram(REACHED_FENCE);
+  try {
+    const result = lowerToIr(load.program, load.entry, load.moduleOrder);
+    expect(result.runtimeFences.map((d) => d.code)).toEqual(["SC1090"]);
+    expect(result.runtimeFenceSites).toEqual(["module-init"]);
+  } finally {
+    load.dispose();
   }
 });

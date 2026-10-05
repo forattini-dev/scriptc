@@ -172,6 +172,7 @@ export function prepareModuleInits(L: Lowerer, parts: FileParts[]): void {
     const isAsync = L.asyncInitFiles.has(sf);
     const ctx = newFnCtx(false, null, null, VOID);
     ctx.isAsync = isAsync;
+    L.fileInitContexts.add(ctx);
     return L.env.inFunction(ctx, () => {
       const loc0: SrcLoc = { file: sf.fileName, start: 0, end: 0 };
       const header: IrStmt[] = [];

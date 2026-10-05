@@ -8,7 +8,7 @@
  */
 import type { Milestone, ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import { renderDiagnostics } from "../diagnostics/render.js";
-import type { LowerStats } from "../frontend/lowering/lowerer.js";
+import type { LowerStats, RuntimeFenceSite } from "../frontend/lowering/lowerer.js";
 import type { NpmBuiltinUse, NpmLazyTrap } from "../frontend/npm.js";
 import type { ProvenanceSources } from "../frontend/provenance-registry.js";
 import type { ExecutionProfile } from "../backend/execution-profile.js";
@@ -27,13 +27,23 @@ export interface CoverageInput {
    * statements): the program builds, but executing one throws — the
    * report lists them so nothing hides. */
   runtimeFences?: ScrDiagnostic[];
+  /** Parallel to `runtimeFences`: the lowering context each fence was
+   * recorded in — module top-level initialisation (it can throw at
+   * startup), a function or closure body (it throws only when that body
+   * runs), or declaration registration. */
+  runtimeFenceSites?: RuntimeFenceSite[];
   /** The unreached remainder: bodies nothing on the entry path reaches,
    * lowered in a throwaway analysis pass. Its blockers cannot fail a
    * build — the report shows them as a secondary, dimmed group.
    * `runtimeFences` are the remainder's deferred JS fences: no build
    * carries them, and they report in their own dimmed group so the
    * unreached share of the dynamic gap is measurable. */
-  unreached?: { stats: LowerStats; diagnostics: ScrDiagnostic[]; runtimeFences?: ScrDiagnostic[] };
+  unreached?: {
+    stats: LowerStats;
+    diagnostics: ScrDiagnostic[];
+    runtimeFences?: ScrDiagnostic[];
+    runtimeFenceSites?: RuntimeFenceSite[];
+  };
   /** --dynamic only: every Node builtin the embedded npm graph imports —
    * what the island must provide for this program (unshimmed ones also
    * appear as SC2030 blockers, EXCEPT lazily-reached ones, which embed
@@ -317,8 +327,14 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
   if (fences.length > 0) {
     const grouped = groupBlockers(fences);
     const widestF = Math.max(...grouped.map((b) => b.what.length));
+    // With the sites known, the header says WHEN the throws can happen:
+    // a fence in module initialisation executes at startup (unless
+    // control flow skips it), one in a function body only when that body
+    // runs — the startup share is what decides whether the binary starts.
+    const sites = input.runtimeFenceSites;
+    const when = sites === undefined || sites.length !== fences.length ? "" : ` — ${fenceSiteSummary(sites)}`;
     out.push(
-      `  ${c(YELLOW, "deferred to runtime")}   ${fences.length} site${fences.length === 1 ? "" : "s"} ${c(DIM, "(JS statements that throw their fence if executed)")}`,
+      `  ${c(YELLOW, "deferred to runtime")}   ${fences.length} site${fences.length === 1 ? "" : "s"} ${c(DIM, `(JS statements that throw their fence if executed${when})`)}`,
     );
     for (const b of grouped) {
       out.push(
@@ -398,6 +414,24 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
   }
   renderUnreachedFences();
   return out.join("\n");
+}
+
+/** "443 in module initialisation, 610 in function bodies, 1 at declaration" —
+ * only the non-zero sites, in that order. */
+function fenceSiteSummary(sites: readonly RuntimeFenceSite[]): string {
+  let init = 0;
+  let fn = 0;
+  let decl = 0;
+  for (const site of sites) {
+    if (site === "module-init") init++;
+    else if (site === "function") fn++;
+    else decl++;
+  }
+  const parts: string[] = [];
+  if (init > 0) parts.push(`${init} in module initialisation`);
+  if (fn > 0) parts.push(`${fn} in function bodies`);
+  if (decl > 0) parts.push(`${decl} at declaration`);
+  return parts.join(", ");
 }
 
 function DIMPath(file: string, color: boolean): string {

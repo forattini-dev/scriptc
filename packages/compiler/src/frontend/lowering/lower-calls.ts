@@ -1868,7 +1868,7 @@ export function genericFnOf(lowerer: Lowerer, ident: ts.Identifier): GenericFnIn
         const captured = lowerer.diags.splice(diagsBefore);
         const ice = captured.filter((d) => d.code === "SC9001");
         if (ice.length > 0) lowerer.diags.push(...ice);
-        lowerer.runtimeFences.push(...captured.filter((d) => d.code !== "SC9001"));
+        lowerer.recordRuntimeFences(captured.filter((d) => d.code !== "SC9001"));
         const first = captured.find((d) => d.code !== "SC9001");
         const mutable = st as unknown as Record<string, unknown>;
         delete mutable["value"];

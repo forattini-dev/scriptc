@@ -378,7 +378,7 @@ export function provenanceElidedConstDecl(lowerer: Lowerer, decl: ts.VariableDec
             const flushed = lowerer.diags.splice(diagsBefore);
             const ice = flushed.filter((d) => d.code === "SC9001");
             lowerer.diags.push(...ice);
-            lowerer.runtimeFences.push(...flushed.filter((d) => d.code !== "SC9001"));
+            lowerer.recordRuntimeFences(flushed.filter((d) => d.code !== "SC9001"));
           }
         } catch (e) {
           // A Go panic inside tsgo, surfaced by the sync channel as a

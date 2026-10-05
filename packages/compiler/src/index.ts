@@ -121,6 +121,7 @@ export {
   renderDiagnostic,
 } from "./diagnostics/render.js";
 export { renderCoverage, type CoverageInput } from "./coverage/report.js";
+export type { RuntimeFenceSite } from "./frontend/lowering/lowerer.js";
 export {
   generateSurfaceManifest,
   renderSurfaceManifest,
@@ -882,7 +883,9 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
         diagnostics,
         ...(opts.backend === undefined ? {} : { backend: opts.backend }),
         ...(execution === undefined ? {} : { execution }),
-        ...(lowered.runtimeFences.length > 0 ? { runtimeFences: lowered.runtimeFences } : {}),
+        ...(lowered.runtimeFences.length > 0
+          ? { runtimeFences: lowered.runtimeFences, runtimeFenceSites: lowered.runtimeFenceSites }
+          : {}),
         ...(lowered.unreached ? { unreached: lowered.unreached } : {}),
         ...(lowered.npmBuiltins ? { npmBuiltins: lowered.npmBuiltins } : {}),
         ...(lowered.npmLazyTraps ? { npmLazyTraps: lowered.npmLazyTraps } : {}),
