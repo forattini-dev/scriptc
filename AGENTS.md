@@ -10,13 +10,14 @@ Write prose paragraphs and list items as single source lines and let editors and
 
 ```bash
 pnpm install && pnpm -r build                    # build the workspace
-SCRIPTC_TEST_WORKERS=4 pnpm test                 # full gate: plain lane
-SCRIPTC_TEST_WORKERS=4 SCRIPTC_SAN=1 pnpm test   # full gate: sanitized lane
+pnpm gate:rust                                   # per-change gate of this fork: the Rust lane
+SCRIPTC_TEST_WORKERS=4 pnpm test                 # upstream sync gate: plain lane
+SCRIPTC_TEST_WORKERS=4 SCRIPTC_SAN=1 pnpm test   # upstream sync gate: sanitized lane
 ```
 
 The ordinary workspace build does not rebuild packaged native artifacts. When changing native assembly/object emission or runtime-pack selection, install CMake, Ninja, the pinned LLVM 22 development package, and Zig 0.16.0, then run the matching `@scriptc/llvm-<platform>` and `@scriptc/runtime-<platform>` `build:native` scripts explicitly. The macOS full test suite also needs its generated artifacts.
 
-Use focused local tests while iterating, then run both full lanes locally before shipping. Both lanes green is the bar before shipping any change. Linux hosts run their supported native-clang contracts locally, and macOS retains the Darwin-native contracts.
+Use focused local tests while iterating, then run the Rust gate before shipping. This fork develops the Rust lane only, so `pnpm gate:rust` is the bar for every change: the runtime crate's own gate, the strict Rust corpus differential, and CI's focused Rust regression list on Node 26 and Node 24, judged against the known reds in `tests/dogfood/rust-gate-baseline.json` (see `tests/dogfood/rust-gate.md`). A change ships with no new reds, no shard that crashed, and no file that did not run; a red the change fixes is removed from the baseline in the same commit. `pnpm gate:rust --quick` is the iteration loop, not the bar. The two three-backend lanes remain the bar for synchronising with upstream, which owns the C and LLVM backends. Linux hosts run their supported native-clang contracts locally, and macOS retains the Darwin-native contracts.
 
 `SCRIPTC_TEST_WORKERS` caps the vitest worker pool so concurrent agents don't
 contend for cores. Direct local runs default to two workers, two nested native
