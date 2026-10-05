@@ -15,6 +15,7 @@ import {
   STEP_IDS,
   UsageError,
   corpusShardIndices,
+  corpusTotalProblem,
   defaultJobs,
   describeCrash,
   digestVitestResults,
@@ -64,6 +65,24 @@ describe("options", () => {
 
   test("a bare -- separator is ignored", () => {
     expect(parseArgs(["--", "--quick"], host).mode).toBe("quick");
+  });
+
+  test("quick mode warns when --shards leaves part of the fixed sample out", () => {
+    expect(parseArgs(["--quick"], host).warnings).toEqual([]);
+    const small = parseArgs(["--quick", "--shards", "10"], host);
+    expect(small.sample).toEqual([1]);
+    expect(small.warnings).toHaveLength(1);
+    expect(small.warnings[0]).toContain("only shard 1 fit");
+    expect(parseArgs(["--quick", "--shards", "10", "--sample", "2"], host).warnings).toEqual([]);
+  });
+
+  test("the lock is on unless --no-lock or SCRIPTC_NO_LOCK=1, and its wait is configurable", () => {
+    expect(parseArgs([], host, {}).noLock).toBe(false);
+    expect(parseArgs(["--no-lock"], host, {}).noLock).toBe(true);
+    expect(parseArgs([], host, { SCRIPTC_NO_LOCK: "1" }).noLock).toBe(true);
+    expect(parseArgs([], host, { SCRIPTC_NO_LOCK: "0" }).noLock).toBe(false);
+    expect(parseArgs([], host, {}).lockWaitMin).toBe(45);
+    expect(parseArgs(["--lock-wait-min", "0"], host, {}).lockWaitMin).toBe(0);
   });
 
   test("--strict-reasons is off unless asked for", () => {
@@ -503,6 +522,24 @@ describe("baseline verdict: clippy lints, changed failures, retries", () => {
     expect(summary).toContain("focus-node26::a.test.ts > other flaky");
   });
 
+  test("warnings in the options are printed in the summary", () => {
+    const steps = [idle("runtime-crate"), idle("rust-unit"), idle("corpus"), idle("focus-node26"), idle("focus-node24")];
+    const summary = renderSummary({
+      mode: "quick", durationMs: 1, finishedAt: "t", repo: { root: "/repo", commit: "0123456789", dirty: false }, options: { warnings: ["the sample shrank"] },
+      steps, baseline: { path: "b.json", updated: false }, verdict: evaluate(steps, baseline, {}), paths: { report: "/r" },
+    });
+    expect(summary).toContain("warning: the sample shrank");
+  });
+});
+
+describe("full-run corpus accounting", () => {
+  test("only a full run with every shard completed is held to the program count", () => {
+    const full = { sample: null, shards: 16, completedShards: Array.from({ length: 16 }, (_, i) => i + 1), collected: 2067, expected: 2067 };
+    expect(corpusTotalProblem(full)).toBeNull();
+    expect(corpusTotalProblem({ ...full, collected: 2060 })).toBe("the 16 shards collected 2060 programs but the corpus directory holds 2067");
+    expect(corpusTotalProblem({ ...full, collected: 2060, sample: [1, 2] })).toBeNull();
+    expect(corpusTotalProblem({ ...full, collected: 2060, completedShards: [1, 2] })).toBeNull();
+  });
 });
 
 describe("command line", () => {
@@ -529,6 +566,16 @@ describe("command line", () => {
       "cargo test --locked --no-fail-fast",
       "cargo clippy --all-targets --locked -- -D warnings",
     ]);
+  });
+
+  test("every run plans its per-shard TMPDIRs under a tag of its own, so two runs never delete each other's", () => {
+    const tmpBase = (out: string) => {
+      const output = execFileSync(process.execPath, [tsx, script, "--quick", "--dry-run", "--out", out], { cwd: repoRoot, encoding: "utf8" });
+      const plan = JSON.parse(output);
+      return plan.steps[1].shards[0].env.TMPDIR as string;
+    };
+    // The same --out twice used to give the same tag (it was derived from the output directory's name).
+    expect(tmpBase("/tmp/scriptc-gate-same-out")).not.toBe(tmpBase("/tmp/scriptc-gate-same-out"));
   });
 
   test("--focus-file replaces the CI list and --steps narrows the plan", () => {

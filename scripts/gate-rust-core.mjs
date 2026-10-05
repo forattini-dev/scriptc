@@ -25,6 +25,8 @@ corpus differential split into shard processes, and CI's focused Rust
 regression list on Node 26 (target node26) and Node 24 (target node24).
 Every step runs even when an earlier one fails; the verdict compares the
 reds against the committed baseline.
+Only one gate (or full suite) runs at a time per temporary directory: it
+takes the same advisory lock as a full 'pnpm test'.
 
   --quick                 runtime crate + corpus shards ${QUICK_SAMPLE.join(",")} of ${QUICK_SHARDS} + focus list on Node 26 only
   --steps <ids>           comma-separated subset of: ${STEP_IDS.join(", ")}
@@ -46,6 +48,8 @@ reds against the committed baseline.
   --keep-binaries         keep passed corpus binaries (default discards them to bound disk use)
   --keep-tmp              keep per-shard TMPDIRs
   --strict-reasons        also fail when a known red fails differently than the baseline recorded
+  --no-lock               do not take the advisory lock (same as SCRIPTC_NO_LOCK=1)
+  --lock-wait-min <n>     wait this long for the lock before refusing to start (default 45)
   --dry-run               print the plan (commands and environment deltas) and exit
   --help                  this text
 `;
@@ -64,8 +68,9 @@ function parseList(flag, raw) {
 }
 
 /** Parse the CLI into a fully resolved option object. Pure: host-derived
- * defaults (jobs) are filled in by the caller through `host`. */
-export function parseArgs(argv, host = { cpus: 1, memoryGb: 0 }) {
+ * defaults (jobs) are filled in by the caller through `host`, and the
+ * environment arrives as `env` so the unit tests stay hermetic. */
+export function parseArgs(argv, host = { cpus: 1, memoryGb: 0 }, env = {}) {
   const options = {
     quick: false,
     steps: null,
@@ -87,8 +92,11 @@ export function parseArgs(argv, host = { cpus: 1, memoryGb: 0 }) {
     keepBinaries: false,
     keepTmp: false,
     strictReasons: false,
+    noLock: env["SCRIPTC_NO_LOCK"] === "1",
+    lockWaitMin: 45,
     dryRun: false,
     help: false,
+    warnings: [],
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -122,6 +130,8 @@ export function parseArgs(argv, host = { cpus: 1, memoryGb: 0 }) {
       case "--keep-binaries": options.keepBinaries = true; break;
       case "--keep-tmp": options.keepTmp = true; break;
       case "--strict-reasons": options.strictReasons = true; break;
+      case "--no-lock": options.noLock = true; break;
+      case "--lock-wait-min": options.lockWaitMin = parseInteger(flag, takeValue(), 0); break;
       case "--dry-run": options.dryRun = true; break;
       case "--help": case "-h": options.help = true; break;
       default: throw new UsageError(`unknown argument '${arg}'`);
@@ -133,7 +143,12 @@ export function parseArgs(argv, host = { cpus: 1, memoryGb: 0 }) {
   const requested = options.steps ?? (options.quick ? QUICK_STEP_IDS : STEP_IDS);
   options.selectedSteps = STEP_IDS.filter((id) => requested.includes(id) && !options.skip.includes(id));
   options.shards ??= options.quick ? QUICK_SHARDS : 16;
-  options.sample ??= options.quick ? QUICK_SAMPLE.filter((index) => index <= options.shards) : null;
+  if (options.quick && options.sample === null) {
+    options.sample = QUICK_SAMPLE.filter((index) => index <= options.shards);
+    if (options.sample.length < QUICK_SAMPLE.length) {
+      options.warnings.push(`--quick samples shards ${QUICK_SAMPLE.join(",")} of ${QUICK_SHARDS}; with --shards ${options.shards} only shard${options.sample.length === 1 ? "" : "s"} ${options.sample.join(",")} fit, so the sample is smaller than in a plain --quick run (pass --sample to choose)`);
+    }
+  }
   if (options.sample !== null) {
     for (const index of options.sample) {
       if (index > options.shards) throw new UsageError(`--sample index ${index} exceeds --shards ${options.shards}`);
@@ -152,6 +167,17 @@ export function defaultJobs(host) {
   const byCpu = Math.floor((host.cpus ?? 1) / 3);
   const byMemory = Math.floor((host.memoryGb ?? 0) / 4);
   return Math.max(1, Math.min(byCpu, byMemory));
+}
+
+/** A full corpus run (no sample, every shard completed) must account for
+ * every corpus program: the shards partition the corpus by name hash, so
+ * their collected counts have to add up to the program count, and a shard
+ * count that dropped or duplicated programs would make "all shards green"
+ * mean less than it says. Null when the check does not apply or holds. */
+export function corpusTotalProblem({ sample, shards, completedShards, collected, expected }) {
+  if (sample !== null || completedShards.length !== shards) return null;
+  if (collected === expected) return null;
+  return `the ${shards} shards collected ${collected} programs but the corpus directory holds ${expected}`;
 }
 
 /** The shard indices a corpus run executes. */
@@ -620,6 +646,7 @@ export function renderSummary(report) {
   const lines = [];
   const counts = `${verdict.newReds.length} new red${verdict.newReds.length === 1 ? "" : "s"}, ${verdict.problems.length} problem${verdict.problems.length === 1 ? "" : "s"}`;
   lines.push(`gate:rust ${verdict.verdict.toUpperCase()} (${counts}) — mode ${report.mode}, ${formatDuration(report.durationMs)}, commit ${report.repo.commit?.slice(0, 8) ?? "?"}${report.repo.dirty ? " (dirty)" : ""}, ${report.finishedAt}`);
+  for (const warning of report.options?.warnings ?? []) lines.push(`warning: ${warning}`);
   for (const step of report.steps) {
     const failing = verdict.newReds.some((red) => red.step === step.id) || verdict.problems.some((problem) => problem.step === step.id);
     const status = !step.ran ? "skip" : failing ? "FAIL" : step.reds.length > 0 ? "known" : "pass";

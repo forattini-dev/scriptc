@@ -20,7 +20,13 @@
  *   console          { file, stream, content } — only the harness's own
  *                    ledger lines ("rust parity: N/M ...")
  *   run-end          { reason, unhandledErrors }
- */
+ *
+ * Orphan guard: when SCRIPTC_GATE_PARENT_PID names the gate process, this
+ * reporter (which runs in the vitest main process, the leader of the
+ * process group the gate created) polls that pid and kills its own group
+ * once the gate is gone. A gate killed with SIGKILL or by the OOM killer
+ * cannot clean up after itself, and without this its shard processes would
+ * keep compiling until their wall-clock cap. */
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, relative } from "node:path";
 
@@ -32,6 +38,24 @@ export function firstLines(text, lines = MAX_ERROR_LINES, chars = MAX_ERROR_CHAR
   const plain = String(text ?? "").replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
   const head = plain.split("\n").slice(0, lines).join("\n");
   return head.length > chars ? `${head.slice(0, chars)}…` : head;
+}
+
+/** True while a process with this pid exists (EPERM means it exists). */
+export function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+/** Kill this process's own group (the gate spawns vitest detached, so the
+ * vitest main process leads one) and then this process; when it is not a
+ * group leader the group kill fails and only this process dies. */
+function abandonGroup() {
+  try { process.kill(-process.pid, "SIGKILL"); } catch { /* not a group leader */ }
+  try { process.kill(process.pid, "SIGKILL"); } catch { /* already gone */ }
 }
 
 function serializeError(error) {
@@ -51,6 +75,14 @@ export default class GateRustReporter {
     this.root = process.cwd();
     mkdirSync(dirname(this.path), { recursive: true });
     writeFileSync(this.path, "");
+    const parent = Number(process.env["SCRIPTC_GATE_PARENT_PID"]);
+    if (Number.isInteger(parent) && parent > 0) {
+      const pollMs = Number(process.env["SCRIPTC_GATE_PARENT_POLL_MS"]) || 10_000;
+      const watchdog = setInterval(() => {
+        if (!pidAlive(parent)) abandonGroup();
+      }, pollMs);
+      watchdog.unref();
+    }
   }
 
   onInit(vitest) {

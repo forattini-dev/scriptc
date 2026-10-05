@@ -21,9 +21,11 @@
  * crashed, a file that did not run, or a child whose exit status the
  * recorded results do not explain always fails. See
  * tests/dogfood/rust-gate.md. The decision logic lives in
- * scripts/gate-rust-core.mjs; this file is the plumbing. */
+ * scripts/gate-rust-core.mjs; this file is the plumbing. The run holds the
+ * host-wide advisory lock of full suite runs (scripts/gate-rust-lock.mjs). */
 import { spawn, execFileSync } from "node:child_process";
 import { closeSync, existsSync, globSync, mkdirSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { cpus, homedir, loadavg, platform, totalmem } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,9 +33,10 @@ import { NODE24_VERSION, NODE26_VERSION } from "../packages/compiler/src/compat/
 import { DRIVER_FIXTURES } from "../tests/harness/driver-fixtures.js";
 import {
   CORPUS_TEST_FILE, REPORT_SCHEMA, USAGE, UsageError,
-  baselineReason, corpusShardIndices, describeCrash, digestVitestResults, emptyBaseline, evaluate, exitStatusProblems, extractFocusLists,
+  baselineReason, corpusShardIndices, corpusTotalProblem, describeCrash, digestVitestResults, emptyBaseline, evaluate, exitStatusProblems, extractFocusLists,
   formatDuration, moduleFindings, normalizeBaseline, parseArgs, parseCargoTestLog, parseClippyLog, readJsonl, renderSummary,
 } from "./gate-rust-core.mjs";
+import { acquireLock } from "./gate-rust-lock.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const reporterPath = join(repoRoot, "scripts/gate-rust-reporter.mjs");
@@ -210,7 +213,7 @@ function runChild({ command, args, cwd, env, logPath, timeoutMs, label }) {
   });
 }
 
-for (const signal of ["SIGINT", "SIGTERM"]) {
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   process.on(signal, () => {
     if (interrupted) return;
     interrupted = true;
@@ -319,6 +322,8 @@ function vitestEnv(context, lane, extra) {
     SCRIPTC_NODE_NODE24: context.node24.executable ?? undefined,
     SCRIPTC_NODE_NODE26: context.node26.executable ?? undefined,
     SCRIPTC_GATE_RESULTS: lane.resultsPath,
+    // The reporter in each vitest main process kills its own group if the gate dies uncleanly.
+    SCRIPTC_GATE_PARENT_PID: String(process.pid),
     TMPDIR: lane.tmpDir,
     SCRIPTC_TEST_DISCARD_PASSED_BINARIES: context.options.keepBinaries ? undefined : "1",
     ...extra,
@@ -663,7 +668,7 @@ async function main() {
   const argv = process.argv.slice(2);
   let options;
   try {
-    options = parseArgs(argv, hostInfo());
+    options = parseArgs(argv, hostInfo(), process.env);
   } catch (error) {
     if (!(error instanceof UsageError)) throw error;
     process.stderr.write(`${error.message}\n\n${USAGE}`);
@@ -677,7 +682,9 @@ async function main() {
   const host = hostInfo();
   const repo = repoInfo();
   const outDir = resolve(options.out ?? defaultOutDir(options.mode));
-  const runTag = basename(outDir).replace(/[^A-Za-z0-9]/g, "").slice(-8) || String(process.pid);
+  // Unique per run, whatever --out says: the per-shard TMPDIRs live under this tag and are
+  // deleted at the end, so two runs must never share one.
+  const runTag = `${process.pid.toString(36)}${randomBytes(2).toString("hex")}`;
   const toolchain = options.toolchain ?? pinnedToolchain();
   const node26 = resolveNode("node26", NODE26_VERSION, options.node26, process.env);
   const node24 = resolveNode("node24", NODE24_VERSION, options.node24, process.env);
@@ -702,6 +709,27 @@ async function main() {
     process.stdout.write(`${JSON.stringify(plan, (key, value) => (key === "env" && value && typeof value === "object" ? envDelta(value) : value), 2)}\n`);
     return 0;
   }
+  for (const warning of options.warnings) log(`warning: ${warning}`);
+  let lock = { acquired: true, release: () => {} };
+  if (!options.noLock) {
+    lock = await acquireLock({
+      waitMs: options.lockWaitMin * 60_000,
+      onWait: (holder) => log(`the host-wide suite lock is held by pid ${holder.pid} (${holder.tool ?? "full suite"}, since ${holder.startedAt ?? "?"}, cwd ${holder.cwd ?? "?"}); waiting up to ${options.lockWaitMin} min (--no-lock or SCRIPTC_NO_LOCK=1 skips it)`),
+    });
+    if (!lock.acquired) {
+      process.stderr.write(`gate:rust: the host-wide suite lock is still held by pid ${lock.holder.pid} after ${options.lockWaitMin} min; refusing to run beside another gate or full suite (pass --no-lock or set SCRIPTC_NO_LOCK=1 to run anyway)\n`);
+      return 2;
+    }
+    process.once("exit", lock.release);
+  }
+  try {
+    return await runGate({ options, argv, startedAt, host, repo, outDir, context, plans, baseline, baselinePath, toolchain, node26, node24 });
+  } finally {
+    lock.release();
+  }
+}
+
+async function runGate({ options, argv, startedAt, host, repo, outDir, context, plans, baseline, baselinePath, toolchain, node26, node24 }) {
   mkdirSync(outDir, { recursive: true });
   mkdirSync(context.tmpBase, { recursive: true });
   log(`mode ${options.mode}; report in ${outDir}; toolchain ${toolchain}; Node 26 ${node26.executable ?? `unavailable (${node26.error})`}; Node 24 ${node24.executable ?? `unavailable (${node24.error})`}`);
@@ -727,6 +755,11 @@ async function main() {
   }
   const orderedSteps = ["runtime-crate", "corpus", "focus-node26", "focus-node24"].map((id) => steps.find((step) => step.id === id));
   if (interrupted) orderedSteps[0].problems.push({ id: "interrupted", message: "the gate was interrupted before every selected step finished" });
+  const corpusStep = orderedSteps.find((step) => step.id === "corpus");
+  if (corpusStep.ran && !interrupted && corpusStep.totals) {
+    const totalProblem = corpusTotalProblem({ sample: options.sample, shards: options.shards, completedShards: corpusStep.scope.completedShards, collected: corpusStep.totals.collected, expected: corpusStep.corpusProgramCount });
+    if (totalProblem !== null) corpusStep.problems.push({ id: "corpus-total", message: totalProblem });
+  }
   const verdict = evaluate(orderedSteps, baseline, { repoRoot, commit: repo.commit, date: startedAt.toISOString().slice(0, 10), strictReasons: options.strictReasons });
   const finishedAt = new Date();
   const paths = { report: join(outDir, "report.json"), summary: join(outDir, "summary.txt"), outDir };
@@ -743,7 +776,7 @@ async function main() {
     host: { ...host, loadavgEnd: loadavg().map((v) => Number(v.toFixed(2))) },
     toolchain: { pin: toolchain, node26, node24 },
     steps: orderedSteps,
-    extrapolation: extrapolation(orderedSteps[1]),
+    extrapolation: extrapolation(corpusStep),
     baseline: baselineSummary(baselinePath, baseline, options),
     verdict,
     paths,
