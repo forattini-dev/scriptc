@@ -23,6 +23,9 @@ const TS5_ISLANDS = [
   // beside cjs-lexer.ts (only strings cross its boundary).
   "packages/compiler/src/frontend/npm-static-declarations.ts",
   "packages/compiler/src/frontend/npm-static-rewrite.ts",
+  // Source readability is a text-to-boolean eligibility scan, before the
+  // program exists. Pure-data AST spans never escape into the TS7 world.
+  "packages/compiler/src/frontend/npm-static-readability.ts",
   // Type-only ESM bridge: parses declaration text, emits JSDoc text; no
   // parser nodes or enums cross into the checker/lowering world.
   "packages/compiler/src/frontend/npm-static-types.ts",

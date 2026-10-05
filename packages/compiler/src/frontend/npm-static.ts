@@ -67,6 +67,7 @@ import { RuntimeTypeBridge, resetRuntimeTypeBridgeFiles } from "./npm-static-typ
 import { isJsSourceFileName, isTsSourceFileName } from "./tsc-codes.js";
 import { npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } from "./workspace-registry.js";
 import { trackedReadFile, trackedRealpath } from "./input-tracker.js";
+import { looksUnminified } from "./npm-static-readability.js";
 
 let activePackages: ReadonlySet<string> = new Set();
 let declarationOverloads: ReadonlyMap<string, NpmStaticDeclarationOverloads> = new Map();
@@ -381,7 +382,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
  * AUTO accepts executable JS inference, own declarations, or
  * identity/version-matched @types. Eligibility only authorizes an attempt;
  * runtime JS must be readable
- * (unminified: real lines, ordinary line lengths), and the source shows
+ * (unminified: real lines, ordinary executable-code density), and the source shows
  * no build-transform markers (a bundled/transpiled dist is not the code
  * the author checked). Best-effort: a package that slips through and
  * fails preflight falls back to the island like any offender. */
@@ -395,15 +396,6 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
  * worth ATTEMPTING: eligible when the source and unminified criteria hold,
  * gracefully per-package-degraded when the attempt fails. */
 const TRANSFORM_MARKERS = ["__webpack_require__"];
-
-/** Unminified-JS heuristic over an entry source: at least two lines and
- * an average line length under 200 characters (minified dists are one
- * enormous line; readable code averages well under 100). */
-function looksUnminified(source: string): boolean {
-  const lines = source.split("\n");
-  if (lines.length < 2) return false;
-  return source.length / lines.length <= 200;
-}
 
 function hasTransformMarkers(source: string): boolean {
   return TRANSFORM_MARKERS.some((m) => source.includes(m));
@@ -430,7 +422,7 @@ export function npmStaticIneligibleReason(
   }
   const source = trackedReadFile(jsEntry);
   if (source === null) return `its runtime entry ${jsEntry} cannot be read`;
-  if (!looksUnminified(source)) return "its shipped JS looks minified";
+  if (!looksUnminified(source, jsEntry)) return "its shipped JS looks minified";
   if (hasTransformMarkers(source)) {
     return "its shipped JS carries build-transform markers (bundled/transpiled dist)";
   }

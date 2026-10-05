@@ -462,6 +462,9 @@ jobs:
           packages/compiler/test/npm-static-inferred-js.test.ts
           tests/harness/dns-promises.test.ts
           tests/harness/js-late-fields.test.ts
+          tests/harness/npm-literal-data.test.ts
+          packages/compiler/src/frontend/npm-static-readability.test.ts
+          packages/compiler/test/npm-static-lazy.test.ts
           packages/compiler/src/ir/dns-lookup.test.ts
           packages/compiler/test/cjs-function-export-prefix.test.ts
           packages/compiler/test/cjs-json-destructure.test.ts
@@ -496,6 +499,9 @@ jobs:
           packages/compiler/test/npm-static-inferred-js.test.ts
           tests/harness/dns-promises.test.ts
           tests/harness/js-late-fields.test.ts
+          tests/harness/npm-literal-data.test.ts
+          packages/compiler/src/frontend/npm-static-readability.test.ts
+          packages/compiler/test/npm-static-lazy.test.ts
           packages/compiler/src/ir/dns-lookup.test.ts
           packages/compiler/test/cjs-function-export-prefix.test.ts
           packages/compiler/test/cjs-json-destructure.test.ts

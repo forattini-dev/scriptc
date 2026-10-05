@@ -254,6 +254,11 @@ export interface LoadResult {
    * last. Empty until checkPreflight runs (and empty when preflight fails
    * structurally). */
   moduleOrder: ts.SourceFile[];
+  /** Executable source frontier inspected by structural preflight, including
+   * literal lazy imports and fork targets. It is not startup evaluation order.
+   * Empty until checkPreflight; npm AUTO uses it to discover dependencies
+   * before lowering appends lazy modules to the compiled graph. */
+  runtimeFiles: ts.SourceFile[];
   /** Node's startup refusal, when the graph carries an import edge Node
    * rejects before ANY module evaluates — a RESOLUTION refusal (a bare
    * specifier nothing installed resolves, an exports/imports map that
@@ -599,6 +604,7 @@ function loadProgram7(
     entry,
     pathAliases: config.pathAliases,
     moduleOrder: [],
+    runtimeFiles: [],
     configDiags: config.diags,
     externalTypes,
     externalTypeSpecifiersByFile,
@@ -751,8 +757,9 @@ export function loadProgram(
  * themselves — the lowering consumes them directly) and returns the
  * preflight diagnostics. The lowerer runs only on programs that pass. */
 export function checkPreflight(load: LoadResult): ScrDiagnostic[] {
-  const { diags, moduleOrder, startupCrash } = preflight7(load);
+  const { diags, moduleOrder, runtimeFiles, startupCrash } = preflight7(load);
   load.moduleOrder = moduleOrder;
+  load.runtimeFiles = runtimeFiles;
   load.startupCrash = startupCrash;
   return diags;
 }
@@ -1741,6 +1748,7 @@ export function checkPreflightTs7(
 function preflight7(load: LoadResult): {
   diags: ScrDiagnostic[];
   moduleOrder: ts.SourceFile[];
+  runtimeFiles: ts.SourceFile[];
   startupCrash: StartupCrash | null;
 } {
   const { program, entry } = load;
@@ -2595,7 +2603,7 @@ function preflight7(load: LoadResult): {
         esmNamedImportLinkCheck(program, entry, order, diags),
       );
 
-  return { diags, moduleOrder: order, startupCrash: resolveCrash ?? linkCrash };
+  return { diags, moduleOrder: order, runtimeFiles: userFiles, startupCrash: resolveCrash ?? linkCrash };
 }
 
 /* ── the CJS named-import link check ─────────────────────────────────────

@@ -88,3 +88,30 @@ test.each([
     expect(npmStaticIneligibleReason("example", entry, entry, true)).toBe(reason);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+const literalTable = `{${Array.from({ length: 180 }, (_, i) => `'entity${i}':'value${i}'`).join(",")}}`;
+const compactBody = Array.from({ length: 80 }, (_, i) => `sink(value${i});`).join("");
+test.each([
+  ["literal table", `const table = ${literalTable};\nexport function read() {\n  return table.entity7;\n}\n`, null],
+  ["regex literal", `const pattern = /${"(?:alpha|beta)".repeat(180)}/g;\nexport function test(value) {\n  return pattern.test(value);\n}\n`, null],
+  ["nested data", `const data = [${Array.from({ length: 180 }, (_, i) => `[${i}, {text:'${"x".repeat(20)}'}]`).join(",")}];\nexport function first() {\n  return data[0][0];\n}\n`, null],
+  ["plain template", `const text = \`${"abc/".repeat(1000)}\`;\nexport function read() {\n  return text;\n}\n`, null],
+  ["division is code", `export function read(value) {${Array.from({ length: 80 }, (_, i) => `value=value/divisor${i};`).join("")}}\n`, "its shipped JS looks minified"],
+  ["compact executable body", `export function run() {${compactBody}}\n`, "its shipped JS looks minified"],
+  ["methods are executable", `const data = {run() {${compactBody}}};\nexport default data;\n`, "its shipped JS looks minified"],
+  ["getters are executable", `const data = {get value() {${compactBody}}};\nexport default data;\n`, "its shipped JS looks minified"],
+  ["calls are executable", `const data = [${Array.from({ length: 180 }, (_, i) => `compute(value${i})`).join(",")}];\nexport default data;\n`, "its shipped JS looks minified"],
+  ["template expressions are executable", `const text = \`prefix\${(() => {${compactBody}})()}suffix\`;\nexport default text;\n`, "its shipped JS looks minified"],
+  ["comments do not dilute compact code", `/*${"documentation\n".repeat(40)}*/\nexport function run() {${compactBody}}\n`, "its shipped JS looks minified"],
+  ["single-line data stays refused", `const table = ${literalTable}; export default table;`, "its shipped JS looks minified"],
+  ["bundler marker stays refused", `const table = ${literalTable};\nconst loader = __webpack_require__;\nexport default table;\n`, "its shipped JS carries build-transform markers (bundled/transpiled dist)"],
+] as const)("AUTO readability distinguishes data from code: %s", async (_name, source, reason) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-npm-static-data-"));
+  try {
+    const root = join(dir, "node_modules", "example");
+    await mkdir(root, { recursive: true });
+    const entry = join(root, "index.js");
+    await writeFile(entry, source);
+    expect(npmStaticIneligibleReason("example", entry, entry, true)).toBe(reason);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

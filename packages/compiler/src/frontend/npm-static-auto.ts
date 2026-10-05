@@ -31,7 +31,10 @@ export function detectAutoPackages(
   // walk-up) answers "no runtime JS" for perfectly ordinary installs.
   // Packages can expose only subpaths; their root need not be importable.
   const seen = new Map<string, { typesFile: string; fromFile: string; specifier: string }[]>();
-  for (const sf of [...load.moduleOrder, load.entry]) {
+  // Startup order omits literal lazy imports and fork roots. Structural
+  // preflight already computed their executable frontier without including
+  // declaration-only dependencies; use it before lowering extends the graph.
+  for (const sf of new Set([...load.runtimeFiles, ...load.moduleOrder, load.entry])) {
     if (mode === "auto" && sf.fileName.includes("/node_modules/") && npmStaticPackageOfPath(sf.fileName) === null) continue;
     const edges: { spec: string; loc: SrcLoc }[] = [];
     for (const stmt of sf.statements) {
