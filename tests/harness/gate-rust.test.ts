@@ -4,16 +4,21 @@
  * spawns cargo and vitest is exercised only through --dry-run here; the
  * real runs are documented in tests/dogfood/rust-gate.md. */
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { shardOf } from "./shard.js";
 import {
   baselineReason,
+  CORPUS_TEST_FILE,
   QUICK_SAMPLE,
   QUICK_SHARDS,
+  RUST_PIN_PATTERN,
+  RUST_UNIT_GLOBS,
+  RUST_UNIT_NEVER,
   STEP_IDS,
+  VITEST_INCLUDE_GLOBS,
   UsageError,
   corpusShardIndices,
   corpusTotalProblem,
@@ -32,6 +37,7 @@ import {
   portableId,
   readJsonl,
   renderSummary,
+  selectRustUnitFiles,
 } from "../../scripts/gate-rust-core.mjs";
 
 const repoRoot = join(import.meta.dirname, "../..");
@@ -564,6 +570,57 @@ describe("full-run corpus accounting", () => {
   });
 });
 
+describe("rust-unit file selection", () => {
+  test("name globs and files that pin the Rust backend are united, de-duplicated and sorted; other steps' files and the monster harnesses are subtracted", () => {
+    const table: Record<string, string[]> = {
+      [RUST_UNIT_GLOBS[0]!]: ["packages/compiler/test/emit-rust-b.test.ts", "packages/compiler/test/emit-rust-a.test.ts"],
+      [RUST_UNIT_GLOBS[1]!]: ["packages/compiler/test/emit-rust-a.test.ts", "tests/harness/focus.test.ts"],
+      [RUST_UNIT_GLOBS[7]!]: ["tests/harness/rust-differential.test.ts"],
+      [VITEST_INCLUDE_GLOBS[0]!]: ["tests/harness/pinned.test.ts", "tests/harness/c-only.test.ts", "tests/harness/differential.test.ts", "tests/harness/focus.test.ts"],
+      [VITEST_INCLUDE_GLOBS[2]!]: ["packages/compiler/test/emit-rust-a.test.ts", "packages/compiler/test/cli-pin.test.ts"],
+    };
+    const sources: Record<string, string> = {
+      "tests/harness/pinned.test.ts": "compile(entry, { backend: \"rust\" })",
+      "packages/compiler/test/cli-pin.test.ts": "run('scriptc build --backend rust x.ts')",
+      "tests/harness/c-only.test.ts": "compile(entry, { backend: \"c\" }) // rust is mentioned only in prose",
+      "tests/harness/differential.test.ts": "{ backend: 'rust' }",
+      "tests/harness/focus.test.ts": "{ backend: 'rust' }",
+    };
+    const files = selectRustUnitFiles({
+      glob: (pattern: string) => table[pattern] ?? [],
+      read: (file: string) => sources[file] ?? "",
+      excluded: ["tests/harness/focus.test.ts", "tests/harness/rust-differential.test.ts"],
+    });
+    expect(files).toEqual([
+      "packages/compiler/test/cli-pin.test.ts",
+      "packages/compiler/test/emit-rust-a.test.ts",
+      "packages/compiler/test/emit-rust-b.test.ts",
+      "tests/harness/pinned.test.ts",
+    ]);
+  });
+
+  test("the pin pattern accepts the spellings the suites use and nothing looser", () => {
+    for (const text of ['backend: "rust"', "backend:'rust'", 'backend = "rust"', "--backend rust", "--backend=rust", '{ backend : "rust" }']) expect(RUST_PIN_PATTERN.test(text), text).toBe(true);
+    for (const text of ['backend: "c"', "the rust backend", 'backend: "rustc"', "--backend=rusty", "backendRust"]) expect(RUST_PIN_PATTERN.test(text), text).toBe(false);
+  });
+
+  test("every never-run file still exists, and the real tree selects the Rust backend's own suites", () => {
+    for (const file of RUST_UNIT_NEVER) expect(existsSync(join(repoRoot, file)), file).toBe(true);
+    const files = selectRustUnitFiles({
+      glob: (pattern: string) => globSync(pattern, { cwd: repoRoot }),
+      read: (file: string) => readFileSync(join(repoRoot, file), "utf8"),
+      excluded: [CORPUS_TEST_FILE],
+    });
+    expect(files).toContain("packages/compiler/test/emit-rust.test.ts");
+    expect(files).toContain("packages/compiler/test/no-engine.test.ts");
+    expect(files).toContain("tests/harness/npm-static.test.ts");
+    expect(files).toContain("tests/harness/oracle-environment.test.ts");
+    for (const file of RUST_UNIT_NEVER) expect(files).not.toContain(file);
+    expect(files).toEqual([...files].sort());
+    expect(new Set(files).size).toBe(files.length);
+  });
+});
+
 describe("command line", () => {
   const tsx = join(repoRoot, "node_modules/tsx/dist/cli.mjs");
   const script = join(repoRoot, "scripts/gate-rust.mjs");
@@ -624,6 +681,25 @@ describe("command line", () => {
     expect(focus.vitestFlags[0]).toBe("--maxWorkers=1");
     expect(focus.env.SCRIPTC_RUNTIME_TARGET).toBe("node24");
     expect(focus.env.SCRIPTC_NODE_ORACLE).toBe(focus.node.executable);
+  });
+
+  test("--unit-file replaces the rust-unit list and the lane runs on Node 26 with the Node 24 oracle", () => {
+    const output = execFileSync(process.execPath, [tsx, script, "--dry-run", "--steps", "rust-unit", "--unit-file", "tests/harness/gate-rust.test.ts", "--unit-file", "packages/compiler/test/no-engine.test.ts"], { cwd: repoRoot, encoding: "utf8", env: ambient() });
+    const unit = JSON.parse(output).steps[0];
+    expect(unit.id).toBe("rust-unit");
+    expect(unit.files).toEqual(["tests/harness/gate-rust.test.ts", "packages/compiler/test/no-engine.test.ts"]);
+    expect(unit.source).toBe("--unit-file");
+    expect(unit.command).toBe(unit.node.executable);
+    expect(unit.node.version).toBe("26.8.1");
+    expect(unit.env.SCRIPTC_NODE_ORACLE).toBe(unit.oracle.executable);
+    expect(unit.oracle.version).toBe("24.15.0");
+    expect(unit.env.SCRIPTC_RUNTIME_TARGET).toBeUndefined();
+    const full = JSON.parse(execFileSync(process.execPath, [tsx, script, "--dry-run", "--steps", "rust-unit"], { cwd: repoRoot, encoding: "utf8", env: ambient() })).steps[0];
+    expect(full.files).toContain("packages/compiler/test/emit-rust.test.ts");
+    expect(full.files).toContain("tests/harness/gate-rust.test.ts");
+    expect(full.files).not.toContain(CORPUS_TEST_FILE);
+    const focus = extractFocusLists(readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8")).node26.files;
+    for (const file of focus) expect(full.files, file).not.toContain(file);
   });
 
   test("an unknown flag is a usage error with exit code 2", () => {

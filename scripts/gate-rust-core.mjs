@@ -7,7 +7,7 @@ import yaml from "js-yaml";
 import { shardOf } from "../tests/harness/shard.js";
 import { firstLines } from "./gate-rust-reporter.mjs";
 
-export const STEP_IDS = ["runtime-crate", "corpus", "focus-node26", "focus-node24"];
+export const STEP_IDS = ["runtime-crate", "rust-unit", "corpus", "focus-node26", "focus-node24"];
 export const QUICK_STEP_IDS = ["runtime-crate", "corpus", "focus-node26"];
 export const QUICK_SHARDS = 40;
 export const QUICK_SAMPLE = [1, 21];
@@ -16,15 +16,85 @@ export const REPORT_SCHEMA = 1;
 export const DEFAULT_BASELINE = "tests/dogfood/rust-gate-baseline.json";
 export const CORPUS_TEST_FILE = "tests/harness/rust-differential.test.ts";
 
+/** The Rust backend's own test files, beyond CI's focus list and the corpus,
+ * are selected two ways and run by the `rust-unit` step. By name: the
+ * emission suites (source-shape and compile-and-run tests), the Rust
+ * backend's co-located unit tests, the Rust-specific harness files, the
+ * npm-static family that covers the mission's npmStatic path, and CI's
+ * oracle-selection contract and the gate's own unit tests (RUST_UNIT_GLOBS). By content: every other
+ * vitest file whose source pins the Rust backend, `backend: "rust"` or
+ * `--backend rust` (RUST_PIN_PATTERN), which is how the admission and
+ * no-engine suites that gate the mission's compile path are found without a
+ * hand-kept list. */
+export const RUST_UNIT_GLOBS = [
+  "packages/compiler/test/emit-rust*.test.ts",
+  "packages/compiler/test/rust-*.test.ts",
+  "packages/compiler/src/backend/rust/**/*.test.ts",
+  "packages/compiler/test/npm-static*.test.ts",
+  "packages/compiler/src/frontend/npm-static*.test.ts",
+  "tests/harness/npm-static*.test.ts",
+  "tests/harness/npm-inferred-containers.test.ts",
+  "tests/harness/rust-*.test.ts",
+  "tests/harness/runtime-rust-package.test.ts",
+  "tests/harness/oracle-environment.test.ts",
+  "tests/harness/gate-rust.test.ts",
+];
+
+/** The files vitest runs by default (vitest.config.ts `include`), the
+ * universe the content rule scans. */
+export const VITEST_INCLUDE_GLOBS = [
+  "tests/harness/**/*.test.ts",
+  "packages/*/src/**/*.test.ts",
+  "packages/*/test/**/*.test.ts",
+];
+
+export const RUST_PIN_PATTERN = /\bbackend\s*[:=]\s*["']rust["']|--backend[= ]rust\b/;
+
+/** Files the rust-unit step never runs even when they match: the
+ * case-sharded monster harnesses (CI splits them ten ways and excludes them
+ * from the file-sharded run), the cache-invalidation suite that must stay
+ * serial, the Test262 profile (excluded by vitest.config.ts) and the corpus
+ * file (its own step). A unit test checks that each still exists, so a
+ * rename surfaces here instead of silently re-admitting a monster. */
+export const RUST_UNIT_NEVER = [
+  "tests/harness/differential.test.ts",
+  "tests/harness/llvm-differential.test.ts",
+  "tests/harness/rust-differential.test.ts",
+  "tests/harness/npm.test.ts",
+  "tests/harness/server.test.ts",
+  "tests/harness/test262.test.ts",
+  "tests/harness/coverage.test.ts",
+  "tests/harness/vercel-e2e.test.ts",
+  "packages/compiler/src/backend/native-toolchain.test.ts",
+];
+
+/** Resolve the rust-unit file list: the name-glob matches plus every vitest
+ * file whose source pins the Rust backend, less the files other steps
+ * already run (`excluded`) and RUST_UNIT_NEVER, sorted for a stable plan.
+ * `glob` maps a pattern to repo-relative paths and `read` returns a file's
+ * text. */
+export function selectRustUnitFiles({ glob, read, excluded = [] }) {
+  const skip = new Set([...excluded, ...RUST_UNIT_NEVER]);
+  const files = new Set();
+  for (const pattern of RUST_UNIT_GLOBS) for (const file of glob(pattern)) if (!skip.has(file)) files.add(file);
+  for (const pattern of VITEST_INCLUDE_GLOBS) {
+    for (const file of glob(pattern)) {
+      if (skip.has(file) || files.has(file)) continue;
+      if (RUST_PIN_PATTERN.test(read(file))) files.add(file);
+    }
+  }
+  return [...files].sort();
+}
+
 export class UsageError extends Error {}
 
 export const USAGE = `usage: pnpm gate:rust [options]
 
-Rust-scoped validation gate: the runtime crate's own gate, the strict Rust
-corpus differential split into shard processes, and CI's focused Rust
-regression list on Node 26 (target node26) and Node 24 (target node24).
-Every step runs even when an earlier one fails; the verdict compares the
-reds against the committed baseline.
+Rust-scoped validation gate: the runtime crate's own gate, the Rust backend's
+unit and emission tests, the strict Rust corpus differential split into
+shard processes, and CI's focused Rust regression list on Node 26 (target
+node26) and Node 24 (target node24). Every step runs even when an earlier
+one fails; the verdict compares the reds against the committed baseline.
 Only one gate (or full suite) runs at a time per temporary directory: it
 takes the same advisory lock as a full 'pnpm test'.
 
@@ -34,8 +104,9 @@ takes the same advisory lock as a full 'pnpm test'.
   --shards <n>            corpus shard count (default 16; quick mode ${QUICK_SHARDS})
   --sample <i,j,...>      run only these shard indices (1-based) of --shards
   --jobs <n>              shard processes running at once (default: host-derived)
-  --focus-workers <n>     vitest workers for each focus lane (default 2)
+  --focus-workers <n>     vitest workers for the focus lanes and the rust-unit lane (default 2)
   --focus-file <path>     replace the CI focus list (repeatable)
+  --unit-file <path>      replace the rust-unit file list (repeatable)
   --timeout-min <n>       wall-clock cap per child process (default 90)
   --out <dir>             report directory (default: <cache>/scriptc/gate-rust/<stamp>-<mode>)
   --baseline <file>       known reds (default ${DEFAULT_BASELINE})
@@ -80,6 +151,7 @@ export function parseArgs(argv, host = { cpus: 1, memoryGb: 0 }, env = {}) {
     jobs: null,
     focusWorkers: 2,
     focusFiles: [],
+    unitFiles: [],
     timeoutMin: 90,
     out: null,
     baseline: DEFAULT_BASELINE,
@@ -118,6 +190,7 @@ export function parseArgs(argv, host = { cpus: 1, memoryGb: 0 }, env = {}) {
       case "--jobs": options.jobs = parseInteger(flag, takeValue()); break;
       case "--focus-workers": options.focusWorkers = parseInteger(flag, takeValue()); break;
       case "--focus-file": options.focusFiles.push(takeValue()); break;
+      case "--unit-file": options.unitFiles.push(takeValue()); break;
       case "--timeout-min": options.timeoutMin = parseInteger(flag, takeValue()); break;
       case "--out": options.out = takeValue(); break;
       case "--baseline": options.baseline = takeValue(); break;

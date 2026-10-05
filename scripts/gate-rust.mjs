@@ -1,11 +1,14 @@
 #!/usr/bin/env tsx
 /* The Rust-scoped validation gate: `pnpm gate:rust`.
  *
- * Four steps, every one of them run and reported even when an earlier one
+ * Five steps, every one of them run and reported even when an earlier one
  * fails, so a run yields a failure inventory rather than the first red:
  *
  *   runtime-crate  cargo test + cargo clippy -D warnings in packages/runtime-rust
  *                  on the toolchain its rust-toolchain.toml pins
+ *   rust-unit      the Rust backend's own test files that neither the focus
+ *                  list nor the corpus runs (emission suites, backend unit
+ *                  tests, the npm-static family), on Node 26
  *   corpus         tests/harness/rust-differential.test.ts, split with
  *                  SCRIPTC_TEST_SHARD into shard processes that run a few
  *                  at a time, each with its own TMPDIR, streaming results
@@ -32,9 +35,9 @@ import { fileURLToPath } from "node:url";
 import { NODE24_VERSION, NODE26_VERSION } from "../packages/compiler/src/compat/node-matrix.js";
 import { DRIVER_FIXTURES } from "../tests/harness/driver-fixtures.js";
 import {
-  CORPUS_TEST_FILE, REPORT_SCHEMA, USAGE, UsageError,
+  CORPUS_TEST_FILE, REPORT_SCHEMA, STEP_IDS, USAGE, UsageError,
   baselineReason, corpusShardIndices, corpusTotalProblem, describeCrash, digestVitestResults, emptyBaseline, evaluate, exitStatusProblems, extractFocusLists,
-  formatDuration, moduleFindings, normalizeBaseline, parseArgs, parseCargoTestLog, parseClippyLog, portableId, readJsonl, renderSummary,
+  formatDuration, moduleFindings, normalizeBaseline, parseArgs, parseCargoTestLog, parseClippyLog, portableId, readJsonl, renderSummary, selectRustUnitFiles,
 } from "./gate-rust-core.mjs";
 import { acquireLock } from "./gate-rust-lock.mjs";
 
@@ -524,8 +527,29 @@ function focusFiles(context) {
   return { files: lanes.node26.files, source: ".github/workflows/ci.yml (node_26_host)" };
 }
 
-/** One vitest process over a file list, hosted on `node`: how each focus lane is planned. */
-function planFileLane(context, { id, target, node, list, extraEnv }) {
+/** The rust-unit file list: the Rust backend's test files (RUST_UNIT_GLOBS)
+ * that neither the CI focus list nor the corpus step already runs. */
+function rustUnitFiles(context) {
+  if (context.options.unitFiles.length > 0) {
+    return { files: context.options.unitFiles.map((file) => (isAbsolute(file) ? relative(repoRoot, file) : file)), source: "--unit-file" };
+  }
+  let focus = [];
+  try {
+    focus = focusFiles(context).files;
+  } catch {
+    // An unreadable focus list is reported by the focus lanes; here it only means nothing is subtracted.
+  }
+  const files = selectRustUnitFiles({
+    glob: (pattern) => globSync(pattern, { cwd: repoRoot }),
+    read: (file) => readFileSync(join(repoRoot, file), "utf8"),
+    excluded: [...focus, CORPUS_TEST_FILE],
+  });
+  return { files, source: "name globs plus files that pin the Rust backend (RUST_UNIT_GLOBS, RUST_PIN_PATTERN in scripts/gate-rust-core.mjs), less the focus list, the corpus file and RUST_UNIT_NEVER" };
+}
+
+/** One vitest process over a file list, hosted on `node`. The focus lanes
+ * and the rust-unit lane differ only in list, interpreter and target. */
+function planFileLane(context, { id, target, node, oracle = node, list, extraEnv }) {
   const dir = join(context.outDir, id);
   const lane = { resultsPath: join(dir, "results.jsonl"), tmpDir: join(context.tmpBase, id) };
   const vitestFlags = [`--maxWorkers=${context.options.focusWorkers}`, "--reporter=default", `--reporter=${reporterPath}`];
@@ -533,6 +557,7 @@ function planFileLane(context, { id, target, node, list, extraEnv }) {
     id,
     target,
     node,
+    oracle,
     files: list.files,
     source: list.source,
     dir,
@@ -545,7 +570,7 @@ function planFileLane(context, { id, target, node, list, extraEnv }) {
     cwd: repoRoot,
     timeoutMs: context.options.timeoutMin * 60_000,
     env: vitestEnv(context, lane, {
-      SCRIPTC_NODE_ORACLE: node.executable ?? undefined,
+      SCRIPTC_NODE_ORACLE: oracle.executable ?? undefined,
       SCRIPTC_TEST_WORKERS: String(context.options.focusWorkers),
       ...extraEnv,
     }),
@@ -564,6 +589,15 @@ function planFocus(context, target) {
   return planFileLane(context, { id, target, node, list, extraEnv: { SCRIPTC_RUNTIME_TARGET: target } });
 }
 
+/** The rust-unit lane runs the way the ordinary plain lane does (no
+ * SCRIPTC_RUNTIME_TARGET, so the default target) on the Node 26 host with the
+ * Node 24 executable as the semantic oracle, which is how CI's Node 26 host
+ * job pairs them and what the corpus step's matrix pin amounts to. */
+function planRustUnit(context) {
+  const id = "rust-unit";
+  return planFileLane(context, { id, target: "default", node: context.node26, oracle: context.node24, list: rustUnitFiles(context), extraEnv: {} });
+}
+
 async function runFileLane(context, plan) {
   const started = Date.now();
   const step = { id: plan.id, ran: true, target: plan.target, reds: [], passed: [], skipped: [], flaky: [], problems: [], files: [], scope: { kind: "files", files: plan.files, completedFiles: [] } };
@@ -579,6 +613,10 @@ async function runFileLane(context, plan) {
   if (plan.node.executable === null) {
     step.problems.push({ id: plan.target, message: plan.node.error });
     return finish(`did not run: ${plan.node.error}`);
+  }
+  if (plan.oracle.executable === null) {
+    step.problems.push({ id: "oracle", message: plan.oracle.error });
+    return finish(`did not run: ${plan.oracle.error}`);
   }
   const present = plan.files.filter((file) => existsSync(join(repoRoot, file)));
   for (const file of plan.files) {
@@ -637,7 +675,8 @@ async function runFileLane(context, plan) {
   if (!context.options.keepTmp) rmSync(plan.tmpDir, { recursive: true, force: true });
   step.run = { exitCode: run.exitCode, signal: run.signal, timedOut: run.timedOut, durationMs: run.durationMs, peakBytes: run.peakBytes, log: plan.logPath, results: plan.resultsPath };
   const tests = step.passed.length + step.reds.length;
-  return finish(`${present.length} files on Node ${plan.node.version}, target ${plan.target} · ${tests} tests · ${step.reds.length} failed · ${step.skipped.length} skipped · ${step.flaky.length} flaky${run.peakBytes ? ` · peak ${(run.peakBytes / 1024 ** 3).toFixed(1)} GB` : ""}`);
+  const targetText = plan.target === "default" ? "default target" : `target ${plan.target}`;
+  return finish(`${present.length} files on Node ${plan.node.version}, ${targetText} · ${tests} tests · ${step.reds.length} failed · ${step.skipped.length} skipped · ${step.flaky.length} flaky${run.peakBytes ? ` · peak ${(run.peakBytes / 1024 ** 3).toFixed(1)} GB` : ""}`);
 }
 
 // ---- main -------------------------------------------------------------------------
@@ -700,6 +739,7 @@ async function main() {
   const context = { options, outDir, tmpBase: tmpBaseFor(runTag), toolchain, node26, node24 };
   const plans = {
     "runtime-crate": () => planRuntimeCrate(context),
+    "rust-unit": () => planRustUnit(context),
     corpus: () => planCorpus(context),
     "focus-node26": () => planFocus(context, "node26"),
     "focus-node24": () => planFocus(context, "node24"),
@@ -750,10 +790,10 @@ async function runGate({ options, argv, startedAt, host, repo, outDir, context, 
     log(`step ${id} finished in ${formatDuration(step.durationMs)} with ${step.reds.length} red(s), ${step.problems.length} problem(s): ${step.headline}`);
     if (interrupted) break;
   }
-  for (const id of ["runtime-crate", "corpus", "focus-node26", "focus-node24"]) {
+  for (const id of STEP_IDS) {
     if (!steps.some((step) => step.id === id)) steps.push({ id, ran: false, reds: [], passed: [], skipped: [], problems: [], scope: { kind: "none" }, durationMs: null, skippedReason: interrupted && options.selectedSteps.includes(id) ? "interrupted" : options.quick && !options.selectedSteps.includes(id) ? "quick mode" : "not selected" });
   }
-  const orderedSteps = ["runtime-crate", "corpus", "focus-node26", "focus-node24"].map((id) => steps.find((step) => step.id === id));
+  const orderedSteps = STEP_IDS.map((id) => steps.find((step) => step.id === id));
   if (interrupted) orderedSteps[0].problems.push({ id: "interrupted", message: "the gate was interrupted before every selected step finished" });
   const corpusStep = orderedSteps.find((step) => step.id === "corpus");
   if (corpusStep.ran && !interrupted && corpusStep.totals) {
