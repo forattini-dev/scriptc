@@ -16,10 +16,13 @@ import {
   UsageError,
   corpusShardIndices,
   defaultJobs,
+  describeCrash,
   digestVitestResults,
   evaluate,
+  exitStatusProblems,
   extractFocusLists,
   inScope,
+  moduleFindings,
   normalizeBaseline,
   parseArgs,
   parseCargoTestLog,
@@ -144,6 +147,67 @@ describe("vitest result stream", () => {
   });
 });
 
+describe("exit status against the recorded results", () => {
+  const clean = (overrides = {}) => ({ exitCode: 0, signal: null, timedOut: false, spawnError: null, durationMs: 1000, ...overrides });
+  const digestOf = (records: object[]) => digestVitestResults(records);
+  const testRecord = (state: string, file = "f.test.ts") => ({ type: "test", file, name: `t-${state}`, fullName: `t-${state}`, state, durationMs: 1, retryCount: 0, flaky: false, note: null, errors: state === "failed" ? ["boom"] : [] });
+
+  test("exit 1 with no failing test, suite hook error, module error or unhandled error is a problem, not a pass", () => {
+    const records = [
+      { type: "module-collected", file: "f.test.ts", tests: ["t-passed"] },
+      testRecord("passed"),
+      { type: "module-end", file: "f.test.ts", state: "failed", durationMs: 5, errors: [] },
+      { type: "run-end", reason: "failed", unhandledErrors: [] },
+    ];
+    const problems = exitStatusProblems(clean({ exitCode: 1 }), digestOf(records));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("vitest exited 1 but recorded no failing test");
+    expect(problems[0]).toContain("1 module(s) ended in state 'failed'");
+  });
+
+  test("exit 1 explained by a failed test, a suite hook error, a module error or an unhandled error is not a problem", () => {
+    const base = [{ type: "module-collected", file: "f.test.ts", tests: ["t-passed"] }, testRecord("passed")];
+    const withEnd = (extra: object[], unhandled: string[] = []) => [...base, ...extra, { type: "module-end", file: "f.test.ts", state: "failed", durationMs: 5, errors: [] }, { type: "run-end", reason: "failed", unhandledErrors: unhandled }];
+    expect(exitStatusProblems(clean({ exitCode: 1 }), digestOf(withEnd([testRecord("failed")])))).toEqual([]);
+    expect(exitStatusProblems(clean({ exitCode: 1 }), digestOf(withEnd([{ type: "suite", file: "f.test.ts", name: "s", fullName: "s", state: "failed", errors: ["afterAll threw"] }])))).toEqual([]);
+    expect(exitStatusProblems(clean({ exitCode: 1 }), digestOf([...base, { type: "module-end", file: "f.test.ts", state: "failed", durationMs: 5, errors: ["import failed"] }, { type: "run-end", reason: "failed", unhandledErrors: [] }]))).toEqual([]);
+    expect(exitStatusProblems(clean({ exitCode: 1 }), digestOf(withEnd([], ["Unhandled rejection"])))).toEqual([]);
+  });
+
+  test("exit 0 with a recorded failure is a problem; a crash is left to the crash rule", () => {
+    const failing = digestOf([testRecord("failed"), { type: "run-end", reason: "passed", unhandledErrors: [] }]);
+    expect(exitStatusProblems(clean(), failing)).toEqual(["vitest exited 0 but recorded 1 failure record(s)"]);
+    expect(exitStatusProblems(clean({ exitCode: 137 }), digestOf([]))).toEqual([]);
+    expect(describeCrash(clean({ exitCode: 137 }))).toBe("exit code 137");
+    expect(describeCrash(clean({ signal: "SIGKILL" }))).toBe("signal SIGKILL");
+    expect(describeCrash(clean({ timedOut: true, durationMs: 60_000 }))).toBe("timed out after 1m00s");
+    expect(describeCrash(clean({ spawnError: "ENOENT" }))).toBe("ENOENT");
+    expect(describeCrash(clean({ exitCode: 1 }))).toBeNull();
+    expect(describeCrash(clean())).toBeNull();
+  });
+
+  test("suite hook errors and module errors are reds keyed by suite or file; an unexplained failed module is a problem", () => {
+    const records = [
+      { type: "module-collected", file: "f.test.ts", tests: ["a", "b"] },
+      { ...testRecord("passed"), name: "a", fullName: "S > a" },
+      { ...testRecord("skipped"), name: "b", fullName: "S > b" },
+      { type: "suite", file: "f.test.ts", name: "S", fullName: "S", state: "failed", errors: ["beforeAll threw: nope"] },
+      { type: "module-end", file: "f.test.ts", state: "failed", durationMs: 5, errors: [] },
+    ];
+    const digest = digestOf(records);
+    const entry = digest.files[0];
+    const found = moduleFindings(entry, digest.outcomes);
+    expect(found.reds).toEqual([{ id: "f.test.ts > S [suite hook failed]", firstLines: "beforeAll threw: nope" }]);
+    expect(found.problems).toEqual([]);
+    const unexplained = digestOf([{ type: "module-collected", file: "g.test.ts", tests: ["x"] }, { ...testRecord("passed", "g.test.ts"), name: "x" }, { type: "module-end", file: "g.test.ts", state: "failed", durationMs: 1, errors: [] }]);
+    expect(moduleFindings(unexplained.files[0], unexplained.outcomes).problems).toEqual(["g.test.ts ended in state 'failed' with no recorded failing test, suite hook error or module error"]);
+    const imported = digestOf([{ type: "module-end", file: "h.test.ts", state: "failed", durationMs: 1, errors: ["Cannot find module 'x'"] }]);
+    expect(moduleFindings(imported.files[0], imported.outcomes)).toEqual({ reds: [{ id: "h.test.ts", firstLines: "Cannot find module 'x'" }], problems: [] });
+    const healthy = digestOf([{ type: "module-collected", file: "k.test.ts", tests: ["x"] }, { ...testRecord("failed", "k.test.ts"), name: "x" }, { type: "module-end", file: "k.test.ts", state: "failed", durationMs: 1, errors: [] }]);
+    expect(moduleFindings(healthy.files[0], healthy.outcomes)).toEqual({ reds: [], problems: [] });
+  });
+});
+
 describe("cargo logs", () => {
   test("cargo test: per-binary outcomes, should-panic names, failure detail and summaries", () => {
     const log = [
@@ -191,6 +255,28 @@ describe("cargo logs", () => {
     expect(parsed.errorCount).toBe(1);
     expect(parsed.firstLines).toBe("error: using `chunks_exact` with a constant chunk size (--> src/zlib.test.rs:30:14)");
     expect(parseClippyLog("    Finished `dev` profile\n")).toEqual({ errorCount: 0, firstLines: "" });
+  });
+
+  test("cargo test: a binary that never prints a result summary crashed, and failed-target lines are counted", () => {
+    const parsed = parseCargoTestLog([
+      "     Running unittests src/lib.rs (target/debug/deps/a-1)",
+      "running 2 tests",
+      "test one ... ok",
+      "test two ... FAILED",
+      "---- two stdout ----",
+      "boom",
+      "failures:",
+      "test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "error: test failed, to rerun pass `--lib`",
+      "     Running tests/net.rs (target/debug/deps/net-2)",
+      "running 1 test",
+      "test dies ... ",
+      "error: test failed, to rerun pass `--test net`",
+      "error: 2 targets failed:",
+    ].join("\n"));
+    expect(parsed.crashedBinaries).toEqual(["tests/net.rs"]);
+    expect(parsed.failedTargetLines).toBe(2);
+    expect(parsed.failures.map((failure) => failure.binary)).toEqual(["src/lib.rs"]);
   });
 });
 

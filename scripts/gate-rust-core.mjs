@@ -215,7 +215,7 @@ export function digestVitestResults(records) {
   const file = (name) => {
     let entry = files.get(name);
     if (entry === undefined) {
-      entry = { file: name, collected: [], tests: [], ended: false, state: null, errors: [], durationMs: null };
+      entry = { file: name, collected: [], tests: [], suiteErrors: [], ended: false, state: null, errors: [], durationMs: null };
       files.set(name, entry);
     }
     return entry;
@@ -228,6 +228,7 @@ export function digestVitestResults(records) {
       case "run-start": runStart = record; break;
       case "module-collected": file(record.file).collected.push(...record.tests); break;
       case "test": file(record.file).tests.push(record); break;
+      case "suite": file(record.file).suiteErrors.push({ name: record.name, fullName: record.fullName ?? record.name, state: record.state, errors: record.errors ?? [] }); break;
       case "module-end": {
         const entry = file(record.file);
         entry.ended = true;
@@ -269,14 +270,73 @@ export function digestVitestResults(records) {
       }
     }
   }
-  return { files: [...files.values()], outcomes, parity, runStart, runEnd };
+  const all = [...files.values()];
+  const evidence = {
+    failedTests: outcomes.filter((outcome) => outcome.state === "failed").length,
+    suiteErrors: all.reduce((n, entry) => n + entry.suiteErrors.length, 0),
+    moduleErrors: all.reduce((n, entry) => n + entry.errors.length, 0),
+    failedModules: all.filter((entry) => entry.state === "failed").length,
+    unhandled: runEnd?.unhandledErrors?.length ?? 0,
+  };
+  return { files: all, outcomes, parity, runStart, runEnd, evidence };
+}
+
+/** Why a child process counts as crashed, or null when it ran to a verdict:
+ * a spawn error, the wall-clock cap, a signal, or any exit status other than
+ * vitest's 0 (green) and 1 (red). */
+export function describeCrash(run) {
+  if (run.spawnError) return run.spawnError;
+  if (run.timedOut) return `timed out after ${formatDuration(run.durationMs)}`;
+  if (run.signal) return `signal ${run.signal}`;
+  if (run.exitCode !== 0 && run.exitCode !== 1) return `exit code ${run.exitCode}`;
+  return null;
+}
+
+/** Cross-check a vitest child's exit status against the records it left.
+ * Exit 1 with nothing recorded that failed means vitest saw a failure the
+ * reporter did not (a hook error, a worker error): the gate must not read
+ * that as green. The reverse, exit 0 with recorded failures, means the
+ * stream and the process disagree. */
+export function exitStatusProblems(run, digest) {
+  if (describeCrash(run) !== null) return [];
+  const { evidence } = digest;
+  const recorded = evidence.failedTests + evidence.suiteErrors + evidence.moduleErrors + evidence.unhandled;
+  if (run.exitCode === 1 && recorded === 0) {
+    const modules = evidence.failedModules > 0 ? `; ${evidence.failedModules} module(s) ended in state 'failed'` : "";
+    return [`vitest exited 1 but recorded no failing test, suite hook error, module error or unhandled error${modules}`];
+  }
+  if (run.exitCode === 0 && recorded > 0) return [`vitest exited 0 but recorded ${recorded} failure record(s)`];
+  return [];
+}
+
+/** What a vitest module's own records imply beyond its test outcomes: a
+ * module-level error (an import that throws, a module-level hook) and a
+ * suite-level hook error are reds keyed by file or suite; a module that
+ * ended in state 'failed' with no failing test, suite error or module error
+ * behind it is a problem, because its failure is unexplained. */
+export function moduleFindings(entry, outcomes) {
+  const reds = [];
+  const problems = [];
+  if (entry.errors.length > 0) reds.push({ id: entry.file, firstLines: entry.errors[0] });
+  for (const suite of entry.suiteErrors) {
+    reds.push({ id: `${entry.file} > ${suite.fullName} [suite hook failed]`, firstLines: suite.errors[0] ?? "(no error message)" });
+  }
+  const explained = entry.errors.length + entry.suiteErrors.length + outcomes.filter((outcome) => outcome.state === "failed").length;
+  if (entry.state === "failed" && explained === 0) {
+    problems.push(`${entry.file} ended in state 'failed' with no recorded failing test, suite hook error or module error`);
+  }
+  return { reds, problems };
 }
 
 // ---- cargo output -----------------------------------------------------------
 
 /** Per-test outcomes from a `cargo test` log that merged stdout and stderr
  * in order: `Running …` lines label the binary, `test X ... ok|FAILED`
- * lines carry the outcome, `---- X stdout ----` blocks hold the failure. */
+ * lines carry the outcome, `---- X stdout ----` blocks hold the failure.
+ * A binary whose `Running` line is never followed by a `test result:` line
+ * crashed (abort, SIGSEGV, killed) and is reported as such, and
+ * `error: test failed, to rerun pass …` lines are counted so the caller can
+ * tell a failure the per-test lines do not explain. */
 export function parseCargoTestLog(text) {
   const lines = text.split("\n");
   const counts = { passed: 0, failed: 0, ignored: 0 };
@@ -284,17 +344,26 @@ export function parseCargoTestLog(text) {
   const failures = [];
   const passed = [];
   const failureDetail = new Map();
+  const targets = [];
+  let current = null;
   let binary = "";
   let summaries = 0;
+  let failedTargetLines = 0;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     let m;
     if ((m = /^\s*Running (?:unittests |tests )?(\S+) \(/.exec(line))) {
       binary = m[1];
       binaries.push(binary);
+      current = { name: binary, summarised: false };
+      targets.push(current);
     } else if ((m = /^\s*Doc-tests (\S+)/.exec(line))) {
       binary = `doc:${m[1]}`;
       binaries.push(binary);
+      current = { name: binary, summarised: false };
+      targets.push(current);
+    } else if (/^error: (?:test|doctest) failed, to rerun pass/.test(line)) {
+      failedTargetLines += 1;
     } else if ((m = /^test (\S+)(?: - .+?)? \.\.\. (ok|FAILED|ignored)/.exec(line))) {
       const record = { id: `cargo-test::${binary}::${m[1]}`, name: m[1], binary };
       if (m[2] === "FAILED") failures.push(record);
@@ -308,6 +377,7 @@ export function parseCargoTestLog(text) {
       failureDetail.set(`${binary}::${m[1]}`, detail.join("\n"));
     } else if ((m = /^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored/.exec(line))) {
       summaries += 1;
+      if (current !== null) current.summarised = true;
       counts.passed += Number(m[2]);
       counts.failed += Number(m[3]);
       counts.ignored += Number(m[4]);
@@ -317,7 +387,8 @@ export function parseCargoTestLog(text) {
     failure.firstLines = firstLines(failureDetail.get(`${failure.binary}::${failure.name}`) ?? "(no captured output)");
   }
   const errorLines = lines.filter((line) => /^error(\[E\d+\])?:/.test(line));
-  return { counts, binaries, failures, passed, summaries, errorLines: errorLines.slice(0, 10) };
+  const crashedBinaries = targets.filter((target) => !target.summarised).map((target) => target.name);
+  return { counts, binaries, failures, passed, summaries, crashedBinaries, failedTargetLines, errorLines: errorLines.slice(0, 10) };
 }
 
 /** Clippy under -D warnings: every lint is an `error:` line. */

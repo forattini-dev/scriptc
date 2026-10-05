@@ -18,7 +18,8 @@
  * The verdict compares the reds against tests/dogfood/rust-gate-baseline.json:
  * a red the baseline does not know fails the gate, a known red passes, a
  * baseline entry that now passes is reported for removal, and a shard that
- * crashed or a file that did not run always fails. See
+ * crashed, a file that did not run, or a child whose exit status the
+ * recorded results do not explain always fails. See
  * tests/dogfood/rust-gate.md. The decision logic lives in
  * scripts/gate-rust-core.mjs; this file is the plumbing. */
 import { spawn, execFileSync } from "node:child_process";
@@ -29,9 +30,9 @@ import { fileURLToPath } from "node:url";
 import { NODE24_VERSION, NODE26_VERSION } from "../packages/compiler/src/compat/node-matrix.js";
 import { DRIVER_FIXTURES } from "../tests/harness/driver-fixtures.js";
 import {
-  CORPUS_TEST_FILE, DEFAULT_BASELINE, REPORT_SCHEMA, USAGE, UsageError,
-  baselineReason, corpusShardIndices, digestVitestResults, emptyBaseline, evaluate, extractFocusLists,
-  formatDuration, normalizeBaseline, parseArgs, parseCargoTestLog, parseClippyLog, readJsonl, renderSummary,
+  CORPUS_TEST_FILE, REPORT_SCHEMA, USAGE, UsageError,
+  baselineReason, corpusShardIndices, describeCrash, digestVitestResults, emptyBaseline, evaluate, exitStatusProblems, extractFocusLists,
+  formatDuration, moduleFindings, normalizeBaseline, parseArgs, parseCargoTestLog, parseClippyLog, readJsonl, renderSummary,
 } from "./gate-rust-core.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -269,8 +270,17 @@ async function runRuntimeCrate(context, plan) {
       check.binaries = parsed.binaries;
       check.failures = parsed.failures;
       for (const failure of parsed.failures) step.reds.push({ id: failure.id, firstLines: failure.firstLines });
-      if (run.exitCode !== 0 && parsed.failures.length === 0) {
-        step.reds.push({ id: "cargo-test", firstLines: parsed.errorLines.join("\n") || `cargo test exited ${run.exitCode} without a parsable test failure` });
+      // A test binary that never printed its result summary crashed (abort, SIGSEGV, kill):
+      // its tests are not in any FAILED line, so it is reported on its own.
+      for (const name of parsed.crashedBinaries) {
+        step.reds.push({ id: `cargo-test::${name}`, firstLines: `test binary ${name} printed no result summary (it crashed or was killed)` });
+      }
+      check.crashedBinaries = parsed.crashedBinaries;
+      // A nonzero exit that the per-test lines and crashed binaries do not account for
+      // (a build failure, or more failed targets than failed tests explain) is a red of its own.
+      const explainedTargets = new Set([...parsed.failures.map((failure) => failure.binary), ...parsed.crashedBinaries]);
+      if (run.exitCode !== 0 && (explainedTargets.size === 0 || parsed.failedTargetLines > explainedTargets.size)) {
+        step.reds.push({ id: "cargo-test", firstLines: parsed.errorLines.join("\n") || `cargo test exited ${run.exitCode} with ${parsed.failedTargetLines} failed target(s) but ${explainedTargets.size} explained by a failed test or a crashed binary` });
       }
       if (run.exitCode === 0 && parsed.summaries === 0) step.problems.push({ id: "cargo-test", message: "cargo test exited 0 but printed no test result summary" });
       if (run.exitCode === 0) step.passed.push("cargo-test");
@@ -429,12 +439,22 @@ async function runShard(context, shard) {
   log(`corpus: shard ${shard.index}/${shard.count} starting`);
   const run = await runChild({ ...shard, label: `corpus shard ${shard.index}/${shard.count}` });
   const digest = digestVitestResults(readJsonl(safeRead(shard.resultsPath)));
-  const file = digest.files.find((entry) => entry.file === CORPUS_TEST_FILE) ?? { collected: [], ended: false, errors: [] };
+  const file = digest.files.find((entry) => entry.file === CORPUS_TEST_FILE) ?? { file: CORPUS_TEST_FILE, collected: [], suiteErrors: [], ended: false, state: null, errors: [] };
   const outcomes = digest.outcomes.filter((outcome) => outcome.file === CORPUS_TEST_FILE);
   const problems = [];
-  const crashed = run.spawnError !== null || run.timedOut || run.signal !== null || (run.exitCode !== 0 && run.exitCode !== 1);
+  const crashReason = describeCrash(run);
+  const crashed = crashReason !== null;
   if (crashed) {
-    problems.push(`crashed (${run.spawnError ?? (run.timedOut ? `timed out after ${formatDuration(run.durationMs)}` : run.signal ? `signal ${run.signal}` : `exit code ${run.exitCode}`)}) after ${outcomes.filter((o) => o.state !== "missing").length} of ${file.collected.length} programs; log ${shard.logPath}`);
+    problems.push(`crashed (${crashReason}) after ${outcomes.filter((o) => o.state !== "missing").length} of ${file.collected.length} programs; log ${shard.logPath}`);
+  }
+  // The exit status must be explained by the records: exit 1 with nothing recorded as failed, a
+  // failing hook around the programs, or a module that failed for no recorded reason all mean the
+  // verdict below would be taken on a stream that hides a failure.
+  problems.push(...exitStatusProblems(run, digest).map((message) => `${message}; log ${shard.logPath}`));
+  if (file.ended) {
+    const found = moduleFindings(file, outcomes);
+    for (const red of found.reds) problems.push(`suite-level failure outside any program (${red.id.replace(`${CORPUS_TEST_FILE} > `, "")}): ${baselineReason(red.firstLines)}`);
+    problems.push(...found.problems);
   }
   if (digest.runEnd === null && !crashed) problems.push(`vitest ended without a run-end record (exit ${run.exitCode}); log ${shard.logPath}`);
   if (digest.runEnd?.reason === "interrupted") problems.push("vitest reported the run as interrupted");
@@ -444,7 +464,7 @@ async function runShard(context, shard) {
   if (missing.length > 0 && !crashed) problems.push(`${missing.length} program(s) did not run: ${missing.slice(0, 5).map((o) => o.name).join(", ")}${missing.length > 5 ? ", …" : ""}`);
   const executed = outcomes.filter((outcome) => outcome.state === "passed" || outcome.state === "failed").length;
   if (executed === 0 && file.collected.length > 0 && !crashed) problems.push(`none of the ${file.collected.length} collected programs executed (all skipped)`);
-  const completed = !crashed && file.ended && missing.length === 0;
+  const completed = !crashed && file.ended && problems.length === 0;
   if (!context.options.keepTmp) rmSync(shard.tmpDir, { recursive: true, force: true });
   const summary = {
     index: shard.index,
@@ -487,17 +507,11 @@ function focusFiles(context) {
   return { files: lanes.node26.files, source: ".github/workflows/ci.yml (node_26_host)" };
 }
 
-function planFocus(context, target) {
-  const node = target === "node26" ? context.node26 : context.node24;
-  const id = `focus-${target}`;
+/** One vitest process over a file list, hosted on `node`: how each focus lane is planned. */
+function planFileLane(context, { id, target, node, list, extraEnv }) {
   const dir = join(context.outDir, id);
   const lane = { resultsPath: join(dir, "results.jsonl"), tmpDir: join(context.tmpBase, id) };
-  let list;
-  try {
-    list = focusFiles(context);
-  } catch (error) {
-    return { id, target, node, error: error.message, files: [] };
-  }
+  const vitestFlags = [`--maxWorkers=${context.options.focusWorkers}`, "--reporter=default", `--reporter=${reporterPath}`];
   return {
     id,
     target,
@@ -509,19 +523,31 @@ function planFocus(context, target) {
     resultsPath: lane.resultsPath,
     tmpDir: lane.tmpDir,
     command: node.executable,
-    vitestFlags: [`--maxWorkers=${context.options.focusWorkers}`, "--reporter=default", `--reporter=${reporterPath}`],
-    args: [vitestPath, "run", ...list.files, `--maxWorkers=${context.options.focusWorkers}`, "--reporter=default", `--reporter=${reporterPath}`],
+    vitestFlags,
+    args: [vitestPath, "run", ...list.files, ...vitestFlags],
     cwd: repoRoot,
     timeoutMs: context.options.timeoutMin * 60_000,
     env: vitestEnv(context, lane, {
-      SCRIPTC_RUNTIME_TARGET: target,
       SCRIPTC_NODE_ORACLE: node.executable ?? undefined,
       SCRIPTC_TEST_WORKERS: String(context.options.focusWorkers),
+      ...extraEnv,
     }),
   };
 }
 
-async function runFocus(context, plan) {
+function planFocus(context, target) {
+  const node = target === "node26" ? context.node26 : context.node24;
+  const id = `focus-${target}`;
+  let list;
+  try {
+    list = focusFiles(context);
+  } catch (error) {
+    return { id, target, node, error: error.message, files: [] };
+  }
+  return planFileLane(context, { id, target, node, list, extraEnv: { SCRIPTC_RUNTIME_TARGET: target } });
+}
+
+async function runFileLane(context, plan) {
   const started = Date.now();
   const step = { id: plan.id, ran: true, target: plan.target, reds: [], passed: [], skipped: [], flaky: [], problems: [], files: [], scope: { kind: "files", files: plan.files, completedFiles: [] } };
   const finish = (headline) => {
@@ -539,16 +565,21 @@ async function runFocus(context, plan) {
   }
   const present = plan.files.filter((file) => existsSync(join(repoRoot, file)));
   for (const file of plan.files) {
-    if (!present.includes(file)) step.problems.push({ id: file, message: `focus file ${file} does not exist` });
+    if (!present.includes(file)) step.problems.push({ id: file, message: `${plan.id} file ${file} does not exist` });
   }
-  if (present.length === 0) return finish("did not run: no focus files exist");
+  if (present.length === 0) {
+    step.problems.push({ id: plan.id, message: `${plan.id} has no files to run` });
+    return finish("did not run: no files");
+  }
   mkdirSync(plan.dir, { recursive: true });
   mkdirSync(plan.tmpDir, { recursive: true });
   log(`${plan.id}: ${present.length} files on Node ${plan.node.version} (${plan.source})`);
   const run = await runChild({ ...plan, args: [vitestPath, "run", ...present, ...plan.vitestFlags], label: plan.id });
   const digest = digestVitestResults(readJsonl(safeRead(plan.resultsPath)));
-  const crashed = run.spawnError !== null || run.timedOut || run.signal !== null || (run.exitCode !== 0 && run.exitCode !== 1);
-  if (crashed) step.problems.push({ id: "vitest", message: `vitest did not complete (${run.spawnError ?? (run.timedOut ? "timed out" : run.signal ? `signal ${run.signal}` : `exit code ${run.exitCode}`)}); log ${plan.logPath}` });
+  const crashReason = describeCrash(run);
+  if (crashReason !== null) step.problems.push({ id: "vitest", message: `vitest did not complete (${crashReason}); log ${plan.logPath}` });
+  // The exit status must be explained by the records (see exitStatusProblems).
+  for (const message of exitStatusProblems(run, digest)) step.problems.push({ id: "vitest", message: `${message}; log ${plan.logPath}` });
   if ((digest.runEnd?.unhandledErrors ?? []).length > 0) step.problems.push({ id: "vitest", message: `${digest.runEnd.unhandledErrors.length} unhandled error(s): ${baselineReason(digest.runEnd.unhandledErrors[0])}` });
   for (const file of present) {
     const entry = digest.files.find((candidate) => candidate.file === file);
@@ -561,14 +592,19 @@ async function runFocus(context, plan) {
       step.problems.push({ id: file, message: `${file} did not run${entry?.errors?.length ? `: ${baselineReason(entry.errors[0])}` : ""}` });
       continue;
     }
-    if (entry.state === "failed" && entry.collected.length === 0) {
-      step.reds.push({ id: file, firstLines: entry.errors[0] ?? "file failed before collecting any test" });
-    } else if (executed.length === 0) {
+    // Module-level errors and failing suite hooks are reds of their own; a module that failed
+    // for no recorded reason is a problem, and a file with a problem is not "completed", so
+    // its baseline entries are left alone rather than judged on an unreliable record.
+    const found = moduleFindings(entry, outcomes);
+    step.reds.push(...found.reds);
+    for (const message of found.problems) step.problems.push({ id: file, message });
+    const failedBeforeCollecting = entry.state === "failed" && entry.collected.length === 0;
+    if (!failedBeforeCollecting && executed.length === 0) {
       step.problems.push({ id: file, message: `${file} executed no test (${entry.collected.length} collected, ${record.skipped} skipped)` });
       continue;
     }
     if (missing.length > 0) step.problems.push({ id: file, message: `${file}: ${missing.length} test(s) did not run` });
-    else step.scope.completedFiles.push(file);
+    else if (found.problems.length === 0) step.scope.completedFiles.push(file);
     for (const outcome of outcomes) {
       const id = `${file} > ${outcome.fullName ?? outcome.name}`;
       if (outcome.state === "passed") {
@@ -664,7 +700,7 @@ async function main() {
     log(`step ${id} starting`);
     let step;
     try {
-      step = id === "runtime-crate" ? await runRuntimeCrate(context, plan) : id === "corpus" ? await runCorpus(context, plan) : await runFocus(context, plan);
+      step = id === "runtime-crate" ? await runRuntimeCrate(context, plan) : id === "corpus" ? await runCorpus(context, plan) : await runFileLane(context, plan);
       if (id === "corpus") step.jobs = plan.jobs;
     } catch (error) {
       step = { id, ran: true, reds: [], passed: [], skipped: [], problems: [{ id: "gate", message: `gate failure: ${error.stack ?? error.message}` }], scope: { kind: "none" }, durationMs: Date.now() - stepStarted, headline: "gate failure" };

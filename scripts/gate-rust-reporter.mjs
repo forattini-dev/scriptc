@@ -13,6 +13,9 @@
  *   module-collected { file, tests: [test names in collection order] }
  *   test             { file, name, fullName, state, durationMs, retryCount,
  *                      flaky, note, errors: [first lines of each error] }
+ *   suite            { file, name, fullName, state, errors } — only suites
+ *                    that carry errors of their own (a failing beforeAll or
+ *                    afterAll in a describe), which no test record shows
  *   module-end       { file, state, durationMs, errors }
  *   console          { file, stream, content } — only the harness's own
  *                    ledger lines ("rust parity: N/M ...")
@@ -86,6 +89,19 @@ export default class GateRustReporter {
       flaky: diagnostic?.flaky ?? false,
       note: result.state === "skipped" ? result.note ?? null : null,
       errors: (result.errors ?? []).map(serializeError),
+    });
+  }
+
+  onTestSuiteResult(testSuite) {
+    const errors = testSuite.errors();
+    if (errors.length === 0) return;
+    this.write({
+      type: "suite",
+      file: this.file(testSuite.module.moduleId),
+      name: testSuite.name,
+      fullName: testSuite.fullName,
+      state: testSuite.state(),
+      errors: errors.map(serializeError),
     });
   }
 
