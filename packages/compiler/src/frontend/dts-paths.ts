@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { trackedReadFile } from "./input-tracker.js";
 import { npmPackageNameOf } from "./workspace-registry.js";
 
 const require = createRequire(import.meta.url);
@@ -35,12 +36,20 @@ export function fallbackDtsPath(): string {
 }
 
 /** The packages that declare the Node type surface: @types/node itself,
- * undici-types (its dependency — the web-platform globals: fetch/Response/
- * AbortSignal/ReadableStream/...), and the Bun surface (@types/bun →
- * bun-types → @types/node). They declare one ambient world (globals and
- * `declare module "node:*"` blocks), so a program carries exactly one copy
- * of each — see ProjectDeclarations. */
+ * undici-types (its dependency: the web-platform globals fetch, Response,
+ * AbortSignal, ReadableStream and the rest), and the Bun surface (@types/bun,
+ * which chains bun-types, which chains @types/node). Provenance for the
+ * lowering tables keys on this whole set. */
 const NODE_TYPE_SURFACE_PACKAGES: ReadonlySet<string> = new Set(["@types/node", "undici-types", "bun-types", "@types/bun"]);
+
+/** The AMBIENT half of the surface: packages whose declarations are globals
+ * and `declare module "node:*"` blocks, so two copies in one checker program
+ * redeclare one world (two `export =` assignments on `node:events`, merged
+ * classes that lose their members). A program carries one copy of each, see
+ * ProjectDeclarations. undici-types is not in this set: it is module-shaped
+ * (every file is an ES module that @types/node imports from its own
+ * install), so a second copy beside the first declares nothing twice. */
+const AMBIENT_SURFACE_PACKAGES: ReadonlySet<string> = new Set(["@types/node", "bun-types", "@types/bun"]);
 
 /** True for files belonging to the adopted Node type surface: the
  * @types/node package itself and undici-types (its dependency — the
@@ -56,17 +65,42 @@ export function isNodeTypesPath(file: string): boolean {
   return pkg !== null && NODE_TYPE_SURFACE_PACKAGES.has(pkg);
 }
 
-/** The installed Node type surface package that owns `file`: its name and
- * the directory of that installed copy (the path through its last
- * `node_modules/<name>` segment), or null for every other file. Two copies
- * of one package are two roots whatever their versions — identical
- * declarations loaded twice collide exactly like different majors do. */
-export function nodeTypeSurfacePackageOf(file: string): { name: string; root: string } | null {
-  const parts = tsgoPath(file).split("/");
-  const at = parts.lastIndexOf("node_modules");
-  if (at < 0 || at + 1 >= parts.length) return null;
-  const end = at + (parts[at + 1]!.startsWith("@") ? 3 : 2);
-  if (end > parts.length) return null;
-  const name = parts.slice(at + 1, end).join("/");
-  return NODE_TYPE_SURFACE_PACKAGES.has(name) ? { name, root: parts.slice(0, end).join("/") } : null;
+/** True for a file of the undici-types package (the web-platform half of a
+ * Node type surface copy; see AMBIENT_SURFACE_PACKAGES). */
+export function isUndiciTypesPath(file: string): boolean {
+  return npmPackageNameOf(file) === "undici-types";
+}
+
+/** The installed ambient Node type surface package that owns the declaration
+ * file `file`: its name and the directory of that installed copy, or null for
+ * every other file. The owner is the nearest package.json upward, matched by
+ * its `name`: a copy is a copy wherever it lives (a node_modules install, a
+ * vendored directory a tsconfig `typeRoots` names), and two copies are two
+ * roots whatever their versions. `cache` memoizes the answer per directory
+ * for one program load. */
+export function nodeTypeSurfacePackageOf(
+  file: string,
+  cache: Map<string, { name: string; root: string } | null> = new Map(),
+): { name: string; root: string } | null {
+  const path = tsgoPath(file);
+  if (!/\.d\.(?:ts|mts|cts)$/.test(path)) return null;
+  const visited: string[] = [];
+  let owner: { name: string; root: string } | null = null;
+  for (let dir = path.slice(0, path.lastIndexOf("/")); ; ) {
+    const cached = cache.get(dir);
+    if (cached !== undefined) { owner = cached; break; }
+    visited.push(dir);
+    const text = trackedReadFile(`${dir}/package.json`);
+    if (text !== null) {
+      let name: unknown;
+      try { name = (JSON.parse(text) as { name?: unknown }).name; } catch { name = undefined; }
+      owner = typeof name === "string" && AMBIENT_SURFACE_PACKAGES.has(name) ? { name, root: dir } : null;
+      break;
+    }
+    const parent = dir.slice(0, dir.lastIndexOf("/"));
+    if (parent === dir || parent === "") break;
+    dir = parent;
+  }
+  for (const dir of visited) cache.set(dir, owner);
+  return owner;
 }

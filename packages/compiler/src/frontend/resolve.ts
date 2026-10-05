@@ -1051,11 +1051,12 @@ export function resolveBareModule(
 }
 
 /** Resolves a `/// <reference types="name" />`-style TYPE DIRECTIVE the way
- * ts.resolveTypeReferenceDirective does with typeRoots emptied (the
- * secondary lookup only): walking up from the anchor file, per directory
- * node_modules/<name> then node_modules/@types/<name>, each via package.json
- * types/typings then index.d.ts. Returns the realpath'd file or null. */
-export function resolveTypeDirective(name: string, fromFile: string): string | null {
+ * ts.resolveTypeReferenceDirective does: the project's explicit `typeRoots`
+ * first (the primary lookup: <typeRoot>/<name>), then the secondary lookup,
+ * walking up from the anchor file, per directory node_modules/<name> then
+ * node_modules/@types/<name>, each via package.json types/typings then
+ * index.d.ts. Returns the realpath'd file or null. */
+export function resolveTypeDirective(name: string, fromFile: string, typeRoots: readonly string[] = []): string | null {
   const tryPkg = (base: string): string | null => {
     const pkg = pkgJsonOf(base);
     for (const field of [pkg?.types, pkg?.typings]) {
@@ -1069,6 +1070,10 @@ export function resolveTypeDirective(name: string, fromFile: string): string | n
     const idx = join(base, "index.d.ts");
     return isFile(idx) ? idx : null;
   };
+  for (const root of typeRoots) {
+    const viaRoot = tryPkg(join(root, mangleScopedName(name)));
+    if (viaRoot) return realpathOr(viaRoot);
+  }
   for (let dir = dirname(resolve(fromFile)); ; ) {
     const nm = join(dir, "node_modules");
     if (isDirectory(nm)) {

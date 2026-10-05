@@ -363,18 +363,26 @@ export function tscPassthroughDiag(message: string, loc: SrcLoc): ScrDiagnostic 
   return { code: "SC0001", message, loc };
 }
 
-/** The hint riding a tsc error inside a project whose own tsconfig resolves
- * a Node type surface copy the program does not carry (one Node type
- * surface per program; the entry project's wins). The error may be a
- * declaration difference between the two copies rather than a defect. */
+/** The tsc error codes that can come from two Node type surface copies
+ * declaring different members: a missing name, property, namespace or module
+ * export. Other errors in a project whose copy stood down are not hinted. */
+const NODE_TYPE_SURFACE_ERROR_CODES: ReadonlySet<number> = new Set([2304, 2305, 2339, 2503, 2551, 2552, 2694, 2724]);
+
+/** The hint riding a declaration-shaped tsc error inside a project whose own
+ * resolution selects a Node type surface copy the program does not carry (a
+ * program carries one copy of each ambient Node type package: the newest any
+ * reached project resolves). The error may be a declaration difference
+ * between the two copies rather than a defect in the project. */
 export function nodeTypeSurfaceHint(
-  standDowns: readonly { package: string; dropped: { version: string | null }; kept: { version: string | null } | null }[],
+  code: number,
+  standDowns: readonly { package: string; dropped: { version: string | null }; kept: { version: string | null } }[],
 ): string | null {
+  if (!NODE_TYPE_SURFACE_ERROR_CODES.has(code)) return null;
   const nodeCopies = standDowns.filter((entry) => entry.package === "@types/node" || entry.package === "bun-types");
   const first = nodeCopies[0] ?? standDowns[0];
   if (first === undefined) return null;
   const spell = (pkg: string, version: string | null): string => version === null ? pkg : `${pkg} ${version}`;
-  return `this file's project resolves ${spell(first.package, first.dropped.version)}, but a program carries one Node type surface and this one is checked against ${first.kept === null ? "another copy" : spell(first.package, first.kept.version)} (the entry project's); align the versions if this error names a declaration that differs between them`;
+  return `this file's project resolves ${spell(first.package, first.dropped.version)}, but a program carries one copy of each Node type package, the newest any reached project resolves, and this file is checked against ${spell(first.package, first.kept.version)}; align the versions if this error names a declaration that differs between them`;
 }
 
 /** Node's package scope forces CommonJS, but the source contains a marker

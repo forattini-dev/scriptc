@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { clearResolveCaches, projectDtsRuntimeSibling, resolveProjectModule, resolveWorkspaceSourceModule, setProjectPathMappings, setProjectRealm } from "./resolve.js";
+import { clearResolveCaches, projectDtsRuntimeSibling, resolveProjectModule, resolveTypeDirective, resolveWorkspaceSourceModule, setProjectPathMappings, setProjectRealm } from "./resolve.js";
 
 const fixturesRoot = join(import.meta.dirname, "../../../..", "tests/fixtures");
 
@@ -51,5 +51,28 @@ test("source-only workspace packages are project modules while JavaScript packag
     expect(resolveProjectModule(jsEntry, "wslinked")).toBeNull();
   } finally {
     clearResolveCaches();
+  }
+});
+
+test("a type directive resolves through the project's typeRoots before the node_modules walk", async () => {
+  const dir = realpathSync(await mkdtemp(join(tmpdir(), "scriptc-type-directive-")));
+  try {
+    const ancestor = join(dir, "node_modules", "@types", "node");
+    const vendored = join(dir, "app", "vendor", "node");
+    await Promise.all([ancestor, vendored].map((root) => mkdir(root, { recursive: true })));
+    await Promise.all([ancestor, vendored].flatMap((root) => [
+      writeFile(join(root, "package.json"), '{"name":"@types/node","types":"index.d.ts"}\n'),
+      writeFile(join(root, "index.d.ts"), "export {};\n"),
+    ]));
+    const entry = join(dir, "app", "main.ts");
+    clearResolveCaches();
+    // Without typeRoots only the ancestor walk answers; with them the
+    // named root does, and a root that lacks the package falls through.
+    expect(resolveTypeDirective("node", entry)).toBe(join(ancestor, "index.d.ts"));
+    expect(resolveTypeDirective("node", entry, [join(dir, "app", "vendor")])).toBe(join(vendored, "index.d.ts"));
+    expect(resolveTypeDirective("node", entry, [join(dir, "app", "elsewhere")])).toBe(join(ancestor, "index.d.ts"));
+  } finally {
+    clearResolveCaches();
+    await rm(dir, { recursive: true, force: true });
   }
 });
