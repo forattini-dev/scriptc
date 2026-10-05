@@ -332,8 +332,11 @@ export interface LowerResult {
    * consts in fetched source modules — off the build, on the report. */
   provenanceElided?: ScrDiagnostic[];
   /** Coverage only (LowerOptions.coverage): the unreached remainder,
-   * lowered in a throwaway pass — blockers in it can never fail a build. */
-  unreached?: { diagnostics: ScrDiagnostic[]; stats: LowerStats };
+   * lowered in a throwaway pass — blockers in it can never fail a build.
+   * `runtimeFences` are the remainder's JS statements whose fences would
+   * defer to runtime if a reference ever reached them: no build carries
+   * them, and the report counts them so the unreached share is measurable. */
+  unreached?: { diagnostics: ScrDiagnostic[]; runtimeFences: ScrDiagnostic[]; stats: LowerStats };
   /** The static frontier (present when any module is island-classified):
    * every program module with its tier and the reason. */
   tiers?: ModuleTierRow[];
@@ -735,7 +738,10 @@ export function lowerToIr(
     externalTypeSpecifiersByFile,
   });
   const rem = remainder.run();
-  return { ...result, unreached: { diagnostics: rem.diagnostics, stats: rem.stats } };
+  return {
+    ...result,
+    unreached: { diagnostics: rem.diagnostics, runtimeFences: rem.runtimeFences, stats: rem.stats },
+  };
 }
 
 /** The island-handle type a `import(...)` initializer gives a binding

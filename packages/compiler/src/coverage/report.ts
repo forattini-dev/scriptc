@@ -29,8 +29,11 @@ export interface CoverageInput {
   runtimeFences?: ScrDiagnostic[];
   /** The unreached remainder: bodies nothing on the entry path reaches,
    * lowered in a throwaway analysis pass. Its blockers cannot fail a
-   * build — the report shows them as a secondary, dimmed group. */
-  unreached?: { stats: LowerStats; diagnostics: ScrDiagnostic[] };
+   * build — the report shows them as a secondary, dimmed group.
+   * `runtimeFences` are the remainder's deferred JS fences: no build
+   * carries them, and they report in their own dimmed group so the
+   * unreached share of the dynamic gap is measurable. */
+  unreached?: { stats: LowerStats; diagnostics: ScrDiagnostic[]; runtimeFences?: ScrDiagnostic[] };
   /** --dynamic only: every Node builtin the embedded npm graph imports —
    * what the island must provide for this program (unshimmed ones also
    * appear as SC2030 blockers, EXCEPT lazily-reached ones, which embed
@@ -325,6 +328,26 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
     out.push("");
   }
 
+  // The same deferral in code nothing on the entry path reaches: those
+  // bodies never lower, so no build carries these fences — a reference
+  // that reached them would. Counted apart from the sites above and
+  // rendered last, dimmed like the other unreached group.
+  const unreachedFences = un?.runtimeFences ?? [];
+  const renderUnreachedFences = () => {
+    if (unreachedFences.length === 0) return;
+    const grouped = groupBlockers(unreachedFences);
+    const widestU = Math.max(...grouped.map((b) => b.what.length));
+    if (out[out.length - 1] !== "") out.push("");
+    out.push(
+      `  ${c(DIM, "deferred in unreached code")}   ${c(DIM, `${unreachedFences.length} site${unreachedFences.length === 1 ? "" : "s"} (never lowered — JS statements that would throw their fence if reached)`)}`,
+    );
+    for (const b of grouped) {
+      out.push(
+        `    ${c(DIM, `×${b.count}`.padStart(4))}  ${c(DIM, b.what.padEnd(widestU))}  ${c(DIM, b.code)}`,
+      );
+    }
+  };
+
   const unreachedDiags = un?.diagnostics ?? [];
   if (failed === 0 && input.diagnostics.length === 0 && unreachedDiags.length === 0) {
     out.push(
@@ -332,6 +355,7 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
         ? `  ${c(GREEN, "builds with --dynamic")} — no remaining blockers (${nativeDynamic ? "the dynamic sites above use the native runtime" : "the island sites above run in the embedded engine"}).`
         : `  ${c(GREEN, "fully static")} — this program has no dynamic remainder.`,
     );
+    renderUnreachedFences();
     return out.join("\n");
   }
 
@@ -372,6 +396,7 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
     out.push(`  ${c(DIM, "in unreached code")}   ${c(DIM, "(never lowered — cannot fail a build)")}`);
     renderGroup(unreachedBlockers, true);
   }
+  renderUnreachedFences();
   return out.join("\n");
 }
 
