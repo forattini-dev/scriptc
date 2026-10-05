@@ -599,6 +599,10 @@ export function evaluate(steps, baseline, context = {}) {
 export function baselineReason(text, repoRoot) {
   let line = String(text ?? "").split("\n").find((candidate) => candidate.trim() !== "") ?? "";
   if (repoRoot) line = line.split(repoRoot).join("<repo>");
+  // The gate's own scratch paths differ on every run: the per-run TMPDIR tag (`gr-<tag>`) and the
+  // six random characters mkdtemp appends to a `scriptc-…` directory. Leaving them in would show
+  // every such red as failing differently each time.
+  line = line.replace(/\/gr-[a-z0-9]+\//g, "/gr-<run>/").replace(/(scriptc-[\w.-]*?)-[A-Za-z0-9]{6}(?=[/\s:]|$)/g, "$1-<rand>");
   line = line.replace(/\s+/g, " ").trim();
   return line.length > 200 ? `${line.slice(0, 200)}…` : line;
 }

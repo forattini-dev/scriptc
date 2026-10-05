@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { shardOf } from "./shard.js";
 import {
+  baselineReason,
   QUICK_SAMPLE,
   QUICK_SHARDS,
   STEP_IDS,
@@ -346,6 +347,17 @@ describe("cargo logs", () => {
     expect(parsed.crashedBinaries).toEqual(["tests/net.rs"]);
     expect(parsed.failedTargetLines).toBe(2);
     expect(parsed.failures.map((failure) => failure.binary)).toEqual(["src/lib.rs"]);
+  });
+});
+
+describe("baseline reasons", () => {
+  test("take the first line, elide the checkout, and drop the gate's per-run scratch names", () => {
+    expect(baselineReason("\n  boom   at  /repo/src/x.ts\nsecond line")).toBe("boom at /repo/src/x.ts");
+    expect(baselineReason("failed in /repo/packages/a.ts", "/repo/")).toBe("failed in <repo>packages/a.ts");
+    expect(baselineReason("Command failed: /home/u/.cache/tmp/gr-lv92d6e5/rust-unit/scriptc-rust-error-coercion-wTml4X/program Uncaught TypeError"))
+      .toBe("Command failed: /home/u/.cache/tmp/gr-<run>/rust-unit/scriptc-rust-error-coercion-<rand>/program Uncaught TypeError");
+    expect(baselineReason("LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: scriptc-llvm-codegen is missing")).toBe("LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: scriptc-llvm-codegen is missing");
+    expect(baselineReason("x".repeat(250))).toBe(`${"x".repeat(200)}…`);
   });
 });
 
