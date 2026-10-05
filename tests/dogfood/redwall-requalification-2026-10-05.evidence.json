@@ -1,0 +1,1843 @@
+{
+ "schema": 1,
+ "createdAt": "2026-10-05T16:37:47Z",
+ "workstream": "redwall requalification: measure, do not fix",
+ "consumer": {
+  "source": "/home/cyber/workspace/red-dev (local repository; refs/remotes/origin/main fetched into a scratch clone; the repository was not modified)",
+  "commit": "9cbdcdf66e87b689361bf56dc713780b8f3fbea3",
+  "subject": "chore: 1.0.127",
+  "committedAt": "2026-08-31T20:49:48+00:00",
+  "version": "1.0.127",
+  "clone": "$MISSION_SCRATCH/red-dev-clean",
+  "install": {
+   "tool": "bun install --frozen-lockfile",
+   "bun": "1.4.2",
+   "packages": 7,
+   "versions": {
+    "@types/node": "26.1.2",
+    "bun-types": "1.3.14",
+    "typescript": "5.9.3",
+    "tuiuiu.js": "1.0.75",
+    "cli-args-parser": "1.0.6"
+   }
+  },
+  "rendererClosure": {
+   "src/redwall-render.ts": {
+    "sha256": "2977305cc13e7f3d687a285d09d500030a622f7571b7c16dd7ffae801da99487",
+    "bytes": 27554,
+    "sameAsSeptemberReceipt": true
+   },
+   "src/png.ts": {
+    "sha256": "5874aae08db1a0dfe1327d3a8c5bde9512209a1cbfb7d4b3c203f03c3427a7a7",
+    "bytes": 11869,
+    "sameAsSeptemberReceipt": true
+   },
+   "src/ttf.ts": {
+    "sha256": "c850a236cd581d23cf5395ff0ed1344de54dc503a622d808a9faa22e39f98f26",
+    "bytes": 15124,
+    "sameAsSeptemberReceipt": true
+   },
+   "src/typeset.ts": {
+    "sha256": "f55e38ab594dfb5eb5c8563bedd08607315eaecf0f476558d50a14755dcec118",
+    "bytes": 11128,
+    "sameAsSeptemberReceipt": true
+   },
+   "src/brand.ts": {
+    "sha256": "970f72512f4b79dd69c84eea19ff16ebf006415f8f98567261c8e8aa04e384d3",
+    "bytes": 7452,
+    "sameAsSeptemberReceipt": true
+   },
+   "src/redwall-charset.ts": {
+    "sha256": "affc64ffda073ed991ce5d52a06d81716166aab1344e329b5f1adbba80888b80",
+    "bytes": 2115,
+    "sameAsSeptemberReceipt": true
+   },
+   "src/themes.ts": {
+    "sha256": "23b3dd7b0f14da38f4ba6ceba7f8c843c6aaa6740918a3fa4caf888627929986",
+    "bytes": 11474,
+    "sameAsSeptemberReceipt": true
+   }
+  },
+  "assets": {
+   "assets/wallpapers/obsidian.png": {
+    "sha256": "05bfd40b726f055ccea9b9627433f425d6f45b21497832c94046687af62cddbf",
+    "bytes": 52123
+   },
+   "assets/fonts/redwall-firacode-subset.ttf": {
+    "sha256": "38a7991ab543f48520284a3e8f69678830873dcfa5e4c303a1912ae66c4e6ee6",
+    "bytes": 6860
+   }
+  }
+ },
+ "compiler": {
+  "worktree": "/home/cyber/workspace/scriptc/.claude/worktrees/dogfood-redwall-requalify",
+  "branch": "dogfood/redwall-requalify",
+  "commit": "170c4dc2ebc9128af7ebfca1e57ca6e45e35c539",
+  "note": "compiler sources run from source through tsx; the only uncommitted files during the runs were this workstream's own deliverables",
+  "hostNode": "v26.8.1",
+  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "cargoBuildJobs": "3",
+  "options": {
+   "backend": "rust",
+   "allowEngine": false,
+   "optimization": "release",
+   "npmStatic": "auto",
+   "targets": [
+    "bun",
+    "node26",
+    "node24"
+   ]
+  }
+ },
+ "september": {
+  "receipt": ".red/checkpoints/2026-09-10-native-rust/current-redwall-acceptance.json",
+  "receiptCompilerCommit": "143bd19c658985f257738b0338d8476767bb9b6a",
+  "receiptConsumerCommit": "d451c0e71a499ba8b50114c529bd22ca99210b5a",
+  "receiptOptions": {
+   "backend": "rust",
+   "allowEngine": false,
+   "target": "bun"
+  },
+  "receiptGeneratedRustSha256": "759a105d30ccb021b5f8a647cc706138f54d1a983a47455fce9efbaed2c26b36",
+  "snapshotCommit": "aa57877eeae6b18d3000e9c02f03d26dfbb936c7",
+  "snapshotSubject": "feat(rust): checkpoint native compatibility and Redwall optimizations",
+  "snapshotMethod": "git archive of packages/compiler, packages/runtime and packages/runtime-rust at aa57877e into scratch; current node_modules symlinked; no branch, worktree or ref created",
+  "analysis": {
+   "bun": {
+    "preflightFailed": false,
+    "statements": {
+     "statementsTotal": 762,
+     "statementsFailed": 0,
+     "statementsIsland": 0,
+     "functionsSkipped": 0
+    },
+    "diagnostics": 0,
+    "diagnosticsByCode": {},
+    "runtimeFences": 0,
+    "execution": {
+     "engine": "none",
+     "externalFfi": false
+    },
+    "sources": 114,
+    "npmStatic": [],
+    "milliseconds": 3676,
+    "peakRssKiB": 427172,
+    "diagnosticList": []
+   }
+  },
+  "build": {
+   "bun": {
+    "ok": true,
+    "milliseconds": 53881,
+    "peakRssKiB": 441632,
+    "execution": {
+     "engine": "none",
+     "externalFfi": false
+    },
+    "runtimeFences": 0,
+    "safetyProfile": "rust-only",
+    "binary": "$MISSION_SCRATCH/runs/snapfull-aa57877e-renderer-bun/program",
+    "binaryBytes": 4085016,
+    "binarySha256": "c14a0e3ceb070a99692e8d28cb9688ef88e14781c1c5f60b15e72a61cf7bd319",
+    "generatedRustBytes": 869644,
+    "generatedRustSha256": "759a105d30ccb021b5f8a647cc706138f54d1a983a47455fce9efbaed2c26b36"
+   },
+   "node26": {
+    "ok": true,
+    "milliseconds": 36079,
+    "peakRssKiB": 413040,
+    "execution": {
+     "engine": "none",
+     "externalFfi": false
+    },
+    "runtimeFences": 0,
+    "safetyProfile": "rust-only",
+    "binary": "$MISSION_SCRATCH/runs/snapfull-aa57877e-renderer-node26/program",
+    "binaryBytes": 4085048,
+    "binarySha256": "86b4c20f3a60b27e3798777aea6a5e05773aaff3609c5a0f7b6e950018f1c727",
+    "generatedRustBytes": 869642,
+    "generatedRustSha256": "98df17bf4fb7d49a0f570343f1db9588c74719dfb0f540901a8c3908cd1a18e8"
+   },
+   "node24": {
+    "ok": true,
+    "milliseconds": 33006,
+    "peakRssKiB": 414452,
+    "execution": {
+     "engine": "none",
+     "externalFfi": false
+    },
+    "runtimeFences": 0,
+    "safetyProfile": "rust-only",
+    "binary": "$MISSION_SCRATCH/runs/snapfull-aa57877e-renderer-node24/program",
+    "binaryBytes": 4085048,
+    "binarySha256": "081a32de778441d05bcf8c680b883dc067d3f607297e712d16c93a274e2e6835",
+    "generatedRustBytes": 869647,
+    "generatedRustSha256": "f88315a3f69f4f130019aa184ea1b494eeb2c912513e717b0e13e00c850af1b2"
+   }
+  },
+  "generatedRustIdenticalToReceipt": true,
+  "contractBunOracle": {
+   "log": "$MISSION_SCRATCH/logs/contract-snapfull-aa57877e-bun.log",
+   "pass": 38,
+   "fail": 0,
+   "expectCalls": 112,
+   "nativeLine": "native renderRedwall invocations with Bun byte parity: 26",
+   "bun": "1.4.2"
+  },
+  "differentials": {
+   "diff-snapfull-aa57877e-bun-vs-24.15.0-node": {
+    "oracle": "v24.15.0",
+    "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/24.15.0/bin/node",
+    "host": "v26.8.1",
+    "comparison": {
+     "exitCode": true,
+     "stdout": true,
+     "stderr": true,
+     "pngBytes": false,
+     "raster": true,
+     "differingPixels": 0,
+     "allEqual": false
+    },
+    "oraclePng": {
+     "bytes": 111095,
+     "sha256": "e6742a2b3efb419fd39bb82a3190c4f40107f4c833f440c302d47211c65d1581"
+    },
+    "nativePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "raster": {
+     "width": 3840,
+     "height": 2160,
+     "channels": 4,
+     "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+    },
+    "oracleMs": 625,
+    "nativeMs": 477,
+    "report": "$MISSION_SCRATCH/runs/diff-snapfull-aa57877e-bun-vs-24.15.0-node/differential.json"
+   },
+   "diff-snapfull-aa57877e-bun-vs-26.8.1-node": {
+    "oracle": "v26.8.1",
+    "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/26.8.1/bin/node",
+    "host": "v26.8.1",
+    "comparison": {
+     "exitCode": true,
+     "stdout": true,
+     "stderr": true,
+     "pngBytes": false,
+     "raster": true,
+     "differingPixels": 0,
+     "allEqual": false
+    },
+    "oraclePng": {
+     "bytes": 111095,
+     "sha256": "e6742a2b3efb419fd39bb82a3190c4f40107f4c833f440c302d47211c65d1581"
+    },
+    "nativePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "raster": {
+     "width": 3840,
+     "height": 2160,
+     "channels": 4,
+     "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+    },
+    "oracleMs": 658,
+    "nativeMs": 491,
+    "report": "$MISSION_SCRATCH/runs/diff-snapfull-aa57877e-bun-vs-26.8.1-node/differential.json"
+   },
+   "diff-snapfull-aa57877e-bun-vs-latest-bun": {
+    "oracle": "1.4.2",
+    "oracleExecutable": "bun",
+    "host": "v26.8.1",
+    "comparison": {
+     "exitCode": true,
+     "stdout": true,
+     "stderr": true,
+     "pngBytes": true,
+     "raster": true,
+     "differingPixels": 0,
+     "allEqual": true
+    },
+    "oraclePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "nativePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "raster": {
+     "width": 3840,
+     "height": 2160,
+     "channels": 4,
+     "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+    },
+    "oracleMs": 488,
+    "nativeMs": 503,
+    "report": "$MISSION_SCRATCH/runs/diff-snapfull-aa57877e-bun-vs-latest-bun/differential.json"
+   },
+   "diff-snapfull-aa57877e-node24-vs-24.15.0-node": {
+    "oracle": "v24.15.0",
+    "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/24.15.0/bin/node",
+    "host": "v26.8.1",
+    "comparison": {
+     "exitCode": true,
+     "stdout": true,
+     "stderr": true,
+     "pngBytes": false,
+     "raster": true,
+     "differingPixels": 0,
+     "allEqual": false
+    },
+    "oraclePng": {
+     "bytes": 111095,
+     "sha256": "e6742a2b3efb419fd39bb82a3190c4f40107f4c833f440c302d47211c65d1581"
+    },
+    "nativePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "raster": {
+     "width": 3840,
+     "height": 2160,
+     "channels": 4,
+     "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+    },
+    "oracleMs": 681,
+    "nativeMs": 507,
+    "report": "$MISSION_SCRATCH/runs/diff-snapfull-aa57877e-node24-vs-24.15.0-node/differential.json"
+   },
+   "diff-snapfull-aa57877e-node24-vs-26.8.1-node": {
+    "oracle": "v26.8.1",
+    "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/26.8.1/bin/node",
+    "host": "v26.8.1",
+    "comparison": {
+     "exitCode": true,
+     "stdout": true,
+     "stderr": true,
+     "pngBytes": false,
+     "raster": true,
+     "differingPixels": 0,
+     "allEqual": false
+    },
+    "oraclePng": {
+     "bytes": 111095,
+     "sha256": "e6742a2b3efb419fd39bb82a3190c4f40107f4c833f440c302d47211c65d1581"
+    },
+    "nativePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "raster": {
+     "width": 3840,
+     "height": 2160,
+     "channels": 4,
+     "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+    },
+    "oracleMs": 653,
+    "nativeMs": 533,
+    "report": "$MISSION_SCRATCH/runs/diff-snapfull-aa57877e-node24-vs-26.8.1-node/differential.json"
+   },
+   "diff-snapfull-aa57877e-node24-vs-latest-bun": {
+    "oracle": "1.4.2",
+    "oracleExecutable": "bun",
+    "host": "v26.8.1",
+    "comparison": {
+     "exitCode": true,
+     "stdout": true,
+     "stderr": true,
+     "pngBytes": true,
+     "raster": true,
+     "differingPixels": 0,
+     "allEqual": true
+    },
+    "oraclePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "nativePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "raster": {
+     "width": 3840,
+     "height": 2160,
+     "channels": 4,
+     "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+    },
+    "oracleMs": 521,
+    "nativeMs": 546,
+    "report": "$MISSION_SCRATCH/runs/diff-snapfull-aa57877e-node24-vs-latest-bun/differential.json"
+   },
+   "diff-snapfull-aa57877e-node26-vs-24.15.0-node": {
+    "oracle": "v24.15.0",
+    "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/24.15.0/bin/node",
+    "host": "v26.8.1",
+    "comparison": {
+     "exitCode": true,
+     "stdout": true,
+     "stderr": true,
+     "pngBytes": false,
+     "raster": true,
+     "differingPixels": 0,
+     "allEqual": false
+    },
+    "oraclePng": {
+     "bytes": 111095,
+     "sha256": "e6742a2b3efb419fd39bb82a3190c4f40107f4c833f440c302d47211c65d1581"
+    },
+    "nativePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "raster": {
+     "width": 3840,
+     "height": 2160,
+     "channels": 4,
+     "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+    },
+    "oracleMs": 663,
+    "nativeMs": 514,
+    "report": "$MISSION_SCRATCH/runs/diff-snapfull-aa57877e-node26-vs-24.15.0-node/differential.json"
+   },
+   "diff-snapfull-aa57877e-node26-vs-26.8.1-node": {
+    "oracle": "v26.8.1",
+    "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/26.8.1/bin/node",
+    "host": "v26.8.1",
+    "comparison": {
+     "exitCode": true,
+     "stdout": true,
+     "stderr": true,
+     "pngBytes": false,
+     "raster": true,
+     "differingPixels": 0,
+     "allEqual": false
+    },
+    "oraclePng": {
+     "bytes": 111095,
+     "sha256": "e6742a2b3efb419fd39bb82a3190c4f40107f4c833f440c302d47211c65d1581"
+    },
+    "nativePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "raster": {
+     "width": 3840,
+     "height": 2160,
+     "channels": 4,
+     "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+    },
+    "oracleMs": 647,
+    "nativeMs": 514,
+    "report": "$MISSION_SCRATCH/runs/diff-snapfull-aa57877e-node26-vs-26.8.1-node/differential.json"
+   },
+   "diff-snapfull-aa57877e-node26-vs-latest-bun": {
+    "oracle": "1.4.2",
+    "oracleExecutable": "bun",
+    "host": "v26.8.1",
+    "comparison": {
+     "exitCode": true,
+     "stdout": true,
+     "stderr": true,
+     "pngBytes": true,
+     "raster": true,
+     "differingPixels": 0,
+     "allEqual": true
+    },
+    "oraclePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "nativePng": {
+     "bytes": 108881,
+     "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6"
+    },
+    "raster": {
+     "width": 3840,
+     "height": 2160,
+     "channels": 4,
+     "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+    },
+    "oracleMs": 536,
+    "nativeMs": 523,
+    "report": "$MISSION_SCRATCH/runs/diff-snapfull-aa57877e-node26-vs-latest-bun/differential.json"
+   }
+  }
+ },
+ "current": {
+  "committedRenderer": {
+   "analysis": {
+    "bun": {
+     "preflightFailed": false,
+     "statements": {
+      "statementsTotal": 749,
+      "statementsFailed": 3,
+      "statementsIsland": 0,
+      "functionsSkipped": 0
+     },
+     "diagnostics": 3,
+     "diagnosticsByCode": {
+      "SC2020": 3
+     },
+     "runtimeFences": 0,
+     "execution": null,
+     "sources": 114,
+     "npmStatic": [],
+     "milliseconds": 4628,
+     "peakRssKiB": 483036,
+     "diagnosticList": [
+      {
+       "code": "SC2020",
+       "file": "$MISSION_SCRATCH/red-dev-clean/src/png.ts",
+       "line": 275,
+       "column": 59,
+       "message": "'deflateSync with explicit options' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "file": "$MISSION_SCRATCH/red-dev-clean/src/png.ts",
+       "line": 279,
+       "column": 11,
+       "message": "'.set from '[number, number, number, number, number, number, number, number]' values' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "file": "$MISSION_SCRATCH/red-dev-clean/src/redwall-render.ts",
+       "line": 353,
+       "column": 72,
+       "message": "'Number.isSafeInteger of 'number | null | undefined' values' is part of the standard library types but has no scriptc lowering yet"
+      }
+     ]
+    },
+    "node26": {
+     "preflightFailed": false,
+     "statements": {
+      "statementsTotal": 749,
+      "statementsFailed": 3,
+      "statementsIsland": 0,
+      "functionsSkipped": 0
+     },
+     "diagnostics": 3,
+     "diagnosticsByCode": {
+      "SC2020": 3
+     },
+     "runtimeFences": 0,
+     "execution": null,
+     "sources": 114,
+     "npmStatic": [],
+     "milliseconds": 4367,
+     "peakRssKiB": 420704,
+     "diagnosticList": [
+      {
+       "code": "SC2020",
+       "file": "$MISSION_SCRATCH/red-dev-clean/src/png.ts",
+       "line": 275,
+       "column": 59,
+       "message": "'deflateSync with explicit options' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "file": "$MISSION_SCRATCH/red-dev-clean/src/png.ts",
+       "line": 279,
+       "column": 11,
+       "message": "'.set from '[number, number, number, number, number, number, number, number]' values' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "file": "$MISSION_SCRATCH/red-dev-clean/src/redwall-render.ts",
+       "line": 353,
+       "column": 72,
+       "message": "'Number.isSafeInteger of 'number | null | undefined' values' is part of the standard library types but has no scriptc lowering yet"
+      }
+     ]
+    },
+    "node24": {
+     "preflightFailed": false,
+     "statements": {
+      "statementsTotal": 749,
+      "statementsFailed": 3,
+      "statementsIsland": 0,
+      "functionsSkipped": 0
+     },
+     "diagnostics": 3,
+     "diagnosticsByCode": {
+      "SC2020": 3
+     },
+     "runtimeFences": 0,
+     "execution": null,
+     "sources": 114,
+     "npmStatic": [],
+     "milliseconds": 4619,
+     "peakRssKiB": 450804,
+     "diagnosticList": [
+      {
+       "code": "SC2020",
+       "file": "$MISSION_SCRATCH/red-dev-clean/src/png.ts",
+       "line": 275,
+       "column": 59,
+       "message": "'deflateSync with explicit options' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "file": "$MISSION_SCRATCH/red-dev-clean/src/png.ts",
+       "line": 279,
+       "column": 11,
+       "message": "'.set from '[number, number, number, number, number, number, number, number]' values' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "file": "$MISSION_SCRATCH/red-dev-clean/src/redwall-render.ts",
+       "line": 353,
+       "column": 72,
+       "message": "'Number.isSafeInteger of 'number | null | undefined' values' is part of the standard library types but has no scriptc lowering yet"
+      }
+     ]
+    }
+   },
+   "build": {
+    "bun": {
+     "ok": false,
+     "milliseconds": 4579,
+     "peakRssKiB": 427304,
+     "diagnosticsByCode": {
+      "SC2020": 3
+     },
+     "diagnostics": [
+      {
+       "code": "SC2020",
+       "message": "'deflateSync with explicit options' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "message": "'.set from '[number, number, number, number, number, number, number, number]' values' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "message": "'Number.isSafeInteger of 'number | null | undefined' values' is part of the standard library types but has no scriptc lowering yet"
+      }
+     ]
+    },
+    "node26": {
+     "ok": false,
+     "milliseconds": 4407,
+     "peakRssKiB": 429140,
+     "diagnosticsByCode": {
+      "SC2020": 3
+     },
+     "diagnostics": [
+      {
+       "code": "SC2020",
+       "message": "'deflateSync with explicit options' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "message": "'.set from '[number, number, number, number, number, number, number, number]' values' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "message": "'Number.isSafeInteger of 'number | null | undefined' values' is part of the standard library types but has no scriptc lowering yet"
+      }
+     ]
+    },
+    "node24": {
+     "ok": false,
+     "milliseconds": 4262,
+     "peakRssKiB": 430216,
+     "diagnosticsByCode": {
+      "SC2020": 3
+     },
+     "diagnostics": [
+      {
+       "code": "SC2020",
+       "message": "'deflateSync with explicit options' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "message": "'.set from '[number, number, number, number, number, number, number, number]' values' is part of the standard library types but has no scriptc lowering yet"
+      },
+      {
+       "code": "SC2020",
+       "message": "'Number.isSafeInteger of 'number | null | undefined' values' is part of the standard library types but has no scriptc lowering yet"
+      }
+     ]
+    }
+   }
+  },
+  "variant": {
+   "purpose": "diagnostic only: a scratch copy of the clean clone with the three refused expressions rewritten, to measure what lies behind the refusals; not a qualification of the consumer",
+   "patch": "$MISSION_SCRATCH/variant.patch",
+   "patchSha256": "a94e8426d159b273c3b47568c571c9886912f251abd8fa4e9d71f0635afc3f72",
+   "patchText": "diff --git a/src/png.ts b/src/png.ts\nindex 38223fb..752822f 100644\n--- a/src/png.ts\n+++ b/src/png.ts\n@@ -272,11 +272,11 @@ export function encodePng(raster: Raster): Uint8Array {\n   // compression 0, filter 0, interlace 0 — the zeroed buffer already\n   // says all three, and there is no other legal value for any of them.\n \n-  const idat = deflateSync(filtered(data, width, height), { level: 9 });\n+  const idat = deflateSync(filtered(data, width, height)); // VARIANT: default level, the explicit option is refused by the current compiler\n \n   const chunks = [chunk(\"IHDR\", header), chunk(\"IDAT\", idat), chunk(\"IEND\", new Uint8Array(0))];\n   const out = new Uint8Array(8 + chunks.reduce((n, c) => n + c.length, 0));\n-  out.set(SIGNATURE, 0);\n+  for (let i = 0; i < SIGNATURE.length; i++) out[i] = SIGNATURE[i]!; // VARIANT: tuple-sourced .set is refused by the current compiler\n   let at = 8;\n   for (const part of chunks) {\n     out.set(part, at);\ndiff --git a/src/redwall-render.ts b/src/redwall-render.ts\nindex b19fa36..670f5d1 100644\n--- a/src/redwall-render.ts\n+++ b/src/redwall-render.ts\n@@ -350,7 +350,9 @@ function validPercent(value: number): boolean {\n }\n \n function validCount(value: number | null | undefined): value is number {\n-  return value !== null && value !== undefined && Number.isSafeInteger(value) && value >= 0;\n+  if (value === null || value === undefined) return false;\n+  const count: number = value; // VARIANT: the narrowed union is refused by the current compiler\n+  return Number.isSafeInteger(count) && count >= 0;\n }\n \n function drawable(line: string): boolean {\n",
+   "analysis": {
+    "bun": {
+     "preflightFailed": false,
+     "statements": {
+      "statementsTotal": 766,
+      "statementsFailed": 0,
+      "statementsIsland": 0,
+      "functionsSkipped": 0
+     },
+     "diagnostics": 0,
+     "diagnosticsByCode": {},
+     "runtimeFences": 0,
+     "execution": {
+      "engine": "none",
+      "externalFfi": false
+     },
+     "sources": 114,
+     "npmStatic": [],
+     "milliseconds": 5938,
+     "peakRssKiB": 440284,
+     "diagnosticList": []
+    },
+    "node26": {
+     "preflightFailed": false,
+     "statements": {
+      "statementsTotal": 766,
+      "statementsFailed": 0,
+      "statementsIsland": 0,
+      "functionsSkipped": 0
+     },
+     "diagnostics": 0,
+     "diagnosticsByCode": {},
+     "runtimeFences": 0,
+     "execution": {
+      "engine": "none",
+      "externalFfi": false
+     },
+     "sources": 114,
+     "npmStatic": [],
+     "milliseconds": 5699,
+     "peakRssKiB": 440852,
+     "diagnosticList": []
+    },
+    "node24": {
+     "preflightFailed": false,
+     "statements": {
+      "statementsTotal": 766,
+      "statementsFailed": 0,
+      "statementsIsland": 0,
+      "functionsSkipped": 0
+     },
+     "diagnostics": 0,
+     "diagnosticsByCode": {},
+     "runtimeFences": 0,
+     "execution": {
+      "engine": "none",
+      "externalFfi": false
+     },
+     "sources": 114,
+     "npmStatic": [],
+     "milliseconds": 6277,
+     "peakRssKiB": 455752,
+     "diagnosticList": []
+    }
+   },
+   "build": {
+    "bun": {
+     "ok": true,
+     "milliseconds": 98618,
+     "peakRssKiB": 453504,
+     "execution": {
+      "engine": "none",
+      "externalFfi": false
+     },
+     "runtimeFences": 0,
+     "safetyProfile": "rust-only",
+     "binary": "$MISSION_SCRATCH/runs/variant-bun/program",
+     "binaryBytes": 4116808,
+     "binarySha256": "2614bee625ea5eb0e43c49f8342322d4c767dbd81449bf15e983cd66fa3e5fd2",
+     "generatedRustBytes": 1109336,
+     "generatedRustSha256": "701c9c9b19e225b5b47f74416d4c1829003c70e200822e931f66e136e179f53c"
+    },
+    "node26": {
+     "ok": true,
+     "milliseconds": 58492,
+     "peakRssKiB": 450252,
+     "execution": {
+      "engine": "none",
+      "externalFfi": false
+     },
+     "runtimeFences": 0,
+     "safetyProfile": "rust-only",
+     "binary": "$MISSION_SCRATCH/runs/variant-node26/program",
+     "binaryBytes": 4116808,
+     "binarySha256": "ca70f39cd157c114ccba0de95cf113eb2021ff36079f67cf740bd6b665bc1a88",
+     "generatedRustBytes": 1109334,
+     "generatedRustSha256": "7a76801a1235742c7c12d3f01cca4ac541f1cf490c2e5e95a5b1f71503546911"
+    },
+    "node24": {
+     "ok": true,
+     "milliseconds": 59489,
+     "peakRssKiB": 455292,
+     "execution": {
+      "engine": "none",
+      "externalFfi": false
+     },
+     "runtimeFences": 0,
+     "safetyProfile": "rust-only",
+     "binary": "$MISSION_SCRATCH/runs/variant-node24/program",
+     "binaryBytes": 4116808,
+     "binarySha256": "14ca185d9ea1d0adf4b7b84dbdd5cbe079175d4dddd5bf87c6d062417923cb62",
+     "generatedRustBytes": 1109339,
+     "generatedRustSha256": "74b1895799a15db8a64a590d738090c29f6b514cbc5a0a40761be89b009ee736"
+    }
+   },
+   "contractBunOracleByteStrict": {
+    "log": "$MISSION_SCRATCH/logs/contract-variant-bun.log",
+    "pass": 21,
+    "fail": 18,
+    "expectCalls": 68,
+    "nativeLine": null,
+    "bun": "1.4.2"
+   },
+   "contractBunOracleRasterAware": {
+    "log": "$MISSION_SCRATCH/logs/contract-variant-bun-raster.log",
+    "pass": 38,
+    "fail": 0,
+    "expectCalls": 112,
+    "nativeLine": "native renderRedwall invocations: 26; byte mismatches (raster equal): 26; raster mismatches: 0",
+    "bun": "1.4.2"
+   },
+   "differentials": {
+    "diff-variant-bun-vs-24.15.0-node": {
+     "oracle": "v24.15.0",
+     "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/24.15.0/bin/node",
+     "host": "v26.8.1",
+     "comparison": {
+      "exitCode": true,
+      "stdout": true,
+      "stderr": true,
+      "pngBytes": true,
+      "raster": true,
+      "differingPixels": 0,
+      "allEqual": true
+     },
+     "oraclePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "nativePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "raster": {
+      "width": 3840,
+      "height": 2160,
+      "channels": 4,
+      "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+     },
+     "oracleMs": 591,
+     "nativeMs": 477,
+     "report": "$MISSION_SCRATCH/runs/diff-variant-bun-vs-24.15.0-node/differential.json"
+    },
+    "diff-variant-bun-vs-26.8.1-node": {
+     "oracle": "v26.8.1",
+     "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/26.8.1/bin/node",
+     "host": "v26.8.1",
+     "comparison": {
+      "exitCode": true,
+      "stdout": true,
+      "stderr": true,
+      "pngBytes": true,
+      "raster": true,
+      "differingPixels": 0,
+      "allEqual": true
+     },
+     "oraclePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "nativePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "raster": {
+      "width": 3840,
+      "height": 2160,
+      "channels": 4,
+      "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+     },
+     "oracleMs": 559,
+     "nativeMs": 417,
+     "report": "$MISSION_SCRATCH/runs/diff-variant-bun-vs-26.8.1-node/differential.json"
+    },
+    "diff-variant-bun-vs-latest-bun": {
+     "oracle": "1.4.2",
+     "oracleExecutable": "bun",
+     "host": "v26.8.1",
+     "comparison": {
+      "exitCode": true,
+      "stdout": true,
+      "stderr": true,
+      "pngBytes": false,
+      "raster": true,
+      "differingPixels": 0,
+      "allEqual": false
+     },
+     "oraclePng": {
+      "bytes": 113073,
+      "sha256": "97ca7a0e849690c140b274542b9c76b84a5c1c4ef5378840a4b6cbf67be0c129"
+     },
+     "nativePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "raster": {
+      "width": 3840,
+      "height": 2160,
+      "channels": 4,
+      "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+     },
+     "oracleMs": 406,
+     "nativeMs": 405,
+     "report": "$MISSION_SCRATCH/runs/diff-variant-bun-vs-latest-bun/differential.json"
+    },
+    "diff-variant-node24-host24-vs-24.15.0-node": {
+     "oracle": "v24.15.0",
+     "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/24.15.0/bin/node",
+     "host": "v24.15.0",
+     "comparison": {
+      "exitCode": true,
+      "stdout": true,
+      "stderr": true,
+      "pngBytes": true,
+      "raster": true,
+      "differingPixels": 0,
+      "allEqual": true
+     },
+     "oraclePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "nativePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "raster": {
+      "width": 3840,
+      "height": 2160,
+      "channels": 4,
+      "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+     },
+     "oracleMs": 597,
+     "nativeMs": 444,
+     "report": "$MISSION_SCRATCH/runs/diff-variant-node24-host24-vs-24.15.0-node/differential.json"
+    },
+    "diff-variant-node24-vs-24.15.0-node": {
+     "oracle": "v24.15.0",
+     "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/24.15.0/bin/node",
+     "host": "v26.8.1",
+     "comparison": {
+      "exitCode": true,
+      "stdout": true,
+      "stderr": true,
+      "pngBytes": true,
+      "raster": true,
+      "differingPixels": 0,
+      "allEqual": true
+     },
+     "oraclePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "nativePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "raster": {
+      "width": 3840,
+      "height": 2160,
+      "channels": 4,
+      "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+     },
+     "oracleMs": 630,
+     "nativeMs": 428,
+     "report": "$MISSION_SCRATCH/runs/diff-variant-node24-vs-24.15.0-node/differential.json"
+    },
+    "diff-variant-node24-vs-26.8.1-node": {
+     "oracle": "v26.8.1",
+     "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/26.8.1/bin/node",
+     "host": "v26.8.1",
+     "comparison": {
+      "exitCode": true,
+      "stdout": true,
+      "stderr": true,
+      "pngBytes": true,
+      "raster": true,
+      "differingPixels": 0,
+      "allEqual": true
+     },
+     "oraclePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "nativePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "raster": {
+      "width": 3840,
+      "height": 2160,
+      "channels": 4,
+      "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+     },
+     "oracleMs": 629,
+     "nativeMs": 449,
+     "report": "$MISSION_SCRATCH/runs/diff-variant-node24-vs-26.8.1-node/differential.json"
+    },
+    "diff-variant-node24-vs-latest-bun": {
+     "oracle": "1.4.2",
+     "oracleExecutable": "bun",
+     "host": "v26.8.1",
+     "comparison": {
+      "exitCode": true,
+      "stdout": true,
+      "stderr": true,
+      "pngBytes": false,
+      "raster": true,
+      "differingPixels": 0,
+      "allEqual": false
+     },
+     "oraclePng": {
+      "bytes": 113073,
+      "sha256": "97ca7a0e849690c140b274542b9c76b84a5c1c4ef5378840a4b6cbf67be0c129"
+     },
+     "nativePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "raster": {
+      "width": 3840,
+      "height": 2160,
+      "channels": 4,
+      "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+     },
+     "oracleMs": 363,
+     "nativeMs": 440,
+     "report": "$MISSION_SCRATCH/runs/diff-variant-node24-vs-latest-bun/differential.json"
+    },
+    "diff-variant-node26-vs-24.15.0-node": {
+     "oracle": "v24.15.0",
+     "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/24.15.0/bin/node",
+     "host": "v26.8.1",
+     "comparison": {
+      "exitCode": true,
+      "stdout": true,
+      "stderr": true,
+      "pngBytes": true,
+      "raster": true,
+      "differingPixels": 0,
+      "allEqual": true
+     },
+     "oraclePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "nativePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "raster": {
+      "width": 3840,
+      "height": 2160,
+      "channels": 4,
+      "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+     },
+     "oracleMs": 662,
+     "nativeMs": 417,
+     "report": "$MISSION_SCRATCH/runs/diff-variant-node26-vs-24.15.0-node/differential.json"
+    },
+    "diff-variant-node26-vs-26.8.1-node": {
+     "oracle": "v26.8.1",
+     "oracleExecutable": "/home/cyber/.local/share/mise/installs/node/26.8.1/bin/node",
+     "host": "v26.8.1",
+     "comparison": {
+      "exitCode": true,
+      "stdout": true,
+      "stderr": true,
+      "pngBytes": true,
+      "raster": true,
+      "differingPixels": 0,
+      "allEqual": true
+     },
+     "oraclePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "nativePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "raster": {
+      "width": 3840,
+      "height": 2160,
+      "channels": 4,
+      "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+     },
+     "oracleMs": 611,
+     "nativeMs": 425,
+     "report": "$MISSION_SCRATCH/runs/diff-variant-node26-vs-26.8.1-node/differential.json"
+    },
+    "diff-variant-node26-vs-latest-bun": {
+     "oracle": "1.4.2",
+     "oracleExecutable": "bun",
+     "host": "v26.8.1",
+     "comparison": {
+      "exitCode": true,
+      "stdout": true,
+      "stderr": true,
+      "pngBytes": false,
+      "raster": true,
+      "differingPixels": 0,
+      "allEqual": false
+     },
+     "oraclePng": {
+      "bytes": 113073,
+      "sha256": "97ca7a0e849690c140b274542b9c76b84a5c1c4ef5378840a4b6cbf67be0c129"
+     },
+     "nativePng": {
+      "bytes": 115550,
+      "sha256": "8caa1adca81da0d4937faca3a2eaace6ff4c1c5f4642fbf14c6173d2700a67c8"
+     },
+     "raster": {
+      "width": 3840,
+      "height": 2160,
+      "channels": 4,
+      "sha256": "b623db2df6422f90a2a972fefe931470a30824d92de1281456c57d96cfa96698"
+     },
+     "oracleMs": 340,
+     "nativeMs": 438,
+     "report": "$MISSION_SCRATCH/runs/diff-variant-node26-vs-latest-bun/differential.json"
+    }
+   }
+  }
+ },
+ "regressions": [
+  {
+   "id": "A",
+   "diagnostic": "SC2020 'deflateSync with explicit options'",
+   "location": "src/png.ts:275:59 `{ level: 9 }`",
+   "reproduction": "zlib-level.ts",
+   "bisect": {
+    "lastGood": "3be65552 2026-09-26T22:09:59-03:00 docs: keep C and LLVM outside Rust libcall work",
+    "firstBad": "d3036197 2026-09-26T22:39:45-03:00 feat(rust): lower zlib callbacks and crc32",
+    "firstParentCommitsSearched": 132,
+    "snapshotsAnalyzed": 9
+   },
+   "mechanism": "packages/compiler/src/frontend/lowering/lower-builtins.ts:1100 `if (bi.module === \"zlib\") return lowerZlibModuleCall(...)` (d3036197) intercepts every zlib call before the fork's level-aware `lowerDeflateLevel` dispatch at line 1861 (e7bcadbc), which is now unreachable; lowerZlibModuleCall refuses any sync call with more than one argument",
+   "corpusCoverage": "tests/corpus/3144-zlib-compression-views.ts (level 0 and level 9 forms)"
+  },
+  {
+   "id": "B",
+   "diagnostic": "SC2020 '.set from '[number, ...]' values'",
+   "location": "src/png.ts:279:11 `out.set(SIGNATURE, 0)`",
+   "reproduction": "typed-array-set-tuple.ts",
+   "bisect": {
+    "lastGood": "00501b5a 2026-09-26T18:41:09-03:00 fix: restore native abstract equality assertions",
+    "firstBad": "a96cb8ad 2026-09-26T19:01:16-03:00 fix: restore native bigint backends",
+    "firstParentCommitsSearched": 132,
+    "snapshotsAnalyzed": 9
+   },
+   "mechanism": "packages/compiler/src/frontend/lowering/lowerer.ts:111 imports lowerBytesMethodCall from ./containers/bytes.js (a96cb8ad, after the upstream refactor 2bd2e6f5), whose .set path is bytes-set.ts lowerSameKindBytesSetCall (same-kind sources only); the fork's tuple/number[]-capable lowerBytesSetCall (lower-native-containers.ts, e7bcadbc) is still dispatched from lower-containers.ts:5946 but that copy of lowerBytesMethodCall is no longer imported by anything",
+   "corpusCoverage": "tests/corpus/3001-typed-array-set-sources.ts (tuple and number[] sources)"
+  },
+  {
+   "id": "C",
+   "diagnostic": "SC2020 'Number.isSafeInteger of 'number | null | undefined' values'",
+   "location": "src/redwall-render.ts:353:72 `value` after `value !== null && value !== undefined &&`",
+   "reproduction": "number-predicate-narrowed.ts",
+   "bisect": {
+    "lastGood": "b659bd0d 2026-09-14T09:34:33-03:00 fix: prove undefined filters and preserve nullish comparison effects",
+    "firstBad": "54f08faf 2026-09-14T17:56:34-03:00 merge: upstream v0.1.1 compiler updates while preserving the Rust native lane",
+    "firstParentCommitsSearched": 132,
+    "snapshotsAnalyzed": 9
+   },
+   "mechanism": "upstream 94fd361b (#297, merged by 54f08faf) changed lowerNumberStaticCall to lower the argument through lowerBuiltinValuePreservingUndefined (lower-builtins.ts:138-142, :7595), which takes runtimeOptionalIdentifierValue's declared `number | null | undefined` instead of the checker's narrowed `number`; lowerOptionalNumberPredicate only handles the number|undefined shape, so the three-arm union reaches the non-f64 refusal",
+   "corpusCoverage": "none found (tests/corpus/1420-number-statics.ts uses literal arguments only)"
+  }
+ ],
+ "reproductions": {
+  "zlib-level.ts": {
+   "path": "$MISSION_SCRATCH/repros/zlib-level.ts",
+   "sha256": "87957cfb7330fbf427075136d29ae6ef01034df6691917842938c246eccbc5b3",
+   "source": "import { deflateSync, inflateSync } from \"node:zlib\";\nconst data = new Uint8Array(4096);\nfor (let i = 0; i < data.length; i++) data[i] = (i * 31 + (i >> 3)) & 255;\nconst packed = deflateSync(data, { level: 9 });\nconst back = inflateSync(packed);\nconsole.log(packed.length, back.length, back[17], back[4095]);\n"
+  },
+  "typed-array-set-tuple.ts": {
+   "path": "$MISSION_SCRATCH/repros/typed-array-set-tuple.ts",
+   "sha256": "2a6ba0a0dd26f4314e536d8074303661421140b42f81e3ba63cc3d3442638967",
+   "source": "const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;\nconst out = new Uint8Array(12);\nout.set(SIGNATURE, 0);\nconsole.log(out.join(\",\"));\n"
+  },
+  "number-predicate-narrowed.ts": {
+   "path": "$MISSION_SCRATCH/repros/number-predicate-narrowed.ts",
+   "sha256": "6e6dbb1da313ccd6089c13d2adec6709f9f69e3764eb713aa37eaba7d9f3d2c4",
+   "source": "function validCount(value: number | null | undefined): value is number {\n  return value !== null && value !== undefined && Number.isSafeInteger(value) && value >= 0;\n}\nconst samples: (number | null | undefined)[] = [3, 0, -1, 1.5, null, undefined, 2 ** 53];\nconsole.log(samples.map((value) => validCount(value)).join(\",\"));\n"
+  }
+ },
+ "reproductionOracles": "each reproduction prints the same line under Node 26.8.1, Node 24.15.0 and Bun 1.4.2; each is refused with one SC2020 by the current compiler for targets node26 and bun",
+ "focusedRustLane": {
+  "log": "$MISSION_SCRATCH/logs/vitest-rust-differential-focused.log",
+  "command": "SCRIPTC_NODE_ORACLE=$NODE24 vitest run tests/harness/rust-differential.test.ts -t '3144-zlib-compression-views|3001-typed-array-set-sources|1420-number-statics' --maxWorkers=2",
+  "summary": [
+   "✓ rust differential corpus (2067 programs) > 1420-number-statics.ts  25332ms",
+   "× rust differential corpus (2067 programs) > 3001-typed-array-set-sources.ts 974ms (retry x1)",
+   "× rust differential corpus (2067 programs) > 3144-zlib-compression-views.ts 927ms (retry x1)",
+   "Test Files  1 failed (1)",
+   "Tests  2 failed | 1 passed | 2064 skipped (2067)"
+  ]
+ },
+ "dualTypesExperiment": {
+  "question": "audit finding F8 (inferred, never executed): two @types/node majors in one checker program remove ChildProcess event members",
+  "setup": "wrapper directory whose nearest ancestor node_modules/@types/node is the worktree's 24.13.3 (tsconfig types: [node]); the wrapper imports the clean clone's renderer, whose tsconfig types: [bun-types] reaches the clone's @types/node 26.1.2; a sibling module calls child.on('exit')",
+  "results": {
+   "dual majors, renderer + child.on": {
+    "analysis": "$MISSION_SCRATCH/runs/dualtypes-dual-node26/analyze.json",
+    "preflightFailed": true,
+    "diagnostics": 2,
+    "diagnosticsByCode": {
+     "SC0001": 2
+    },
+    "diagnosticList": [
+     {
+      "code": "SC0001",
+      "file": "$MISSION_SCRATCH/dualtypes/wrapper/child-events.ts",
+      "line": 4,
+      "column": 43,
+      "message": "Property 'on' does not exist on type 'ChildProcessWithoutNullStreams'."
+     },
+     {
+      "code": "SC0001",
+      "file": "$MISSION_SCRATCH/dualtypes/wrapper/child-events.ts",
+      "line": 4,
+      "column": 55,
+      "message": "Parameter 'code' implicitly has an 'any' type."
+     }
+    ]
+   },
+   "single major (24.13.3), child.on only": {
+    "analysis": "$MISSION_SCRATCH/runs/dualtypes-single-node26/analyze.json",
+    "preflightFailed": false,
+    "diagnostics": 0,
+    "diagnosticsByCode": {}
+   },
+   "same major (26.1.2) reachable both ways, renderer + child.on": {
+    "analysis": "$MISSION_SCRATCH/runs/dualtypes-same-dual-node26/analyze.json",
+    "preflightFailed": false,
+    "diagnostics": 3,
+    "diagnosticsByCode": {
+     "SC2020": 3
+    }
+   },
+   "dual majors, renderer only (committed closure has no ChildProcess.on call)": {
+    "analysis": "$MISSION_SCRATCH/runs/dualtypes-node26/analyze.json",
+    "preflightFailed": false,
+    "diagnostics": 3,
+    "diagnosticsByCode": {
+     "SC2020": 3
+    }
+   }
+  }
+ },
+ "otherEntries": {
+  "redwall.ts@node26": {
+   "statements": {
+    "statementsTotal": 1462,
+    "statementsFailed": 115,
+    "statementsIsland": 4,
+    "functionsSkipped": 0
+   },
+   "diagnostics": 114,
+   "diagnosticsByCode": {
+    "SC2020": 50,
+    "SC1090": 34,
+    "SC2004": 15,
+    "SC2013": 7,
+    "SC2002": 3,
+    "SC2011": 2,
+    "SC2003": 2,
+    "SC1120": 1
+   },
+   "runtimeFences": 0,
+   "sources": 113,
+   "npmStatic": [
+    {
+     "package": "tuiuiu.js",
+     "status": "fallback",
+     "detail": "SC1010: the 'node:process' module is not supported yet"
+    },
+    {
+     "package": "cli-args-parser",
+     "status": "fallback",
+     "detail": "auto: the program does not typecheck against its inferred surface"
+    }
+   ],
+   "milliseconds": 52125,
+   "peakRssKiB": 727232,
+   "bunApiDiagnostics": 45,
+   "engineRequiredDiagnostics": 9,
+   "sc2004Cascades": 15,
+   "topMessages": [
+    {
+     "count": 18,
+     "code": "SC1090",
+     "message": "string indexing with this index/result shape (a number index typed 'string' lowers to char"
+    },
+    {
+     "count": 10,
+     "code": "SC2020",
+     "message": "'Bun.spawn'"
+    },
+    {
+     "count": 6,
+     "code": "SC2013",
+     "message": "importing 'tuiuiu.js' requires the embedded dynamic engine, which this build does not incl"
+    },
+    {
+     "count": 6,
+     "code": "SC2020",
+     "message": "'Bun.write'"
+    },
+    {
+     "count": 5,
+     "code": "SC2020",
+     "message": "'BunFile.text'"
+    },
+    {
+     "count": 5,
+     "code": "SC2020",
+     "message": "'Subprocess<\"ignore\", \"ignore\", \"ignore\">.exited'"
+    },
+    {
+     "count": 4,
+     "code": "SC2020",
+     "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.stdout'"
+    },
+    {
+     "count": 4,
+     "code": "SC2020",
+     "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.exited'"
+    },
+    {
+     "count": 4,
+     "code": "SC2020",
+     "message": "'Bun.which'"
+    },
+    {
+     "count": 3,
+     "code": "SC2002",
+     "message": "record shapes must match exactly or width-coerce: expected 'number[]', got '{ argv: string"
+    },
+    {
+     "count": 3,
+     "code": "SC1090",
+     "message": "'??=' on non-variable targets (write it out: if (o.f === undefined) o.f = v) are not suppo"
+    },
+    {
+     "count": 2,
+     "code": "SC2011",
+     "message": "values of type 'Provider' have no static representation but run in the embedded dynamic en"
+    }
+   ],
+   "topFiles": [
+    [
+     "wsl.ts",
+     19
+    ],
+    [
+     "theme-editors.ts",
+     18
+    ],
+    [
+     "theme-apply.ts",
+     11
+    ],
+    [
+     "zellij-layer.ts",
+     10
+    ],
+    [
+     "red-skills-hosts.ts",
+     9
+    ],
+    [
+     "wallpaper.ts",
+     8
+    ],
+    [
+     "windows-hidden.ts",
+     7
+    ],
+    [
+     "build-resources.ts",
+     6
+    ]
+   ]
+  },
+  "redwall.ts@bun": {
+   "statements": {
+    "statementsTotal": 1462,
+    "statementsFailed": 115,
+    "statementsIsland": 4,
+    "functionsSkipped": 0
+   },
+   "diagnostics": 114,
+   "diagnosticsByCode": {
+    "SC2020": 50,
+    "SC1090": 34,
+    "SC2004": 15,
+    "SC2013": 7,
+    "SC2002": 3,
+    "SC2011": 2,
+    "SC2003": 2,
+    "SC1120": 1
+   },
+   "runtimeFences": 0,
+   "sources": 113,
+   "npmStatic": [
+    {
+     "package": "tuiuiu.js",
+     "status": "fallback",
+     "detail": "SC1010: the 'node:process' module is not supported yet"
+    },
+    {
+     "package": "cli-args-parser",
+     "status": "fallback",
+     "detail": "auto: the program does not typecheck against its inferred surface"
+    }
+   ],
+   "milliseconds": 46509,
+   "peakRssKiB": 681752,
+   "bunApiDiagnostics": 45,
+   "engineRequiredDiagnostics": 9,
+   "sc2004Cascades": 15,
+   "topMessages": [
+    {
+     "count": 18,
+     "code": "SC1090",
+     "message": "string indexing with this index/result shape (a number index typed 'string' lowers to char"
+    },
+    {
+     "count": 10,
+     "code": "SC2020",
+     "message": "'Bun.spawn'"
+    },
+    {
+     "count": 6,
+     "code": "SC2013",
+     "message": "importing 'tuiuiu.js' requires the embedded dynamic engine, which this build does not incl"
+    },
+    {
+     "count": 6,
+     "code": "SC2020",
+     "message": "'Bun.write'"
+    },
+    {
+     "count": 5,
+     "code": "SC2020",
+     "message": "'BunFile.text'"
+    },
+    {
+     "count": 5,
+     "code": "SC2020",
+     "message": "'Subprocess<\"ignore\", \"ignore\", \"ignore\">.exited'"
+    },
+    {
+     "count": 4,
+     "code": "SC2020",
+     "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.stdout'"
+    },
+    {
+     "count": 4,
+     "code": "SC2020",
+     "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.exited'"
+    },
+    {
+     "count": 4,
+     "code": "SC2020",
+     "message": "'Bun.which'"
+    },
+    {
+     "count": 3,
+     "code": "SC2002",
+     "message": "record shapes must match exactly or width-coerce: expected 'number[]', got '{ argv: string"
+    },
+    {
+     "count": 3,
+     "code": "SC1090",
+     "message": "'??=' on non-variable targets (write it out: if (o.f === undefined) o.f = v) are not suppo"
+    },
+    {
+     "count": 2,
+     "code": "SC2011",
+     "message": "values of type 'Provider' have no static representation but run in the embedded dynamic en"
+    }
+   ],
+   "topFiles": [
+    [
+     "wsl.ts",
+     19
+    ],
+    [
+     "theme-editors.ts",
+     18
+    ],
+    [
+     "theme-apply.ts",
+     11
+    ],
+    [
+     "zellij-layer.ts",
+     10
+    ],
+    [
+     "red-skills-hosts.ts",
+     9
+    ],
+    [
+     "wallpaper.ts",
+     8
+    ],
+    [
+     "windows-hidden.ts",
+     7
+    ],
+    [
+     "build-resources.ts",
+     6
+    ]
+   ]
+  },
+  "main.ts@node26": {
+   "statements": {
+    "statementsTotal": 4632,
+    "statementsFailed": 747,
+    "statementsIsland": 18,
+    "functionsSkipped": 0
+   },
+   "diagnostics": 699,
+   "diagnosticsByCode": {
+    "SC2004": 274,
+    "SC1090": 211,
+    "SC2020": 171,
+    "SC2013": 19,
+    "SC2012": 8,
+    "SC2011": 3,
+    "SC2002": 3,
+    "SC2003": 3,
+    "SC2009": 3,
+    "SC1120": 2,
+    "SC1043": 1,
+    "SC1070": 1
+   },
+   "runtimeFences": 0,
+   "sources": 149,
+   "npmStatic": [
+    {
+     "package": "tuiuiu.js",
+     "status": "fallback",
+     "detail": "SC1010: the 'node:process' module is not supported yet"
+    },
+    {
+     "package": "cli-args-parser",
+     "status": "fallback",
+     "detail": "auto: the program does not typecheck against its inferred surface"
+    }
+   ],
+   "milliseconds": 60751,
+   "peakRssKiB": 750928,
+   "bunApiDiagnostics": 157,
+   "engineRequiredDiagnostics": 33,
+   "sc2004Cascades": 274,
+   "topMessages": [
+    {
+     "count": 32,
+     "code": "SC2020",
+     "message": "'Bun.spawn'"
+    },
+    {
+     "count": 29,
+     "code": "SC2020",
+     "message": "'Bun.write'"
+    },
+    {
+     "count": 18,
+     "code": "SC2020",
+     "message": "'BunFile.text'"
+    },
+    {
+     "count": 18,
+     "code": "SC1090",
+     "message": "string indexing with this index/result shape (a number index typed 'string' lowers to char"
+    },
+    {
+     "count": 17,
+     "code": "SC2004",
+     "message": "uses of 'reclaim' inherit the blocker on its declaration"
+    },
+    {
+     "count": 15,
+     "code": "SC2020",
+     "message": "'Bun.which'"
+    },
+    {
+     "count": 14,
+     "code": "SC1090",
+     "message": "native import() export 'resolveWallpaperSlug' has a function signature whose argument or r"
+    },
+    {
+     "count": 12,
+     "code": "SC2013",
+     "message": "importing 'tuiuiu.js' requires the embedded dynamic engine, which this build does not incl"
+    },
+    {
+     "count": 11,
+     "code": "SC2020",
+     "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.stdout'"
+    },
+    {
+     "count": 11,
+     "code": "SC2020",
+     "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.exited'"
+    },
+    {
+     "count": 11,
+     "code": "SC1090",
+     "message": "native import() export 'installNerdFont' has a function signature whose argument or result"
+    },
+    {
+     "count": 9,
+     "code": "SC1090",
+     "message": "native import() export 'AGENTS' has type '{ about: string; cmd: string; configFiles: strin"
+    }
+   ],
+   "topFiles": [
+    [
+     "main.ts",
+     298
+    ],
+    [
+     "providers.ts",
+     81
+    ],
+    [
+     "migrations.ts",
+     60
+    ],
+    [
+     "alacritty.ts",
+     29
+    ],
+    [
+     "terminal-surfaces.ts",
+     21
+    ],
+    [
+     "wsl.ts",
+     19
+    ],
+    [
+     "theme-editors.ts",
+     18
+    ],
+    [
+     "red-skills-watch.ts",
+     13
+    ]
+   ]
+  },
+  "main.ts@bun": {
+   "statements": {
+    "statementsTotal": 4632,
+    "statementsFailed": 747,
+    "statementsIsland": 18,
+    "functionsSkipped": 0
+   },
+   "diagnostics": 699,
+   "diagnosticsByCode": {
+    "SC2004": 274,
+    "SC1090": 211,
+    "SC2020": 171,
+    "SC2013": 19,
+    "SC2012": 8,
+    "SC2011": 3,
+    "SC2002": 3,
+    "SC2003": 3,
+    "SC2009": 3,
+    "SC1120": 2,
+    "SC1043": 1,
+    "SC1070": 1
+   },
+   "runtimeFences": 0,
+   "sources": 149,
+   "npmStatic": [
+    {
+     "package": "tuiuiu.js",
+     "status": "fallback",
+     "detail": "SC1010: the 'node:process' module is not supported yet"
+    },
+    {
+     "package": "cli-args-parser",
+     "status": "fallback",
+     "detail": "auto: the program does not typecheck against its inferred surface"
+    }
+   ],
+   "milliseconds": 60980,
+   "peakRssKiB": 718220,
+   "bunApiDiagnostics": 157,
+   "engineRequiredDiagnostics": 33,
+   "sc2004Cascades": 274,
+   "topMessages": [
+    {
+     "count": 32,
+     "code": "SC2020",
+     "message": "'Bun.spawn'"
+    },
+    {
+     "count": 29,
+     "code": "SC2020",
+     "message": "'Bun.write'"
+    },
+    {
+     "count": 18,
+     "code": "SC2020",
+     "message": "'BunFile.text'"
+    },
+    {
+     "count": 18,
+     "code": "SC1090",
+     "message": "string indexing with this index/result shape (a number index typed 'string' lowers to char"
+    },
+    {
+     "count": 17,
+     "code": "SC2004",
+     "message": "uses of 'reclaim' inherit the blocker on its declaration"
+    },
+    {
+     "count": 15,
+     "code": "SC2020",
+     "message": "'Bun.which'"
+    },
+    {
+     "count": 14,
+     "code": "SC1090",
+     "message": "native import() export 'resolveWallpaperSlug' has a function signature whose argument or r"
+    },
+    {
+     "count": 12,
+     "code": "SC2013",
+     "message": "importing 'tuiuiu.js' requires the embedded dynamic engine, which this build does not incl"
+    },
+    {
+     "count": 11,
+     "code": "SC2020",
+     "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.stdout'"
+    },
+    {
+     "count": 11,
+     "code": "SC2020",
+     "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.exited'"
+    },
+    {
+     "count": 11,
+     "code": "SC1090",
+     "message": "native import() export 'installNerdFont' has a function signature whose argument or result"
+    },
+    {
+     "count": 9,
+     "code": "SC1090",
+     "message": "native import() export 'AGENTS' has type '{ about: string; cmd: string; configFiles: strin"
+    }
+   ],
+   "topFiles": [
+    [
+     "main.ts",
+     298
+    ],
+    [
+     "providers.ts",
+     81
+    ],
+    [
+     "migrations.ts",
+     60
+    ],
+    [
+     "alacritty.ts",
+     29
+    ],
+    [
+     "terminal-surfaces.ts",
+     21
+    ],
+    [
+     "wsl.ts",
+     19
+    ],
+    [
+     "theme-editors.ts",
+     18
+    ],
+    [
+     "red-skills-watch.ts",
+     13
+    ]
+   ]
+  }
+ },
+ "bunApiUsageInCommittedSources": {
+  "nonTestSourceFiles": 302,
+  "filesUsingBunGlobal": 63,
+  "bunGlobalOccurrences": 249,
+  "byMember": {
+   "Bun.which": 67,
+   "Bun.spawn": 64,
+   "Bun.write": 59,
+   "Bun.file": 42,
+   "Bun.spawnSync": 8,
+   "Bun.CryptoHasher": 6,
+   "Bun.stdin": 1,
+   "Bun.inflateSync": 1,
+   "Bun.Subprocess": 1
+  },
+  "nodeBuiltinImports": {
+   "node:fs": 75,
+   "node:path": 29,
+   "node:os": 19,
+   "node:crypto": 4,
+   "node:child_process": 3,
+   "node:fs/promises": 2,
+   "node:zlib": 1,
+   "node:stream": 1,
+   "node:net": 1
+  },
+  "npmImports": {
+   "tuiuiu.js": 12,
+   "tuiuiu.js/hooks": 2,
+   "cli-args-parser": 1
+  },
+  "method": "grep over src/**/*.ts excluding *.test.ts in the clean clone"
+ },
+ "cliFromSource": {
+  "log": "$MISSION_SCRATCH/logs/cli-build-variant-node26.log",
+  "result": "scriptc/.claude/worktrees/dogfood-redwall-requalify/packages/cli/src/main.ts\n    at finalizeResolution (node:internal/modules/esm/resolve:272:11)\n    at moduleResolve (node:internal/modules/esm/resolve:879:10)\n    at defaultResolve (node:internal/modules/esm/resolve:1006:11)\n    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)\n    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)\n    at nextStep (node:internal/modules/customization_hooks:189:26)\n    at resolveBaseSync (file:///home/cyber/workspace/scriptc/.claude/worktrees/dogfood-redwall-requalify/node_modules/.pnpm/tsx@4.23.0/node_modules/tsx/dist/register-D5KIhaFJ.mjs:2:9115)\n    at resolveDirectorySync (file:///home/cyber/workspace/scriptc/.claude/worktrees/dogfood-redwall-requalify/node_modules/.pnpm/tsx@4.23.0/node_modules/tsx/dist/register-D5KIhaFJ.mjs:2:10328)\n    at resolveTsPathsSync (file:///home/cyber/workspace/scriptc/.claude/worktrees/dogfood-redwall-requalify/node_modules/.pnpm/tsx@4.23.0/node_modules/tsx/dist/register-D5KIhaFJ.mjs:2:11560)\n    at resolve (file:///home/cyber/workspace/scriptc/.claude/worktrees/dogfood-redwall-requalify/node_modules/.pnpm/tsx@4.23.0/node_modules/tsx/dist/register-D5KIhaFJ.mjs:2:13343) {\n  code: 'ERR_MODULE_NOT_FOUND',\n  url: 'file:///home/cyber/workspace/scriptc/.claude/worktrees/dogfood-redwall-requalify/packages/cli/node_modules/@scriptc/compiler/dist/index.js'\n}\n\nNode.js v26.8.1\n\nreal\t0m0.279s\nuser\t0m0.233s\nsys\t0m0.081s\nexit=1\n"
+ },
+ "driver": {
+  "note": "the measurement driver runs analyze()/compile() from packages/compiler/src through tsx; its source is embedded so the runs can be repeated without the scratch directory",
+  "probe.mjs": "// Measurement driver: runs the scriptc compiler from the worktree SOURCE (via tsx).\n// usage: tsx probe.mjs <analyze|compile> <entry> <outDir> <target> [optimization=release] [npmStatic=auto|none|a,b]\nimport { mkdir, readFile, writeFile, stat } from \"node:fs/promises\";\nimport { resolve, join } from \"node:path\";\nimport { createHash } from \"node:crypto\";\nimport { spawnSync } from \"node:child_process\";\nimport { pathToFileURL } from \"node:url\";\n\nconst wt = process.env.COMPILER_ROOT ?? process.env.WT_DIR;\nif (!wt) throw new Error(\"WT_DIR is required\");\nconst { analyze, compile } = await import(pathToFileURL(join(wt, \"packages/compiler/src/index.ts\")).href);\n\nconst [mode, entryArg, outputArg, target = \"node26\", optimization = \"release\", npm = \"auto\"] = process.argv.slice(2);\nconst entry = resolve(entryArg), outDir = resolve(outputArg);\nawait mkdir(outDir, { recursive: true });\nconst sha = (b) => createHash(\"sha256\").update(b).digest(\"hex\");\nconst options = {\n  backend: \"rust\", allowEngine: false, target, optimization,\n  ...(npm === \"none\" ? {} : { npmStatic: npm === \"auto\" ? \"auto\" : npm.split(\",\") }),\n};\nconst git = (args) => spawnSync(\"git\", args, { cwd: wt, encoding: \"utf8\" }).stdout.trim();\nconst report = {\n  createdAt: new Date().toISOString(), node: process.version, mode, entry, options,\n  entrySha256: sha(await readFile(entry)),\n  compiler: { root: wt, commit: process.env.COMPILER_SNAPSHOT ?? git([\"rev-parse\", \"HEAD\"]), dirty: process.env.COMPILER_SNAPSHOT ? false : git([\"status\", \"--porcelain=v1\"]).length > 0, rustc: spawnSync(\"rustc\", [\"--version\"], { encoding: \"utf8\" }).stdout.trim() },\n};\nconst byCode = (list) => {\n  const m = {};\n  for (const d of list ?? []) m[d.code] = (m[d.code] ?? 0) + 1;\n  return Object.fromEntries(Object.entries(m).sort((a, b) => b[1] - a[1]));\n};\nconst start = performance.now();\ntry {\n  if (mode === \"analyze\") {\n    const result = analyze(entry, options);\n    const c = result.coverage;\n    report.coverage = c;\n    report.summary = {\n      preflightFailed: c.preflightFailed, stats: c.stats,\n      diagnostics: c.diagnostics.length, diagnosticsByCode: byCode(c.diagnostics),\n      runtimeFences: (c.runtimeFences ?? []).length, runtimeFencesByCode: byCode(c.runtimeFences),\n      execution: c.execution ?? null, npmStatic: c.npmStatic ?? [],\n      sources: result.sourceTexts.size,\n    };\n    report.ok = !c.preflightFailed && c.diagnostics.length === 0 && c.stats.statementsFailed === 0;\n    report.sources = [...result.sourceTexts].map(([file, text]) => ({ file, bytes: Buffer.byteLength(text), sha256: sha(text) })).sort((a, b) => a.file.localeCompare(b.file));\n  } else {\n    const result = await compile(entry, { ...options, outDir, outPath: join(outDir, \"program\") });\n    const { sourceTexts, ...serializable } = result;\n    report.result = serializable;\n    report.ok = result.ok;\n    report.summary = result.ok ? {\n      ok: true, execution: result.execution, runtimeFences: (result.runtimeFences ?? []).length, runtimeFencesByCode: byCode(result.runtimeFences),\n      safetyProfile: result.safetyProfile ?? null,\n      binary: result.binaryPath, binaryBytes: (await stat(result.binaryPath)).size, binarySha256: sha(await readFile(result.binaryPath)),\n      generatedSource: result.sourcePath ?? null,\n      generatedSourceBytes: result.sourcePath ? (await stat(result.sourcePath)).size : null,\n      generatedSourceSha256: result.sourcePath ? sha(await readFile(result.sourcePath)) : null,\n    } : { ok: false, diagnostics: result.diagnostics.length, diagnosticsByCode: byCode(result.diagnostics) };\n  }\n} catch (error) { report.ok = false; report.exception = { name: error.name, message: error.message, stack: error.stack }; }\nreport.milliseconds = Math.round(performance.now() - start);\nreport.peakRssKiB = process.resourceUsage().maxRSS;\nawait writeFile(join(outDir, `${mode}.json`), JSON.stringify(report, null, 2) + \"\\n\");\nconsole.log(JSON.stringify({ mode, target, optimization, npm, ok: report.ok, milliseconds: report.milliseconds, peakRssKiB: report.peakRssKiB, summary: report.summary, exception: report.exception?.message }, null, 1));\nprocess.exitCode = report.ok ? 0 : 1;\n",
+  "differential.mjs": "generated by scripts/prepare-native-redwall.mjs (identical to the scratch copy)",
+  "snap.sh": "#!/usr/bin/env bash\n# Extract a read-only source snapshot of the compiler at <sha> into scratch (git archive; no refs, branches or worktrees).\nset -euo pipefail\nsha=\"$1\"\ndest=\"$MISSION_SCRATCH/snap/$sha\"\nif [ ! -d \"$dest/packages/compiler/src\" ]; then\n  mkdir -p \"$dest\"\n  git -C \"$WT_DIR\" archive \"$sha\" packages/compiler package.json | tar -x -C \"$dest\"\n  ln -s \"$WT_DIR/node_modules\" \"$dest/node_modules\"\n  ln -s \"$WT_DIR/packages/compiler/node_modules\" \"$dest/packages/compiler/node_modules\"\n  for p in runtime runtime-rust; do ln -s \"$WT_DIR/packages/$p\" \"$dest/packages/$p\"; done\nfi\necho \"$dest\"\n",
+  "bisect.py": "#!/usr/bin/env python3\n\"\"\"First-parent bisect over source snapshots (git archive into scratch; analysis only).\nusage: bisect.py <good-sha> <bad-sha> <entry> <target> <needle-substring-of-diagnostic-message>\"\"\"\nimport json, os, subprocess, sys\ngood, bad, entry, target, needle = sys.argv[1:6]\nwt = os.environ[\"WT_DIR\"]; scratch = os.environ[\"MISSION_SCRATCH\"]\nrevs = subprocess.run([\"git\", \"-C\", wt, \"rev-list\", \"--first-parent\", \"--reverse\", f\"{good}..{bad}\"], capture_output=True, text=True, check=True).stdout.split()\nrevs = [subprocess.run([\"git\", \"-C\", wt, \"rev-parse\", good], capture_output=True, text=True).stdout.strip()] + revs\nlabel = os.path.basename(entry).replace(\".ts\", \"\")\ndef probe(sha):\n    short = sha[:8]\n    snap = subprocess.run([f\"{scratch}/driver/snap.sh\", short], capture_output=True, text=True, check=True).stdout.strip().splitlines()[-1]\n    out = f\"{scratch}/runs/bisect/{label}-{target}/{short}\"\n    env = dict(os.environ, COMPILER_ROOT=snap, COMPILER_SNAPSHOT=sha)\n    r = subprocess.run([f\"{wt}/node_modules/.bin/tsx\", f\"{scratch}/driver/probe.mjs\", \"analyze\", entry, out, target, \"release\", \"none\"], cwd=snap, env=env, capture_output=True, text=True)\n    try:\n        rep = json.load(open(f\"{out}/analyze.json\"))\n    except Exception as e:\n        return (\"error\", f\"no report: {r.stderr[-300:]}\")\n    if rep.get(\"exception\"):\n        return (\"error\", rep[\"exception\"][\"message\"][:200])\n    diags = rep[\"coverage\"][\"diagnostics\"]\n    hit = [d for d in diags if needle in d[\"message\"]]\n    return (\"bad\" if hit else \"good\", f\"{len(diags)} diagnostics; stats {rep['coverage']['stats']}; \" + \"; \".join(sorted({d['code']+':'+d['message'][:70] for d in diags}))[:400])\nlo, hi = 0, len(revs) - 1\nlog = []\ns_lo = probe(revs[lo]); s_hi = probe(revs[hi])\nlog.append((revs[lo], *s_lo)); log.append((revs[hi], *s_hi))\nprint(\"endpoints\", revs[lo][:8], s_lo, revs[hi][:8], s_hi, flush=True)\nassert s_lo[0] == \"good\" and s_hi[0] == \"bad\", \"endpoints do not bracket the change\"\nwhile hi - lo > 1:\n    mid = (lo + hi) // 2\n    s = probe(revs[mid]); log.append((revs[mid], *s))\n    print(revs[mid][:8], s, flush=True)\n    if s[0] == \"good\": lo = mid\n    elif s[0] == \"bad\": hi = mid\n    else:\n        # an unanalyzable snapshot: walk linearly toward the bad side\n        j = mid + 1\n        while j < hi:\n            s2 = probe(revs[j]); log.append((revs[j], *s2)); print(\" skip->\", revs[j][:8], s2, flush=True)\n            if s2[0] != \"error\": break\n            j += 1\n        if j >= hi or s2[0] == \"bad\": hi = mid if j >= hi else j; \n        else: lo = j\n        if s2[0] == \"bad\" and j < hi: hi = j\ndesc = lambda sha: subprocess.run([\"git\", \"-C\", wt, \"log\", \"-1\", \"--format=%h %ad %s\", \"--date=iso-strict\", sha], capture_output=True, text=True).stdout.strip()\nresult = {\"entry\": entry, \"target\": target, \"needle\": needle, \"lastGood\": desc(revs[lo]), \"firstBad\": desc(revs[hi]), \"firstParentRange\": len(revs) - 1, \"steps\": [{\"commit\": c[:8], \"state\": st, \"detail\": d} for c, st, d in log]}\nos.makedirs(f\"{scratch}/runs/bisect\", exist_ok=True)\njson.dump(result, open(f\"{scratch}/runs/bisect/{label}-{target}.json\", \"w\"), indent=1)\nprint(\"LAST GOOD:\", result[\"lastGood\"]); print(\"FIRST BAD:\", result[\"firstBad\"])\n"
+ },
+ "artifacts": {
+  "scratchRoot": "/home/cyber/.cache/scriptc-mission/redwall-requalify/scratch",
+  "adapter": "$MISSION_SCRATCH/adapter",
+  "variantAdapter": "$MISSION_SCRATCH/adapter-variant",
+  "runs": "$MISSION_SCRATCH/runs",
+  "logs": "$MISSION_SCRATCH/logs",
+  "driver": "$MISSION_SCRATCH/driver",
+  "septemberSnapshot": "$MISSION_SCRATCH/snapfull/aa57877e",
+  "bisectSnapshots": "$MISSION_SCRATCH/snap"
+ }
+}
