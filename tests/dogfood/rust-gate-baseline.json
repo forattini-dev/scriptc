@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "reds": {
+    "corpus": {
+      "2534-object-rest-decl.ts": "AssertionError: expected '1 2 3 4\\n{\"beta\":2,\"delta\":4,\"gamma\":…' to be '1 2 3 4\\n{\"beta\":2,\"gamma\":3,\"delta\":…' // Object.is equality",
+      "2736-agentic-safe-own-property.ts": "rust backend regressed out of full-corpus parity on 2736-agentic-safe-own-property.ts: SC2020 'Object.prototype.hasOwnProperty with this property key' is part of the standard library types but has no …",
+      "2906-bigint-wasi-width.ts": "rust backend regressed out of full-corpus parity on 2906-bigint-wasi-width.ts: SC2003 union types must match exactly: expected 'number', got 'number | undefined' (a union re-tags into another union on…",
+      "2917-builtin-callable-widths.ts": "rust backend regressed out of full-corpus parity on 2917-builtin-callable-widths.ts: SC1090 library functions as values (call 'basename' directly) are not supported yet; SC1090 library functions as va…",
+      "2972-http-static-distinct-snapshots.ts": "rust backend regressed out of full-corpus parity on 2972-http-static-distinct-snapshots.ts: SC2020 'IncomingMessage.rawTrailers' is part of the standard library types but has no scriptc lowering yet; …",
+      "2975-http-static-client-controls.ts": "rust backend regressed out of full-corpus parity on 2975-http-static-client-controls.ts: SC3001 rust backend does not support library call 'http.clientWritableEnded' yet",
+      "2983-http-static-close-idle.ts": "rust backend regressed out of full-corpus parity on 2983-http-static-close-idle.ts: SC3001 rust backend does not support library call 'http.serverCloseIdleConnections' yet",
+      "2984-http-static-close-upgrade.ts": "rust backend regressed out of full-corpus parity on 2984-http-static-close-upgrade.ts: SC3001 rust backend does not support library call 'http.serverOnUpgrade' yet",
+      "2988-http-static-client-abort.ts": "rust backend regressed out of full-corpus parity on 2988-http-static-client-abort.ts: SC3001 rust backend does not support library call 'http.clientAborted' yet",
+      "3052-array-construction.ts": "AssertionError: expected 'count 4 true true\\ncount-write 4 true…' to be 'count 4 false true\\ncount-write 4 tru…' // Object.is equality",
+      "3207-native-bigint-dynamic-operations.js": "AssertionError: expected '' to be '20 14 51 5 2 4913\\n20 14 51 5.6666666…' // Object.is equality"
+    },
+    "focus-node24": {
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3447-cjs-conditional-function/main.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3448-cjs-conditional-require/main.cjs'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3449-cjs-conditional-export-forwardin…'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3444-builtin-error-calls.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3445-builtin-error-call-causes.cjs'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3446-builtin-error-call-shadowing.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…"
+    },
+    "focus-node26": {
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3447-cjs-conditional-function/main.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3448-cjs-conditional-require/main.cjs'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3449-cjs-conditional-export-forwardin…'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3444-builtin-error-calls.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3445-builtin-error-call-causes.cjs'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3446-builtin-error-call-shadowing.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…"
+    },
+    "runtime-crate": {
+      "cargo-clippy": "error: using `chunks_exact` with a constant chunk size (--> src/zlib.test.rs:30:14)"
+    }
+  },
+  "calibration": {
+    "corpus": {
+      "commit": "170c4dc2ebc9128af7ebfca1e57ca6e45e35c539",
+      "date": "2026-10-05",
+      "scope": "shards 1,21 of 40",
+      "complete": false
+    },
+    "focus-node24": {
+      "commit": "170c4dc2ebc9128af7ebfca1e57ca6e45e35c539",
+      "date": "2026-10-05",
+      "scope": "28 of 28 files",
+      "complete": true
+    },
+    "focus-node26": {
+      "commit": "170c4dc2ebc9128af7ebfca1e57ca6e45e35c539",
+      "date": "2026-10-05",
+      "scope": "28 of 28 files",
+      "complete": true
+    },
+    "runtime-crate": {
+      "commit": "170c4dc2ebc9128af7ebfca1e57ca6e45e35c539",
+      "date": "2026-10-05",
+      "scope": "cargo test + cargo clippy",
+      "complete": true
+    }
+  }
+}
