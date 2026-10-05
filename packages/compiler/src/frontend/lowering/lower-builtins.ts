@@ -141,8 +141,19 @@ function lowerBuiltinValuePreservingUndefined(lowerer: Lowerer, node: ts.Express
     lowerer.lowerExpr(node);
 }
 
+/** The union that carries `target` plus only unit arms (`T | null | undefined`)
+ * and so can hold a narrowed use of `T` together with the absence that the
+ * narrowing does not prove. */
+function unitPaddedUnion(lowerer: Lowerer, actual: IrType, target: IrType): IrType | null {
+  if (actual.kind !== "union") return null;
+  const def = lowerer.unions.get(actual.unionId);
+  if (!def || lowerer.armTag(actual.unionId, UNDEFINED_T) < 0) return null;
+  const rest = def.arms.filter((arm) => !isUnitType(arm));
+  return rest.length === 1 && typeEquals(rest[0]!, target) ? actual : null;
+}
+
 function checkedOptionalBuiltinArm(lowerer: Lowerer, value: IrExpr, target: IrType): IrExpr | null {
-  const widened = lowerer.runtimeOptionalWidening(value.type, target);
+  const widened = lowerer.runtimeOptionalWidening(value.type, target) ?? unitPaddedUnion(lowerer, value.type, target);
   if (!widened || widened.kind !== "union") return null;
   const helper = lowerer.narrowedArmHelper(widened.unionId, target, value.loc);
   return helper
@@ -152,11 +163,11 @@ function checkedOptionalBuiltinArm(lowerer: Lowerer, value: IrExpr, target: IrTy
 
 /** Number.isFinite/isNaN/isInteger/isSafeInteger over a tagged union that
  * holds a number plus absence: `number | undefined` (a read that may observe a
- * missing element) and its declared or promoted widenings with null. The
- * statics never coerce, so every unit arm answers false and only the number
- * arm reaches the predicate. The value stays tagged on purpose: the checker may
- * have narrowed this use to `number`, but the stored union can still carry the
- * absence that narrowing does not prove. */
+ * missing element), `number | null` and the three-arm union. The statics never
+ * coerce, so every unit arm answers false and only the number arm reaches the
+ * predicate. The value stays tagged on purpose: the checker may have narrowed
+ * this use to `number`, but the stored union can still carry the absence that
+ * narrowing does not prove. */
 function lowerOptionalNumberPredicate(
   lowerer: Lowerer,
   value: IrExpr,
@@ -167,8 +178,7 @@ function lowerOptionalNumberPredicate(
   const unionId = value.type.unionId;
   const def = lowerer.unions.get(unionId);
   const numberTag = lowerer.armTag(unionId, F64);
-  if (!def || numberTag < 0 || lowerer.armTag(unionId, UNDEFINED_T) < 0 ||
-      !def.arms.every((arm) => typeEquals(arm, F64) || isUnitType(arm))) return null;
+  if (!def || numberTag < 0 || !def.arms.every((arm) => typeEquals(arm, F64) || isUnitType(arm))) return null;
   const widened = value.type;
   const key = `number.optionalPredicate:${fn}:${unionId}`;
   let helper = lowerer.widthHelpers.get(key);

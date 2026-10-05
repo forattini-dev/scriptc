@@ -28,6 +28,12 @@ function viaGuard(name: string, value: number | null | undefined): void {
   console.log(name, ok, finite, nan, integer);
 }
 
+function nullOnly(name: string, value: number | null): void {
+  // No undefined arm: the union is the number plus null.
+  console.log(name, String(value), Number.isFinite(value), Number.isNaN(value), Number.isInteger(value), Number.isSafeInteger(value));
+  if (value !== null) console.log(name, "narrowed", Number.isInteger(value), Number.isSafeInteger(value));
+}
+
 function twoArm(name: string, value?: number): void {
   console.log(name, String(value), Number.isInteger(value), Number.isSafeInteger(value), Number.isFinite(value), Number.isNaN(value));
 }
@@ -36,6 +42,7 @@ for (let i = 0; i < samples.length; i++) {
   all("all", samples[i]);
   narrowed("narrowed", samples[i]);
   viaGuard("guard", samples[i]);
+  nullOnly("null-only", samples[i] ?? null);
   const element = samples[i];
   if (typeof element === "number") twoArm("two", element);
   else twoArm("two", undefined);
