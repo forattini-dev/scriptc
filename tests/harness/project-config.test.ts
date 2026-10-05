@@ -9,7 +9,7 @@
  * declares fences with the SC2020-family wording that names it.
  */
 import { execFile } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -260,6 +260,36 @@ test("no-types-node: a bare project outside the repo compiles on the fallback de
   if (!result.ok) return;
   const { stdout } = await execFileAsync(result.binaryPath);
   expect(stdout).toBe("hi bare\n");
+});
+
+test("no-types-node: off() on ChildProcess and Server typechecks on the fallback declarations and fences at lowering", () => {
+  // The fallback declares the same listener surface @types/node does, off
+  // included: a program that removes a listener reaches the lowering's
+  // honest per-member fence instead of failing preflight with a raw
+  // "Property 'off' does not exist" that @types/node would not report.
+  const dir = mkdtempSync(join(tmpdir(), "scriptc-bare-off-"));
+  try {
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "bare-off", version: "1.0.0", type: "module" }));
+    writeFileSync(join(dir, "main.ts"), [
+      'import { spawn } from "node:child_process";',
+      'import { createServer } from "node:net";',
+      "const server = createServer((socket) => { socket.end(); });",
+      "const onError = (err: Error): void => { console.log(err.message); };",
+      'server.on("error", onError);',
+      'server.off("error", onError);',
+      'const child = spawn("/bin/sh", ["-c", "exit 0"], { stdio: "ignore" });',
+      "const onExit = (code: number | null, signal: string | null): void => { console.log(code ?? -1, signal ?? \"none\"); };",
+      'child.on("exit", onExit);',
+      'child.off("exit", onExit);',
+      "",
+    ].join("\n"));
+    const result = analyze(join(dir, "main.ts"), { backend: sanitize ? "c" : "rust" });
+    expect(result.coverage.preflightFailed).toBe(false);
+    expect(result.coverage.diagnostics.map((d) => [d.code, d.message])).toEqual([
+      ["SC2020", "'Server.off' is part of the standard library types but has no scriptc lowering yet"],
+      ["SC2020", "'ChildProcess.off' is part of the standard library types but has no scriptc lowering yet"],
+    ]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("dot-parent: bare '.' and '..' imports build and run (the TS project dialect)", async () => {
