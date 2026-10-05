@@ -411,7 +411,7 @@ async function runCorpus(context, plan) {
   step.corpusProgramCount = corpusProgramCount();
   step.sample = options.sample !== null;
   const shardsText = options.sample === null ? `all ${options.shards} shards` : `shards ${options.sample.join(",")} of ${options.shards}`;
-  step.headline = `${shardsText}, ${plan.jobs} at a time · ${totals.passed}/${totals.collected} claimed · ${totals.failed} failed · ${totals.skipped} skipped · ${totals.missing} did not run · ${totals.flaky} flaky · Σ test time ${formatDuration(totals.testTimeMs)} · peak ${totals.peakBytesPerShard ? `${(totals.peakBytesPerShard / 1024 ** 3).toFixed(1)} GB` : "n/a"}/shard`;
+  step.headline = `${shardsText}, ${Math.min(plan.jobs, plan.shards.length)} at a time · ${totals.passed}/${totals.collected} claimed · ${totals.failed} failed · ${totals.skipped} skipped · ${totals.missing} did not run · ${totals.flaky} flaky · Σ test time ${formatDuration(totals.testTimeMs)} · peak ${totals.peakBytesPerShard ? `${(totals.peakBytesPerShard / 1024 ** 3).toFixed(1)} GB` : "n/a"}/shard`;
   return step;
 }
 
@@ -670,7 +670,8 @@ async function main() {
       step = { id, ran: true, reds: [], passed: [], skipped: [], problems: [{ id: "gate", message: `gate failure: ${error.stack ?? error.message}` }], scope: { kind: "none" }, durationMs: Date.now() - stepStarted, headline: "gate failure" };
     }
     steps.push(step);
-    log(`step ${id} ${step.reds.length === 0 && step.problems.length === 0 ? "passed" : "FAILED"} in ${formatDuration(step.durationMs)}: ${step.headline}`);
+    // Counts, not a verdict: whether a red is new is decided against the baseline at the end.
+    log(`step ${id} finished in ${formatDuration(step.durationMs)} with ${step.reds.length} red(s), ${step.problems.length} problem(s): ${step.headline}`);
     if (interrupted) break;
   }
   for (const id of ["runtime-crate", "corpus", "focus-node26", "focus-node24"]) {
