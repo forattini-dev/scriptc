@@ -344,6 +344,23 @@ export function lowerStringPaddingCall(
   return { kind: "call", callee: helper, args: values, type: STRING, loc };
 }
 
+/** The replacement-ARGUMENT gate shared by `s.replace`/`s.replaceAll` on both
+ * paths. A function replacement is CALLED once per match, and the lowered
+ * argument's IR type is NOT evidence that the argument isn't one: in a
+ * JavaScript source a stdlib global taken as a VALUE lowers to the opaque
+ * identity token, a STRING literal (`[builtin encodeURI]`), so
+ * `url.replace(re, encodeURI)` (the `encodeurl` package's exact shape) would
+ * sail past a string-typed check and INTERPOLATE the token ("a[builtin
+ * encodeURI]b") instead of calling the builtin per match: silently wrong
+ * output. The CHECKER type is the honest witness: anything with a call
+ * signature is a function replacement, however it lowers (a direct builtin
+ * reference, a local aliasing one, an arrow, a named function). */
+function fenceFunctionReplacement(lowerer: Lowerer, arg: ts.Expression | undefined): void {
+  if (!arg) return;
+  if (lowerer.checker.getCallSignatures(lowerer.typeOf(arg)).length === 0) return;
+  lowerer.unsupported("SC1120", arg, "function replacement values (replacements must be string templates)");
+}
+
 /** Regex method calls, both directions: `re.test(s)` on a regex receiver,
  * and `s.replace(re, tpl)` / `s.replaceAll(re, tpl)` / `s.split(re)` on a
  * string receiver whose FIRST ARGUMENT is a regex (the string-pattern
@@ -519,6 +536,9 @@ export function lowerRegexMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     const args = name === "split"
       ? [lowerer.lowerExpr(arg0), lowerSplitLimitArg(lowerer, call.arguments[1], loc)]
       : call.arguments.map((a) => lowerer.lowerExpr(a));
+    // A string-typed replacement with call signatures is a builtin taken as a
+    // value, not a template.
+    if (name !== "split" && args[1]?.type.kind === "string") fenceFunctionReplacement(lowerer, call.arguments[1]);
     if (name !== "split" && args[1]?.type.kind !== "string") {
       const callback = args[1];
       if (name === "replace" && callback?.type.kind === "func" && callback.type.params.length === 1 &&
@@ -711,7 +731,14 @@ export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     }
     return { kind: "call", callee: helper, args: [receiver, ...args], type: entry.result, loc };
   }
+  // A string pattern takes string templates only: a function replacement is
+  // CALLED once per match and has no lowering here (regex patterns take the
+  // callback form in lowerRegexMethodCall).
+  if (entry.method === "replace" || entry.method === "replaceAll") fenceFunctionReplacement(lowerer, argumentNodes[1]);
   const args = argumentNodes.map((a) => lowerer.lowerExpr(a));
+  if ((entry.method === "replace" || entry.method === "replaceAll") && args[1]?.type.kind === "func") {
+    lowerer.unsupported("SC1120", argumentNodes[1] ?? call, "function replacement values (replacements must be string templates)");
+  }
   return {
     kind: "strIntrinsic",
     method: entry.method,
