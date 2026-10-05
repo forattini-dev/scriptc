@@ -1778,6 +1778,7 @@ function preflight7(load: LoadResult): {
         programFiles,
         [...createRequireProgramRoots7(program), ...forkTargetPaths(program, program.getSourceFiles())],
         (sf, spec) => resolveImport7(program, sf, spec) ?? npmStaticDepSf7(program, sf, spec),
+        isNodeEsmFile7,
       )
     : programFiles;
   program.getTypeChecker().prefetchSourceFileStructures(candidates);
