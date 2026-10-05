@@ -1,7 +1,7 @@
 import { lowerNumericParser } from "./lower-numeric-parser.js";
 import { lowerFsWriteOptions } from "./lower-fs-write-options.js";
 import { fsConstantValue } from "./fs-constants.js";
-import { lowerDeflateLevel, lowerZlibModuleCall } from "./lower-zlib.js";
+import { lowerZlibModuleCall } from "./lower-zlib.js";
 import { registerPromisifiedZlibRaw } from "./lower-promisify-zlib.js";
 import { registerPromisifiedDnsLookup } from "./lower-dns-promises.js";
 import { InternalCompilerError } from "../../errors.js";
@@ -1858,17 +1858,6 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     }
     const writeOptions = lowerFsWriteOptions(lowerer, expr, bi, loc);
     if (writeOptions) return writeOptions;
-    if (bi.module === "zlib" && bi.member === "deflateSync" && expr.arguments.length === 2) return lowerDeflateLevel(lowerer, expr);
-    if (bi.module === "zlib" && expr.arguments.length >= 1) {
-      const dataIr = lowerer.mapTypeOf(lowerer.typeOf(expr.arguments[0]!));
-      if (!(dataIr?.kind === "bytes" && dataIr.elem === "u8")) {
-        lowerer.noLowering(
-          `${bi.member} of '${dataIr ? lowerer.fmt(dataIr) : lowerer.checker.typeToString(lowerer.typeOf(expr.arguments[0]!))}' data`,
-          expr.arguments[0]!,
-          `zlib works on Buffers: ${bi.member}(Buffer.from(s, "utf8"))`,
-        );
-      }
-    }
     if (fn.variadicPack) {
       // join(...parts) forwards the array itself; mixing spread and plain
       // arguments (or spreading anything but a string[]) stays out.

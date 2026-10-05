@@ -37,7 +37,7 @@ impl StandardHashCalc {
     }
 
     fn string_hash(state: &State, val: u32) -> usize {
-        if cfg!(feature = "scriptc-node-level6") && state.level == 6 {
+        if crate::deflate::node_slow_level(state.level) {
             // Node's default memLevel=8 uses 15 hash bits. Preserve the
             // installed Node 24/26 four-byte hash and its collision choices.
             ((val.wrapping_add(1).wrapping_mul(66521) >> 16) & 32767) as usize

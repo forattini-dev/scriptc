@@ -810,8 +810,21 @@ fn lm_set_level(state: &mut State, level: i8) {
     state.nice_match = CONFIGURATION_TABLE[level as usize].nice_length;
     state.max_chain_length = CONFIGURATION_TABLE[level as usize].max_chain;
 
-    state.hash_calc_variant = HashCalcVariant::for_max_chain_length(state.max_chain_length);
+    state.hash_calc_variant = if node_slow_level(level) {
+        // Node hashes four bytes at every level; level 9 must not use the
+        // rolling three-byte hash that upstream pairs with its chain jumper.
+        HashCalcVariant::Standard
+    } else {
+        HashCalcVariant::for_max_chain_length(state.max_chain_length)
+    };
     state.level = level;
+}
+
+/// Levels whose Node byte stream the opt-in `scriptc-node-level6` feature
+/// reproduces (6 and 9): the slow matcher with Node's four-byte hash, its
+/// three-byte tail insertion and its distant three-byte match rejection.
+pub(crate) fn node_slow_level(level: i8) -> bool {
+    cfg!(feature = "scriptc-node-level6") && matches!(level, 6 | 9)
 }
 
 pub fn tune(
@@ -1829,7 +1842,7 @@ pub(crate) fn fill_window(stream: &mut DeflateStream) {
         // Initialize the hash value now that we have some input:
         if state.lookahead + state.insert >= STD_MIN_MATCH {
             let string = state.strstart - state.insert;
-            if state.max_chain_length > 1024 {
+            if matches!(state.hash_calc_variant, HashCalcVariant::Roll) {
                 let v0 = state.window.filled()[string] as u32;
                 let v1 = state.window.filled()[string + 1] as u32;
                 state.ins_h = state.update_hash(v0, v1);
