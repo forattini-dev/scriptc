@@ -1,13 +1,10 @@
-/* require() of a JSON document: the IDENTIFIER binding is the supported
- * form (the document bakes into a comptime global, like the ESM default
- * import of the same file). Two spellings keep their fence — destructuring
- * (a JSON namespace has no static story, like the named-import twin) and
- * the bare side-effect call, where Node PARSES the document and can throw.
+/* JSON require supports identifier bindings and flat object patterns.
+ * Defaults retain an explicit refusal; bare calls keep their parse-failure
+ * fence rather than silently lowering to nothing.
  */
 "use strict";
 const pkg = require("./pkg.json");
-const { version } = require("./pkg.json");
+const { version = "unknown" } = require("./pkg.json");
 require("./pkg.json");
-
 console.log(pkg.version);
 console.log(version);

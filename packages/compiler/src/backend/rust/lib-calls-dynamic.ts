@@ -153,6 +153,11 @@ export function emitRustDynamicLibCall(
     const value = context.nextTemporary();
     return `{ let ${value} = ${context.emitExpr(arg)}; sc_dyn_get_prototype_of(&${value}) }`;
   }
+  if (expr.fn === "dyn.keySetComputed" && expr.args.length === 3 && arg?.type.kind === "dyn" &&
+    secondArg?.type.kind === "dyn" && expr.args[2]?.type.kind === "dyn" && expr.type.kind === "void") {
+    const receiver = context.nextTemporary(), key = context.nextTemporary(), value = context.nextTemporary();
+    return `{ let ${receiver} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; let ${value} = ${context.emitExpr(expr.args[2])}; sc_dyn_key_set_computed(&${receiver}, &${key}, ${value}); () }`;
+  }
   if (expr.fn === "dyn.keySet" && expr.args.length === 3 && arg?.type.kind === "dyn") {
     const keyExpr = expr.args[1];
     const valueExpr = expr.args[2];
@@ -206,6 +211,11 @@ export function emitRustDynamicLibCall(
       ? "sc_dyn_obj_keys"
       : expr.fn === "dyn.objValues" ? "sc_dyn_obj_values" : "sc_dyn_obj_entries";
     return `{ let ${value} = ${context.emitExpr(arg)}; ${helper}(&${value}) }`;
+  }
+  if ((expr.fn === "dyn.objectRestCheck" || expr.fn === "dyn.objectAssignSourceCheck") && expr.args.length === 1 && arg?.type.kind === "dyn" && expr.type.kind === "void") {
+    const value = context.nextTemporary();
+    const helper = expr.fn === "dyn.objectRestCheck" ? "sc_dyn_object_rest_check" : "sc_dyn_object_assign_source_check";
+    return `{ let ${value} = ${context.emitExpr(arg)}; ${helper}(&${value}); () }`;
   }
   if (expr.fn === "dyn.hasOwn" && expr.args.length === 2 &&
     arg?.type.kind === "dyn" && secondArg?.type.kind === "string" && expr.type.kind === "bool") {

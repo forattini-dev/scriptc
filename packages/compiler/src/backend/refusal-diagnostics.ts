@@ -2,6 +2,7 @@ import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import type { SrcLoc } from "../ir/ir.js";
 import type { LlvmUnsupportedError } from "./llvm/emitter.js";
 import type { RustUnsupportedError } from "./rust/emitter.js";
+import type { CUnsupportedError } from "./c/unsupported.js";
 
 /** The LLVM backend's tier refusal as a diagnostic. SC3xxx = backend
  * coverage (the program is fine — this backend doesn't compile it yet);
@@ -13,6 +14,11 @@ export function llvmRefusalDiag(err: LlvmUnsupportedError, entryPath: string): S
     message: err.message,
     loc: err.loc ?? { file: entryPath, start: 0, end: 0 },
   };
+}
+
+/** A named C coverage refusal, rather than an internal compiler error. */
+export function cRefusalDiag(err: CUnsupportedError, entryPath: string): ScrDiagnostic {
+  return { code: "SC3001", message: err.message, loc: err.loc ?? { file: entryPath, start: 0, end: 0 } };
 }
 
 function rustRefusalDiag(err: RustUnsupportedError, entryPath: string): ScrDiagnostic {

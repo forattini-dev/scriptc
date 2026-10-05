@@ -31,6 +31,20 @@ export function emitRustZlibCall(
 ): string | null {
   const runtimeFn = ZLIB_ONE_SHOTS[expr.fn];
   const [data, level] = expr.args;
+  if (expr.fn === "zlib.deflateRawAsync" || expr.fn === "zlib.inflateRawAsync") {
+    const compressing = expr.fn === "zlib.deflateRawAsync";
+    if (expr.args.length !== (compressing ? 2 : 1) || (compressing && level?.type.kind !== "dyn") || data?.type.kind !== "bytes" || data.type.elem !== "u8" ||
+        expr.type.kind !== "promise" || expr.type.inner.kind !== "bytes" || expr.type.inner.elem !== "u8") {
+      context.unsupported(`${expr.fn} shape`, expr.loc);
+    }
+    if (!compressing || !level) return `runtime::zlib_raw_promise(&(${context.emitExpr(data)}), false)`;
+    const input = context.nextTemporary();
+    const option = context.nextTemporary();
+    const promise = context.nextTemporary();
+    const guard = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${input} = ${context.emitExpr(data)}; let ${option} = ${context.emitExpr(level)}; let ${promise} = runtime::promise_new(); let ${guard} = ${promise}.clone(); runtime::promise_run_segment(&${guard}, || { let sc_level = match &${option} { ${dyn}::Undefined => -1.0, ${dyn}::Number(sc_number) => *sc_number, sc_value => sc_dyn_prop_type_fail("options.level", "of type number", sc_value), }; runtime::zlib_raw_promise_start(&${promise}, &${input}, true, sc_level); }); ${promise} }`;
+  }
   if (runtimeFn !== undefined) {
     const explicitLevel = expr.fn === "zlib.deflateSyncLevel";
     if (explicitLevel && level?.type.kind !== "f64") context.unsupported("deflate level shape", expr.loc);

@@ -50,6 +50,7 @@ export interface RustStatementContext {
   classDef(name: string, loc?: SrcLoc): IrClassDef;
   classFieldName(className: string, fieldName: string, loc?: SrcLoc): string;
   hasErrorClassRoots(): boolean;
+  refusesSourceStackWrite(className: string, fieldName: string): boolean;
   isEdgeValue(type: IrType): boolean;
   rustString(value: string): string;
   unsupported(kind: string, loc?: SrcLoc): never;
@@ -603,6 +604,12 @@ class RustStatementEmitter {
   }
 
   private emitFieldSet(stmt: Extract<IrStmt, { kind: "fieldSet" }>): void {
+    if (this.context.refusesSourceStackWrite(stmt.className, stmt.field)) {
+      // A capability fallback can remain in IR although its branch is
+      // unreachable. Refuse only an executed write, preserving its effects.
+      this.context.line(`{ let _target = ${this.context.emitExpr(stmt.obj)}; let _value = ${this.context.emitExpr(stmt.value)}; runtime::throw_error_code("scriptc SC1031: native Error stack writes are not implemented".to_owned(), "SC1031"); }`);
+      return;
+    }
     if (RUNTIME_ERROR_CLASSES.has(stmt.className) && (stmt.field === "name" || stmt.field === "message")) {
       const object = this.context.nextTemporary();
       const value = this.context.nextTemporary();

@@ -30,6 +30,14 @@ export function emitDynamicExpr(host: LlvmEmitterContext, e: ExprOf<"dynFrom" | 
           return host.own({ name: t, type: e.type });
         }
         const v = host.emitExpr(e.value);
+        if (v.type.kind === "object" && host.classMetaOf(v.type.className).root.def.name === "%Error") {
+          // The shared Error prefix retains the actual subclass instance;
+          // a generic typed-reference snapshot would erase its Error brand.
+          host.declare(`declare ptr @scr_dyn_from_error(ptr)`);
+          const boxed = B.tmp();
+          B.line(`${boxed} = call ptr @scr_dyn_from_error(ptr ${v.name})`);
+          return host.own({ name: boxed, type: e.type });
+        }
         const identityRef =
           isDynTypedRefType(v.type) ||
           (v.type.kind === "union" &&

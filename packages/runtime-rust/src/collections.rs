@@ -128,6 +128,12 @@ pub fn map_symbol_has<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, key: &JsSym
     map.with(|data| data.symbol_entries.iter().any(|(stored, _)| symbol_ptr_eq(stored, key)))
 }
 
+/// Presence-only inspection must not read or convert projected values.
+pub fn map_has_symbol_properties<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> bool {
+    if let Some(view) = map_view(map) { return view.has_symbol_properties(); }
+    map.with(|data| !data.symbol_entries.is_empty())
+}
+
 pub fn map_symbol_set<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, key: JsSymbol, value: V) {
     if let Some(view) = map_view(map) { view.symbol_set(key, value); return; }
     if map_is_module_namespace(map) {

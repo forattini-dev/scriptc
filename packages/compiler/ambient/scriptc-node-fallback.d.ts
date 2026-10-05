@@ -1949,11 +1949,16 @@ declare module "node:child_process" {
   export * from "child_process";
 }
 
-/* node:util — compile-time projections for child_process.execFile and
- * fs.readFile. The former retains Node's custom { stdout, stderr } result;
- * the latter resolves the callback's data argument. Other targets and bare
- * promisify values fence per site. */
+/* node:util — compile-time projections for child_process.execFile,
+ * fs.readFile, dns.lookup and the raw zlib pair. Unsupported targets and bare
+ * promisify values still fence per site. */
 declare module "util" {
+  export function promisify(
+    fn: typeof import("node:dns").lookup,
+  ): (hostname: string, options?: number | { family?: number; all?: boolean; hints?: number; order?: string; verbatim?: boolean }) => Promise<import("dns/promises").LookupAddress>;
+  export function promisify(
+    fn: typeof import("node:zlib").deflateRaw,
+  ): (data: string | Uint8Array, options?: import("node:zlib").ZlibOptions) => Promise<Buffer>;
   export function promisify(
     fn: typeof import("node:fs").readFile,
   ): (path: string, encoding: "utf8" | "utf-8") => Promise<string>;
@@ -3490,6 +3495,17 @@ declare module "dns" {
 declare module "node:dns" {
   export * from "dns";
 }
+
+/* Native promise lookups return one address. Node 24 permits a null
+ * address for an empty hostname; Node 26 rejects that input instead. */
+declare module "dns/promises" {
+  export interface LookupAddress { address: string | null; family: number; }
+  export function lookup(hostname: string, options?: number | {
+    family?: number; all?: boolean; hints?: number; order?: string; verbatim?: boolean;
+  }): Promise<LookupAddress>;
+  export function resolve4(hostname: string): Promise<string[]>;
+}
+declare module "node:dns/promises" { export * from "dns/promises"; }
 
 /* node:worker_threads — the MAIN-THREAD slice only. A compiled binary is
  * always the main thread (no JS-engine thread machinery exists), so

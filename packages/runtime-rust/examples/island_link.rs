@@ -60,7 +60,10 @@ fn imported_names(bytes: &[u8]) -> Result<Vec<JsString>, String> {
             && let ImportKind::Named { names: list, .. } = decl.kind()
         {
             for n in list {
-                let text = scratch.interner().resolve_expect(n.export_name()).to_string();
+                let text = scratch
+                    .interner()
+                    .resolve_expect(n.export_name())
+                    .to_string();
                 names.push(JsString::from(text.as_str()));
             }
         }
@@ -72,7 +75,9 @@ fn main() {
     let mut failures = 0usize;
     let mut total = 0usize;
     for path in std::env::args().skip(1) {
-        let Ok(bytes) = std::fs::read(&path) else { continue; };
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
         let text = String::from_utf8_lossy(&bytes);
         if !(path.ends_with(".mjs") || text.contains("import ") || text.contains("export ")) {
             continue;
@@ -80,17 +85,35 @@ fn main() {
         total += 1;
         let names = match imported_names(&bytes) {
             Ok(names) => names,
-            Err(error) => { println!("{path}: parse: {error}"); failures += 1; continue; }
+            Err(error) => {
+                println!("{path}: parse: {error}");
+                failures += 1;
+                continue;
+            }
         };
-        let loader = Rc::new(StubLoader { wanted: names, cache: RefCell::new(HashMap::new()) });
-        let mut context = Context::builder().module_loader(loader).build().expect("context");
+        let loader = Rc::new(StubLoader {
+            wanted: names,
+            cache: RefCell::new(HashMap::new()),
+        });
+        let mut context = Context::builder()
+            .module_loader(loader)
+            .build()
+            .expect("context");
         let mut limits = context.runtime_limits();
         limits.set_recursion_limit(8_192);
         limits.set_stack_size_limit(4 * 1024 * 1024);
         context.set_runtime_limits(limits);
-        let module = match Module::parse(Source::from_reader(&mut &bytes[..], Some(Path::new(&path))), None, &mut context) {
+        let module = match Module::parse(
+            Source::from_reader(&mut &bytes[..], Some(Path::new(&path))),
+            None,
+            &mut context,
+        ) {
             Ok(m) => m,
-            Err(error) => { println!("{path}: parse: {error}"); failures += 1; continue; }
+            Err(error) => {
+                println!("{path}: parse: {error}");
+                failures += 1;
+                continue;
+            }
         };
         let promise = module.load_link_evaluate(&mut context);
         let _ = context.run_jobs();

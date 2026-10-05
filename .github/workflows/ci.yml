@@ -402,12 +402,12 @@ jobs:
           pnpm exec vitest run packages/compiler/test/cc-driver.test.ts
           --testNamePattern "Windows CA roots honor"
 
-  # The release oracle remains the pinned Node 24 build, while the compiler
-  # itself must also load, build, and execute under Node 26. Capture the Node
-  # 24 executable before switching the job host to Node 26 so differential
-  # tests do not mistake a Node-major semantic change for a backend regression.
+  # Node 26 is the development focus; Node 24 remains a compatibility target.
+  # Run the recent Baldim-related Rust regressions with a matching target and
+  # oracle, Node 26 first, then Node 24. The existing inventory and untargeted
+  # C corpus retain their audited Node 24 denominator until separately migrated.
   node_26_host:
-    name: test (Node 26 host, Node 24 oracle)
+    name: test (Node 26 focus, Node 24 compatibility)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -430,6 +430,9 @@ jobs:
         id: node26
         shell: bash
         run: echo "executable=$(command -v node)" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Rust toolchain
+        working-directory: packages/runtime-rust
+        run: rustup show active-toolchain || rustup toolchain install
       - run: pnpm install --frozen-lockfile
       - name: Build compiler on Node 26
         run: |
@@ -440,6 +443,74 @@ jobs:
           SCRIPTC_NODE_NODE24: ${{ steps.node24.outputs.executable }}
           SCRIPTC_NODE_NODE26: ${{ steps.node26.outputs.executable }}
         run: pnpm exec vitest run tests/harness/oracle-environment.test.ts
+      - name: Baldim-related native Rust regressions (Node 26 focus)
+        env:
+          SCRIPTC_RUNTIME_TARGET: node26
+          SCRIPTC_NODE_ORACLE: ${{ steps.node26.outputs.executable }}
+          SCRIPTC_NODE_NODE24: ${{ steps.node24.outputs.executable }}
+          SCRIPTC_NODE_NODE26: ${{ steps.node26.outputs.executable }}
+        run: >-
+          pnpm exec vitest run
+          packages/compiler/test/npm-static-null-defaults.test.ts
+          packages/compiler/test/error-stack-capture.test.ts
+          packages/compiler/test/promisify-zlib.test.ts
+          packages/compiler/test/buffer-from-dynamic.test.ts
+          packages/compiler/test/js-array-constructor.test.ts
+          packages/compiler/test/zlib-node-parity.test.ts
+          packages/compiler/test/native-error-call.test.ts
+          packages/compiler/test/native-cjs-conditional-export.test.ts
+          packages/compiler/test/npm-static-inferred-js.test.ts
+          tests/harness/dns-promises.test.ts
+          tests/harness/js-late-fields.test.ts
+          packages/compiler/src/ir/dns-lookup.test.ts
+          packages/compiler/test/cjs-function-export-prefix.test.ts
+          packages/compiler/test/cjs-json-destructure.test.ts
+          packages/compiler/test/js-derived-config-factory.test.ts
+          packages/compiler/test/js-computed-assignment.test.ts
+          packages/compiler/test/class-factory-capture.test.ts
+          packages/compiler/test/js-async-instance-methods.test.ts
+          packages/compiler/src/frontend/lowering/js-async-methods.test.ts
+          packages/compiler/src/frontend/lowering/class-factory-captures.test.ts
+          packages/compiler/src/frontend/lowering/class-factory-shapes.test.ts
+          packages/compiler/src/frontend/lowering/lower-computed-assignment.test.ts
+          packages/compiler/src/frontend/require-tdz.test.ts
+          packages/compiler/src/frontend/lowering/js-factory-global.test.ts
+          packages/compiler/src/backend/rust/values.test.ts
+          --maxWorkers=1
+      - name: Baldim-related native Rust regressions (Node 24 compatibility)
+        env:
+          SCRIPTC_RUNTIME_TARGET: node24
+          SCRIPTC_NODE_ORACLE: ${{ steps.node24.outputs.executable }}
+          SCRIPTC_NODE_NODE24: ${{ steps.node24.outputs.executable }}
+          SCRIPTC_NODE_NODE26: ${{ steps.node26.outputs.executable }}
+        run: >-
+          pnpm exec vitest run
+          packages/compiler/test/npm-static-null-defaults.test.ts
+          packages/compiler/test/error-stack-capture.test.ts
+          packages/compiler/test/promisify-zlib.test.ts
+          packages/compiler/test/buffer-from-dynamic.test.ts
+          packages/compiler/test/js-array-constructor.test.ts
+          packages/compiler/test/zlib-node-parity.test.ts
+          packages/compiler/test/native-error-call.test.ts
+          packages/compiler/test/native-cjs-conditional-export.test.ts
+          packages/compiler/test/npm-static-inferred-js.test.ts
+          tests/harness/dns-promises.test.ts
+          tests/harness/js-late-fields.test.ts
+          packages/compiler/src/ir/dns-lookup.test.ts
+          packages/compiler/test/cjs-function-export-prefix.test.ts
+          packages/compiler/test/cjs-json-destructure.test.ts
+          packages/compiler/test/js-derived-config-factory.test.ts
+          packages/compiler/test/js-computed-assignment.test.ts
+          packages/compiler/test/class-factory-capture.test.ts
+          packages/compiler/test/js-async-instance-methods.test.ts
+          packages/compiler/src/frontend/lowering/js-async-methods.test.ts
+          packages/compiler/src/frontend/lowering/class-factory-captures.test.ts
+          packages/compiler/src/frontend/lowering/class-factory-shapes.test.ts
+          packages/compiler/src/frontend/lowering/lower-computed-assignment.test.ts
+          packages/compiler/src/frontend/require-tdz.test.ts
+          packages/compiler/src/frontend/lowering/js-factory-global.test.ts
+          packages/compiler/src/backend/rust/values.test.ts
+          --maxWorkers=1
       - name: C corpus smoke on Node 26 host
         env:
           SCRIPTC_NODE_ORACLE: ${{ steps.node24.outputs.executable }}

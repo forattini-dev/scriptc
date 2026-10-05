@@ -2,6 +2,8 @@ import { lowerNumericParser } from "./lower-numeric-parser.js";
 import { lowerFsWriteOptions } from "./lower-fs-write-options.js";
 import { fsConstantValue } from "./fs-constants.js";
 import { lowerDeflateLevel, lowerZlibModuleCall } from "./lower-zlib.js";
+import { registerPromisifiedZlibRaw } from "./lower-promisify-zlib.js";
+import { registerPromisifiedDnsLookup } from "./lower-dns-promises.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Builtin-surface lowering: node builtin-module calls (fs, path, os, url,
  * crypto, child_process spawn/spawnSync and child/stats/spawn-result
@@ -3182,10 +3184,10 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return name;
   }
 
-/** `const execFileAsync = promisify(execFile)` — the ONE lowered
-   * util.promisify shape. Returns true (and registers the declared symbol
+/** Register direct-call projections of util.promisify for imported execFile
+   * and the raw zlib pair. Returns true (and registers the declared symbol
    * so call sites lower and value uses fence) when `init` is a promisify
-   * call over a child_process.execFile import binding; a promisify call
+   * call over one of these builtin import bindings; a promisify call
    * over anything else fences HERE with the supported-target hint (the
    * declaration is where the target is visible). False for non-promisify
    * initializers, so the ordinary declaration paths apply. */
@@ -3210,11 +3212,13 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (!e) return false;
     const argNode = e.arguments.length === 1 ? e.arguments[0]! : null;
     const target = argNode && ts.isIdentifier(argNode) ? lowerer.builtinImportOf(argNode) : null;
+    if (registerPromisifiedZlibRaw(lowerer, nameNode, target)) return true;
+    if (registerPromisifiedDnsLookup(lowerer, nameNode, target)) return true;
     if (!target || target.module !== "child_process" || target.member !== "execFile") {
       lowerer.noLowering(
         "util.promisify of this target",
         argNode ?? e,
-        "child_process.execFile is the one promisifiable target: const execFileAsync = promisify(execFile)",
+        "supported const bindings: promisify(execFile), promisify(deflateRaw), promisify(inflateRaw), promisify(lookup); call the binding directly",
       );
     }
     const symbol = lowerer.checker.getSymbolAtLocation(nameNode);
@@ -6077,7 +6081,6 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
     if (
       (expr.name.text === "node" || expr.name.text === "openssl") &&
       !expr.questionDotToken &&
-      ts.isPropertyAccessExpression(expr.expression) &&
       lowerer.stdlibGlobalMember(expr.expression, "process") === "versions"
     ) {
       // versions.openssl answers the compat target's string for the same
@@ -6230,7 +6233,7 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
 /** True iff `node` is THE ambient `process.env` object itself (the
    * receiver of an env read). */
   export function isProcessEnv(lowerer: Lowerer, node: ts.Expression): boolean {
-    return ts.isPropertyAccessExpression(node) && lowerer.stdlibGlobalMember(node, "process") === "env";
+    return lowerer.stdlibGlobalMember(node, "process") === "env";
   }
 
 /** The interned `string | undefined` union — the type every env read
@@ -6710,11 +6713,14 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
    * (the element form lands in lowerElementAccess). getenv(3) at runtime:
    * present wraps the string arm, absent yields the interned
    * undefined-arm instance. Null for non-env receivers. */
-  export function lowerProcessEnvGet(lowerer: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+  export function lowerProcessEnvGet(lowerer: Lowerer, expr: ts.PropertyAccessExpression | ts.ElementAccessExpression): IrExpr | null {
     if (expr.questionDotToken) return null;
     if (!lowerer.isProcessEnv(expr.expression)) return null;
     const loc = locOf(expr);
-    const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
+    const key: IrExpr = ts.isPropertyAccessExpression(expr)
+      ? { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) }
+      : lowerer.lowerExpr(expr.argumentExpression);
+    if (key.type.kind !== "string") lowerer.unsupported("SC1090", expr, "indexing process.env with non-string keys");
     return { kind: "libCall", fn: "process.envGet", args: [key], type: lowerer.envValueType(), loc };
   }
 

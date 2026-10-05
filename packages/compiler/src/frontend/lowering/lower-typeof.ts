@@ -61,6 +61,10 @@ export function lowerBuiltinTypeof(L: Lowerer, expr: ts.TypeOfExpression, loc: S
   // probe must therefore answer "function" without materializing a
   // bound method value.
   if (ts.isPropertyAccessExpression(expr.expression)) {
+    const member = expr.expression;
+    if (!L.dynamic && !member.questionDotToken && member.name.text === "captureStackTrace" && L.isStdlibGlobal(member.expression, "Error")) {
+      return { kind: "strLit", value: "function", type: STRING, loc };
+    }
     const processMember = L.stdlibGlobalMember(expr.expression, "process");
     if (processMember === "getuid" || processMember === "getgid") {
       return { kind: "strLit", value: "function", type: STRING, loc };

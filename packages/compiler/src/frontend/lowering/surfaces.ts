@@ -10,6 +10,7 @@ import type { Lowerer } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
 import { BOOL, BYTES_U8, CHILD_T, CRYPTOHASH_T, CRYPTOHMAC_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrStrIntrinsicMethod, IrType, RUNTIME_ERROR_CLASSES, SPAWNRES_T, STATS_T, STRING, URL_T, VOID, arrayOf } from "../../ir/ir.js";
 import { isNodeTypesPath, requireSpecOf } from "../program.js";
+import { processModuleMemberAliasOf } from "../process-module.js";
 
 /** Statement-level constructs rejected wholesale, keyed by syntax kind. */
 export const UNSUPPORTED_STMT: Partial<Record<ts.SyntaxKind, { code: keyof typeof UNSUPPORTED; feature?: string }>> = {
@@ -913,6 +914,7 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
   // special-cased); the keys exist for the same reason net/http's do.
   dgram: {},
   dns: {},
+  "dns/promises": {},
   // node:assert lowers ENTIRELY through the assert spoke (lower-assert.ts
   // — every call shape is special-cased: optional messages complete, the
   // comparisons pick per-type libCalls, deep equality synthesizes
@@ -1187,8 +1189,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
   },
   util: {
     promisify:
-      "the one lowered shape is a const binding over child_process.execFile: " +
-      "const execFileAsync = promisify(execFile), then call execFileAsync directly",
+      "supported direct const bindings: promisify(execFile), promisify(readFile) with utf8, " +
+      "and (Rust) promisify(deflateRaw)/promisify(inflateRaw)/promisify(lookup); other targets and escaping values remain fenced",
     // child_process.execFile itself exists to be promisified — the same
     // story from the other end.
   },
@@ -1347,8 +1349,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       member === "stack"
     ) {
       hint =
-        "stack traces are not captured (frames would need runtime bookkeeping); " +
-        "name, message, and toString() are available";
+        "native source stack capture is limited to the Rust backend's qualified synchronous Error shapes; " +
+        "name, message, and toString() remain available on the other native backends";
     } else if (container === "process.stdin" || (container === "process" && member === "stdin")) {
       hint =
         "isTTY, destroy(), on/once of the data/end/error events, and " +
@@ -1541,8 +1543,12 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * standard-library global `name` (console, JSON, process, Math). Null for
    * anything else, so property-lowering chains keep trying other
    * receivers. */
-  export function stdlibGlobalMember(lowerer: Lowerer, access: ts.PropertyAccessExpression, name: string): string | null {
-    if (access.questionDotToken) return null;
+  export function stdlibGlobalMember(lowerer: Lowerer, access: ts.Expression, name: string): string | null {
+    if (name === "process") {
+      const member = processModuleMemberAliasOf(lowerer.checker, access);
+      if (member !== null) return member;
+    }
+    if (!ts.isPropertyAccessExpression(access) || access.questionDotToken) return null;
     return lowerer.isStdlibGlobal(access.expression, name) ? access.name.text : null;
   }
 

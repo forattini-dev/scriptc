@@ -342,9 +342,9 @@
       "apiEntries": 51,
       "static": {
         "supported": 0,
-        "partial": 0,
+        "partial": 2,
         "refused": 0,
-        "not-implemented": 51,
+        "not-implemented": 49,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -20133,7 +20133,7 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
+        "status": "partial",
         "detail": "Derived from the exact API rows in this chapter.",
         "verification": "derived"
       },
@@ -20245,9 +20245,9 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "detail": "No static compiler lowering is registered for this API yet.",
-        "verification": "registry-gap"
+        "status": "partial",
+        "detail": "Rust direct calls with a string hostname and omitted options, a numeric family, or a plain family-options record, including runtime-built records. Families 0, 4 and 6 return one result. Other options and methods remain refused; OS resolution is synchronous and resolver error parity is incomplete.",
+        "verification": "test-backed"
       },
       "dynamic": {
         "status": "refused",

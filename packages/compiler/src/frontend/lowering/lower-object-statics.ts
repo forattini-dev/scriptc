@@ -15,6 +15,7 @@ import { lowerObjectAssignIndexShape } from "./lower-containers.js";
 import { droppableStatic, probeLower } from "./lower-exprs.js";
 import { lowerObjectAssignSchema } from "./lower-schema.js";
 import { lowerSqlClientDecorate } from "./lower-sql-client.js";
+import { lowerObjectAssignClass } from "./lower-object-assign-class.js";
 
   /** Legacy robust-own-property idiom emitted by transpilers and agents:
    * Object.prototype.hasOwnProperty.call(obj, key). */
@@ -327,6 +328,8 @@ import { lowerSqlClientDecorate } from "./lower-sql-client.js";
       if (sqlClient) return sqlClient;
       const hybrid = lowerObjectAssignHybrid(lowerer, call);
       if (hybrid) return hybrid;
+      const classAssign = lowerObjectAssignClass(lowerer, call);
+      if (classAssign) return classAssign;
       // `Object.assign({}, lit)` and
       // `Object.assign(Object.create(null) as Record<string, T>, lit)` —
       // an EMPTY fresh target and one object-literal source. The result is

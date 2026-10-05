@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { BOOL, F64, STRING, UNDEFINED_T, VOID, arrayOf, type IrExpr, type IrModule, type IrType } from "./ir.js";
+import { BOOL, DYN, F64, MAY_THROW_LIB_FNS, STRING, UNDEFINED_T, VOID, arrayOf, type IrExpr, type IrModule, type IrType } from "./ir.js";
 import { deserializeModule, serializeModule } from "./serialize.js";
 import { validateModule } from "./validate.js";
 
@@ -22,6 +22,23 @@ test("numeric array-read intrinsic validates and round-trips", () => {
   const mod = numericReadModule();
   expect(validateModule(mod)).toEqual([]);
   expect(deserializeModule(serializeModule(mod))).toEqual(mod);
+});
+
+test("computed dynamic assignment validates its unconverted key ABI and throwing effect", () => {
+  const mod = numericReadModule();
+  const value: IrExpr = { kind: "dynObjLit", fields: [], type: DYN, loc };
+  const write: IrExpr = { kind: "libCall", fn: "dyn.keySetComputed", args: [value, value, value], type: VOID, loc };
+  const entry = mod.functions[0];
+  if (!entry) throw new Error("expected an entry function");
+  entry.body = [{ kind: "exprStmt", expr: write, loc }];
+  expect(validateModule(mod)).toEqual([]);
+  expect(deserializeModule(serializeModule(mod))).toEqual(mod);
+  expect(MAY_THROW_LIB_FNS.has("dyn.keySetComputed")).toBe(true);
+  write.args[1] = { kind: "strLit", value: "key", type: STRING, loc };
+  expect(validateModule(mod).length).toBeGreaterThan(0);
+  write.args = [value, value, value];
+  write.type = DYN;
+  expect(validateModule(mod).length).toBeGreaterThan(0);
 });
 
 test("omitted process.exit code validates as a zero-argument terminating call", () => {

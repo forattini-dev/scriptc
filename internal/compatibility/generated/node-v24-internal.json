@@ -391,9 +391,9 @@
       "apiEntries": 51,
       "static": {
         "supported": 0,
-        "partial": 0,
+        "partial": 2,
         "refused": 0,
-        "not-implemented": 51,
+        "not-implemented": 49,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -35119,8 +35119,14 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "derived:descendants"
+        "status": "partial",
+        "evidence": "derived:descendants",
+        "tests": [
+          "tests/corpus/3451-dns-promises-lookup.ts",
+          "tests/corpus/3452-dns-promises-errors.js",
+          "tests/corpus/3453-dns-promisify-lookup.js",
+          "tests/harness/dns-promises.test.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -35263,8 +35269,15 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:dns"
+        "status": "partial",
+        "evidence": "compiler-feature:dns.dnsPromises.lookup",
+        "tests": [
+          "tests/corpus/3451-dns-promises-lookup.ts",
+          "tests/corpus/3452-dns-promises-errors.js",
+          "tests/corpus/3453-dns-promisify-lookup.js",
+          "tests/harness/dns-promises.test.ts"
+        ],
+        "publicDetail": "Rust direct calls with a string hostname and omitted options, a numeric family, or a plain family-options record, including runtime-built records. Families 0, 4 and 6 return one result. Other options and methods remain refused; OS resolution is synchronous and resolver error parity is incomplete."
       },
       "dynamic": {
         "status": "refused",
@@ -110353,7 +110366,13 @@
           "tests/corpus/1473-promisify-execfile.ts",
           "tests/corpus/1573-promisify-execfile-env-spread.ts",
           "tests/corpus/2440-console-inspect-args.ts",
-          "tests/corpus/2912-promisify-fs-readfile.ts"
+          "tests/corpus/2912-promisify-fs-readfile.ts",
+          "tests/corpus/3393-promisify-zlib-raw.ts",
+          "tests/corpus/3394-promisify-zlib-level.ts",
+          "tests/corpus/3395-promisify-zlib-string.ts",
+          "tests/corpus/3396-promisify-zlib-errors.js",
+          "tests/corpus/3453-dns-promisify-lookup.js",
+          "tests/harness/dns-promises.test.ts"
         ]
       },
       "dynamic": {
@@ -112070,7 +112089,13 @@
         "tests": [
           "tests/corpus/1473-promisify-execfile.ts",
           "tests/corpus/1573-promisify-execfile-env-spread.ts",
-          "tests/corpus/2912-promisify-fs-readfile.ts"
+          "tests/corpus/2912-promisify-fs-readfile.ts",
+          "tests/corpus/3393-promisify-zlib-raw.ts",
+          "tests/corpus/3394-promisify-zlib-level.ts",
+          "tests/corpus/3395-promisify-zlib-string.ts",
+          "tests/corpus/3396-promisify-zlib-errors.js",
+          "tests/corpus/3453-dns-promisify-lookup.js",
+          "tests/harness/dns-promises.test.ts"
         ]
       },
       "dynamic": {
@@ -125856,8 +125881,13 @@
         "status": "partial",
         "evidence": "derived:descendants",
         "tests": [
+          "packages/compiler/test/promisify-zlib.test.ts",
           "tests/corpus/1404-zlib-crypto-bytes.ts",
-          "tests/corpus/2921-zlib-callbacks.ts"
+          "tests/corpus/2921-zlib-callbacks.ts",
+          "tests/corpus/3393-promisify-zlib-raw.ts",
+          "tests/corpus/3394-promisify-zlib-level.ts",
+          "tests/corpus/3395-promisify-zlib-string.ts",
+          "tests/corpus/3396-promisify-zlib-errors.js"
         ]
       },
       "dynamic": {
@@ -127003,8 +127033,12 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.deflateRaw",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts",
-          "tests/corpus/2921-zlib-callbacks.ts"
+          "tests/corpus/2921-zlib-callbacks.ts",
+          "tests/corpus/3393-promisify-zlib-raw.ts",
+          "tests/corpus/3394-promisify-zlib-level.ts",
+          "tests/corpus/3395-promisify-zlib-string.ts",
+          "tests/corpus/3396-promisify-zlib-errors.js",
+          "packages/compiler/test/promisify-zlib.test.ts"
         ]
       },
       "dynamic": {
@@ -127275,8 +127309,12 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.inflateRaw",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts",
-          "tests/corpus/2921-zlib-callbacks.ts"
+          "tests/corpus/2921-zlib-callbacks.ts",
+          "tests/corpus/3393-promisify-zlib-raw.ts",
+          "tests/corpus/3394-promisify-zlib-level.ts",
+          "tests/corpus/3395-promisify-zlib-string.ts",
+          "tests/corpus/3396-promisify-zlib-errors.js",
+          "packages/compiler/test/promisify-zlib.test.ts"
         ]
       },
       "dynamic": {
@@ -128271,8 +128309,12 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.deflateRaw",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts",
-          "tests/corpus/2921-zlib-callbacks.ts"
+          "tests/corpus/2921-zlib-callbacks.ts",
+          "tests/corpus/3393-promisify-zlib-raw.ts",
+          "tests/corpus/3394-promisify-zlib-level.ts",
+          "tests/corpus/3395-promisify-zlib-string.ts",
+          "tests/corpus/3396-promisify-zlib-errors.js",
+          "packages/compiler/test/promisify-zlib.test.ts"
         ]
       },
       "dynamic": {
@@ -128543,8 +128585,12 @@
         "status": "partial",
         "evidence": "surface-manifest:node-builtin.zlib.inflateRaw",
         "tests": [
-          "tests/corpus/1404-zlib-crypto-bytes.ts",
-          "tests/corpus/2921-zlib-callbacks.ts"
+          "tests/corpus/2921-zlib-callbacks.ts",
+          "tests/corpus/3393-promisify-zlib-raw.ts",
+          "tests/corpus/3394-promisify-zlib-level.ts",
+          "tests/corpus/3395-promisify-zlib-string.ts",
+          "tests/corpus/3396-promisify-zlib-errors.js",
+          "packages/compiler/test/promisify-zlib.test.ts"
         ]
       },
       "dynamic": {

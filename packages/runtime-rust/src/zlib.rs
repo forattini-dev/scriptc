@@ -133,10 +133,84 @@ pub fn zlib_crc32(input: &JsBytes<u8>, value: f64) -> f64 {
 /// exception slots, and callback execution stay on the owning thread.
 type ZlibCodecCallback = Box<dyn FnOnce(Option<JsError>, Option<JsBytes<u8>>)>;
 
+/// Promise projection of the existing error-first raw codec. Scheduling and
+/// buffer ownership stay identical to the callback path on the owning thread.
+pub fn zlib_raw_promise(input: &JsBytes<u8>, compressing: bool) -> JsPromise<JsBytes<u8>> {
+    let promise = promise_new();
+    let guard = promise.clone();
+    promise_run_segment(&guard, || {
+        zlib_raw_promise_start(&promise, input, compressing, -1.0)
+    });
+    promise
+}
+
+/// Called inside a promise segment: option-validation throws become rejections,
+/// and successful codecs retain the error-first path's deferred completion.
+pub fn zlib_raw_promise_start(
+    promise: &JsPromise<JsBytes<u8>>,
+    input: &JsBytes<u8>,
+    compressing: bool,
+    level: f64,
+) {
+    let compression = zlib_raw_compression_level(level);
+    let target = promise.clone();
+    zlib_codec_async_level(
+        input,
+        1,
+        compressing,
+        compression,
+        Box::new(move |error, value| {
+            if let Some(error) = error {
+                let _ = promise_reject(&target, caught_value(error));
+            } else {
+                let _ = promise_fulfill(
+                    &target,
+                    value.expect("scriptc: zlib success without a Buffer"),
+                );
+            }
+        }),
+    );
+}
+
+fn zlib_raw_compression_level(level: f64) -> Compression {
+    if level.is_nan() || level == -1.0 {
+        return Compression::default();
+    }
+    if !level.is_finite() {
+        throw_range_error_code(
+            format!(
+                "The value of \"options.level\" is out of range. It must be a finite number. Received {}",
+                format_number(level)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    if !(-1.0..=9.0).contains(&level) {
+        throw_range_error_code(
+            format!(
+                "The value of \"options.level\" is out of range. It must be >= -1 and <= 9. Received {}",
+                format_number(level)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    Compression::new(level as u32)
+}
+
 pub fn zlib_codec_async(
     input: &JsBytes<u8>,
     mode: u8,
     compressing: bool,
+    callback: ZlibCodecCallback,
+) {
+    zlib_codec_async_level(input, mode, compressing, Compression::default(), callback);
+}
+
+fn zlib_codec_async_level(
+    input: &JsBytes<u8>,
+    mode: u8,
+    compressing: bool,
+    level: Compression,
     callback: ZlibCodecCallback,
 ) {
     let input = input.clone();
@@ -145,7 +219,9 @@ pub fn zlib_codec_async(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match (mode, compressing) {
                 (0, true) => zlib_deflate_sync(&input),
                 (0, false) => zlib_inflate_sync(&input),
-                (1, true) => zlib_deflate_raw_sync(&input),
+                (1, true) => bytes_from_elements(zlib_with_input(&input, |source| {
+                    zlib_compress_bytes_level(source, false, level)
+                })),
                 (1, false) => zlib_inflate_raw_sync(&input),
                 (2, true) => zlib_gzip_sync(&input),
                 (2, false) => zlib_gunzip_sync(&input),

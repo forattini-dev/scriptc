@@ -48,7 +48,7 @@ const ZLIB_CALLBACK_FNS: Readonly<Record<string, IrLibFn | undefined>> = {
   unzip: "zlib.unzipCb",
 };
 
-function zlibInputBytes(lowerer: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr {
+export function zlibInputBytes(lowerer: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr {
   const value = lowerer.lowerExpr(node);
   if (value.type.kind === "bytes" && value.type.elem === "u8") return value;
   if (value.type.kind === "string") {

@@ -145,6 +145,10 @@ export class RustValueEmitter {
     const global = this.context.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
+      if (type.kind === "func" && !global.mutable) {
+        const message = this.context.rustString(`Cannot access '${global.name}' before initialization`);
+        return `${name}.with(|slot| slot.borrow().as_ref().cloned().unwrap_or_else(|| runtime::throw_reference_error("${message}".to_owned())))`;
+      }
       if (this.isHeapRoot(type) || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "generator") {
         return `${name}.with(|slot| slot.borrow().as_ref().expect("scriptc: uninitialized global").clone())`;
       }

@@ -1,4 +1,5 @@
 import type { RustDynamicContext } from "./dynamic-context.js";
+import { moduleHasLibCall } from "../../ir/ir.js";
 
 export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   const name = context.dynTypeName();
@@ -8,6 +9,27 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
       return shape === undefined ? [] : [context.dynFunctionVariant(shape)];
     })
     .filter((variant, index, variants) => variants.indexOf(variant) === index);
+  const errorRoots = context.errorClassRoots();
+  const classTypes = [...new Set((moduleHasLibCall(context.module(), "dyn.objectRestCheck") || moduleHasLibCall(context.module(), "dyn.objectAssignSourceCheck") ? context.module().classes ?? [] : [])
+    .filter(cls => cls.runtime !== true)
+    .map(cls => context.classMetaOf(cls.name).root)
+    .filter(root => !errorRoots.includes(root))
+    .map(root => context.rustType({ kind: "object", className: root.def.name })))];
+  context.line(`fn sc_dyn_object_data_check(value: &${name}, operation: &str) {`);
+  context.pushIndent();
+  context.line(`if let ${name}::Object(object) = value {`);
+  context.pushIndent();
+  context.line("let is_error = SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().any(|(_, _, cached)| cached.identity() == object.identity()));");
+  context.line(`let is_class_capsule = ${classTypes.map(type => `runtime::live_dyn_ref_get::<${type}>(object.identity()).is_some()`).join(" || ") || "false"};`);
+  context.line('let has_unsupported_symbols = operation == "Object.assign source" && runtime::map_has_symbol_properties(object);');
+  context.line("if !is_error && !is_class_capsule && !runtime::map_is_module_namespace(object) && !runtime::map_is_proxy_restricted(object) && !has_unsupported_symbols { return; }");
+  context.popIndent();
+  context.line("}");
+  context.line('runtime::throw_error_code(format!("scriptc SC1031: checked-dynamic {operation} requires an ordinary object without descriptor-defined properties"), "SC1031");');
+  context.popIndent();
+  context.line("}");
+  context.line(`fn sc_dyn_object_rest_check(value: &${name}) { sc_dyn_object_data_check(value, "object rest"); }`);
+  context.line(`fn sc_dyn_object_assign_source_check(value: &${name}) { sc_dyn_object_data_check(value, "Object.assign source"); }`);
   context.line(`fn sc_dyn_obj_walk_push(output: &runtime::JsArray<${name}>, mode: u8, key: runtime::JsString, value: ${name}) {`);
   context.pushIndent();
   context.line("let item = match mode {");

@@ -1,7 +1,7 @@
 /* Cheap whole-module may-throw analysis (see computeMayThrow). Pure function
  * of the IR module; the emitter consults the result to place unwind checks. */
 import type { IrArrIntrinsicMethod, IrBytesIntrinsicMethod, IrLibFn, IrModule, IrStrIntrinsicMethod } from "../../ir/ir.js";
-import { isFfiCallbackParam, MAY_THROW_ARR_METHODS, MAY_THROW_BYTES_METHODS, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS } from "../../ir/ir.js";
+import { ERROR_TOSTRING_DISPATCH_FN, isFfiCallbackParam, MAY_THROW_ARR_METHODS, MAY_THROW_BYTES_METHODS, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS } from "../../ir/ir.js";
 import { hasRetainedFfiCallback } from "../ffi-callbacks.js";
 
 /** Cheap may-throw analysis (cost discipline: functions that transitively
@@ -21,6 +21,7 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
     callsValue: boolean;
   }
   const facts = new Map<string, Facts>();
+  const errorDispatch = mod.functions.some((fn) => fn.name === ERROR_TOSTRING_DISPATCH_FN);
   const closureTargets = new Set<string>();
   // FUNC-targeted dynChecks synthesize adapter closures outside the IR's
   // closure table; any callValue may then reach a throwing body.
@@ -156,6 +157,14 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           if (vt === "dyn" || vt === "record" || vt === "array" || vt === "union") f.throws = true;
           break;
         }
+        case "toString":
+          // Generated dyn walkers invoke native Error hooks, including
+          // errors nested inside arrays. Attribute that hidden call edge
+          // to the IR dispatcher so pure overrides retain their fast path.
+          if (errorDispatch && (rec["operand"] as { type?: { kind?: string } }).type?.kind === "dyn") {
+            f.callees.push(ERROR_TOSTRING_DISPATCH_FN);
+          }
+          break;
         case "jsOp":
         case "jsExit":
         case "jsMarshal":

@@ -29,6 +29,8 @@ island-eval = ["dep:boa_engine", "boa_engine/intl_bundled", "boa_engine/temporal
 boa_engine = { version = "=0.22.0", default-features = false, optional = true }
 chrono = { version = "=0.4.39", default-features = false, features = ["clock", "std"] }
 flate2 = { version = "=1.1.9", default-features = false, features = ["zlib-rs"] }
+# Select Node's level-6 algorithm without changing the numeric level or tuning.
+zlib-rs = { version = "=0.6.7", default-features = false, features = ["scriptc-node-level6"] }
 getrandom = "=0.4.3"
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
@@ -81,6 +83,8 @@ boa_parser = "=0.22.0"
 boa_interner = "=0.22.0"
 
 [patch.crates-io]
+# Node's default compressor uses slow matching at level 6, unlike upstream's medium.
+zlib-rs = { path = "vendor/zlib-rs" }
 # Preserve file-path empty segments for Node-compatible relative URL resolution.
 url = { path = "vendor/url" }
 boa_engine = { path = "vendor/boa_engine" }

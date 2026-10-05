@@ -82,8 +82,8 @@ Options:
       --npm-static <pkg[,pkg…]|auto>
                      compile the named npm packages' shipped JS statically as
                      program modules (repeatable; "auto" opts in every eligible
-                     direct import: own .d.ts, unminified JS, no build-transform
-                     markers). A package preflight refuses falls back to the
+                     reachable package: readable JS/TS, verified types when
+                     present, no bundler runtime). A preflight refusal falls back to the
                      island (--dynamic) with a coverage-report note — opt-in,
                      experimental
       --types-mode <auto|local|offline>

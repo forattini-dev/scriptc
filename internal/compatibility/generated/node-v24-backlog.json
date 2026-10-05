@@ -8,8 +8,8 @@
     "tiers": {
       "static": {
         "replace-refusal": 49,
-        "verify-gap": 2572,
-        "audit-partial": 590,
+        "verify-gap": 2571,
+        "audit-partial": 591,
         "classify": 3,
         "implement": 81
       },
@@ -16072,12 +16072,17 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:dns",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "compiler-feature:dns.dnsPromises.lookup",
+          "tests": [
+            "tests/corpus/3451-dns-promises-lookup.ts",
+            "tests/corpus/3452-dns-promises-errors.js",
+            "tests/corpus/3453-dns-promisify-lookup.js",
+            "tests/harness/dns-promises.test.ts"
+          ]
         },
         "dynamic": {
           "status": "refused",
@@ -94984,7 +94989,13 @@
           "tests": [
             "tests/corpus/1473-promisify-execfile.ts",
             "tests/corpus/1573-promisify-execfile-env-spread.ts",
-            "tests/corpus/2912-promisify-fs-readfile.ts"
+            "tests/corpus/2912-promisify-fs-readfile.ts",
+            "tests/corpus/3393-promisify-zlib-raw.ts",
+            "tests/corpus/3394-promisify-zlib-level.ts",
+            "tests/corpus/3395-promisify-zlib-string.ts",
+            "tests/corpus/3396-promisify-zlib-errors.js",
+            "tests/corpus/3453-dns-promisify-lookup.js",
+            "tests/harness/dns-promises.test.ts"
           ]
         },
         "dynamic": {
@@ -109400,8 +109411,12 @@
           "confidence": "high",
           "source": "surface-manifest:node-builtin.zlib.deflateRaw",
           "tests": [
-            "tests/corpus/1404-zlib-crypto-bytes.ts",
-            "tests/corpus/2921-zlib-callbacks.ts"
+            "tests/corpus/2921-zlib-callbacks.ts",
+            "tests/corpus/3393-promisify-zlib-raw.ts",
+            "tests/corpus/3394-promisify-zlib-level.ts",
+            "tests/corpus/3395-promisify-zlib-string.ts",
+            "tests/corpus/3396-promisify-zlib-errors.js",
+            "packages/compiler/test/promisify-zlib.test.ts"
           ]
         },
         "dynamic": {
@@ -109704,8 +109719,12 @@
           "confidence": "high",
           "source": "surface-manifest:node-builtin.zlib.inflateRaw",
           "tests": [
-            "tests/corpus/1404-zlib-crypto-bytes.ts",
-            "tests/corpus/2921-zlib-callbacks.ts"
+            "tests/corpus/2921-zlib-callbacks.ts",
+            "tests/corpus/3393-promisify-zlib-raw.ts",
+            "tests/corpus/3394-promisify-zlib-level.ts",
+            "tests/corpus/3395-promisify-zlib-string.ts",
+            "tests/corpus/3396-promisify-zlib-errors.js",
+            "packages/compiler/test/promisify-zlib.test.ts"
           ]
         },
         "dynamic": {
@@ -110334,8 +110353,12 @@
           "confidence": "high",
           "source": "surface-manifest:node-builtin.zlib.deflateRaw",
           "tests": [
-            "tests/corpus/1404-zlib-crypto-bytes.ts",
-            "tests/corpus/2921-zlib-callbacks.ts"
+            "tests/corpus/2921-zlib-callbacks.ts",
+            "tests/corpus/3393-promisify-zlib-raw.ts",
+            "tests/corpus/3394-promisify-zlib-level.ts",
+            "tests/corpus/3395-promisify-zlib-string.ts",
+            "tests/corpus/3396-promisify-zlib-errors.js",
+            "packages/compiler/test/promisify-zlib.test.ts"
           ]
         },
         "dynamic": {
@@ -110638,8 +110661,12 @@
           "confidence": "high",
           "source": "surface-manifest:node-builtin.zlib.inflateRaw",
           "tests": [
-            "tests/corpus/1404-zlib-crypto-bytes.ts",
-            "tests/corpus/2921-zlib-callbacks.ts"
+            "tests/corpus/2921-zlib-callbacks.ts",
+            "tests/corpus/3393-promisify-zlib-raw.ts",
+            "tests/corpus/3394-promisify-zlib-level.ts",
+            "tests/corpus/3395-promisify-zlib-string.ts",
+            "tests/corpus/3396-promisify-zlib-errors.js",
+            "packages/compiler/test/promisify-zlib.test.ts"
           ]
         },
         "dynamic": {

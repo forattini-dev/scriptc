@@ -24,9 +24,9 @@ import { InternalCompilerError } from "../../errors.js";
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrType } from "../../ir/ir.js";
-import { DYN_HANDLE_KINDS, isDynTypedRefType, isRefCounted, typeKey } from "../../ir/ir.js";
+import { DYN_HANDLE_KINDS, ERROR_TOSTRING_DISPATCH_FN, isDynTypedRefType, isRefCounted, typeKey } from "../../ir/ir.js";
 import { dynDesc, undefinedArmTag } from "../../ir/analysis.js";
-import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { llvmCommentText } from "./common.js";
 import { arrNewCall, elemAccess, llFieldType, releaseSym, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -67,6 +67,8 @@ export const DYN_KIND = {
 export interface DynHost extends WalkerHost {
   unitInstanceRef(unionId: string, tag: number): string;
   liveDynRefAdapter(t: IrType): { snapshot: string; commit: string };
+  errorClassInterval(className: string): { pre: number; post: number } | null;
+  errorToStringOverrideIntervals(): readonly { pre: number; post: number }[];
 }
 
 /** Exact double literal (the emitter's f64Lit — the walkers' copy). */
@@ -91,7 +93,7 @@ export class LlDyn {
   /** Emitted function definitions, in interning order. */
   readonly defs: string[] = [];
 
-  constructor(private readonly host: DynHost) {}
+  constructor(private readonly host: DynHost, readonly hasErrorToStringDispatch = false) {}
 
   private get S(): "i32" | "i64" { return this.host.sizeType; }
   private abiOffset(native64: number, wasm32: number): number {
@@ -585,6 +587,45 @@ export class LlDyn {
     host.declare(`declare void @scr_dyn_check_fail(ptr, ptr, ptr)`);
     const want = host.cstr(dynDesc(t, this.host.recordsById, this.host.unionsById));
     const B = new BlockBuilder();
+    const errorClass = t.kind === "object" ? host.errorClassInterval(t.className) : null;
+    if (errorClass) {
+      // Cache lookup retains the actual Error, preserving its fields and
+      // dynamic subclass brand. Both branches consume that owned reference.
+      host.declare(`declare ptr @scr_errdyn_err_of(ptr)`);
+      host.declare(`declare void @scr_error_release_v(ptr)`);
+      const error = B.tmp();
+      const hasError = B.tmp();
+      B.line(`${error} = call ptr @scr_errdyn_err_of(ptr %d)`);
+      B.line(`${hasError} = icmp ne ptr ${error}, null`);
+      const lError = B.newLabel("dc.error");
+      const lUncached = B.newLabel("dc.uncached");
+      B.condBr(hasError, lError, lUncached);
+      B.startBlock(lError);
+      const vtSlot = B.tmp();
+      const vt = B.tmp();
+      const preSlot = B.tmp();
+      const pre = B.tmp();
+      const above = B.tmp();
+      const below = B.tmp();
+      const matches = B.tmp();
+      B.line(`${vtSlot} = getelementptr inbounds %ScrError, ptr ${error}, i64 0, i32 1`);
+      B.line(`${vt} = load ptr, ptr ${vtSlot}`);
+      B.line(`${preSlot} = getelementptr inbounds %ScrVt, ptr ${vt}, i64 0, i32 0`);
+      B.line(`${pre} = load ${host.sizeType}, ptr ${preSlot}`);
+      B.line(`${above} = icmp uge ${host.sizeType} ${pre}, ${errorClass.pre}`);
+      B.line(`${below} = icmp ule ${host.sizeType} ${pre}, ${errorClass.post}`);
+      B.line(`${matches} = and i1 ${above}, ${below}`);
+      const lMatch = B.newLabel("dc.error.match");
+      const lMismatch = B.newLabel("dc.error.mismatch");
+      B.condBr(matches, lMatch, lMismatch);
+      B.startBlock(lMatch);
+      B.terminate(`ret ptr ${error}`);
+      B.startBlock(lMismatch);
+      B.line(`call void @scr_error_release_v(ptr ${error})`);
+      B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${want}, ptr %d)`);
+      B.terminate(`ret ptr null`);
+      B.startBlock(lUncached);
+    }
     if (isRefCounted(t) && t.kind !== "dyn") {
       host.declare(`declare zeroext i1 @scr_dyn_typed_ref_is(ptr, ptr, ${host.sizeType})`);
       host.declare(`declare ptr @scr_dyn_typed_ref_unbox(ptr)`);
@@ -1267,7 +1308,7 @@ export class LlDyn {
       }
       case "object": {
         const className = t.className;
-        if (className === "%Error") {
+        if (host.errorClassInterval(className)) {
           host.declare(`declare ptr @scr_dyn_from_error(ptr)`);
           const r = B.tmp();
           B.line(`${r} = call ptr @scr_dyn_from_error(ptr %v)`);
@@ -1718,7 +1759,7 @@ export class LlDyn {
   /* ── the dyn ToString pair (dynToStrHelper, ported) ────────────────── */
 
   /** Node's String() over a dyn value — sc_ds (+1 result) over the
-   * recursive sc_ds_buf walker. Borrowed operand; never throws. */
+   * recursive sc_ds_buf walker. Borrowed operand; native Error hooks may throw. */
   dynToStrHelper(): string {
     if (this.dynToStrFn) return this.dynToStrFn;
     const name = "sc_ds";
@@ -1749,6 +1790,7 @@ export class LlDyn {
         // leaves the exception pending and appends nothing).
         host.declare(`declare void @scr_dyn_isl_tostr_buf(ptr, ptr)`);
         B.line(`call void @scr_dyn_isl_tostr_buf(ptr %b, ptr %d)`);
+        if (this.hasErrorToStringDispatch) this.pendingBail(B, "ds.js", () => {}, "void");
         B.br(done);
       }
       B.startBlock(labels.get(DYN_KIND.TYPED_REF)!);
@@ -1759,6 +1801,7 @@ export class LlDyn {
         B.line(`${materialized} = call ptr @scr_dyn_typed_ref_materialize(ptr %d)`);
         B.line(`call void @sc_ds_buf(ptr %b, ptr ${materialized})`);
         B.line(`call void @scr_dyn_release_v(ptr ${materialized})`);
+        if (this.hasErrorToStringDispatch) this.pendingBail(B, "ds.tr", () => {}, "void");
         B.br(done);
       }
       B.startBlock(labels.get(DYN_KIND.UNDEF)!);
@@ -1796,7 +1839,7 @@ export class LlDyn {
         // Array.prototype.toString: join(",") — null/undefined ELEMENTS
         // print empty (unlike top level), nested arrays flatten.
         const n = this.lenOf(B, "%d");
-        const items = this.itemsOf(B, "%d");
+        const items = this.hasErrorToStringDispatch ? null : this.itemsOf(B, "%d");
         this.i64Loop(B, "ds.ar", n, (i, brNext) => {
           const nz = B.tmp();
           B.line(`${nz} = icmp ugt ${this.S} ${i}, 0`);
@@ -1807,7 +1850,16 @@ export class LlDyn {
           B.line(`call void @scr_jb_putc(ptr %b, i8 44)`);
           B.br(lel);
           B.startBlock(lel);
-          const e = this.itemAt(B, items, i);
+          let e: string;
+          if (items === null) {
+            // Read and retain each element after earlier hooks have run.
+            host.declare(`declare ptr @scr_dyn_arr_at(ptr, double)`);
+            host.declare(`declare void @scr_dyn_release_v(ptr)`);
+            const index = B.tmp();
+            e = B.tmp();
+            B.line(`${index} = uitofp ${this.S} ${i} to double`);
+            B.line(`${e} = call ptr @scr_dyn_arr_at(ptr %d, double ${index})`);
+          } else e = this.itemAt(B, items, i);
           const ek = this.kindOf(B, e);
           const isU = B.tmp();
           const isN = B.tmp();
@@ -1819,14 +1871,72 @@ export class LlDyn {
           const lRec = B.newLabel("ds.rc");
           B.condBr(unit, lSkip, lRec);
           B.startBlock(lSkip);
+          if (this.hasErrorToStringDispatch) B.line(`call void @scr_dyn_release_v(ptr ${e})`);
           brNext();
           B.startBlock(lRec);
           B.line(`call void @sc_ds_buf(ptr %b, ptr ${e})`);
+          if (this.hasErrorToStringDispatch) {
+            B.line(`call void @scr_dyn_release_v(ptr ${e})`);
+            this.pendingBail(B, "ds.ar", () => {}, "void");
+          }
         });
         B.br(done);
       }
       B.startBlock(labels.get(DYN_KIND.OBJ)!);
       {
+        if (this.hasErrorToStringDispatch) {
+          // Only genuine cached errors with an inherited user override
+          // dispatch; builtin snapshots and own shadowing keep the fallback.
+          host.declare(`declare ptr @scr_errdyn_err_of(ptr)`);
+          host.declare(`declare void @scr_error_release_v(ptr)`);
+          const error = B.tmp();
+          const cached = B.tmp();
+          const lCached = B.newLabel("ds.ec");
+          const lNative = B.newLabel("ds.ne");
+          const lSkip = B.newLabel("ds.skip");
+          const lSnapshot = B.newLabel("ds.es");
+          B.line(`${error} = call ptr @scr_errdyn_err_of(ptr %d)`);
+          B.line(`${cached} = icmp ne ptr ${error}, null`);
+          B.condBr(cached, lCached, lSnapshot);
+          B.startBlock(lCached);
+          const vtSlot = B.tmp();
+          const vt = B.tmp();
+          const preSlot = B.tmp();
+          const pre = B.tmp();
+          B.line(`${vtSlot} = getelementptr inbounds %ScrError, ptr ${error}, i64 0, i32 1`);
+          B.line(`${vt} = load ptr, ptr ${vtSlot}`);
+          B.line(`${preSlot} = getelementptr inbounds %ScrVt, ptr ${vt}, i64 0, i32 0`);
+          B.line(`${pre} = load ${this.S}, ptr ${preSlot}`);
+          let overridden = "false";
+          for (const interval of host.errorToStringOverrideIntervals()) {
+            const above = B.tmp();
+            const below = B.tmp();
+            const matches = B.tmp();
+            const either = B.tmp();
+            B.line(`${above} = icmp uge ${this.S} ${pre}, ${interval.pre}`);
+            B.line(`${below} = icmp ule ${this.S} ${pre}, ${interval.post}`);
+            B.line(`${matches} = and i1 ${above}, ${below}`);
+            B.line(`${either} = or i1 ${overridden}, ${matches}`);
+            overridden = either;
+          }
+          const ownToString = this.objGetLit(B, "%d", "toString");
+          const inherited = B.tmp();
+          const dispatch = B.tmp();
+          B.line(`${inherited} = icmp eq ptr ${ownToString}, null`);
+          B.line(`${dispatch} = and i1 ${overridden}, ${inherited}`);
+          B.condBr(dispatch, lNative, lSkip);
+          B.startBlock(lSkip);
+          B.line(`call void @scr_error_release_v(ptr ${error})`);
+          B.br(lSnapshot);
+          B.startBlock(lNative);
+          const text = B.tmp();
+          B.line(`${text} = call ptr @${mangleFunction(ERROR_TOSTRING_DISPATCH_FN)}(ptr ${error}) ; consumes +1 receiver`);
+          this.pendingBail(B, "ds.ne", () => B.line(`call void @scr_str_release(ptr ${text})`), "void");
+          this.putScrStr(B, "%b", text);
+          B.line(`call void @scr_str_release(ptr ${text})`);
+          B.br(done);
+          B.startBlock(lSnapshot);
+        }
         // The checked-dynamic tree's error encoding renders Error.prototype.toString;
         // plain objects are "[object Object]".
         const marker = this.objGetLit(B, "%d", "%error");
@@ -2031,6 +2141,9 @@ export class LlDyn {
       B.line(`call void @${name}_buf(ptr ${buf}, ptr %d)`);
       const out = B.tmp();
       B.line(`${out} = call ptr @scr_jb_finish(ptr ${buf})`);
+      if (this.hasErrorToStringDispatch) {
+        this.pendingBail(B, "ds.out", () => B.line(`call void @scr_str_release(ptr ${out})`), "ptr null");
+      }
       B.terminate(`ret ptr ${out}`);
       this.defs.push(
         `define internal ptr @${name}(ptr %d) ${FN_ATTRS} { ; String(unknown) -> owned (+1)`,
@@ -2606,6 +2719,51 @@ export class LlDyn {
     B.terminate(`ret void`);
     this.defs.push(
       `define internal void @${name}(ptr %d, ptr %spell, ptr %firstProp) ${FN_ATTRS} { ; destructuring RequireObjectCoercible`,
+      B.render(),
+      `}`,
+      ``,
+    );
+    return name;
+  }
+
+  /** Borrow the source and reject exotic dyn kinds or genuine cached Errors.
+   * Error cache lookup returns +1, which the refusal path releases. */
+  dynObjectRestCheckHelper(operation = "object rest"): string {
+    const memoKey = `%dynObjectRestCheck:${operation}`;
+    const existing = this.dynBuilders.get(memoKey);
+    if (existing) return existing;
+    const name = operation === "object rest" ? "sc_dyn_object_rest_check" : "sc_dyn_object_assign_source_check";
+    this.dynBuilders.set(memoKey, name);
+    const host = this.host;
+    const message = `scriptc SC1031: checked-dynamic ${operation} requires an ordinary object without descriptor-defined properties`;
+    host.declare(`declare ptr @scr_errdyn_err_of(ptr)`);
+    host.declare(`declare void @scr_error_release_v(ptr)`);
+    host.declare(`declare void @scr_throw_error_msg_code(i32, ptr, ${host.sizeType}, ptr)`);
+    const B = new BlockBuilder();
+    const kind = this.kindOf(B, "%d");
+    const isObject = B.tmp();
+    B.line(`${isObject} = icmp eq i32 ${kind}, ${DYN_KIND.OBJ}`);
+    const lObject = B.newLabel("orc.obj");
+    const lThrow = B.newLabel("orc.throw");
+    const lRelease = B.newLabel("orc.release");
+    const lOk = B.newLabel("orc.ok");
+    B.condBr(isObject, lObject, lThrow);
+    B.startBlock(lObject);
+    const error = B.tmp();
+    const hasError = B.tmp();
+    B.line(`${error} = call ptr @scr_errdyn_err_of(ptr %d)`);
+    B.line(`${hasError} = icmp ne ptr ${error}, null`);
+    B.condBr(hasError, lRelease, lOk);
+    B.startBlock(lRelease);
+    B.line(`call void @scr_error_release_v(ptr ${error})`);
+    B.br(lThrow);
+    B.startBlock(lThrow);
+    B.line(`call void @scr_throw_error_msg_code(i32 0, ptr ${host.cstr(message)}, ${host.sizeType} ${Buffer.byteLength(message, "utf8")}, ptr ${host.cstr("SC1031")}) ; SCR_ERR_ERROR`);
+    B.terminate(`ret void`);
+    B.startBlock(lOk);
+    B.terminate(`ret void`);
+    this.defs.push(
+      `define internal void @${name}(ptr %d) ${FN_ATTRS} { ; checked-dynamic object-rest boundary`,
       B.render(),
       `}`,
       ``,

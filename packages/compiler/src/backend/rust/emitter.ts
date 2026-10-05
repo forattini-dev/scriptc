@@ -2,6 +2,7 @@ import { isRustFunctionReferenced } from "./function-references.js";
 import { rejectRustDeferredReceivers } from "./call-receiver.js";
 import { RustByteRegions } from "./byte-regions.js";
 import { RustLocalCells } from "./local-cells.js";
+import { emitSourceStackCall, rejectUnqualifiedSourceStacks } from "./source-stack.js";
 import { RustIntegerLoops } from "./integer-loops.js";
 import { planSharedRecords, registerSharedRecordMethods } from "./shared-records.js";
 import type {
@@ -148,6 +149,7 @@ class RustEmitter {
     classMetaOf: (name, loc) => this.classMetaOf(name, loc),
     errorClassRoots: () => this.errorClassRoots(),
     errorValueName: () => this.errorValueName(),
+    errorValueVariant: (meta) => this.errorValueVariant(meta),
     hasEmbeddedModules: () => featuresEmbedIsland(rustRuntimeFeatures(this.mod)),
     isEdgeValue: (type) => this.isEdgeValue(type),
     isRustJsonCompatible: (type, visiting) => this.isRustJsonCompatible(type, visiting),
@@ -278,7 +280,8 @@ class RustEmitter {
     unionVariant: (tag) => this.unionVariant(tag), familyName: (id, loc) => this.familyName(id, loc), familyOf: (id, loc) => this.familyOf(id, loc), familyTargetOf: (name) => this.familyTargets.get(name),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
-  private readonly expressionEmitter = new RustExpressionEmitter({
+  private readonly expressionEmitter: RustExpressionEmitter = new RustExpressionEmitter({
+    traceSourceCall: (expr, emit) => emitSourceStackCall({ module: () => this.mod, currentFunction: () => this.currentFunction, emitExpr: value => this.emitExpr(value), emitWithValues: (value, values) => this.expressionEmitter.emitExprWithValues(value, values), nextName: () => `sc_stack_${this.temporary++}`, rustString: value => this.rustString(value) }, expr, emit),
     hasExplicitThis: () => this.usesExplicitThis,
     chainValues: this.chainValues,
     classMeta: this.classMeta,
@@ -541,6 +544,7 @@ class RustEmitter {
   }
   emit(): string {
     this.checkModuleSurface();
+    rejectUnqualifiedSourceStacks(this.mod, (reason, loc) => this.unsupported(reason, loc));
     this.line(
       (this.mod.ffiImports?.length ?? 0) === 0 && this.mod.lib === undefined
         ? "#![forbid(unsafe_code)]"
@@ -699,7 +703,7 @@ class RustEmitter {
       const dynamicStringCoercion = node.kind === "toString" &&
         (node.operand as { type?: IrType } | undefined)?.type?.kind === "dyn";
       if (dynamicStringCoercion || node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && (node.op === "callMethod" || node.op === "optCallMethod" || node.op === "toStr")) ||
-        (node.kind === "libCall" && (node.fn === "fetch.streamNew" || node.fn === "fetch.streamFrom" || node.fn === "dyn.this" || node.fn === "dyn.proxyNew" || node.fn === "json.stringifyReplacer" || node.fn === "dyn.toStringCoerce" || node.fn === "dyn.stringConstructor" || node.fn === "dyn.toNumberCoerce" || node.fn === "dyn.compare" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
+        (node.kind === "libCall" && (node.fn === "buffer.fromDyn" || node.fn === "fetch.streamNew" || node.fn === "fetch.streamFrom" || node.fn === "dyn.this" || node.fn === "dyn.proxyNew" || node.fn === "json.stringifyReplacer" || node.fn === "dyn.toStringCoerce" || node.fn === "dyn.stringConstructor" || node.fn === "dyn.toNumberCoerce" || node.fn === "dyn.compare" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
         this.usesDynamicInvoke = true;
       }
       if (node.kind === "libCall" && node.fn === "dyn.this") this.usesExplicitThis = true;
@@ -978,6 +982,7 @@ class RustEmitter {
       classDef: (name, loc) => this.classDef(name, loc),
       classFieldName: (className, fieldName, loc) => this.classFieldName(className, fieldName, loc),
       hasErrorClassRoots: () => this.errorClassRoots().length !== 0,
+      refusesSourceStackWrite: (className, fieldName) => this.mod.sourceStackFiles !== undefined && fieldName === "stack" && this.metadata.runtimeErrorClassNames(className).length > 0,
       isEdgeValue: (type) => this.isEdgeValue(type),
       rustString: (value) => this.rustString(value),
       unsupported: (kind, loc) => this.unsupported(kind, loc),

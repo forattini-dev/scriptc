@@ -7,11 +7,12 @@ import { InternalCompilerError } from "../../errors.js";
  * interning ORDER is part of the emitted C, so the registries stay on
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./c-emitter.js";
-import { DYN_HANDLE_KINDS, IrType, isRefCounted, typeEquals, typeKey } from "../../ir/ir.js";
+import { DYN_HANDLE_KINDS, ERROR_TOSTRING_DISPATCH_FN, IrType, isRefCounted, moduleHasLibCall, RUNTIME_ERROR_CLASSES, type SrcLoc, typeEquals, typeKey } from "../../ir/ir.js";
 import { dynDesc, undefinedArmTag } from "../../ir/analysis.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./types.js";
-import { mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./shapes.js";
+import { CUnsupportedError } from "./unsupported.js";
 
 /** The per-union ToBoolean helper (interned per unionId): switch on the
    * runtime tag — unit arms false, f64 arms 0/NaN-falsy, string arms
@@ -230,6 +231,17 @@ import { OVERFLOW_MEMBER } from "./shapes.js";
     if (emitter.dynToStrFn) return emitter.dynToStrFn;
     const name = "sc_ds";
     emitter.dynToStrFn = name;
+    const errorDispatch = emitter.fnByName.has(ERROR_TOSTRING_DISPATCH_FN)
+      ? mangleFunction(ERROR_TOSTRING_DISPATCH_FN)
+      : null;
+    const errorOverrides = [...emitter.classMeta.values()].filter((meta) =>
+      meta.root.def.name === "%Error" &&
+      !RUNTIME_ERROR_CLASSES.has(meta.def.name) &&
+      emitter.fnByName.has(`%${meta.def.name}.toString`),
+    );
+    const hasNativeOverride = errorOverrides.map((meta) =>
+      `(sc_error->vt->pre >= ${meta.pre} && sc_error->vt->pre <= ${meta.post})`,
+    ).join(" || ") || "false";
     emitter.walkerProtos.push(
       `static void ${name}_buf(ScrJsonBuf *b, const ScrDyn *d); /* String(unknown) walker */`,
       `static ScrStr *${name}(const ScrDyn *d); /* String(unknown) */`,
@@ -249,17 +261,49 @@ import { OVERFLOW_MEMBER } from "./shapes.js";
       `  case SCR_DYN_STR:`,
       `    for (size_t i = 0; i < d->v.str->len; i++) scr_jb_putc(b, d->v.str->data[i]);`,
       `    break;`,
-      `  case SCR_DYN_ARR:`,
+      `  case SCR_DYN_ARR: {`,
       `    /* Array.prototype.toString: join(",") — null/undefined ELEMENTS`,
       `     * print empty (unlike top level), nested arrays flatten. */`,
-      `    for (size_t i = 0; i < d->v.arr.len; i++) {`,
+      ...(errorDispatch === null ? [
+        `    for (size_t i = 0; i < d->v.arr.len; i++) {`,
+      ] : [
+        `    const size_t sc_length = d->v.arr.len;`,
+        `    for (size_t i = 0; i < sc_length; i++) {`,
+      ]),
       `      if (i > 0) scr_jb_putc(b, ',');`,
-      `      const ScrDyn *e = d->v.arr.items[i];`,
-      `      if (e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL) continue;`,
+      ...(errorDispatch === null ? [
+        `      const ScrDyn *e = d->v.arr.items[i];`,
+        `      if (e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL) continue;`,
+      ] : [
+        `      /* Retain across hooks which may mutate this array. */`,
+        `      ScrDyn *e = scr_dyn_arr_at(d, (double)i);`,
+        `      if (e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL) { scr_dyn_release(e); continue; }`,
+      ]),
       `      ${name}_buf(b, e);`,
+      ...(errorDispatch === null ? [] : [
+        `      scr_dyn_release(e);`,
+        `      if (scr_exc_pending()) return;`,
+      ]),
       `    }`,
       `    break;`,
+      `  }`,
       `  case SCR_DYN_OBJ:`,
+      ...(errorDispatch === null ? [] : [
+        `    {`,
+        `      /* Only inherited user overrides use the native receiver. */`,
+        `      ScrError *sc_error = scr_errdyn_err_of(d);`,
+        `      if (sc_error) {`,
+        `        if ((${hasNativeOverride}) && !scr_dyn_obj_get(d, "toString", 8)) {`,
+        `          ScrStr *sc_text = ${errorDispatch}(sc_error); /* consumes the +1 receiver */`,
+        `          if (scr_exc_pending()) { scr_str_release(sc_text); return; }`,
+        `          for (size_t i = 0; i < sc_text->len; i++) scr_jb_putc(b, sc_text->data[i]);`,
+        `          scr_str_release(sc_text);`,
+        `          break;`,
+        `        }`,
+        `        scr_error_release(sc_error); /* skipped lookup's +1 */`,
+        `      }`,
+        `    }`,
+      ]),
       `    if (scr_dyn_obj_get(d, "%error", 6)) {`,
       `      /* The checked-dynamic tree's error encoding (caughtToDyn): Error.prototype`,
       `       * .toString over the encoded name/message — Node's String(err),`,
@@ -315,11 +359,13 @@ import { OVERFLOW_MEMBER } from "./shapes.js";
       `    /* Island-held: the engine's own ToString (a bridged failure`,
       `     * leaves the exception pending and appends nothing). */`,
       `    scr_dyn_isl_tostr_buf(b, d);`,
+      ...(errorDispatch === null ? [] : [`    if (scr_exc_pending()) return;`]),
       `    break;`,
       `  case SCR_DYN_TYPED_REF: {`,
       `    ScrDyn *sc_materialized = scr_dyn_typed_ref_materialize(d);`,
       `    ${name}_buf(b, sc_materialized);`,
       `    scr_dyn_release(sc_materialized);`,
+      ...(errorDispatch === null ? [] : [`    if (scr_exc_pending()) return;`]),
       `    break;`,
       `  }`,
       `  }`,
@@ -329,7 +375,13 @@ import { OVERFLOW_MEMBER } from "./shapes.js";
       `  ScrJsonBuf b;`,
       `  scr_jb_init(&b);`,
       `  ${name}_buf(&b, d);`,
-      `  return scr_jb_finish(&b);`,
+      ...(errorDispatch === null ? [
+        `  return scr_jb_finish(&b);`,
+      ] : [
+        `  ScrStr *sc_result = scr_jb_finish(&b);`,
+        `  if (scr_exc_pending()) { scr_str_release(sc_result); return NULL; }`,
+        `  return sc_result;`,
+      ]),
       `}`,
       ``,
     );
@@ -876,6 +928,37 @@ export function jsonWriteHelper(emitter: CEmitter, t: IrType): string {
     return name;
   }
 
+  /** Object rest currently copies only the native ordinary-object table.
+   * Borrow the source; a genuine Error cache lookup is +1 even when refused. */
+  export function dynObjectRestCheckHelper(emitter: CEmitter, loc?: SrcLoc, operation = "object rest"): string {
+    const memoKey = `%dynObjectRestCheck:${operation}`;
+    const existing = emitter.dynBuilders.get(memoKey);
+    if (existing) return existing;
+    if (moduleHasLibCall(emitter.mod, "dyn.defineProps")) {
+      const fn = operation === "object rest" ? "dyn.objectRestCheck" : "dyn.objectAssignSourceCheck";
+      const error = new CUnsupportedError(`libCall:${fn}:descriptor-defined-properties`, loc);
+      error.message = `the C backend does not support checked-dynamic ${operation} in a module with dyn.defineProps (${error.kind}); use --backend rust`;
+      throw error;
+    }
+    const name = operation === "object rest" ? "sc_dyn_object_rest_check" : "sc_dyn_object_assign_source_check";
+    emitter.dynBuilders.set(memoKey, name);
+    const message = Buffer.from(`scriptc SC1031: checked-dynamic ${operation} requires an ordinary object without descriptor-defined properties`, "utf8");
+    const sig = `static void ${name}(const ScrDyn *d)`;
+    emitter.walkerProtos.push(`${sig}; /* checked-dynamic object-rest boundary */`);
+    emitter.walkerDefs.push(
+      `${sig} { /* checked-dynamic object-rest boundary */`,
+      `  if (d->kind == SCR_DYN_OBJ) {`,
+      `    ScrError *sc_error = scr_errdyn_err_of(d);`,
+      `    if (!sc_error) return;`,
+      `    scr_error_release(sc_error);`,
+      `  }`,
+      `  scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStringLiteral(message)}, ${message.length}, "SC1031");`,
+      `}`,
+      ``,
+    );
+    return name;
+  }
+
   /** GetIterator + first-N steps over a dyn value (the dynIterN node), as
    * array destructuring sees it: arrays step by index, strings by CODE
    * POINT (the string iterator — astral chars arrive unsplit), Buffers by
@@ -1077,6 +1160,20 @@ export function jsonWriteHelper(emitter: CEmitter, t: IrType): string {
     emitter.walkerProtos.push(`${sig}; /* check ${key} */`);
     const want = cStringLiteral(Buffer.from(dynDesc(t, emitter.recordsById, emitter.unionsById), "utf8"));
     const d: string[] = [`${sig} { /* check ${key} */`];
+    const errorClass = t.kind === "object" ? emitter.classMeta.get(t.className) : undefined;
+    if (errorClass?.root.def.name === "%Error") {
+      // Cache hits carry the original Error, including its subclass brand
+      // and fields. The lookup returns +1, consumed by either return/drop.
+      d.push(
+        `  ScrError *sc_error = scr_errdyn_err_of(d);`,
+        `  if (sc_error) {`,
+        `    if (sc_error->vt->pre >= ${errorClass.pre} && sc_error->vt->pre <= ${errorClass.post}) return (${cType(t).trim()})sc_error;`,
+        `    scr_error_release(sc_error);`,
+        `    scr_dyn_check_fail(path, ${want}, d);`,
+        `    return NULL;`,
+        `  }`,
+      );
+    }
     if (isRefCounted(t) && t.kind !== "dyn") {
       const keyLit = cStringLiteral(Buffer.from(key, "utf8"));
       const keyLen = Buffer.byteLength(key, "utf8");
@@ -1193,6 +1290,12 @@ export function jsonWriteHelper(emitter: CEmitter, t: IrType): string {
         // compare reference-equal (the tracing suite's shape); alien
         // %error objects rebuild once and cache the pair.
         if (t.className !== "%Error") {
+          if (errorClass?.root.def.name === "%Error") {
+            // A structurally similar plain object cannot acquire a
+            // subclass brand; exact legacy capsules matched above.
+            d.push(`  scr_dyn_check_fail(path, ${want}, d); return NULL;`);
+            break;
+          }
           throw new InternalCompilerError(`emitter bug: dynCheck of class ${t.className} (only %Error extracts from the checked-dynamic tree)`);
         }
         d.push(`  if (d->kind != SCR_DYN_OBJ || !scr_dyn_obj_get(d, "%error", 6)) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
@@ -1458,11 +1561,12 @@ export function jsonWriteHelper(emitter: CEmitter, t: IrType): string {
         d.push(`  (void)v; return scr_dyn_new_null();`);
         break;
       case "object":
-        // %Error only (canConvertToDyn's gate): the checked-dynamic tree's error encoding.
-        if (t.className !== "%Error") {
+        // Error-rooted classes share the ScrError prefix and identity cache,
+        // including when reached through a converting composite.
+        if (emitter.classMeta.get(t.className)?.root.def.name !== "%Error") {
           throw new InternalCompilerError(`emitter bug: to-dyn of class ${t.className}`);
         }
-        d.push(`  return scr_dyn_from_error(v);`);
+        d.push(`  return scr_dyn_from_error((ScrError *)v);`);
         break;
       case "dyn":
         // A dyn member of a converting composite (a dyn record field): the

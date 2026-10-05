@@ -1071,6 +1071,14 @@
       "note": "recognized module (bare and node:-prefixed specifiers)"
     },
     {
+      "id": "node-builtin.dns.promises",
+      "kind": "node-builtin",
+      "name": "dns/promises",
+      "status": "static",
+      "backends": "unknown",
+      "note": "recognized module (bare and node:-prefixed specifiers)"
+    },
+    {
       "id": "node-builtin.events",
       "kind": "node-builtin",
       "name": "events",
@@ -2720,7 +2728,7 @@
       "status": "unsupported",
       "backends": "unknown",
       "code": "SC2020",
-      "note": "the one lowered shape is a const binding over child_process.execFile: const execFileAsync = promisify(execFile), then call execFileAsync directly"
+      "note": "supported direct const bindings: promisify(execFile), promisify(readFile) with utf8, and (Rust) promisify(deflateRaw)/promisify(inflateRaw)/promisify(lookup); other targets and escaping values remain fenced"
     },
     {
       "id": "node-builtin.util.types",

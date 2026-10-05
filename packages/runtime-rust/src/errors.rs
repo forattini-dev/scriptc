@@ -94,68 +94,57 @@ impl std::fmt::Debug for JsError {
 
 impl PartialEq for JsError {
     fn eq(&self, other: &Self) -> bool {
-        let dom_equal = match (&self.dom, &other.dom) {
-            (None, None) => true,
-            (Some(left), Some(right)) => {
-                left.code == right.code
-                    && match (&left.cause, &right.cause) {
-                        (None, None) => true,
-                        (Some(left), Some(right)) => Rc::ptr_eq(&left.value, &right.value),
-                        _ => false,
-                    }
-            }
-            _ => false,
-        };
-        let cause_equal = match (&self.cause, &other.cause) {
-            (None, None) => true,
-            (Some(left), Some(right)) => Rc::ptr_eq(&left.value, &right.value),
-            _ => false,
-        };
-        self.name == other.name
-            && self.message == other.message
-            && self.code == other.code
-            && cause_equal
-            && dom_equal
+        Rc::ptr_eq(&self.identity, &other.identity)
     }
 }
 
 impl Eq for JsError {}
+
+#[cfg(test)]
+#[path = "errors.test.rs"]
+mod error_identity_tests;
 
 impl Trace for JsError {
     fn trace(&self, _tracer: &mut Tracer<'_>) {}
 }
 
 pub fn error_new(name: &str, message: JsString) -> JsError {
-    JsError {
+    let error = JsError {
         identity: Rc::new(()),
         name: name.to_owned(),
         message: message.to_string(),
         code: None,
         cause: None,
         dom: None,
-    }
+    };
+    error_capture_stack_if_active(&error);
+    error
 }
 
 pub fn error_new_cause(name: &str, message: JsString, cause: Caught) -> JsError {
-    JsError {
+    let error = JsError {
         identity: Rc::new(()),
         name: name.to_owned(),
         message: message.to_string(),
         code: None,
         cause: Some(cause),
         dom: None,
-    }
+    };
+    error_capture_stack_if_active(&error);
+    error
 }
 
 pub fn error_new_code(name: &str, message: JsString, code: &str) -> JsError {
-    JsError {
+    let error = JsError {
         identity: Rc::new(()),
         name: name.to_owned(),
         message: message.to_string(),
         code: Some(code.to_owned()),
         cause: None,
         dom: None,
-    }
+    };
+    error_capture_stack_if_active(&error);
+    error
 }
 
 #[derive(Clone)]
@@ -561,6 +550,7 @@ pub fn error_message(error: &JsError) -> JsString {
 }
 
 fn errors_finish() {
+    error_stacks_finish();
     ERROR_PROPERTIES.with(|properties| properties.borrow_mut().clear());
     LIBRARY_TRAP_CODES.with(|codes| codes.borrow_mut().clear());
     LIBRARY_TRAPS_ENABLED.with(|enabled| enabled.set(false));

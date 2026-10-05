@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "count": 7,
+  "display-name": "stream",
+  "nested": { "enabled": true },
+  "values": [3, 5]
+}

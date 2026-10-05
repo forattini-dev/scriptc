@@ -46,6 +46,7 @@ import {
   lowerRecordUpdateSpread,
 } from "./lower-object-spread.js";
 import { propNameText } from "./lower-exprs.js";
+import { declaredReturnType } from "./lower-calls.js";
 
   /** The dropped-field names of the PromiseSettledResult honest subset
    * (SEMANTICS.md 46): when the literal's target type is (a union
@@ -97,6 +98,22 @@ function optionalJsonRootCall(lowerer: Lowerer, init: ts.Expression, fieldType: 
 }
 
 export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
+  // JS can infer later expando writes into an initially empty literal's
+  // checker shape. Those keys do not exist at creation, even for const.
+  // Keep the open object's identity and actual property presence.
+  if (expr.properties.length === 0 && isJsSourceFile(expr.getSourceFile())) return lowerDynObjectLiteral(lowerer, expr);
+  // Keep an inferred JS factory closure's native dyn result instead of
+  // installing a record-return adapter which copies object identity or
+  // cannot represent a recursive factory result.
+  if (isJsSourceFile(expr.getSourceFile()) && ts.isVariableDeclaration(expr.parent) && !expr.parent.type &&
+    expr.properties.some((property) => {
+      if (!ts.isPropertyAssignment(property)) return false;
+      const fn = property.initializer;
+      if ((!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) || fn.type !== undefined) return false;
+      const inferred = lowerer.mapTypeOf(lowerer.typeOf(fn));
+      return inferred?.kind === "func" && inferred.ret.kind === "record" &&
+        declaredReturnType(lowerer, fn, fn).kind === "dyn";
+    })) return lowerDynObjectLiteral(lowerer, expr);
     const loc = locOf(expr);
     // The RUNTIME-KEYED literal (JS): a computed key that doesn't fold to a
     // compile-time string means the literal's shape is not a compile-time

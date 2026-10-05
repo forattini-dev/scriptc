@@ -1,17 +1,17 @@
-json-require-forms/main.js:9:7 - error SC1012: destructuring require() of JSON modules are not supported yet
+json-require-forms/main.js:7:7 - error SC1012: require() destructuring with defaults, rest, or nested patterns are not supported yet
 
-   8 | const pkg = require("./pkg.json");
-   9 | const { version } = require("./pkg.json");
-     |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  10 | require("./pkg.json");
+  6 | const pkg = require("./pkg.json");
+  7 | const { version = "unknown" } = require("./pkg.json");
+    |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  8 | require("./pkg.json");
 
   hint: use named exports: export function f() {} / import { f } from "./m"
 
-json-require-forms/main.js:10:1 - error SC1012: bare require() of JSON modules are not supported yet
+json-require-forms/main.js:8:1 - error SC1012: bare require() of JSON modules are not supported yet
 
-   9 | const { version } = require("./pkg.json");
-  10 | require("./pkg.json");
-     | ^~~~~~~~~~~~~~~~~~~~~
-  11 | 
+  7 | const { version = "unknown" } = require("./pkg.json");
+  8 | require("./pkg.json");
+    | ^~~~~~~~~~~~~~~~~~~~~
+  9 | console.log(pkg.version);
 
   hint: use named exports: export function f() {} / import { f } from "./m"

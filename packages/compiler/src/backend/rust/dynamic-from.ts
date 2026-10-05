@@ -139,6 +139,12 @@ export class RustDynamicFromEmitter {
           const error = this.context.nextTemporary();
           return `{ let ${error} = ${value}; sc_dyn_error_box(&${error}) }`;
         }
+        const meta = this.context.classMetaOf(type.className, loc);
+        if (this.context.errorClassRoots().some((root) => root === meta.root)) {
+          const error = this.context.nextTemporary();
+          const variant = `${this.context.errorValueName()}::${this.context.errorValueVariant(meta)}`;
+          return `{ let ${error} = ${value}; sc_dyn_error_box(&${variant}(${error})) }`;
+        }
         const source = this.context.nextTemporary();
         const capsule = this.context.nextTemporary();
         return `{ let ${source} = ${value}; let source_identity = ${source}.identity(); if let Some(${capsule}) = runtime::live_dyn_mirror_get::<runtime::JsMap<runtime::JsString, ${name}>>(source_identity) { ${name}::Object(${capsule}) } else { let ${capsule}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); runtime::live_dyn_ref_store(${capsule}.identity(), ${source}); runtime::live_dyn_mirror_store(source_identity, ${capsule}.clone()); ${name}::Object(${capsule}) } }`;

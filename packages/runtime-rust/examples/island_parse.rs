@@ -24,8 +24,15 @@ fn main() {
         let as_script = if module_like {
             Err(())
         } else {
-            context.eval(Source::from_bytes(b"void 0")).map(|_| ()).map_err(|_| ())
-                .and_then(|_| boa_engine::Script::parse(Source::from_bytes(&bytes), None, &mut context).map(|_| ()).map_err(|_| ()))
+            context
+                .eval(Source::from_bytes(b"void 0"))
+                .map(|_| ())
+                .map_err(|_| ())
+                .and_then(|_| {
+                    boa_engine::Script::parse(Source::from_bytes(&bytes), None, &mut context)
+                        .map(|_| ())
+                        .map_err(|_| ())
+                })
         };
         // A script also COMPILES the way the require shim loads it — as a
         // `new Function` body — so bytecompiler panics surface here too.

@@ -1,5 +1,6 @@
 import { regexCaptureArray } from "../../ir/regex-captures.js";
 import { lowerArrayMapDynamic } from "./lower-array-map-dynamic.js";
+import { lowerDynamicArrayConstructor } from "./lower-dynamic-array-constructor.js";
 import { lowerArraySpreadInsert, lowerBytesSetCall, lowerTupleJoinCall } from "./lower-native-containers.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Container-surface call lowering: array methods (including the HOF family
@@ -2895,6 +2896,8 @@ export function lowerArrayConstructor(lowerer: Lowerer,
     const contextual = lowerer.checker.getContextualType(expr);
     if (contextual) result = lowerer.mapTypeOf(contextual);
   }
+  const dynamic = lowerDynamicArrayConstructor(lowerer, expr, args, result);
+  if (dynamic) return dynamic;
   if (result?.kind !== "array" || !isSupportedArrayElem(result.elem, lowerer.nativeCollectionArrays)) {
     lowerer.badType(expr, lowerer.typeOf(expr));
   }

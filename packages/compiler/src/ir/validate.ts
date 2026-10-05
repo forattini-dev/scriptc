@@ -5,10 +5,12 @@ import { isJsonStringifyType } from "./json-stringify.js";
 import { regexCaptureLayout } from "./regex-captures.js";
 import { FS_WRITE_LIB_SIGS } from "./fs-write-signatures.js";
 import { validateModuleInitCaches } from "./validate-module-inits.js";
+import { validateSourceStack } from "./validate-source-stack.js";
 import { validRecordDiscriminant } from "./record-discriminant.js";
 import { nativeArrayCheckSupported, nativeRecordCheckSupported, nativeTupleCheckSupported } from "./native-record.js";
 import type { IrFamily } from "./ir.js"; import { validateCallFamily, validateFamilyClosure } from "./validate-families.js";
 import { validateEffectUnitArgument } from "./validate-effect-units.js";
+import { validDnsLookupPromiseResult } from "./dns-lookup.js";
 import type {
   IrClassDef,
   IrExpr,
@@ -25,7 +27,7 @@ import type {
   SrcLoc,
 } from "./ir.js";
 import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, CHILDWRITER_T, CRYPTOHASH_T, CRYPTOHMAC_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isDynTypedRefType, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, shapeHasAccessorSlots, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./ir.js";
-import { BIGINT_T } from "./ir.js";
+import { BIGINT_T, UNDEFINED_T } from "./ir.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -114,6 +116,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "island.castFail": { argTypes: [JSVAL, STRING], result: VOID },
   "json.parse": { argTypes: [STRING], result: DYN },
   "dyn.keySet": { argTypes: [DYN, STRING, DYN], result: VOID },
+  "dyn.keySetComputed": { argTypes: [DYN, DYN, DYN], result: VOID },
   "dyn.iterPack": { argTypes: [DYN, STRING], result: DYN },
   "dyn.arrLen": { argTypes: [DYN], result: F64 },
   "dyn.arrAt": { argTypes: [DYN, F64], result: DYN },
@@ -458,6 +461,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dgram.onClose": { argTypes: [DGRAMSOCK_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "dgram.onConnect": { argTypes: [DGRAMSOCK_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "dns.lookup": { argTypes: [STRING, F64, null], result: VOID },
+  // Program-dependent promise record result, checked structurally below.
+  "dns.promises.lookup": { argTypes: [STRING, F64, STRING], result: VOID },
+  "dns.lookupAsync": { argTypes: [STRING, F64, STRING], result: VOID },
+  "dns.lookupFamily": { argTypes: [DYN], result: F64 },
   // node:test (scr_test.c). Bodies are program-dependent closures (0 or
   // 1 testCtx param, void or Promise<void> result — the spoke pinned the
   // shape): null slots. sub's result is the settled Promise<void> the
@@ -912,6 +919,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The Buffer statics and the fs/zlib Buffer forms: fixed always-u8
   // signatures (Buffer IS a Uint8Array — one bytes kind).
   "buffer.fromStr": { argTypes: [STRING, STRING], result: BYTES_U8 },
+  "buffer.fromDyn": { argTypes: [DYN, STRING], result: BYTES_U8 },
   "buffer.concat": { argTypes: [arrayOf(BYTES_U8)], result: BYTES_U8 },
   "buffer.byteLenStr": { argTypes: [STRING, STRING], result: F64 },
   "buffer.isEncoding": { argTypes: [STRING], result: BOOL },
@@ -952,6 +960,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "zlib.inflateCb": { argTypes: [BYTES_U8, null], result: VOID },
   "zlib.deflateRawCb": { argTypes: [BYTES_U8, null], result: VOID },
   "zlib.inflateRawCb": { argTypes: [BYTES_U8, null], result: VOID },
+  "zlib.deflateRawAsync": { argTypes: [BYTES_U8, DYN], result: { kind: "promise", inner: BYTES_U8 } },
+  "zlib.inflateRawAsync": { argTypes: [BYTES_U8], result: { kind: "promise", inner: BYTES_U8 } },
   "zlib.gzipCb": { argTypes: [BYTES_U8, null], result: VOID },
   "zlib.gunzipCb": { argTypes: [BYTES_U8, null], result: VOID },
   "zlib.unzipCb": { argTypes: [BYTES_U8, null], result: VOID },
@@ -1026,6 +1036,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // error.new's result and the receiver slots are builtin-error classes —
   // program-dependent object types, checked in the libCall case.
   "error.new": { argTypes: [STRING], result: VOID },
+  "error.captureStackTrace": { argTypes: [{ kind: "object", className: "%Error" }], result: UNDEFINED_T },
+  "error.captureStackTraceExclude": { argTypes: [{ kind: "object", className: "%Error" }, STRING], result: UNDEFINED_T },
+  "error.stack": { argTypes: [{ kind: "object", className: "%Error" }], result: STRING },
   "error.newCause": { argTypes: [STRING, DYN], result: VOID },
   "error.cause": { argTypes: [null], result: DYN },
   "error.nodeThrow": { argTypes: [F64, STRING, STRING], result: VOID },
@@ -1053,6 +1066,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.errInstanceof": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.classInstanceof": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.objKeys": { argTypes: [DYN], result: DYN },
+  "dyn.objectRestCheck": { argTypes: [DYN], result: VOID },
+  "dyn.objectAssignSourceCheck": { argTypes: [DYN], result: VOID },
   "dyn.hasOwn": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.assign": { argTypes: [DYN, DYN], result: DYN },
   "dyn.packPush": { argTypes: [DYN, DYN], result: VOID },
@@ -1362,6 +1377,7 @@ function callSiteReturnType(fn: IrFunction): IrType {
 
 export function validateModule(mod: IrModule): IrValidationError[] {
   const errors: IrValidationError[] = [];
+  validateSourceStack(mod, (message, loc) => errors.push({ message, loc }));
   const functionsByName = new Map<string, IrFunction>();
   for (const fn of mod.functions) {
     if (functionsByName.has(fn.name)) {
@@ -4374,6 +4390,12 @@ function validateFunction(
           }
           if (!ok) {
             err(`libCall ${e.fn} callback shape (frontend must fence)`, e.loc);
+          }
+          break;
+        }
+        if (e.fn === "dns.promises.lookup" || e.fn === "dns.lookupAsync") {
+          if (!validDnsLookupPromiseResult(e.type, records, unions)) {
+            err(`libCall ${e.fn} must return a promise of {address: string | null, family: number}`, e.loc);
           }
           break;
         }

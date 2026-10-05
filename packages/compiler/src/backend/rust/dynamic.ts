@@ -22,6 +22,7 @@ import { RustDynamicFromEmitter } from "./dynamic-from.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
 import { emitRustDynamicObjectPrototype } from "./dynamic-object-prototype.js";
 import { emitRustDynamicProxy } from "./dynamic-proxy.js";
+import { emitRustDynamicKeyWrite } from "./dynamic-key-write.js";
 import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
@@ -145,6 +146,7 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.line(`fn sc_dyn_effect_reflection<T>(operation: &str) -> T { runtime::throw_error(format!("scriptc: {} on native kernel references is not supported yet", operation)) }`);
     emitRustDynamicProxy(this.context);
+    emitRustDynamicKeyWrite(this.context);
     emitRustQuerystringDynImpl(name, this.context);
     emitRustDynamicIslandSupport(this.context);
     this.context.line(`impl runtime::JsonValue for ${name} {`);
@@ -482,7 +484,7 @@ export class RustDynamicEmitter {
     this.context.line("index = index.checked_mul(10)?.checked_add((byte - b'0') as usize)?;");
     this.context.popIndent();
     this.context.line("}");
-    this.context.line("Some(index)");
+    this.context.line("(index < 4_294_967_295usize).then_some(index)");
     this.context.popIndent();
     this.context.line("}");
     emitRustDynamicObjectWalk(this.context);
@@ -494,7 +496,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("property membership"),`);
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, false),`);
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()) || runtime::map_prototype(object).is_some_and(|prototype| sc_dyn_has_key(&prototype, key)),`);
-    this.context.line(`${name}::Array(array) => key.as_ref() == "length" || sc_dyn_key_index(key).is_some_and(|index| index < runtime::array_len(array) as usize),`);
+    this.context.line(`${name}::Array(array) => key.as_ref() == "length" || runtime::array_property_has(array, key) || sc_dyn_key_index(key).is_some_and(|index| runtime::array_has(array, index as f64)),`);
     this.context.line("_ => false,");
     this.context.popIndent();
     this.context.line("}");
@@ -509,7 +511,7 @@ export class RustDynamicEmitter {
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, true),`);
     this.context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()),`);
-    this.context.line(`${name}::Array(array) => key.as_ref() == "length" || (key.as_ref() == "raw" && runtime::array_raw(array).is_some()) || runtime::array_property_has(array, key) || sc_dyn_key_index(key).is_some_and(|index| index < runtime::array_len(array) as usize),`);
+    this.context.line(`${name}::Array(array) => key.as_ref() == "length" || (key.as_ref() == "raw" && runtime::array_raw(array).is_some()) || runtime::array_property_has(array, key) || sc_dyn_key_index(key).is_some_and(|index| runtime::array_has(array, index as f64)),`);
     this.context.line("_ => false,");
     this.context.popIndent();
     this.context.line("}");
@@ -547,7 +549,7 @@ export class RustDynamicEmitter {
     this.context.line(`else if key.as_ref() == "index" || key.as_ref() == "input" { runtime::array_regex_metadata(array).map(|(index, input)| if key.as_ref() == "index" { ${name}::Number(index) } else { ${name}::String(input) }).unwrap_or(${name}::Undefined) }`);
     this.context.line(`else if key.as_ref() == "groups" { match runtime::array_regex_groups(array) { Some(groups) => { let object: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); sc_dyn_mark_null_proto(&object); for (group, index) in groups { let value = runtime::array_get(array, index as f64); let replace = runtime::map_get_by(&object, &group, |left, right| left.as_ref() == right.as_ref()).map_or(true, |current| matches!(current, ${name}::Undefined)); if replace { runtime::map_set_by(&object, group, value, |left, right| left.as_ref() == right.as_ref()); } } ${name}::Object(object) }, None => ${name}::Undefined } }`);
     this.context.line(`else if key.as_ref() == "raw" { runtime::array_raw(array).map(${name}::Array).unwrap_or(${name}::Undefined) }`);
-    this.context.line(`else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::array_len(array) as usize { runtime::array_get(array, index as f64) } else { ${name}::Undefined } }`);
+    this.context.line(`else if let Some(index) = sc_dyn_key_index(key) { if runtime::array_state(array, index as f64) == 1.0 { runtime::array_get(array, index as f64) } else { ${name}::Undefined } }`);
     this.context.line(`else { runtime::array_property_get(array, key).unwrap_or(${name}::Undefined) }`);
     this.context.popIndent();
     this.context.line("},");
@@ -642,7 +644,12 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Regex(regex) if key.as_ref() == "lastIndex" => match field { ${name}::Number(value) => runtime::regex_set_last_index(regex, value), _ => runtime::regex_set_last_index(regex, 0.0), },`);
     this.context.line(`${name}::Array(array) => {`);
     this.context.pushIndent();
-    this.context.line(`if let Some(index) = sc_dyn_key_index(&key) { while runtime::array_len(array) < index as f64 { runtime::array_push(array, ${name}::Undefined); } runtime::array_set(array, index as f64, field); } else { runtime::array_property_set(array, key, field); }`);
+    this.context.line(`if key.as_ref() == "length" {`);
+    this.context.pushIndent();
+    this.context.line(`let length = match &field { ${name}::Undefined | ${name}::Null | ${name}::Number(..) | ${name}::BigInt(..) | ${name}::Boolean(..) | ${name}::String(..) | ${name}::Symbol(..) => sc_dyn_to_number(&field), _ => runtime::throw_error("scriptc: native array length coercion from objects is not supported yet".to_owned()), };`);
+    this.context.line(`runtime::array_set_length(array, length);`);
+    this.context.popIndent();
+    this.context.line(`} else if let Some(index) = sc_dyn_key_index(&key) { runtime::array_set(array, index as f64, field); } else { runtime::array_property_set(array, key, field); }`);
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::Bytes(bytes) | ${name}::Buffer(bytes) => {`);
@@ -737,6 +744,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Object(object) => {`);
     this.context.pushIndent();
     this.context.line("if sc_dyn_is_null_proto(object) { runtime::throw_type_error(\"Cannot convert object to primitive value\".to_owned()); }");
+    this.context.line("if let Some(text) = sc_dyn_error_string_coerce(value) { return text; }");
     this.context.line("if runtime::map_has_by(object, &runtime::string(\"%error\"), |left, right| left.as_ref() == right.as_ref()) {");
     this.context.pushIndent();
     this.context.line(`let error_name = match runtime::map_get_by(object, &runtime::string("name"), |left, right| left.as_ref() == right.as_ref()) { Some(${name}::String(value)) => value, _ => runtime::empty_string(), };`);

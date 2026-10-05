@@ -41,10 +41,13 @@ include!("terminal.rs");
 include!("readline.rs");
 include!("generators.rs");
 include!("errors.rs");
+include!("error_stacks.rs");
 include!("ffi_callbacks.rs");
 include!("ffi_foreign.rs");
 #[cfg(all(feature = "island-eval", feature = "island-v8"))]
-compile_error!("scriptc-runtime: island-eval (boa) and island-v8 are mutually exclusive island engines");
+compile_error!(
+    "scriptc-runtime: island-eval (boa) and island-v8 are mutually exclusive island engines"
+);
 #[cfg(feature = "island-eval")]
 include!("island_string.rs");
 #[cfg(feature = "island-eval")]
@@ -177,6 +180,7 @@ mod tests {
     include!("tests/language_and_heap.rs");
     include!("promise_views.test.rs");
     include!("promises.test.rs");
+    include!("dns.test.rs");
     include!("array_views.test.rs");
     include!("readline.test.rs");
     include!("tests/heap_pressure.rs");
@@ -204,6 +208,7 @@ mod tests {
     include!("native_module.test.rs");
     include!("collections.test.rs");
     include!("map_views.test.rs");
+    include!("error_stacks.test.rs");
     include!("tests/dgram.rs");
     include!("tests/child_process.rs");
     include!("child_writer.test.rs");

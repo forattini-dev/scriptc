@@ -184,6 +184,9 @@ function dedicatedIndex(compat) {
 function featureEntries(compat) {
   for (const entry of compat.features ?? []) {
     validateStatus(entry.status, `${entry.chapter} compatibility features`);
+    if (entry.publicDetail !== undefined && (typeof entry.publicDetail !== "string" || entry.publicDetail.trim() === "")) {
+      throw new Error(`${entry.chapter} compatibility feature publicDetail must be non-empty text`);
+    }
     if (entry.status === "supported" || entry.status === "partial") {
       validateEvidence(entry.evidence, `${entry.chapter} compatibility features`);
     }
@@ -271,6 +274,7 @@ function tier(status, _reason, evidence) {
     status,
     ...(evidence?.source ? { evidence: evidence.source } : {}),
     ...(evidence?.tests?.length ? { tests: evidence.tests } : {}),
+    ...(evidence?.publicDetail ? { publicDetail: evidence.publicDetail } : {}),
   };
 }
 
@@ -333,7 +337,7 @@ function classifyStatic(row, chapter, ctx, parentSignature) {
   if (row.depth === 0) return tier("unreviewed", "", { source: "chapter-summary" });
   if (row.scope === "documentation" || row.scope === "configuration") return tier("not-applicable", "", { source: row.scope });
   const feature = featureOf(row, ctx.staticFeatures, parentSignature);
-  if (feature) return tier(feature.status, "", { source: `compiler-feature:${row.chapter}.${row.apiSymbol}`, tests: feature.evidence });
+  if (feature) return tier(feature.status, "", { source: `compiler-feature:${row.chapter}.${row.apiSymbol}`, tests: feature.evidence, publicDetail: feature.publicDetail });
   for (const candidate of symbolCandidates(row)) {
     // Dedicated lowering paths are authoritative when an older generic
     // fence row shares the same API name (the surface manifest documents
@@ -597,6 +601,7 @@ function render(snapshot) {
 }
 
 function publicDetail(tier) {
+  if (tier.publicDetail) return tier.publicDetail;
   const source = tier.evidence ?? "";
   if (source === "derived:descendants") return "Derived from the exact API rows in this chapter.";
   if (tier.status === "unreviewed") return "Not yet classified; tracked as open parity work.";

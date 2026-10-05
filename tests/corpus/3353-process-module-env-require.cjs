@@ -1,0 +1,10 @@
+const { env: settings } = require("node:process");
+const key = "SCRIPTC_PROCESS_ALIAS_PROBE";
+delete process.env[key];
+console.log(settings[key] ?? "absent");
+process.env[key] = "global";
+console.log(settings[key]);
+settings[key] = "alias";
+console.log(process.env[key]);
+delete settings[key];
+console.log(process.env[key] ?? "deleted");

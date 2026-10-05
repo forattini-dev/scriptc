@@ -153,11 +153,17 @@ impl fmt::Display for JsString {
 }
 impl fmt::Debug for JsString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(text) = self.well_formed_utf8() { return fmt::Debug::fmt(text, f); }
+        if let Some(text) = self.well_formed_utf8() {
+            return fmt::Debug::fmt(text, f);
+        }
         f.write_str("\"")?;
         for item in char::decode_utf16(self.encode_utf16()) {
             match item {
-                Ok(ch) => for escaped in ch.escape_debug() { write!(f, "{escaped}")?; },
+                Ok(ch) => {
+                    for escaped in ch.escape_debug() {
+                        write!(f, "{escaped}")?;
+                    }
+                }
                 Err(error) => write!(f, "\\u{:04x}", error.unpaired_surrogate())?,
             }
         }

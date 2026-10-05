@@ -252,18 +252,16 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
   }, 120_000);
 
-  // Auto refuses ms: it ships no own .d.ts (the declared-claim criterion),
-  // so the import keeps today's story — and the explicit opt-in below is
-  // the user's override.
-  test("--npm-static=auto refuses a package with no own .d.ts", () => {
+  // JS inference authorizes the same attempt as an explicit opt-in; it
+  // does not erase the JSDoc-contradicting return fences pinned below.
+  test("--npm-static=auto admits readable JS and preserves its real fences", () => {
     const { coverage } = analyze(join(pilotRoot, "ms-cli.ts"), { npmStatic: "auto" });
-    expect(coverage.npmStatic).toEqual([
-      {
-        package: "ms",
-        status: "fallback",
-        detail: "auto: it ships no own .d.ts declaration surface",
-      },
-    ]);
+    const explicit = analyze(join(pilotRoot, "ms-cli.ts"), { npmStatic: ["ms"] }).coverage;
+    expect(coverage.npmStatic).toEqual([{ package: "ms", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toEqual([]);
+    expect(coverage.runtimeFences).toEqual(explicit.runtimeFences);
+    expect(coverage.runtimeFences).toHaveLength(2);
   }, 120_000);
 
   // ms's coverage, pinned: aliased-typeof narrowing carried the entry

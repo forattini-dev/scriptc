@@ -11,7 +11,7 @@ import { InternalCompilerError } from "../../errors.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/ir.js";
-import { MAX_GENERIC_INSTANCES, generatorMeta, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
+import { MAX_GENERIC_INSTANCES, appendImplicitUndefinedReturn, generatorMeta, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, inferredJsRecordFactoryResult, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, typeKey } from "../type-mapper.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, own } from "./lowerer.js";
@@ -32,11 +32,16 @@ import { lowerHttpAgentNew, lowerHttpServerNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 import { classExpressionRunsOnceInEsbuildInitializer } from "./esbuild-once.js";
-import { errorSuperArgs, errorWithCause } from "./lower-error-message.js";
+import { errorSuperArgs } from "./lower-error-message.js";
+import { lowerBuiltinErrorConstruction } from "./lower-error-constructor.js";
 import { exactClassOfReceiver, exactInstanceClassOf } from "./lower-class-bindings.js";
 export { exactClassOfReceiver, exactInstanceClassOf, probeExactInstanceClassOf } from "./lower-class-bindings.js";
 import { rejectStaticThis } from "./static-this.js";
 import { lowerSqlErrorNew } from "./lower-sql-client.js";
+import { implicitMethodMayBeOverridden } from "./implicit-method-overrides.js";
+import { classFactoryArgumentInits, classFactorySelfInit, classFactoryReturnType, withClassFactoryCaptures } from "./class-factory-captures.js";
+import { classFactoryMethodOf } from "./class-factory-shapes.js";
+import { deferJsAsyncMethod, noteDeferredJsAsyncMethod, ownsDeferredJsAsyncMethod } from "./js-async-methods.js";
 
 export interface ClassInfo {
   def: IrClassDef;
@@ -46,7 +51,17 @@ export interface ClassInfo {
   /** OWN fields only (declaration order) with their initializers: the
    * class's constructor runs exactly these — inherited fields initialize in
    * the base constructor, before/via super(). */
-  fieldOrder: { name: string; type: IrType; initializer: ts.Expression | undefined; /** Redeclared INHERITED field: the initializer assigns the base slot at this position; no new slot (def.fields excludes it). */ redeclared?: true }[];
+  fieldOrder: {
+    name: string;
+    type: IrType;
+    initializer: ts.Expression | undefined;
+    /** Redeclared INHERITED field: assigns the base slot at this position;
+     * no new slot (def.fields excludes it). */
+    redeclared?: true;
+    /** Bare inherited declaration: reset the existing undefined-capable
+     * slot AFTER super(), at this field's position. */
+    undefinedResetLoc?: SrcLoc;
+  }[];
   /** OWN declared methods only — inherited lookups walk the base chain
    * (findMethodOn). An `abstract` entry is a signature with no body (and
    * no module function): it declares the vtable slot; concrete subclasses
@@ -58,8 +73,10 @@ export interface ClassInfo {
    * walk IS lexical resolution and privates never join vtables (JS's
    * no-dynamic-dispatch semantics by construction). A `gen` entry is a
    * #private GENERATOR method: the body is a generator IrFunction and
-   * calls enter through its gen-spawn wrapper. */
-  methods: Map<string, { params: ParamShape[]; ret: IrType; abstract?: true; async?: true; gen?: NonNullable<IrFunction["generator"]> }>;
+   * calls enter through its gen-spawn wrapper. `throwOnlyReturnAbi`
+   * marks a JavaScript family rooted at a provably throw-only method:
+   * implementations share a checked-native dyn result, not inferred void. */
+  methods: Map<string, { params: ParamShape[]; ret: IrType; abstract?: true; async?: true; gen?: NonNullable<IrFunction["generator"]>; throwOnlyReturnAbi?: true }>;
   /** OWN GENERIC instance methods (own type parameters — `m<T>(x: T)`),
    * monomorphized per call site like top-level generic functions: instance
    * `n` is the module function `%C.m%n` taking `this` as param 0. They
@@ -857,7 +874,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
       const fields = new Map<string, IrType>(base ? base.fields : []);
       const symbolFields = new Map<ts.Symbol, string>(base?.symbolFields ?? []);
       const fieldOrder: ClassInfo["fieldOrder"] = [];
-      const methods = new Map<string, { params: ParamShape[]; ret: IrType; abstract?: true; async?: true; gen?: NonNullable<IrFunction["generator"]> }>();
+      const methods = new Map<string, { params: ParamShape[]; ret: IrType; abstract?: true; async?: true; gen?: NonNullable<IrFunction["generator"]>; throwOnlyReturnAbi?: true }>();
       // Own accessor declarations ("get:x"/"set:x" → node), for the
       // partial-override analysis below (diagnostics need the node).
       const accessorNodes = new Map<string, ts.AccessorDeclaration>();
@@ -1011,7 +1028,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
               name: member.name.text,
               type,
               initializer: member.initializer,
-              globalId: `%g.s.${lowerer.classNamer(decl)}.${member.name.text}`,
+              globalId: `%g.s.${mixin?.name ?? lowerer.classNamer(decl)}.${member.name.text}`,
               readonly: modifiers.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword),
             });
           }
@@ -1026,6 +1043,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
             member.asteriskToken === undefined
           ) {
             const { shapes, funcType: ft } = lowerer.lambdaSignature(member);
+            if (ft.ret.kind === "dyn") ft.ret = classFactoryReturnType(lowerer, member) ?? ft.ret;
             staticMethods.set(member.name.text, { params: shapes, ret: ft.ret, member });
           }
           // GENERIC static methods monomorphize like top-level generic
@@ -1246,7 +1264,14 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
           // undefined arm (undefFieldInitLineC — Node defines the property
           // as undefined on construction, verified), and reads/writes ride
           // the ordinary undefined-armed union machinery.
-          const type = lowerer.irTypeOf(member.name);
+          let type = lowerer.irTypeOf(member.name);
+          // An unannotated JavaScript factory returns its object by
+          // identity through a native dyn slot (declaredReturnType's
+          // record rule). Preserve that same representation in an inferred
+          // instance field instead of demanding a structural copy/check.
+          if (type.kind === "record" && member.type === undefined && inferredJsRecordFactoryResult(lowerer, member.initializer)) {
+            type = DYN;
+          }
           if (type.kind === "void") lowerer.badType(member.name, lowerer.typeOf(member.name));
           if (fields.has(member.name.text)) {
             // REDECLARING an inherited field: Node [[Define]]s the OWN
@@ -1259,11 +1284,18 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
             // builtin Error prefix included — reads, toString, and throw
             // reports all answer the overwritten name like Node). A BARE
             // redeclare writes undefined in Node (`class B extends A
-            // { x; }` reads undefined!) and a type-changing redeclare has
-            // no single slot type — both keep the fence.
+            // { x; }` reads undefined!). It can reuse the slot only when
+            // the unchanged ABI already admits undefined. A type-changing
+            // redeclare has no single slot type and keeps the fence.
             const baseType = fields.get(member.name.text)!;
             if (member.initializer && typeEquals(type, baseType)) {
               fieldOrder.push({ name: member.name.text, type, initializer: member.initializer, redeclared: true });
+              continue;
+            }
+            if (!member.initializer && typeEquals(type, baseType) &&
+              (type.kind === "dyn" || type.kind === "jsval" ||
+                (type.kind === "union" && lowerer.armTag(type.unionId, UNDEFINED_T) >= 0))) {
+              fieldOrder.push({ name: member.name.text, type, initializer: undefined, redeclared: true, undefinedResetLoc: locOf(member) });
               continue;
             }
             lowerer.unsupported(
@@ -1454,6 +1486,12 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
           // A body-less method is an OVERLOAD SIGNATURE (abstract methods
           // collected above): type-world, exactly the constructor story.
           if (!member.body) continue;
+          // A class-returning builder method has no single class-value ABI.
+          // Only an exact newly constructed receiver's once-evaluated wrapper
+          // specializes it; ordinary calls and override families stay fenced.
+          if (classFactoryMethodOf(lowerer, member) && !fields.has(mName) &&
+            !lowerer.findMethodOn(base, mName) && !findGenericMethodOn(lowerer, base, mName) &&
+            !implicitMethodMayBeOverridden(lowerer, mName)) continue;
           // GENERIC methods (own type parameters): collected aside — never
           // in `methods` (no single ABI signature, no vtable slot); bodies
           // lower per call-site instantiation as `%C.m%n`. Mixing generic
@@ -1474,21 +1512,26 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
             collectGenericMember(member, false);
             continue;
           }
-          // Async METHODS in JS classes simply do not COLLECT — each call
-          // fences at its own site (the JS deferral stance, the
-          // async-static precedent above), so a class whose driven
-          // surface is synchronous still compiles (commander: parse()
-          // works, parseAsync() traps where called). TS async methods
-          // collect below like any method: the body is an async
-          // IrFunction (fiber spawn wrapper, `this` as param 0), calls
-          // dispatch STATICALLY — override chains fence (the vtable slot
-          // machinery has no fiber-spawn story), so every call site is a
-          // direct call the emitter routes through the spawn wrapper.
+          // Closed JS async families use the existing TS spawn wrapper.
+          // Virtual families retain JS deferral: unused methods must not
+          // poison a synchronous surface, and reached calls fence without
+          // silently inheriting a base body. Preserve the early refusal
+          // for throw-only slots and Error.toString's refined sync ABI.
           if (
             member.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) &&
             isJsSourceFile(decl.getSourceFile())
           ) {
-            continue;
+            if (lowerer.findMethodOn(base, mName)?.sig.throwOnlyReturnAbi ||
+                (mName === "toString" && base !== null && lowerer.errorHierarchyClassOf(base.def.name))) {
+              lowerer.unsupported(
+                "SC1090", member.name,
+                `overriding a method with an async method '${mName}' (async methods dispatch statically — the vtable slot machinery has no fiber-spawn story)`,
+              );
+            }
+            if (deferJsAsyncMethod(lowerer, member)) {
+              noteDeferredJsAsyncMethod(lowerer, decl, mName);
+              continue;
+            }
           }
           // IMPLICIT-ANY monomorphization (npm-static JS): a method whose
           // signature carries bindable untyped params collects like a
@@ -1497,13 +1540,14 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
           // type parameters; see lower-calls' implicit section). DECLINES
           // (falls through to the normal all-dyn ABI) wherever the two
           // dispatch worlds could meet: an inherited declaration of the
-          // name (the override stays on the vtable), a shadowed field, or
+          // name or a later override (both stay on the vtable), a shadowed field, or
           // a generic-class instantiation's member.
           if (
             implicitMonoFile(decl.getSourceFile()) &&
             ts.isIdentifier(member.name) &&
             inst === undefined && decl.typeParameters === undefined &&
             !fields.has(member.name.text) &&
+            !implicitMethodMayBeOverridden(lowerer, member.name.text) &&
             !lowerer.findMethodOn(base, member.name.text) &&
             !findGenericMethodOn(lowerer, base, member.name.text)
           ) {
@@ -1521,6 +1565,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
             }
           }
           const { shapes, funcType: ft } = lowerer.lambdaSignature(member);
+          if (ft.ret.kind === "dyn") ft.ret = classFactoryReturnType(lowerer, member) ?? ft.ret;
           if (fields.has(mName)) {
             lowerer.unsupported("SC1090", member.name, "methods shadowing inherited fields");
           }
@@ -1549,16 +1594,24 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
           // against the STATIC receiver's shape, so `m(x?: number)` and
           // `m(x: number | undefined)` interchange soundly in overrides.
           const overridden = lowerer.findMethodOn(base, mName);
-          if (overridden?.declarer.builtinError) {
-            // Error.prototype.toString is a runtime implementation with no
-            // vtable slot — calls to it are direct, so an override could
-            // never be reached through a base-typed receiver.
-            lowerer.unsupported(
-              "SC1090",
-              member.name,
-              `overriding the builtin Error method '${mName}'`,
-            );
-          }
+          // JavaScript uses throw-only base methods as abstract-like slots.
+          // tsc infers void, which would discard a concrete override's
+          // value. Give the entire family the same checked-native return
+          // ABI, without changing parameter exactness or typed contracts.
+          // Only a straight-line body ending in throw proves this case;
+          // a return, conditional, loop or finally keeps the usual fence.
+          const syncJsMethod = isJsSourceFile(decl.getSourceFile()) && member.type === undefined &&
+            member.asteriskToken === undefined &&
+            !member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword);
+          const throwOnlyReturnAbi = syncJsMethod && (
+            overridden?.sig.throwOnlyReturnAbi === true ||
+            (!overridden && ft.ret.kind === "void" && implicitMethodMayBeOverridden(lowerer, mName) &&
+              member.body.statements.length > 0 &&
+              member.body.statements.every((statement, index, statements) => index === statements.length - 1
+                ? ts.isThrowStatement(statement)
+                : ts.isExpressionStatement(statement) || ts.isVariableStatement(statement) || ts.isEmptyStatement(statement)))
+          );
+          if (throwOnlyReturnAbi) ft.ret = DYN;
           if (
             overridden &&
             (overridden.sig.params.length !== shapes.length ||
@@ -1597,11 +1650,13 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
               ...(asyncMember ? { async: true as const } : {}),
             });
           } else {
-            methods.set(mName, asyncMember ? { params: shapes, ret: ft.ret, async: true as const } : { params: shapes, ret: ft.ret });
+            methods.set(mName, asyncMember ? { params: shapes, ret: ft.ret, async: true as const } : {
+              params: shapes, ret: ft.ret, ...(throwOnlyReturnAbi ? { throwOnlyReturnAbi: true as const } : {}),
+            });
           }
           // Overrides keep the inherited ABI exactly, so only non-override
           // methods may still refine once the ctor scan runs.
-          if (ft.ret.kind === "dyn" && !overridden) {
+          if (ft.ret.kind === "dyn" && !overridden && !throwOnlyReturnAbi) {
             dynRetMethods.set(mName, member);
           }
         } else if (ts.isGetAccessor(member) || ts.isSetAccessor(member)) {
@@ -1963,7 +2018,9 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
           // (pre-write reads answer undefined, like Node) instead of
           // poisoning the class (commander's `this.required` switch
           // assignment, `this.runningCommand` method assignment).
-          // Unmappable inferences and arm-less kinds keep the fence.
+          // Inferred any uses native checked-dynamic storage, which
+          // already holds undefined. Other unmappable inferences and
+          // arm-less kinds keep the fence.
           // TypeScript classes keep the loud fence too: an annotated
           // program can spell `T | undefined` itself.
           if (isJsSourceFile(decl.getSourceFile())) {
@@ -2257,7 +2314,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
       lowerer.suppressStats = prevSuppress || mi.ordinal > 0;
       lowerer.mixinTypeContext = { classNode: info.decl!, className: info.def.name };
       try {
-        return fn();
+        return withClassFactoryCaptures(lowerer, info, fn);
       } finally {
         lowerer.typeParamBindings = prevBindings;
         lowerer.instantiationContext = prevContext;
@@ -2290,7 +2347,9 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
     // Mixin instantiations lower their initializers under the
     // instantiation's bindings/context (a no-op for everything else —
     // generic FAMILIES own their statics and carry no genericInstance).
-    return withInstanceBindings(lowerer, info, () => lowerStaticFieldInitsInner(lowerer, info));
+    return [...classFactoryArgumentInits(lowerer, info),
+      ...withInstanceBindings(lowerer, info, () => lowerStaticFieldInitsInner(lowerer, info)),
+      ...classFactorySelfInit(lowerer, info)];
   }
 
   function lowerStaticFieldInitsInner(lowerer: Lowerer, info: ClassInfo): IrStmt[] {
@@ -3222,8 +3281,9 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
 /** The nearest declaration of `name` at or above `info` — the method a
    * receiver of that static class runs when nothing below overrides it. */
   export function findMethodOn(lowerer: Lowerer, info: ClassInfo | null,
-    name: string,): { declarer: ClassInfo; sig: { params: ParamShape[]; ret: IrType; abstract?: true; async?: true; gen?: NonNullable<IrFunction["generator"]> } } | null {
+    name: string,): { declarer: ClassInfo; sig: NonNullable<ReturnType<ClassInfo["methods"]["get"]>> } | null {
     for (let c = info; c; c = c.base) {
+      if (ownsDeferredJsAsyncMethod(lowerer, c, name)) return null;
       const sig = c.methods.get(name);
       if (sig) return { declarer: c, sig };
     }
@@ -3265,6 +3325,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
   export function findGenericMethodOn(lowerer: Lowerer, info: ClassInfo | null,
     name: string,): { declarer: ClassInfo; info: GenericFnInfo } | null {
     for (let c = info; c; c = c.base) {
+      if (ownsDeferredJsAsyncMethod(lowerer, c, name)) return null;
       const gm = c.genericMethods?.get(name);
       if (gm) return { declarer: c, info: gm };
     }
@@ -3832,6 +3893,7 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
         const declared = lowerer.declareParams(fnLike.parameters, sig.params);
         params.push(...declared.params);
         const body = [...declared.prologue, ...lowerer.lowerStmts(fnBody.statements)];
+        if (sig.throwOnlyReturnAbi) appendImplicitUndefinedReturn(lowerer, body, bodyReturn, locOf(fnLike));
         const fn: IrFunction = {
           name: `%${className}.${mName}`,
           params,
@@ -3857,6 +3919,10 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
    * method's `this`) and this-binding function forms opaque — the static-
    * block rule verbatim. */
   export function lowerStaticMethod(lowerer: Lowerer, info: ClassInfo, name: string): IrFunction | null {
+    return withInstanceBindings(lowerer, info, () => lowerStaticMethodInner(lowerer, info, name));
+  }
+
+  function lowerStaticMethodInner(lowerer: Lowerer, info: ClassInfo, name: string): IrFunction | null {
     const entry = info.staticMethods?.get(name);
     if (!entry?.member.body) return null;
     // Async statics: an async IrFunction like any module function — the
@@ -3960,6 +4026,12 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
     const out: IrStmt[] = [];
     const thisType: IrType = { kind: "object", className: info.def.name };
     for (const f of info.fieldOrder) {
+      if (f.undefinedResetLoc) {
+        const loc = f.undefinedResetLoc;
+        const value = lowerer.undefinedArgFor(f.type, loc, info.decl ?? lowerer.entry);
+        out.push({ kind: "fieldSet", obj: { kind: "varRef", localId: thisLocal.id, type: thisType, loc }, className: info.def.name, field: f.name, value, loc });
+        continue;
+      }
       if (!f.initializer) continue;
       lowerer.stats.statementsTotal++;
       lowerer.bumpFileStat(locOf(f.initializer).file, "total");
@@ -4235,10 +4307,13 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
     }
     const thisLocal = lowerer.resolveThis();
     if (!thisLocal) lowerer.unsupported("SC1080", access);
-    lowerer.noteEdge(`%${found.declarer.def.name}.${access.name.text}`);
     const loc = locOf(call);
     const thisRef: IrExpr = { kind: "varRef", localId: thisLocal.id, type: thisLocal.type, loc };
     const args = lowerer.completeArgs(call.arguments, found.sig.params, loc, call);
+    if (found.declarer.builtinError) {
+      return { kind: "libCall", fn: "error.toString", args: [lowerer.upcastTo(thisRef, found.declarer.def.name)], type: STRING, loc };
+    }
+    lowerer.noteEdge(`%${found.declarer.def.name}.${access.name.text}`);
     return {
       kind: "call",
       callee: `%${found.declarer.def.name}.${access.name.text}`,
@@ -4639,45 +4714,7 @@ export function lowerNew(lowerer: Lowerer, expr: ts.NewExpression): IrExpr {
         };
       }
       if (errInfo) {
-        const args = expr.arguments ?? [];
-        if (args.length > 2) {
-          lowerer.unsupported("SC1090", args[2] ?? expr, "Error constructor arguments after options");
-        }
-        if (args.length === 2) {
-          const options = args[1]!;
-          if (!ts.isObjectLiteralExpression(options)) {
-            lowerer.unsupported(
-              "SC1090",
-              options,
-              "Error constructor options that are not an inline { cause: value } literal",
-            );
-          }
-          let causeNode: ts.Expression | null = null;
-          for (const property of options.properties) {
-            if (ts.isPropertyAssignment(property) &&
-              ((ts.isIdentifier(property.name) && property.name.text === "cause") ||
-                (ts.isStringLiteral(property.name) && property.name.text === "cause"))) {
-              causeNode = property.initializer;
-              continue;
-            }
-            if (ts.isShorthandPropertyAssignment(property) &&
-              ts.isIdentifier(property.name) && property.name.text === "cause") {
-              causeNode = property.name;
-              continue;
-            }
-            lowerer.unsupported("SC1090", property, "Error constructor option other than a plain 'cause' property");
-          }
-          if (causeNode !== null) {
-            return errorWithCause(lowerer, args[0]!, causeNode, errInfo.def.name, loc);
-          }
-        }
-        return {
-          kind: "libCall",
-          fn: "error.new",
-          args: [lowerer.errorMessageArg(args.slice(0, 1), loc, expr)],
-          type: { kind: "object", className: errInfo.def.name },
-          loc,
-        };
+        return lowerBuiltinErrorConstruction(lowerer, expr.arguments ?? [], errInfo.def.name, loc, expr);
       }
       // `new EventEmitter()`: the runtime-provided emitter constructs
       // through one libCall. Zero arguments — the options bag

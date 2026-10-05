@@ -1,4 +1,6 @@
 import { inferredRegexBindingType } from "./lower-regex-captures.js";
+import { jsFactoryGlobalType } from "./js-factory-global.js";
+import { collectConditionalCjsExport, conditionalCjsExportSymbol } from "./cjs-conditional-export.js";
 import { nativeProxyBindingType } from "./lower-native-proxy.js";
 /* Module-graph lowering: split source files; collect signatures, classes,
  * globals, reachability seeds and npm/JSON imports; emit per-file %init,
@@ -15,12 +17,13 @@ import { isRuntimeSourceFileName } from "../tsc-codes.js";
 import { isKernelModule } from "../builtin-modules.js"; import { kernelServiceIdOf } from "../kernel.js";
 import { resolveBareAsset, resolveRelativeAsset } from "../resolve.js";
 import { trackedReadFile, trackedReadFileBytes } from "../input-tracker.js";
-import { type CycleEdge, canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, pathAliasesProgramModule, requireSpecOf, resolveImport, resolveNpmImport } from "../program.js";
-import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
+import { type CycleEdge, canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, pathAliasesProgramModule, resolveImport, resolveNpmImport } from "../program.js";
+import { npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
+export { collectJsonImports } from "./lower-json-imports.js";
 import { BOOL, DYN, F64, IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/ir.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, importCallHandleType, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireProgramModuleDecl, createRequireSpecOf, textCodecBindingDecl } from "./lower-builtins.js";
-import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, bindingNeverReassigned, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishGenericBindingUnitOf } from "./lower-calls.js";
+import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, bindingNeverReassigned, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, inferredJsRecordFactoryResult, nullishGenericBindingUnitOf } from "./lower-calls.js";
 import { isVarDeclared, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { stdlibGlobalAliasDecl, stdlibGlobalAliasNameOf } from "./surfaces.js";
@@ -29,6 +32,7 @@ import { collectExpandoMembers } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../type-mapper.js";
 import { type ClassInfo, decoratorNodesOf, probeExactInstanceClassOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow } from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
+import { classFactoryInstanceBindingType } from "./class-factory-captures.js";
 import { esbuildOnceAssignedClassExpression } from "./esbuild-once.js";
 import { cjsModuleRegistryPrelude } from "./lower-node-module.js";
 import { forkTargetPaths } from "../fork-target.js";
@@ -631,33 +635,6 @@ export function appendForkModules(
     visit(sf);
   }
 
-/** The JSON-module BINDING SITES of one file: the ESM default import
-   * (`import pkg from "../package.json"`) and its CommonJS twin
-   * (`const pkg = require("./codes.json")`). Both are alias declarations
-   * over a .json source file, so both bake identically — the shapes below
-   * are the only two spellings preflight admits (named/namespace imports
-   * and the destructuring/bare require forms keep their fences). */
-  function jsonBindingSitesOf(sf: ts.SourceFile): { name: ts.Identifier; site: ts.Node; spec: string | null }[] {
-    const out: { name: ts.Identifier; site: ts.Node; spec: string | null }[] = [];
-    for (const stmt of sf.statements) {
-      if (ts.isImportDeclaration(stmt) && ts.isStringLiteral(stmt.moduleSpecifier)) {
-        const clause = stmt.importClause;
-        if (clause?.name && clause.phaseModifier !== ts.SyntaxKind.TypeKeyword) {
-          out.push({ name: clause.name, site: stmt, spec: stmt.moduleSpecifier.text });
-        }
-        continue;
-      }
-      // `const data = require("./x.json")` — preflight (the require-of-JSON
-      // branch) admits exactly the identifier-bound form; the .json file
-      // carries no init, so this declaration IS the whole module edge.
-      if (!isRequireStatement(stmt) || !ts.isVariableStatement(stmt)) continue;
-      for (const decl of stmt.declarationList.declarations) {
-        const spec = decl.initializer !== undefined ? requireSpecOf(decl.initializer) : null;
-        if (spec !== null && ts.isIdentifier(decl.name)) out.push({ name: decl.name, site: decl, spec });
-      }
-    }
-    return out;
-  }
 
 /** The `with { type: "..." }` attribute value of an import declaration, or
    * null when the declaration carries none (tsgo's client AST carries the
@@ -779,87 +756,6 @@ export function appendForkModules(
     }
   }
 
-/** JSON module bindings (`import pkg from "../package.json"`, and the
-   * CommonJS `const pkg = require("./codes.json")`): the document is DATA
-   * known at build time, so the binding bakes into a record global — the
-   * checker's structural type for the module (thanks to resolveJsonModule)
-   * maps to a record shape, the JSON text parses in the compiler, and
-   * comptimeValueToIr turns the value into literal IR assigned in the
-   * importing module's %init prelude (evaluation order: imports before the
-   * importer's body, like npm bindings). Two importers of the same
-   * document share one global (keyed by the ALIASED symbol) — Node's
-   * module cache in miniature. Shapes outside the bakeable surface
-   * (null-valued fields, mixed arrays, ...) report the standard
-   * unsupported-type diagnostic at the binding site. Preflight already
-   * fenced named/namespace JSON imports plus the destructuring and bare
-   * require spellings, and kept .json files out of the module order. */
-  export function collectJsonImports(lowerer: Lowerer, parts: FileParts[]): void {
-    // The module cache in miniature: one global per DOCUMENT, whatever the
-    // spelling that reached it. The ESM form's alias symbol is the natural
-    // key (importers of the same document alias one symbol); the CommonJS
-    // require binding may be a plain variable, so the document's path keys
-    // the sharing and BOTH symbols route reads to the one global.
-    const byDocument = new Map<string, IrGlobal>();
-    for (const fp of parts) {
-      for (const { name, site, spec } of jsonBindingSitesOf(fp.sf)) {
-        const nameSym = lowerer.checker.getSymbolAtLocation(name);
-        if (!nameSym) continue;
-        const target = (nameSym.flags & ts.SymbolFlags.Alias) ? lowerer.checker.getAliasedSymbol(nameSym) : null;
-        let jsonSf = target ? lowerer.checker.declarationsOf(target)[0]?.getSourceFile() : undefined;
-        if ((!jsonSf || !jsonSf.fileName.endsWith(".json")) && spec !== null) {
-          // The require form: tsgo need not model the binding as an alias
-          // onto the JSON module, so the specifier resolves directly.
-          jsonSf = resolveImport(lowerer.program, fp.sf, spec) ?? undefined;
-        }
-        if (!jsonSf || !jsonSf.fileName.endsWith(".json")) continue;
-        try {
-          const tsType = lowerer.typeOf(name);
-          const mapped = lowerer.mapTypeOf(tsType);
-          if (!mapped || !lowerer.comptimeBakeable(mapped)) {
-            lowerer.badType(name, tsType);
-          }
-          // tsgo tolerates JSON shapes strict JSON.parse rejects (a leading
-          // `//` comment — importAttributes11), so no SC0001 guarantees a
-          // clean document: a failing parse gates at the binding site
-          // (Node refuses to load the module at runtime too).
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(jsonSf.text);
-          } catch (e) {
-            lowerer.pushDiag(invalidJsonModuleDiag(
-              jsonSf.fileName,
-              e instanceof Error ? e.message : String(e),
-              locOf(site),
-            ));
-            throw new PoisonError();
-          }
-          const value = lowerer.comptimeValueToIr(parsed, mapped, "$", name);
-          let g = (target !== null ? lowerer.globalsBySymbol.get(target) : undefined) ??
-            byDocument.get(jsonSf.fileName);
-          if (!g) {
-            g = {
-              id: `%g.json.${lowerer.globalsList.length}`,
-              name: name.text,
-              type: mapped,
-              mutable: false,
-            };
-            byDocument.set(jsonSf.fileName, g);
-            lowerer.globalsList.push(g);
-          }
-          if (target !== null) lowerer.globalsBySymbol.set(target, g);
-          // The BINDING's own symbol too: a require declaration tsgo does
-          // not alias onto the module has nothing else for reads to find.
-          lowerer.globalsBySymbol.set(nameSym, g);
-          const actions = lowerer.jsonInitActions.get(fp.sf) ?? [];
-          lowerer.jsonInitActions.set(fp.sf, actions);
-          actions.push({ kind: "assign", localId: g.id, value, loc: locOf(site) });
-        } catch (e) {
-          if (!(e instanceof PoisonError)) throw e;
-          // diagnostic already recorded; uses of the binding poison too
-        }
-      }
-    }
-  }
 
 /** The classes, records, and unions the emitted module carries: exactly
    * what the lowered functions and globals reference, closed transitively
@@ -1081,6 +977,7 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
     // register their module globals first — reads inside function bodies
     // collected earlier in this pass must resolve them (lower-expando.ts).
     collectExpandoMembers(lowerer, sf);
+    collectConditionalCjsExport(lowerer, sf, tag);
     for (const stmt of topStmts) {
       // `export default <expr>`: the module's `default` binding is a const
       // module global (registered under the checker's default-export
@@ -1178,7 +1075,7 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
         // Statements Node would DISCARD (a replaced export object) never
         // register storage — importer reads must not bind to values Node's
         // importers never see. The statement lowering owns the diagnostic.
-        const cjs = cjsExportDiscardReason(stmt) === null ? cjsExportAssignmentOf(stmt) : null;
+        const cjs = conditionalCjsExportSymbol(lowerer, sf) === null && cjsExportDiscardReason(stmt) === null ? cjsExportAssignmentOf(stmt) : null;
         const registerExport = (nameNode: ts.Node, name: string, typeNode: ts.Node): void => {
           const diagsBefore = lowerer.diags.length;
           try {
@@ -1622,6 +1519,16 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
         for (const nameNode of boundIdentifiersOf(decl.name)) {
           const diagsBefore = lowerer.diags.length;
           try {
+            const factoryType = nameNode === decl.name ? classFactoryInstanceBindingType(lowerer, decl) : null;
+            if (factoryType) {
+              const symbol = lowerer.checker.getSymbolAtLocation(nameNode);
+              if (symbol && !lowerer.globalsBySymbol.has(symbol)) {
+                const g: IrGlobal = { id: `%g.${tag}${nsPrefix}${nameNode.text}`, name: nameNode.text, type: factoryType, mutable: false };
+                lowerer.globalsBySymbol.set(symbol, g);
+                lowerer.globalsList.push(g);
+              }
+              continue;
+            }
             // esbuild's lazy ESM transform declares module classes as
             // `var C;` and assigns `C = class {}` inside its clearing-once
             // callback. Keep the binding as an actual optional class-value
@@ -1764,7 +1671,16 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
             // and closures created in the init body capture it normally.
             // References from separately-declared functions cascade to
             // their own per-site runtime fences.
-            if (isJsSourceFile(sf) && !lowerer.mapTypeOf(lowerer.typeOf(nameNode))) continue;
+            if (isJsSourceFile(sf) && !lowerer.mapTypeOf(lowerer.typeOf(nameNode))) {
+              const factoryType = nameNode === decl.name ? jsFactoryGlobalType(lowerer, decl) : null;
+              const symbol = factoryType ? lowerer.checker.getSymbolAtLocation(nameNode) : undefined;
+              if (factoryType && symbol && !lowerer.globalsBySymbol.has(symbol)) {
+                const g: IrGlobal = { id: `%g.${tag}${nsPrefix}${nameNode.text}`, name: nameNode.text, type: factoryType, mutable: false };
+                lowerer.globalsBySymbol.set(symbol, g);
+                lowerer.globalsList.push(g);
+              }
+              continue;
+            }
             // `var p1 = import("./m")` at file scope: the global holds the
             // island promise/handle — the import expression's only
             // production — whatever the checker's namespace type mapped to
@@ -1820,6 +1736,8 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
               : storedOptionalClassValue ??
                 (exactNewClass ? { kind: "object", className: exactNewClass.def.name } : null) ??
                 handleT ?? inferredRegexBindingType(lowerer, decl, lowerer.irTypeOf(nameNode));
+            if (type.kind === "record" && decl.type === undefined && nameNode === decl.name &&
+              inferredJsRecordFactoryResult(lowerer, decl.initializer)) type = DYN;
             // An evolving-`any` array's DERIVED file-scope binding under
             // --dynamic (`const kept = fns.filter(...)` where `fns`
             // registered array<jsval> at its `any[]` declaration): the

@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { expect, test } from "vitest";
 import { npmStaticIneligibleReason } from "./npm-static.js";
 import { loadProgram } from "./program.js";
@@ -59,4 +60,31 @@ test("an unreadable runtime entry is an eligibility refusal", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test.each(["js", "mjs", "cjs"])("runtime inference admits readable %s only for executable AUTO", async (extension) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-npm-static-inference-"));
+  try {
+    const root = join(dir, "node_modules", "example");
+    await mkdir(root, { recursive: true });
+    const entry = join(root, `index.${extension}`);
+    await writeFile(entry, "exports.answer = 42;\n");
+    expect(npmStaticIneligibleReason("example", entry, entry, true)).toBeNull();
+    expect(npmStaticIneligibleReason("example", entry, entry)).toBe("it ships no own .d.ts declaration surface");
+    expect(npmStaticIneligibleReason("example", entry, null, true)).toBe("no runtime JS entry resolves");
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test.each([
+  ["exports.answer = 42;", "its shipped JS looks minified"],
+  ["const loader = __webpack_require__;\nexports.answer = loader(0);\n", "its shipped JS carries build-transform markers (bundled/transpiled dist)"],
+] as const)("runtime inference preserves source refusal: %s", async (source, reason) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-npm-static-inference-refusal-"));
+  try {
+    const root = join(dir, "node_modules", "example");
+    await mkdir(root, { recursive: true });
+    const entry = join(root, "index.js");
+    await writeFile(entry, source);
+    expect(npmStaticIneligibleReason("example", entry, entry, true)).toBe(reason);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

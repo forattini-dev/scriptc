@@ -1,4 +1,5 @@
 import { emitRustBigIntCall } from "./bigint.js";
+import { emitRustErrorStackCall } from "./error-stacks.js";
 import { rustJsString } from "./string-literals.js";
 import type { IrFamily } from "../../ir/ir.js";
 import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
@@ -16,6 +17,7 @@ import { emitRustTlsCall } from "./tls.js";
 import { emitRustCheckedBufferCall } from "./buffer-checked.js";
 import { emitRustCheckedFsCall } from "./fs-checked.js";
 import { emitRustDgramCall } from "./dgram.js";
+import { emitRustDnsCall } from "./dns.js";
 import { emitRustReadlineCall } from "./readline.js";
 import { emitRustInspectCall } from "./inspect.js";
 import { emitRustCryptoCall } from "./crypto.js";
@@ -82,6 +84,7 @@ export interface RustLibCallContext {
   functionIdentity(value: string, type: IrFuncType, loc: SrcLoc, borrowed?: boolean): string;
   emitEventEmitterCall(expr: RustLibCallExpr): string | null;
   classNameArms(className: string, loc?: SrcLoc): string;
+  constructorIdentityArms(className: string, loc?: SrcLoc): string;
   isEdgeValue(type: IrType): boolean;
   isUnit(type: IrType): boolean;
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
@@ -89,6 +92,10 @@ export interface RustLibCallContext {
 }
 
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const dns = emitRustDnsCall(expr, context);
+  if (dns !== null) return dns;
+  const stack = emitRustErrorStackCall(expr, context);
+  if (stack !== null) return stack;
   const promiseView = emitRustPromiseView(expr, context);
   if (promiseView !== null) return promiseView;
   const bigint = emitRustBigIntCall(expr, context);
@@ -1078,7 +1085,11 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     const nameField = context.classFieldName(receiverExpr.type.className, "name", expr.loc);
     const messageField = context.classFieldName(receiverExpr.type.className, "message", expr.loc);
     const codeField = context.classFieldName(receiverExpr.type.className, "%code", expr.loc);
-    return `{ let ${receiver} = ${context.emitExpr(receiverExpr)}; let ${message} = ${context.emitExpr(expr.args[1])}; ${receiver}.with_mut(|object| { object.${nameField} = ${rustJsString(error.lib, text => context.rustString(text))}; object.${messageField} = ${message}; object.${codeField} = runtime::empty_string(); }); }`;
+    const identities = context.constructorIdentityArms(receiverExpr.type.className, expr.loc);
+    const constructor = context.classMetaOf(receiverExpr.type.className, expr.loc).hierarchy
+      ? `${receiver}.with(|object| match object.sc_class_pre { ${identities} _ => unreachable!("scriptc invariant: Error constructor identity"), })`
+      : `"${context.rustString(`%${receiverExpr.type.className}.constructor`)}"`;
+    return `{ let ${receiver} = ${context.emitExpr(receiverExpr)}; let ${message} = ${context.emitExpr(expr.args[1])}; ${receiver}.with_mut(|object| { object.${nameField} = ${rustJsString(error.lib, text => context.rustString(text))}; object.${messageField} = ${message}; object.${codeField} = runtime::empty_string(); }); runtime::error_capture_stack_gc_if_active(&${receiver}, ${constructor}); }`;
   }
   if (expr.fn === "error.new" && expr.args.length === 1 && arg !== undefined && expr.type.kind === "object") {
     const error = RUNTIME_ERROR_CLASSES.get(expr.type.className);

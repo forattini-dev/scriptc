@@ -39,6 +39,8 @@ import type { Lowerer } from "./lowerer.js";
 import { PoisonError } from "./lowerer.js";
 import { IrType } from "../../ir/ir.js";
 import { ClassInfo, builtinStreamInfoOf, exactClassOfReceiver, propertyAssignedClassInfoOf } from "./lower-classes.js";
+import { prepareClassFactoryCaptures, classFactoryStatementOf, type ClassFactoryCaptures } from "./class-factory-captures.js";
+import { closedClassFactoryShapeOf, type ClassFactoryShape } from "./class-factory-shapes.js";
 
 /** A recognized mixin function: one base-class parameter, a body that
  * defines and returns exactly one class extending that parameter, and no
@@ -57,6 +59,8 @@ export interface MixinFnShape {
   classNode: ts.ClassLikeDeclaration;
   /** Source name for diagnostics. */
   name: string;
+  /** Closed-base factories use parameter cells instead of a base argument. */
+  factory?: ClassFactoryShape;
 }
 
 /** Mixin-instantiation state hung off the instantiation's ClassInfo (the
@@ -81,6 +85,7 @@ export interface MixinInstanceInfo {
    * in this file's init, at the top-level statement containing the call —
    * exactly when JS evaluates them (lowerFileInit's merge). */
   statics?: { sf: ts.SourceFile; pos: number };
+  factory?: ClassFactoryCaptures;
 }
 
 /** Strips parentheses. */
@@ -100,7 +105,7 @@ export function mixinFnShapeOf(
 ): MixinFnShape | null {
   const cached = lowerer.mixinFnShapes.get(fn);
   if (cached !== undefined) return cached;
-  const shape = mixinFnShapeInner(lowerer, fn);
+  const shape = mixinFnShapeInner(lowerer, fn) ?? closedClassFactoryShapeOf(lowerer, fn);
   lowerer.mixinFnShapes.set(fn, shape);
   return shape;
 }
@@ -390,7 +395,7 @@ function instantiateMixinCall(lowerer: Lowerer, call: ts.CallExpression, shape: 
   if (lowerer.mixinCollectingCalls.has(call)) {
     lowerer.unsupported("SC1090", call, "mixin calls whose base chain re-enters their own instantiation (a cyclic extends)");
   }
-  if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) {
+  if (!shape.factory && (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!))) {
     lowerer.unsupported("SC1090", call, "mixin calls with anything but exactly one direct class argument");
   }
   // Evaluation-position fence: one immortal class object is exact only
@@ -404,7 +409,7 @@ function instantiateMixinCall(lowerer: Lowerer, call: ts.CallExpression, shape: 
       lowerer.unsupported(
         "SC1090",
         call,
-        "mixin calls inside functions (each call mints a DISTINCT class in JS — call the mixin at top level and bind or extend the result)",
+        `${shape.factory ? "class factory" : "mixin"} calls inside functions (each call mints a DISTINCT class in JS — call the ${shape.factory ? "factory" : "mixin"} at top level and bind or extend the result)`,
       );
     }
     if ((ts.isClassDeclaration(p) || ts.isClassExpression(p)) && !ts.isHeritageClause(prev)) {
@@ -416,12 +421,13 @@ function instantiateMixinCall(lowerer: Lowerer, call: ts.CallExpression, shape: 
     }
   }
 
-  const base = mixinBaseClassOf(lowerer, call.arguments[0]!);
   const instName = lowerer.qualify(
     call.getSourceFile(),
     `%mx${call.getStart()}.${shape.classNode.name?.text ?? ""}`,
   );
   const ordinal = lowerer.mixinOrdinals.get(shape.classNode) ?? 0;
+  const factory = shape.factory ? prepareClassFactoryCaptures(lowerer, call, shape, instName) : undefined;
+  const base = mixinBaseClassOf(lowerer, shape.factory?.base ?? call.arguments[0]!);
   lowerer.mixinOrdinals.set(shape.classNode, ordinal + 1);
   const bindings = new Map<ts.Symbol, IrType>();
   if (shape.paramTypeParam) {
@@ -431,12 +437,14 @@ function instantiateMixinCall(lowerer: Lowerer, call: ts.CallExpression, shape: 
   const prevBindings = lowerer.typeParamBindings;
   const prevContext = lowerer.instantiationContext;
   const prevMixinCtx = lowerer.mixinTypeContext;
+  const prevCaptures = lowerer.classFactoryCaptures;
   lowerer.typeParamBindings = bindings;
   lowerer.instantiationContext = context;
   lowerer.mixinTypeContext = { classNode: shape.classNode, className: instName };
+  if (factory) lowerer.classFactoryCaptures = factory.slots;
   lowerer.mixinCollectingCalls.add(call);
   try {
-    lowerer.collectClassShapeInner(shape.classNode, undefined, undefined, {
+    lowerer.collectClassShapeInner(shape.classNode, shape.factory?.method?.self?.name.getText(), undefined, {
       base,
       name: instName,
       call,
@@ -448,10 +456,16 @@ function instantiateMixinCall(lowerer: Lowerer, call: ts.CallExpression, shape: 
     lowerer.typeParamBindings = prevBindings;
     lowerer.instantiationContext = prevContext;
     lowerer.mixinTypeContext = prevMixinCtx;
+    lowerer.classFactoryCaptures = prevCaptures;
     lowerer.mixinCollectingCalls.delete(call);
   }
   const info = lowerer.classes.get(instName);
   if (!info) throw new PoisonError(); // collection poisoned and reported
+  if (factory && info.mixinInstance) {
+    info.mixinInstance.factory = factory;
+    const holder = classFactoryStatementOf(call);
+    if (holder) info.mixinInstance.statics = { sf: call.getSourceFile(), pos: holder.getStart() };
+  }
   // Members lower in the shared monomorphization fixpoint (demand-driven,
   // like generic-class instantiations — never wantBody-gated).
   lowerer.genericClassInstances.push(info);
@@ -470,7 +484,7 @@ function instantiateMixinCall(lowerer: Lowerer, call: ts.CallExpression, shape: 
   // (before the statement; every allowed shape evaluates nothing
   // observable ahead of the call). Anything subtler is a named fence,
   // never a reordering.
-  if (info.staticFields.length > 0 || (info.staticBlocks?.length ?? 0) > 0) {
+  if (!factory && (info.staticFields.length > 0 || (info.staticBlocks?.length ?? 0) > 0)) {
     const holder = staticsEvalStatementOf(call);
     if (!holder) {
       lowerer.unsupported(

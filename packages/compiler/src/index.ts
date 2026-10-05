@@ -4,7 +4,7 @@ import type { TypeAcquisitionOptions } from "./type-acquisition/acquire.js";
 export { analyzeAsync, type AsyncAnalyzeOptions } from "./type-acquisition/api.js";
 export type { TypeAcquisitionOptions } from "./type-acquisition/acquire.js";
 import { resolveLibrarySection, libraryIntSlotConfig, mergeSidecarIntSlots } from "./library/section-resolution.js";
-import { llvmRefusalDiag, rustRefusalDiags, backendRefusalDiag, targetRefusalDiag } from "./backend/refusal-diagnostics.js";
+import { cRefusalDiag, llvmRefusalDiag, rustRefusalDiags, backendRefusalDiag, targetRefusalDiag } from "./backend/refusal-diagnostics.js";
 import { InternalCompilerError } from "./errors.js";
 import { ffiNativeBuildDetail } from "./ffi/native-build-detail.js";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -25,6 +25,7 @@ import {
   targetPlatform,
 } from "./backend/external-c.js";
 import { emitCModule } from "./backend/c/c-emitter.js";
+import { CUnsupportedError } from "./backend/c/unsupported.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
 import { nativeModuleBackendDiagnostics } from "./backend/native-module-support.js";
 import { moduleWasiUnavailableSurface } from "./backend/wasi-surface.js";
@@ -70,7 +71,7 @@ import { checkPreflight, loadProgram } from "./frontend/program.js";
 import { npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
 import { provenanceSources } from "./frontend/provenance-registry.js";
 import { clearResolveCaches } from "./frontend/resolve.js";
-import { retryNpmCallbackContext } from "./frontend/npm-static-context.js";
+import { retryNpmInferredContext } from "./frontend/npm-static-context.js";
 import { withNpmDeclarationCandidates } from "./frontend/npm-static-declarations.js";
 import { detectAutoPackages, filterExternalNpmPackages, findSingleNpmSurfaceOffender, npmSurfaceHasTypeErrors, npmTypeErrorKey, packagesNamedByDiag } from "./frontend/npm-static-auto.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
@@ -307,8 +308,8 @@ export interface CompileBaseOptions {
   /** --npm-static: package names whose shipped, unminified JS compiles
    * STATICALLY as program modules (inference types the bodies; statements
    * the lowering cannot prove become runtime fences). "auto" opts in every
-   * reachable package passing the eligibility heuristics (own
-   * .d.ts, unminified JS, no build-transform markers). A package whose
+   * reachable package passing the eligibility heuristics (readable runtime
+   * JS/TS, matched declaration providers when present, no bundler runtime). A package whose
    * preflight refuses marks itself an offender and falls back to the
    * island (--dynamic) or the requires-dynamic diagnostic (static builds)
    * — never a silent misbuild. Off by default: nothing changes without
@@ -598,9 +599,9 @@ function runFrontendWithDeclarations(
     load = loadProgram(entryPath, { npmStatic: effective, externalTypes });
     preflight = checkPreflight(load);
   }
-  // Preserve the original strict authoring gate when only callback
-  // contextual types disappear across an inferred npm any boundary.
-  const contextual = retryNpmCallbackContext(entryPath, effective, load, preflight, externalTypes);
+  // Preserve the original authoring gate when npm inference loses callback
+  // context or over-narrows an unannotated JavaScript null-default option.
+  const contextual = retryNpmInferredContext(entryPath, effective, load, preflight, externalTypes);
   if (contextual !== null) ({ load, preflight } = contextual);
   // The last resort, ALL modes: an opt-in can change the PROGRAM's OWN
   // typecheck through errors that name no package at all (the inferred
@@ -865,6 +866,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
         } catch (error) {
           if (error instanceof RustUnsupportedError) diagnostics.push(...rustRefusalDiags(error, entryPath));
           else if (error instanceof LlvmUnsupportedError) diagnostics.push(llvmRefusalDiag(error, entryPath));
+          else if (error instanceof CUnsupportedError) diagnostics.push(cRefusalDiag(error, entryPath));
           else throw error;
         }
       }
@@ -1591,8 +1593,14 @@ async function compileTracked(
   }
 
   if (outputKind === "c") {
+    let source: string;
+    try { source = emitCModule(lowered.module, entryText); }
+    catch (error) {
+      if (!(error instanceof CUnsupportedError)) throw error;
+      return { ok: false, diagnostics: [cRefusalDiag(error, entryPath)], sourceTexts };
+    }
     await mkdir(dirname(opts.outPath), { recursive: true });
-    await writeFile(opts.outPath, emitCModule(lowered.module, entryText));
+    await writeFile(opts.outPath, source);
     return { ok: true, artifact: { kind: "c", path: opts.outPath } };
   }
 
@@ -1760,7 +1768,11 @@ async function compileTracked(
     }
   }
   if (backend === "c") {
-    await writeFile(cPath, emitCModule(lowered.module!, entryText));
+    try { await writeFile(cPath, emitCModule(lowered.module!, entryText)); }
+    catch (error) {
+      if (!(error instanceof CUnsupportedError)) throw error;
+      return { ok: false, diagnostics: [cRefusalDiag(error, entryPath)], sourceTexts };
+    }
   }
   let irPath: string | undefined;
   if (opts.emitIr) {
@@ -2610,7 +2622,11 @@ async function compileLibraryTracked(
     }
   } else {
     cPath = join(opts.outDir, `${stem}.lib.c`);
-    await writeFile(cPath, emitCModule(mod, entryText));
+    try { await writeFile(cPath, emitCModule(mod, entryText)); }
+    catch (error) {
+      if (!(error instanceof CUnsupportedError)) throw error;
+      return fail([cRefusalDiag(error, entryPath)]);
+    }
   }
 
   let irPath: string | undefined;

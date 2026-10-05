@@ -186,13 +186,14 @@ export function builtinStreamInfoOf(L: Lowerer, symbol: ts.Symbol | null | undef
 /** The undefined-armed union of a JS class property's inferred type — the
  * honest slot for a field first assigned outside the constructor's top
  * level (undefined until the write runs, Node-exact). Null when the
- * inference is unmappable, checked-dynamic (dyn stays out of class
- * fields — KEEP NARROW), or an arm-less kind that cannot join a union
- * (genResultRecord's list, including scalar-backed Date values). */
+ * inference is unmappable or an arm-less kind cannot join a union.
+ * Native checked-dynamic slots already hold undefined, including inferred
+ * JS any fields, just like their constructor-assigned counterparts. */
 export function undefArmedFieldType(L: Lowerer, p: ts.Symbol): IrType | null {
   const t = L.checker.getTypeOfSymbol(p);
-  const mapped = L.mapTypeOf(t);
-  if (!mapped || mapped.kind === "void" || mapped.kind === "dyn") return null;
+  const mapped = L.mapTypeOf(t) ?? ((t.flags & ts.TypeFlags.Any) !== 0 ? DYN : null);
+  if (!mapped || mapped.kind === "void") return null;
+  if (mapped.kind === "dyn") return DYN;
   const byKey = new Map<string, IrType>();
   const arms = mapped.kind === "union" ? (L.unions.get(mapped.unionId)?.arms ?? []) : [mapped];
   for (const a of arms) {
@@ -272,4 +273,3 @@ export const EMITTER_API_MEMBERS: ReadonlySet<string> = new Set([
 "off", "removeListener", "removeAllListeners", "emit", "listenerCount",
 "listeners", "rawListeners", "eventNames", "setMaxListeners", "getMaxListeners",
 ]);
-

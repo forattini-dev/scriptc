@@ -1,4 +1,6 @@
 import { fixedTupleParameters } from "./fixed-tuple-parameters.js";
+import { builtinErrorIntersection } from "./builtin-error-intersection.js";
+import { mapDnsLookupAddress } from "./dns-lookup-type.js";
 export { formatIrType } from "./format-ir-type.js";
 export { ISLAND_AMBIENT_TYPES, isParseArgsDynTypeName } from "./ambient-type-names.js";
 import { ISLAND_AMBIENT_TYPES, PARSE_ARGS_DYN_TYPES } from "./ambient-type-names.js";
@@ -994,6 +996,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // part must be a plain object refinement — no call/construct signatures,
   // no class identity of its own.
   if (widened.isIntersectionType()) {
+    const error = builtinErrorIntersection(ts.constituentTypes(widened).map(part => mapType(part, ctx)));
+    if (error) return error;
     // A tuple with a method-signature-only refinement keeps the tuple's
     // runtime representation. This is the common `as const as Tuple & {
     // includes(wider): boolean }` idiom: the extra constituent changes
@@ -1186,6 +1190,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const groupsType = regexGroupsType(widened, ctx);
   if (groupsType) return groupsType;
   const psym = widened.getSymbol();
+  const dnsLookup = mapDnsLookupAddress(widened, ctx);
+  if (dnsLookup !== null) return dnsLookup;
   const isStdlibInterface = (name: string): boolean =>
     psym?.name === name &&
     checker.declarationsOf(psym).some(

@@ -8,11 +8,11 @@ import { InternalCompilerError } from "../../errors.js";
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
 import type { CEmitter, Temp } from "./c-emitter.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, CHILDWRITER_T, DYN, F64, IrExpr, IrLibFn, IrRecordShape, IrType, islandPromisePayloadTag, isClassOwnEnumerableFieldName, isDynTypedRefType, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS, NETSOCKET_T, RUNTIME_ERROR_CLASSES, STRING, typeEquals, typeKey } from "../../ir/ir.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, CHILDWRITER_T, DYN, ERROR_TOSTRING_DISPATCH_FN, F64, IrExpr, IrLibFn, IrRecordShape, IrType, islandPromisePayloadTag, isClassOwnEnumerableFieldName, isDynTypedRefType, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS, NETSOCKET_T, RUNTIME_ERROR_CLASSES, STRING, typeEquals, typeKey } from "../../ir/ir.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, releaseCallC, retainCallC, vAdapters } from "./types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordClone, mangleRecordNew, mangleRecordStruct, mangleVtStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./shapes.js";
-import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./walkers.js";
+import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper, dynObjectRestCheckHelper } from "./walkers.js";
 import { collectFfiRetainedOps, parseFfiCallbackKey } from "../ffi-callbacks.js";
 import { genResultThunkFor } from "./async.js";
 import { isStableReceiverOperand, matchStringSelfConcat, newValueMayThrow, streamTypedRefEligible, undefinedArmTag } from "../../ir/analysis.js";
@@ -1384,7 +1384,9 @@ function emitStringExpr(
         if (v.type.kind === "dyn") {
           // String(unknown): dispatch over the dyn kind (dynToStrHelper —
           // Node's String() incl. arrays-join and "[object Object]").
-          return emitter.newTemp(e.type, `${emitter.dynToStrHelper()}(${v.name})`);
+          const result = emitter.newTemp(e.type, `${emitter.dynToStrHelper()}(${v.name})`);
+          if (emitter.mayThrow.has(ERROR_TOSTRING_DISPATCH_FN)) emitter.emitPendingCheck();
+          return result;
         }
         if (v.type.kind === "record") {
           // String(record) / `${record}`: Object.prototype.toString's
@@ -2812,6 +2814,11 @@ function emitDynamicExpr(
           );
         }
         const v = emitter.emitExpr(e.value);
+        if (v.type.kind === "object" && emitter.classMeta.get(v.type.className)?.root.def.name === "%Error") {
+          // Preserve the genuine Error identity and subclass fields through
+          // the runtime cache, rather than materializing a plain class view.
+          return emitter.newTemp(e.type, `scr_dyn_from_error((ScrError *)${v.name})`);
+        }
         if (e.liveRef) {
           if (v.type.kind === "union") {
             const adapter = liveDynUnionRefAdapter(emitter, v.type);
@@ -4414,6 +4421,10 @@ function emitDynamicLibCall(state: LibCallState): Temp {
   const { e, emitter, arg, finish } = state;
   const fn = e.fn;
   switch (fn) {
+          case "dyn.objectRestCheck":
+            return finish(`${dynObjectRestCheckHelper(emitter, e.loc)}(${arg(0)})`);
+          case "dyn.objectAssignSourceCheck":
+            return finish(`${dynObjectRestCheckHelper(emitter, e.loc, "Object.assign source")}(${arg(0)})`);
           case "dyn.defineProps":
             // Object.defineProperties over dyn values: both borrowed,
             // result the target (+1); throws catchably (may-throw seed).

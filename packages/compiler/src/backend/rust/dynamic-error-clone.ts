@@ -1,12 +1,20 @@
 import type { RustDynamicContext } from "./dynamic-context.js";
 import type { RustClosureShape } from "./model.js";
 import { emitRustDynamicEquality } from "./dynamic-equality.js";
+import { ERROR_TOSTRING_DISPATCH_FN } from "../../ir/ir.js";
+import { mangleFunction } from "../mangle.js";
 
 export function emitRustDynamicErrorAndCloneHelpers(context: RustDynamicContext, boxedShapes: readonly RustClosureShape[]): void {
   const name = context.dynTypeName();
+  const errorRoots = context.errorClassRoots();
   const usesEmbeddedModules = context.hasEmbeddedModules();
   const mapType = `runtime::JsMap<runtime::JsString, ${name}>`;
   const errorType = context.errorClassRoots().length === 0 ? "runtime::JsError" : context.errorValueName();
+  const emittedFunctions = new Set(context.module().functions.map((fn) => fn.name));
+  const errorOverrides = (context.module().classes ?? []).filter((cls) =>
+    cls.runtime !== true && emittedFunctions.has(`%${cls.name}.toString`) &&
+    errorRoots.some((root) => root === context.classMetaOf(cls.name).root),
+  );
   const errorHelper = (helper: string): string => context.errorClassRoots().length === 0 ? `runtime::error_${helper}` : `sc_error_${helper}`;
   const errorTarget = context.errorClassRoots().length === 0 ? "target.strip_prefix('%').unwrap_or(target)" : "target";
   const abortError = context.errorClassRoots().length === 0 ? `runtime::dom_exception_new(runtime::string("This operation was aborted"), runtime::string("AbortError"), None)` : `${context.errorValueName()}::Builtin(runtime::dom_exception_new(runtime::string("This operation was aborted"), runtime::string("AbortError"), None))`;
@@ -17,15 +25,31 @@ export function emitRustDynamicErrorAndCloneHelpers(context: RustDynamicContext,
   context.line(`static SC_DYN_ERROR_CACHE: std::cell::RefCell<Vec<(usize, ${errorType}, ${mapType})>> = const { std::cell::RefCell::new(Vec::new()) };`);
   context.popIndent();
   context.line("}");
+  if (errorRoots.length > 0) {
+    context.line(`fn sc_dyn_error_register_live(error: &${errorType}, object: &${mapType}) {`);
+    context.pushIndent();
+    context.line("match error {");
+    context.pushIndent();
+    context.line(`${errorType}::Builtin(_) => {},`);
+    for (const root of errorRoots) {
+      context.line(`${errorType}::${context.errorValueVariant(root)}(original) => { runtime::live_dyn_ref_store(object.identity(), original.clone()); runtime::live_dyn_mirror_store(original.identity(), object.clone()); },`);
+    }
+    context.popIndent();
+    context.line("}");
+    context.popIndent();
+    context.line("}");
+  }
   context.line(`fn sc_dyn_error_box(error: &${errorType}) -> ${name} {`);
   context.pushIndent();
   context.line(`let identity = ${errorHelper("identity")}(error);`);
   context.line("if let Some(object) = SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(cached, _, _)| *cached == identity).map(|(_, _, object)| object.clone())) {");
   context.pushIndent();
+  if (errorRoots.length > 0) context.line("sc_dyn_error_register_live(error, &object);");
   context.line(`return ${name}::Object(object);`);
   context.popIndent();
   context.line("}");
   context.line(`let object: ${mapType} = runtime::map_new();`);
+  if (errorRoots.length > 0) context.line("sc_dyn_error_register_live(error, &object);");
   context.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow_mut().push((identity, error.clone(), object.clone())));");
   context.line(`runtime::map_set_by(&object, runtime::string("%error"), ${name}::Boolean(true), |left, right| left.as_ref() == right.as_ref());`);
   context.line(`runtime::map_set_by(&object, runtime::string("name"), ${name}::String(${errorHelper("name")}(error)), |left, right| left.as_ref() == right.as_ref());`);
@@ -50,6 +74,28 @@ export function emitRustDynamicErrorAndCloneHelpers(context: RustDynamicContext,
   context.line(`let ${name}::Object(object) = value else { return false; };`);
   context.line("let identity = object.identity();");
   context.line(`SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).is_some_and(|(_, error, _)| ${errorHelper("is_class")}(error, ${errorTarget})))`);
+  context.popIndent();
+  context.line("}");
+  context.line(`fn sc_dyn_error_string_coerce(value: &${name}) -> Option<runtime::JsString> {`);
+  context.pushIndent();
+  if (errorOverrides.length > 0 && emittedFunctions.has(ERROR_TOSTRING_DISPATCH_FN)) {
+    context.line(`let ${name}::Object(object) = value else { return None; };`);
+    context.line('if runtime::map_has_by(object, &runtime::string("toString"), |left, right| left.as_ref() == right.as_ref()) { return None; }');
+    context.line("let identity = object.identity();");
+    // Clone the original Error before invoking user code: an override may
+    // re-enter Error boxing/coercion, so the cache borrow must already end.
+    context.line("let error = SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).map(|(_, error, _)| error.clone()))?;");
+    // Only emitted user overrides require the live receiver. Builtin and
+    // non-overridden Errors keep their mutable boxed name/message snapshot.
+    const hasOverride = errorOverrides.map((cls) =>
+      `sc_error_is_class(&error, "${context.rustString(cls.name)}")`,
+    ).join(" || ");
+    context.line(`if !(${hasOverride}) { return None; }`);
+    context.line(`Some(${mangleFunction(ERROR_TOSTRING_DISPATCH_FN)}(error))`);
+  } else {
+    context.line("let _ = value;");
+    context.line("None");
+  }
   context.popIndent();
   context.line("}");
   context.line(`fn sc_dyn_error_unbox(value: ${name}) -> ${errorType} {`);

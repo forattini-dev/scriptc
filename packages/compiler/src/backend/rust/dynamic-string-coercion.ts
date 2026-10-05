@@ -19,9 +19,9 @@ export function emitRustDynamicStringCoercion(
   boxedShapes: readonly RustClosureShape[],
 ): void {
   const name = context.dynTypeName();
-  // Boxed Errors keep their builtin default conversion, but an ordinary
-  // record cannot acquire Error behavior by spelling the internal marker.
-  const defaultObjectString = 'if sc_dyn_error_instanceof(value, "Error") { sc_dyn_to_string(value) } else { runtime::string("[object Object]") }';
+  // Recover the original boxed Error by cache identity, not its marker or
+  // copied fields, so overrides observe the live instance on every call.
+  const defaultObjectString = 'if let Some(text) = sc_dyn_error_string_coerce(value) { text } else if sc_dyn_error_instanceof(value, "Error") { sc_dyn_to_string(value) } else { runtime::string("[object Object]") }';
   const callable = boxedShapes
     .map((shape) => `${name}::${context.dynFunctionVariant(shape)}(..)`)
     .join(" | ");

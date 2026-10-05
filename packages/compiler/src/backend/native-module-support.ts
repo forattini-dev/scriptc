@@ -83,6 +83,21 @@ export function nativeModuleBackendDiagnostics(
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
       return;
     }
+    if (node.kind === "libCall" && node.fn === "buffer.fromDyn") {
+      feature = "checked-native Buffer.from (libCall:buffer.fromDyn)";
+      loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+      return;
+    }
+    if (node.kind === "libCall" && node.fn === "dyn.keySetComputed") {
+      feature = "checked-native computed assignment (libCall:dyn.keySetComputed)";
+      loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+      return;
+    }
+    if (node.kind === "libCall" && (node.fn === "dns.promises.lookup" || node.fn === "dns.lookupAsync" || node.fn === "dns.lookupFamily")) {
+      feature = `native ${node.fn}`;
+      loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+      return;
+    }
     if (node.kind === "libCall" && (node.fn === "module.import" || node.fn === "module.namespace" || node.fn === "promise.view")) {
       if (node.fn === "promise.view") feature = "Promise payload views";
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };

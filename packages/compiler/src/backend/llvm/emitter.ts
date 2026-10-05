@@ -81,7 +81,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/ir.js";
-import { CAUGHT, ffiCallbackType, isDynTypedRefType, isFfiContextParam, isRefCounted, isUnitType, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, moduleUsesTls, moduleUsesTlsCa, NPM_COMPRESS_MIN, POINTER_KINDS, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, typeKey, VOID } from "../../ir/ir.js";
+import { CAUGHT, ERROR_TOSTRING_DISPATCH_FN, ffiCallbackType, isDynTypedRefType, isFfiContextParam, isRefCounted, isUnitType, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleHasLibCall, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, moduleUsesTls, moduleUsesTlsCa, NPM_COMPRESS_MIN, POINTER_KINDS, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, typeKey, VOID } from "../../ir/ir.js";
 import { matchIntegerBytesForLoop } from "../../ir/integer-loops.js";
 import { scalarizeNumericRecords } from "../../ir/scalar-records.js";
 import { analyzeIntegerRanges, type IntegerRanges } from "../../ir/integer-ranges.js";
@@ -175,6 +175,7 @@ export type { LlvmTargetOptions } from "./target-options.js";
 import type { LlvmTargetOptions } from "./target-options.js";
 
 export function emitLlvmModule(mod: IrModule, options: LlvmTargetOptions = {}): string {
+  assertNativeModuleBackend(mod, "llvm");
   return new LlEmitter(scalarizeNumericRecords(mod), options).emit();
 }
 
@@ -228,7 +229,7 @@ class LlEmitter {
   private readonly walkers = new LlWalkers(this);
   /** The dyn (ScrDyn dyn) helper registry — dyn.ts's interned ports of
    * walkers.ts's dyn slice. */
-  private readonly dyn = new LlDyn(this);
+  private readonly dyn: LlDyn;
   /** External declarations, in first-use order. */
   private readonly decls = new Set<string>();
   /** Declared functions referenced as values: each needs an env-signature
@@ -238,6 +239,7 @@ class LlEmitter {
   private needsBadTag = false;
   private needsBadKey = false;
   private needsRetainBox = false;
+  private hasDynamicDescriptorDefinitions: boolean | undefined;
 
   private readonly fnByName = new Map<string, IrFunction>();
   /** Manifest-bound native imports, used by ffiCall emission. */
@@ -369,6 +371,7 @@ class LlEmitter {
   private logArgSlots = 0;
 
   constructor(private readonly mod: IrModule, options: LlvmTargetOptions) {
+    this.dyn = new LlDyn(this, mod.functions.some((fn) => fn.name === ERROR_TOSTRING_DISPATCH_FN));
     this.constantNumericTables = findConstantNumericTables(mod);
     this.sizeType = options.pointerBits === 32 ? "i32" : "i64";
     this.wasi = options.wasi === true;
@@ -2618,6 +2621,19 @@ class LlEmitter {
 
   // ── class plumbing ──────────────────────────────────────────────────────
 
+  errorClassInterval(className: string): { pre: number; post: number } | null {
+    const meta = this.classMeta.get(className);
+    return meta?.root.def.name === "%Error" ? { pre: meta.pre, post: meta.post } : null;
+  }
+
+  errorToStringOverrideIntervals(): readonly { pre: number; post: number }[] {
+    return [...this.classMeta.values()].filter((meta) =>
+      meta.root.def.name === "%Error" &&
+      !RUNTIME_ERROR_CLASSES.has(meta.def.name) &&
+      this.fnByName.has(`%${meta.def.name}.toString`),
+    ).map((meta) => ({ pre: meta.pre, post: meta.post }));
+  }
+
   private classMetaOf(className: string): LlClassMeta {
     const meta = this.classMeta.get(className);
     if (!meta) throw new InternalCompilerError(`llvm emitter bug: unknown class ${className}`);
@@ -4465,6 +4481,20 @@ class LlEmitter {
   }
 
   private emitLibCall(e: LibCallExpr): LlValue {
+    if (e.fn === "dyn.objectRestCheck" || e.fn === "dyn.objectAssignSourceCheck") {
+      const operation = e.fn === "dyn.objectRestCheck" ? "object rest" : "Object.assign source";
+      this.hasDynamicDescriptorDefinitions ??= moduleHasLibCall(this.mod, "dyn.defineProps");
+      if (this.hasDynamicDescriptorDefinitions) {
+        const error = new LlvmUnsupportedError(`libCall:${e.fn}:descriptor-defined-properties`, e.loc);
+        error.message = `the LLVM backend does not support checked-dynamic ${operation} in a module with dyn.defineProps (${error.kind}); use --backend rust`;
+        throw error;
+      }
+      const source = this.emitExpr(e.args[0]!);
+      const helper = this.dyn.dynObjectRestCheckHelper(operation);
+      this.B.line(`call void @${helper}(ptr ${source.name})`);
+      this.emitPendingCheck();
+      return { name: "", type: e.type };
+    }
     return emitLibCall(this.expressionContext(), e);
   }
 }

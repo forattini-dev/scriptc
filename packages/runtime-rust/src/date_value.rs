@@ -1,43 +1,67 @@
 //! Native Date object identity. Calendar operations continue using the shared
 //! TimeClip/calendar primitives, while aliases retain the same internal slot.
-use std::{cell::Cell, rc::Rc};
 use crate::{JsString, JsonValue, JsonWriter, Tracer};
+use std::{cell::Cell, rc::Rc};
 
 #[derive(Clone, Debug)]
 pub struct JsDate(Rc<Cell<f64>>);
 
 impl PartialEq for JsDate {
-    fn eq(&self, other: &Self) -> bool { Rc::ptr_eq(&self.0, &other.0) }
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
 }
 impl Eq for JsDate {}
 impl crate::ArrayElement for JsDate {}
 impl crate::JsonDecode for JsDate {
     fn decode_json(_: &crate::JsonNode, path: &str) -> Result<Self, String> {
-        Err(format!("expected a Date object at {path}, received JSON data"))
+        Err(format!(
+            "expected a Date object at {path}, received JSON data"
+        ))
     }
 }
-impl crate::Trace for JsDate { fn trace(&self, _: &mut Tracer<'_>) {} }
-impl crate::HeapValue for JsDate { fn trace_value(&self, _: &mut Tracer<'_>) {} }
+impl crate::Trace for JsDate {
+    fn trace(&self, _: &mut Tracer<'_>) {}
+}
+impl crate::HeapValue for JsDate {
+    fn trace_value(&self, _: &mut Tracer<'_>) {}
+}
 
 pub fn date_value_new(milliseconds: f64) -> JsDate {
     JsDate(Rc::new(Cell::new(crate::date_new_ms(milliseconds))))
 }
-pub fn date_value_time(value: &JsDate) -> f64 { value.0.get() }
-pub fn date_value_identity(value: &JsDate) -> usize { Rc::as_ptr(&value.0) as usize }
-pub fn date_value_copy(value: &JsDate) -> JsDate { date_value_new(date_value_time(value)) }
+pub fn date_value_time(value: &JsDate) -> f64 {
+    value.0.get()
+}
+pub fn date_value_identity(value: &JsDate) -> usize {
+    Rc::as_ptr(&value.0) as usize
+}
+pub fn date_value_copy(value: &JsDate) -> JsDate {
+    date_value_new(date_value_time(value))
+}
 pub fn date_value_inspect(value: &JsDate) -> JsString {
     let time = date_value_time(value);
-    if time.is_nan() { crate::string("Invalid Date") } else { crate::date_to_iso(time) }
+    if time.is_nan() {
+        crate::string("Invalid Date")
+    } else {
+        crate::date_to_iso(time)
+    }
 }
 /// The existing Date surface intentionally excludes locale/string formatters.
 /// Keep this boundary explicit when an unknown now contains a Date object.
 pub fn date_value_to_string(_: &JsDate) -> JsString {
-    crate::throw_type_error("native Date string coercion is not supported yet; use toISOString()".to_owned())
+    crate::throw_type_error(
+        "native Date string coercion is not supported yet; use toISOString()".to_owned(),
+    )
 }
 impl JsonValue for JsDate {
     fn write_json(&self, writer: &mut JsonWriter) {
         let time = date_value_time(self);
-        if time.is_nan() { writer.write_null(); } else { crate::date_to_iso(time).write_json(writer); }
+        if time.is_nan() {
+            writer.write_null();
+        } else {
+            crate::date_to_iso(time).write_json(writer);
+        }
     }
 }
 

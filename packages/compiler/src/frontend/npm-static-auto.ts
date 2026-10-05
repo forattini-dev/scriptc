@@ -2,7 +2,8 @@
  * through opted-in runtime sources. Every candidate is judged once per
  * frontend fixpoint, from its importing package's own resolution realm.
  * Library mode additionally diagnoses runtime-only packages lacking types;
- * executable auto retains its existing eligibility/fallback policy. */
+ * executable auto can infer readable JavaScript without declarations.
+ * Neither mode skips the normal inferred-surface or lowering checks. */
 import { checkPreflightTypes } from "./preflight-types.js";
 import { registerNpmDeclaration } from "./npm-static-declarations.js";
 import type { NpmStaticStatus } from "../coverage/report.js";
@@ -90,7 +91,7 @@ export function detectAutoPackages(
       const identity = `${runtime}\0${typesFile}`;
       if (checked.has(identity)) continue;
       checked.add(identity);
-      reason = npmStaticIneligibleReason(pkg, typesFile, runtime);
+      reason = npmStaticIneligibleReason(pkg, typesFile, runtime, mode === "auto");
       if (reason !== null) break;
       if (runtime !== null) pairs.push({ runtime, declaration: typesFile });
     }

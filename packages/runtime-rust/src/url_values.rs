@@ -1,6 +1,6 @@
 use crate::{
     JsArray, JsString, array_get, array_len, array_new, empty_string, path_resolve, string,
-    throw_type_error, throw_type_error_code, string_to_well_formed,
+    string_to_well_formed, throw_type_error, throw_type_error_code,
 };
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -266,7 +266,10 @@ fn search_params_from_pairs(
     pairs: Vec<(JsString, JsString)>,
     owner: Option<JsUrl>,
 ) -> JsSearchParams {
-    let pairs = pairs.into_iter().map(|(name, value)| (string_to_well_formed(&name), string_to_well_formed(&value))).collect();
+    let pairs = pairs
+        .into_iter()
+        .map(|(name, value)| (string_to_well_formed(&name), string_to_well_formed(&value)))
+        .collect();
     Rc::new(SearchParamsData {
         pairs: RefCell::new(pairs),
         owner,
@@ -419,7 +422,9 @@ fn search_params_delete_impl(
         .borrow_mut()
         .retain(|(candidate_name, candidate_value)| {
             candidate_name != name.as_ref()
-                || pair_value.as_ref().is_some_and(|expected| candidate_value != expected)
+                || pair_value
+                    .as_ref()
+                    .is_some_and(|expected| candidate_value != expected)
         });
     search_params_sync_owner(value);
 }
@@ -476,8 +481,7 @@ pub fn search_params_has_value(
         .borrow()
         .iter()
         .any(|(candidate_name, candidate_value)| {
-            candidate_name == name.as_ref()
-                && candidate_value == pair_value.as_ref()
+            candidate_name == name.as_ref() && candidate_value == pair_value.as_ref()
         })
 }
 

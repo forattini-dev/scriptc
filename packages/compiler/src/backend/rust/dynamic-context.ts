@@ -24,6 +24,7 @@ export interface RustDynamicContext {
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
   errorClassRoots(): RustClassMeta[];
   errorValueName(): string;
+  errorValueVariant(meta: RustClassMeta): string;
   hasEmbeddedModules(): boolean;
   isEdgeValue(type: IrType): boolean;
   isRustJsonCompatible(type: IrType, visiting?: Set<string>): boolean;

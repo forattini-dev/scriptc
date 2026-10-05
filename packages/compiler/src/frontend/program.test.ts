@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { API } from "typescript/unstable/sync";
 import { loadProgram, checkPreflight } from "./program.js";
+import { FrontendInputTracker, frontendInputsStillMatch } from "./input-tracker.js";
 
 test("static JS source discovery crosses deep and shared declaration paths without truncation", () => {
   const dir = mkdtempSync(join(tmpdir(), "scriptc-static-depth-"));
@@ -63,4 +64,24 @@ test("preflight releases its temporary project type world before continuing", ()
     load.dispose();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("configless Node type discovery tracks a missing local installation", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scriptc-node-type-inputs-"));
+  try {
+    const entry = join(dir, "entry.mts");
+    writeFileSync(entry, "console.log(42);");
+    const tracker = new FrontendInputTracker();
+    tracker.run(() => {
+      const load = loadProgram(entry);
+      try { expect(checkPreflight(load)).toEqual([]); }
+      finally { load.dispose(); }
+    });
+    const snapshot = tracker.snapshot();
+    const nodeTypes = join(dir, "node_modules", "@types", "node");
+    expect(snapshot.probes).toContainEqual({ op: "kind", path: nodeTypes, kind: "missing" });
+    expect(frontendInputsStillMatch(snapshot)).toBe(true);
+    mkdirSync(nodeTypes, { recursive: true });
+    expect(frontendInputsStillMatch(snapshot)).toBe(false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

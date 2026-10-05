@@ -1,6 +1,7 @@
 import type * as ts from "../ts7/adapter.js";
 import { DYN, STRING, type IrExpr } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
+import { lowerErasedErrorToString } from "./lower-error-tostring.js";
 
 /** String(symbol) alone uses SymbolDescriptiveString. Template interpolation,
  * concatenation and an object's primitive Symbol result still use ToString. */
@@ -10,6 +11,6 @@ export function lowerStringConstructor(L: Lowerer, value: IrExpr, node: ts.Node)
     value = { kind: "dynFrom", value, type: DYN, loc: value.loc };
   }
   return value.type.kind === "dyn"
-    ? { kind: "libCall", fn: "dyn.stringConstructor", args: [value], type: STRING, loc: value.loc }
+    ? lowerErasedErrorToString(L, value, true) ?? { kind: "libCall", fn: "dyn.stringConstructor", args: [value], type: STRING, loc: value.loc }
     : L.ensureString(value, node);
 }

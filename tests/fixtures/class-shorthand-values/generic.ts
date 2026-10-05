@@ -1,0 +1,4 @@
+class Box<T> {
+  constructor(public value: T) {}
+}
+const registry = { Box };

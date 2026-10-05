@@ -1,4 +1,4 @@
-import { arrayOf, funcOf, typeKey, typeEquals, canBoxFuncIntoDyn, canAdaptDynFuncTo, canMarshalTypedFuncIntoIsland } from "./ir.js";
+import { arrayOf, funcOf, typeKey, typeEquals, canBoxFuncIntoDyn, canAdaptDynFuncTo, canConvertToDyn, canMarshalTypedFuncIntoIsland } from "./ir.js";
 import { validateModule } from "./validate.js";
 import { deserializeModule, serializeModule } from "./serialize.js";
 import { describe, expect, test } from "vitest";
@@ -10,12 +10,32 @@ import {
   STRING,
   VOID,
   moduleUsesDynAsync,
+  moduleHasLibCall,
   type IrExpr,
   type IrModule,
+  type IrRecordShape,
   type IrType,
 } from "./ir.js";
 
 const loc = { file: "test.ts", start: 0, end: 1 };
+
+test("recursive records through function results terminate and retain unsupported-member refusals", () => {
+  const record: IrType = { kind: "record", shapeId: "factory" };
+  const factory = funcOf([], record);
+  const shape: IrRecordShape = { id: "factory", fields: [{ name: "clone", type: factory }] };
+  const records = new Map([[shape.id, shape]]);
+  const getRecord = (id: string): IrRecordShape | undefined => records.get(id);
+  expect(canConvertToDyn(record, getRecord, () => undefined)).toBe(true);
+  expect(canBoxFuncIntoDyn(factory, getRecord, () => undefined)).toBe(true);
+
+  // A cycle does not excuse a non-boxable field elsewhere in the graph.
+  // Checking the factory twice also catches stale visitation state from
+  // a failed speculative walk/fallback.
+  shape.fields.push({ name: "unsupported", type: { kind: "bytes", elem: "u32" } });
+  expect(canConvertToDyn(record, getRecord, () => undefined)).toBe(false);
+  expect(canConvertToDyn(factory, getRecord, () => undefined)).toBe(false);
+  expect(canBoxFuncIntoDyn(factory, getRecord, () => undefined)).toBe(false);
+});
 
 function moduleWithExpr(expr: IrExpr): IrModule {
   return {
@@ -36,6 +56,20 @@ function moduleWithExpr(expr: IrExpr): IrModule {
 function ref(type: IrType): IrExpr {
   return { kind: "varRef", localId: "value.0", type, loc };
 }
+
+test.each(["dyn.objectRestCheck", "dyn.objectAssignSourceCheck"] as const)("%s validates, round-trips and is found inside nested initializers", fn => {
+  const source: IrExpr = { kind: "dynObjLit", fields: [], type: DYN, loc };
+  const guard: IrExpr = { kind: "libCall", fn, args: [source], type: VOID, loc };
+  const module = moduleWithExpr({
+    kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: guard, loc }], result: source, type: DYN, loc,
+  });
+  expect(validateModule(module)).toEqual([]);
+  expect(moduleHasLibCall(module, fn)).toBe(true);
+  expect(moduleHasLibCall(module, "dyn.defineProps")).toBe(false);
+  const restored = deserializeModule(serializeModule(module));
+  expect(validateModule(restored)).toEqual([]);
+  expect(moduleHasLibCall(restored, fn)).toBe(true);
+});
 
 describe("IR kind sets", () => {
   test("keeps procStream as the scalar handle exception", () => {

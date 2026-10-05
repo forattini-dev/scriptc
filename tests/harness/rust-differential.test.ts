@@ -246,6 +246,7 @@ async function build(file: string) {
     sanitize: rustSanitize,
     ...(/^\/\/ @no-engine\s*$/m.test(readFileSync(file, "utf8")) ? { allowEngine: false } : {}),
     dynamic: wantsDynamic(file),
+    ...(directiveHead(file).some(line => /^\/\/ @npm-static:\s*auto\s*$/.test(line)) ? { npmStatic: "auto" as const } : {}),
     target: targetOf(file),
     ...(islandModulesOf(file).length > 0 ? { islandModules: islandModulesOf(file) } : {}),
   });

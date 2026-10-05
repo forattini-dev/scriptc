@@ -6,6 +6,30 @@ fn map_view_number(value: f64) -> JsString {
 fn map_view_string(value: JsString) -> f64 { value.parse().expect("numeric test value") }
 
 #[test]
+fn symbol_presence_follows_aliases_and_nested_views_without_reading_values() {
+    MAP_VIEW_READS.with(|reads| reads.set(0));
+    let source = map_new::<JsString, f64>();
+    let alias = source.clone();
+    let view = map_mapped(source.clone(), map_view_number, map_view_string);
+    let nested = map_mapped(view.clone(), |value| value, |value| value);
+    let other = map_new::<JsString, f64>();
+    assert!(!map_has_symbol_properties(&source));
+    assert!(!map_has_symbol_properties(&nested));
+    let key = symbol_new(&string("metadata"));
+    map_symbol_set(&nested, key.clone(), string("2"));
+    for present in [&source, &alias] { assert!(map_has_symbol_properties(present)); }
+    for present in [&view, &nested] { assert!(map_has_symbol_properties(present)); }
+    assert!(!map_has_symbol_properties(&other));
+    map_clear(&alias);
+    assert!(!map_has_symbol_properties(&source));
+    assert!(!map_has_symbol_properties(&nested));
+    MAP_VIEW_READS.with(|reads| assert_eq!(reads.get(), 0));
+    drop((source, alias, view, nested, other, key));
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}
+
+#[test]
 fn proxy_restrictions_follow_map_aliases_and_nested_projections() {
     MAP_VIEW_READS.with(|reads| reads.set(0));
     let source = map_new::<JsString, f64>();

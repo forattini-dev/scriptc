@@ -30,6 +30,7 @@ trait MapView<K: HeapValue, V: HeapValue>: Trace {
     fn symbol_get(&self, key: &JsSymbol) -> Option<V>;
     fn symbol_set(&self, key: JsSymbol, value: V);
     fn symbol_has(&self, key: &JsSymbol) -> bool;
+    fn has_symbol_properties(&self) -> bool;
 }
 
 struct MappedMap<K: HeapValue, S: HeapValue, T: HeapValue> {
@@ -72,6 +73,7 @@ impl<K: HeapValue, S: HeapValue, T: HeapValue> MapView<K, T> for MappedMap<K, S,
     fn symbol_get(&self, key: &JsSymbol) -> Option<T> { map_symbol_get(&self.source, key).map(self.read) }
     fn symbol_set(&self, key: JsSymbol, value: T) { map_symbol_set(&self.source, key, (self.write)(value)); }
     fn symbol_has(&self, key: &JsSymbol) -> bool { map_symbol_has(&self.source, key) }
+    fn has_symbol_properties(&self) -> bool { map_has_symbol_properties(&self.source) }
 }
 
 impl<K: HeapValue, V: HeapValue> MapData<K, V> {

@@ -1,5 +1,9 @@
 import { completeFunctionValueArgs, functionAbi } from "./function-abi.js";
 import { lowerNativeGlobalCall } from "./lower-native-global-calls.js";
+import { lowerErrorStackCall } from "./lower-error-stack.js";
+import { lowerBuiltinErrorCall } from "./lower-error-constructor.js";
+import { lowerPromisifiedZlibRawCall } from "./lower-promisify-zlib.js";
+import { lowerDnsPromisesCall } from "./lower-dns-promises.js";
 import { lowerNumericParser } from "./lower-numeric-parser.js";
 import { lowerNumberConversion } from "./lower-number-conversion.js";
 import { hasHiddenOptionalIndex } from "./lower-contextual-index.js";
@@ -29,7 +33,7 @@ import { ffiBindingDiag, ffiSignatureDiag, libCallbackDiag, requiresDynamicDiag 
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { dynStringReceiver, lowerArrayConstructor, lowerArrayFlatMapCall, lowerArrayHofCall, lowerArrayFromCall, lowerArrayOfCall, lowerArrayReduceCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerDynArrayMapCall, lowerDynArrayReduceCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectFromEntriesCall, lowerTupleReadMethodCall } from "./lower-containers.js";
-import { bufEncoding } from "./containers/bytes.js";
+import { bufEncoding, lowerBytesFromCall } from "./containers/bytes.js";
 import { lowerRegexMethodCall, lowerStringIndexCall, lowerStringMethodCall, lowerStringPaddingCall, lowerStringSplitCall } from "./containers/string-and-regexp.js";
 import { lowerChildStreamMethodCall, lowerChildWriterMethodCall, lowerCreateRequireCall, lowerCryptoHashMethodCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerImportMetaResolveCall, lowerNodeModuleCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerRequireResolveCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
@@ -42,6 +46,7 @@ import { isSafeToDiscard } from "./expressions/evaluation-safety.js";
 import { voidTernaryIfStmtOrExprStmt } from "./lower-stmts.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerCompatReqStreamOptionalCall, lowerHttpClientFnCall } from "./lower-server.js";
 import { EMITTER_API_MEMBERS, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
+import { deferredJsAsyncOverrideBelow } from "./js-async-methods.js";
 import { emitterRooted, lowerEmitterMethodCall } from "./lower-event-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
@@ -54,6 +59,7 @@ import { rejectStaticThis } from "./static-this.js";
 import { packDynamicRest } from "./dynamic-rest.js";
 import { fenceNodeModuleMutationCall, lowerRequireCacheKeys } from "./lower-node-module.js";
 import { defaultAfterUndefined, lowerOptionalArgument, lowerStaticallyUndefinedArgument, positionNumber } from "./optional-arguments.js";
+import { lowerErasedErrorToString, lowerErrorToString } from "./lower-error-tostring.js";
 
 import { lowerLegacyHasOwnCall, lowerObjectStaticCall } from "./lower-object-statics.js";
 /** How a parameter participates in CALL-SITE COMPLETION (the frontend
@@ -259,8 +265,7 @@ export interface GenericInstance {
       // through the declaration-destructuring machinery (declareParams →
       // lowerBindingPattern), so the fences inside patterns (computed
       // keys, class-instance sources, union sources) are the declaration
-      // fences verbatim. A rest parameter bound to a pattern would need
-      // the packing machinery on top — fenced.
+      // fences verbatim. Rest patterns pack the source before destructuring.
       if (param.questionToken) {
         lowerer.unsupported("SC1031", param, "optional destructuring pattern parameters");
       }
@@ -270,6 +275,14 @@ export interface GenericInstance {
         // array exactly like an identifier rest param; the prologue then
         // destructures the packed array through the declaration
         // machinery (declareParams → lowerBindingPattern).
+        if (!lowerer.dynamic && isJsSourceFile(param.getSourceFile()) &&
+          ts.isArrayBindingPattern(param.name) && lowerer.mapTypeOf(lowerer.typeOf(param.name)) === null) {
+          // JS inference produces unmappable tuples such as `[any]` for
+          // `constructor(...[configuration])`. Use the native checked-dyn
+          // argument vector, just like an untyped identifier rest parameter;
+          // the existing pattern prologue owns holes, defaults and tail refusals.
+          return { type: DYN, mode: "dynRest" };
+        }
         const type = lowerer.irTypeOf(param.name);
         const tupleRest = type.kind === "record" && lowerer.shapes.get(type.shapeId)?.tuple === true;
         if (type.kind !== "array" && !tupleRest) lowerer.badType(param.name, lowerer.typeOf(param.name));
@@ -984,6 +997,18 @@ export interface GenericInstance {
     }
     return returnType;
   }
+
+/** An inferred JS record produced by a factory whose native return ABI
+ * already preserves object identity as dyn. Storage must keep that same
+ * representation rather than introducing a structural copy/adapter. */
+export function inferredJsRecordFactoryResult(lowerer: Lowerer, initializer: ts.Expression | undefined): boolean {
+  if (!initializer || !ts.isCallExpression(initializer) || !isJsSourceFile(initializer.getSourceFile())) return false;
+  const signature = lowerer.checker.getResolvedSignature(initializer);
+  const factory = signature ? lowerer.checker.signatureDeclaration(signature) : undefined;
+  return factory !== undefined && isJsSourceFile(factory.getSourceFile()) &&
+    (ts.isArrowFunction(factory) || ts.isFunctionExpression(factory) || ts.isFunctionDeclaration(factory)) &&
+    lowerer.declaredReturnType(factory, initializer).kind === "dyn";
+}
 
 /** A RESULT position whose type is itself a generic signature (`const
    * satisfies = <T>() => <N extends T>(n: N) => n` — the call's result
@@ -3242,6 +3267,10 @@ export function lowerFfiCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr 
 
 export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
+    if (ts.isPropertyAccessExpression(expr.expression) && !expr.questionDotToken && !expr.expression.questionDotToken) {
+      const stack = lowerErrorStackCall(lowerer, expr, expr.expression);
+      if (stack) return stack;
+    }
     if (ts.isCallExpression(expr.expression)) { const effectFn = lowerEffectCall(lowerer, expr, loc); if (effectFn !== null) return effectFn; } // Effect.fn("name")(function* …): the kernel's function value
     // A call of a runtime-TRAPPED module binding (bun:sqlite/bun:ffi/v8):
     // the whole call IS the runtime throw — arguments never lower, typed
@@ -3399,6 +3428,7 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
       return lowerer.lowerSuperMethodCall(expr, expr.expression);
     }
 
+    const error = lowerBuiltinErrorCall(lowerer, expr); if (error) return error;
     const consoleMember = lowerer.consoleCallMember(expr);
     if (consoleMember !== null) {
       // console.log/info/debug write stdout; console.error and console.warn
@@ -3868,15 +3898,16 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
       if (expr.expression.text === "Array" && lowerer.isStdlibGlobal(expr.expression, "Array")) {
         return lowerArrayConstructor(lowerer, expr, expr.arguments);
       }
-      // A call through a `const execFileAsync = promisify(execFile)`
-      // binding — the one lowered util.promisify shape: the interned
-      // async-exec helper (Node's promisified execFile behind an
-      // already-settled promise).
+      // Calls through recorded util.promisify bindings: execFile uses its
+      // interned async-exec helper; the raw zlib pair uses deferred codecs.
       {
         const sym = lowerer.resolveValueSymbol(expr.expression);
         if (sym && lowerer.promisifiedExecFile.has(sym)) {
           return lowerer.lowerExecFileAsyncCall(expr, loc);
         }
+        const zlib = sym ? lowerer.promisifiedZlibRaw.get(sym) : undefined;
+        if (zlib) return lowerPromisifiedZlibRawCall(lowerer, expr, zlib, loc);
+        if (sym && lowerer.promisifiedDnsLookup.has(sym)) return lowerDnsPromisesCall(lowerer, expr, "lookup", loc, true);
         // A call through a `const requestFn = tls ? https.request :
         // http.request` binding (the client-function ternary): the http
         // client lowering with the RUNTIME-secure dial.
@@ -4440,6 +4471,7 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
         // Typed-array/Buffer receivers and the Buffer statics — before the
         // island path (bytes never cross the boundary).
         lowerer.lowerBytesMethodCall(expr, expr.expression) ??
+        lowerBytesFromCall(lowerer, expr, expr.expression) ??
         lowerBufferStaticCallWithNarrowedArg(lowerer, expr, expr.expression) ??
         // Readable.from — the stream classes' one static (before the
         // stdlib chokepoint claims the member).
@@ -5516,13 +5548,17 @@ function lowerOptionalStringNumber(
       // The source spelling rides along for the ONE receiver whose
       // prototype lacks toString: a null-prototype dictionary throws
       // Node's "<spelling> is not a function" at runtime.
+      const encoding: IrExpr = { kind: "strLit", value: enc, type: STRING, loc: locOf(call) };
+      const spelling: IrExpr = { kind: "strLit", value: access.getText(), type: STRING, loc: locOf(call) };
+      const errorDispatch = lowerErasedErrorToString(lowerer, recv, false, [encoding, spelling]);
+      if (errorDispatch) return errorDispatch;
       return {
         kind: "libCall",
         fn: "dyn.toString",
         args: [
           recv,
-          { kind: "strLit", value: enc, type: STRING, loc: locOf(call) },
-          { kind: "strLit", value: access.getText(), type: STRING, loc: locOf(call) },
+          encoding,
+          spelling,
         ],
         type: STRING,
         loc: locOf(call),
@@ -9131,6 +9167,10 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
     const info = exact ?? (receiverIr?.kind === "object" ? lowerer.classes.get(receiverIr.className) : undefined);
     if (!info && receiverIr?.kind === "object") lowerer.flushDeferredClass(receiverIr.className);
     const found = info ? lowerer.findMethodOn(info, access.name.text) : null;
+    if (info && !exact && deferredJsAsyncOverrideBelow(lowerer, info, access.name.text)) {
+      lowerer.unsupported("SC1090", call,
+        `calls of '${access.name.text}' through a receiver with a deferred async override (async methods dispatch statically)`);
+    }
     // The stream surface: API-named calls on stream-rooted receivers
     // lower through the stream spoke (checked before the emitter surface
     // — the two member sets are disjoint, but streams root at the emitter
@@ -9187,17 +9227,8 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
         : value;
     };
     if (found.declarer.builtinError) {
-      // The one builtin method: Error.prototype.toString, a runtime
-      // implementation called directly (overriding it is fenced, so no
-      // dispatch can ever be needed). Receiver BORROWED by the libCall.
-      const receiver = lowerer.lowerExpr(access.expression);
-      return {
-        kind: "libCall",
-        fn: "error.toString",
-        args: [lowerer.upcastTo(receiver, found.declarer.def.name)],
-        type: STRING,
-        loc: locOf(call),
-      };
+      lowerer.completeArgs(call.arguments, found.sig.params, locOf(call), call);
+      return lowerErrorToString(lowerer, strictReceiver());
     }
     // An ABSTRACT nearest declaration with no concrete override below the
     // static class: no implementation exists for a direct call to target.

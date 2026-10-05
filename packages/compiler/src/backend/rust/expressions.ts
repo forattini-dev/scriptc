@@ -9,6 +9,7 @@ import type { IrExpr, IrFunction } from "../../ir/ir.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeEquals, typeKey } from "../../ir/ir.js";
 import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js"; import { emitErrorMessageRead } from "./error-message-getters.js";
 import { emitRustLibCall } from "./lib-calls.js";
+import { rustLibCallContext } from "./lib-call-context.js";
 import { emitRustGeneratorResume } from "./generators.js";
 import { emitRustDataViewIntrinsic } from "./data-view.js";
 import { emitRustBytesFillIntrinsic } from "./bytes-fill.js";
@@ -32,6 +33,7 @@ export type { RustExpressionContext } from "./expression-context.js";
 
 export class RustExpressionEmitter {
   private replacements: ReadonlyMap<IrExpr, string> | null = null;
+  private readonly sourceTraceActive = new Set<IrExpr>();
 
   constructor(private readonly context: RustExpressionContext) {}
 
@@ -54,6 +56,11 @@ export class RustExpressionEmitter {
     if (replacement !== undefined) return replacement;
     const integer = this.replacements === null ? this.context.integerLoops.regions.current()?.expression(expr) : null;
     if (integer != null) return integer;
+    if (!this.sourceTraceActive.has(expr)) {
+      this.sourceTraceActive.add(expr);
+      try { return this.context.traceSourceCall(expr, () => this.emitExpr(expr)); }
+      finally { this.sourceTraceActive.delete(expr); }
+    }
     switch (expr.kind) {
       case "numLit":
         return this.context.numberLiteral(expr.value);
@@ -350,14 +357,7 @@ export class RustExpressionEmitter {
       case "dynKeyGet": return emitRustDynamicKeyRead(this.context, expr, value => this.emitExpr(value));
       case "dynHasKey": {
         const value = this.context.nextName("sc_rt");
-        const index = /^(?:0|[1-9][0-9]*)$/u.test(expr.key) && Number.isSafeInteger(Number(expr.key))
-          ? Number(expr.key)
-          : null;
-        const arrayTest = expr.key === "length"
-          ? "true"
-          : index === null ? "false" : `runtime::array_len(array) > ${index}.0`;
-        let test = `match &${value} { ${this.context.dynTypeName()}::Object(..) | ${this.context.dynTypeName()}::Proxy(..) | ${this.context.dynTypeName()}::Effect(..) => sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))}), ${this.context.dynTypeName()}::Array(array) => ${arrayTest}, _ => false, }`;
-        if (this.context.hasEmbeddedModules()) test = `match &${value} { ${this.context.dynTypeName()}::Island(..) => sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))}), _ => ${test}, }`;
+        const test = `sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))})`;
         return `{ let ${value} = ${this.emitExpr(expr.value)}; ${expr.negated === true ? `!(${test})` : test} }`;
       }
       case "dynScalarEq": {
@@ -1001,49 +1001,7 @@ export class RustExpressionEmitter {
         }
         return this.emitExpr(expr.value);
       case "libCall":
-        return emitRustLibCall(expr, {
-          nextTemporary: () => this.context.nextName("sc_rt"),
-          emitExpr: (value) => this.emitExpr(value),
-          unsupported: (kind, loc) => this.context.unsupported(kind, loc),
-          dynTypeName: () => this.context.dynTypeName(),
-          record: (id, loc) => {
-            const record = this.context.records.get(id);
-            if (record === undefined) this.context.unsupported(`unknown record shape '${id}'`, loc);
-            return record;
-          },
-          union: (id, loc) => this.context.union(id, loc),
-          unionName: (id) => this.context.unionName(id),
-          unionVariant: (tag) => this.context.unionVariant(tag),
-          stripCasts: (value) => this.context.stripCasts(value),
-          hasClassMeta: (name) => this.context.classMeta.has(name), errorMessageRead: (className, receiver) => this.context.classMeta.has(className) ? emitErrorMessageRead(this.context, this.context.classMetaOf(className), className, receiver) : null,
-          classFieldName: (className, fieldName, loc) => this.context.classFieldName(className, fieldName, loc),
-          classMetaOf: (className, loc) => this.context.classMetaOf(className, loc),
-          hasErrorClassRoots: () => this.context.errorClassRoots().length > 0,
-          errorValueName: () => this.context.errorValueName(),
-          rustString: (value) => this.context.rustString(value),
-          rustType: (type, loc) => this.context.rustType(type, loc),
-          emitPromiseFromSync: (args, operation) => this.context.emitPromiseFromSync(args, operation),
-          emitFileHandleTransferPromise: (value) => this.context.emitFileHandleTransferPromise(value),
-          emitFsRenameCallback: (value) => this.context.emitFsRenameCallback(value),
-          emitClosureDispatch: (callee, type, args, loc) => this.context.emitClosureDispatch(callee, type, args, loc),
-          functionIdentity: (value, type, loc, borrowed = false) => {
-            const shape = this.context.closureShapeForType(type, loc);
-            return `sc_closure_identity_${shape.index}(${borrowed ? value : `&${value}`})`;
-          },
-          emitEventEmitterCall: (value) => this.context.emitEventEmitterCall(value),
-          isEdgeValue: (type) => this.context.isEdgeValue(type),
-          isUnit: (type) => this.context.isUnit(type),
-          familyName: (id, loc) => this.context.familyName(id, loc),
-          familyOf: (id, loc) => this.context.familyOf(id, loc),
-          familyTargetOf: (name) => this.context.familyTargetOf(name),
-          emitDynCheckValue: (type, value, loc) => this.context.emitDynCheckValue(type, value, loc), emitDynFromValue: (type, value, loc) => this.context.emitDynFromValue(type, value, loc),
-          classNameArms: (className, loc) => {
-            const meta = this.context.classMetaOf(className, loc);
-            return this.context.classSubtree(meta).map((candidate) =>
-              `${candidate.pre} => ${rustJsString(candidate.def.jsName ?? "", text => this.context.rustString(text))},`
-            ).join(" ");
-          },
-        });
+        return emitRustLibCall(expr, rustLibCallContext(this.context, value => this.emitExpr(value)));
       case "ffiCall": return emitRustFfiCall(expr, this.context.ffiImports(), this.context.libraryCallbacks(), this.context, (value) => this.emitExpr(value));
       case "genResume": return emitRustGeneratorResume(expr, this.context, (value) => this.emitExpr(value));
       case "awaitExpr":

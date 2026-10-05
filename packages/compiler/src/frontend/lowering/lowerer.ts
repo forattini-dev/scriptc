@@ -1,4 +1,6 @@
 import { coercibleValue } from "./value-coercion.js";
+import { conditionalCjsExportSymbol, hasConditionalCjsExports } from "./cjs-conditional-export.js";
+import { localModuleBindingDepOf } from "./cjs-module-binding.js";
 import { directExternalTypeSpecifiersByFile } from "./external-type-specifiers.js";
 import { checkNativeCallResult } from "./native-call-result.js";
 import { jsArrayInferenceBinding, jsArrayInferenceExpression } from "../js-array-field-types.js";
@@ -24,6 +26,7 @@ import { isIslandModulePath, islandModuleReason, type ModuleTierRow } from "../t
 import { resolve } from "node:path";
 import { tsgoPath } from "../dts-paths.js";
 import * as ts from "../ts7/adapter.js";
+import { attachSourceStackMetadata } from "./source-stack-metadata.js";
 import {
   type ScrDiagnostic, anyOpRequiresDynamicDiag,
   blockedBindingUseDiag,
@@ -60,6 +63,8 @@ import type {
   SrcLoc,
 } from "../../ir/ir.js";
 import { arrayOf, BOOL, canCrossIslandBoundary, canExitIslandToType, DYN, F64, isJsonSafeType, isJsonStringifySafeType, isUndefinedArmedUnion, JSVAL, RUNTIME_ERROR_CLASSES, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/ir.js";
+import { refreshErrorToStringDispatch } from "./lower-error-tostring.js";
+import { refreshInstanceConstructorNames } from "./lower-instance-constructor-name.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -1547,6 +1552,10 @@ export class Lowerer {
    * calls through the binding lower (lowerExecFileAsyncCall) and value
    * uses fence. */
   readonly promisifiedExecFile = new Set<ts.Symbol>();
+  /** Direct-call bindings over the builtin raw zlib error-first codecs. */
+  readonly promisifiedZlibRaw = new Map<ts.Symbol, "deflateRaw" | "inflateRaw">();
+  /** Direct-call projections of dns.lookup's named multi-result callback. */
+  readonly promisifiedDnsLookup = new Set<ts.Symbol>();
   /** Symbols bound by `const process = globalThis.process` (and the other
    * stdlib-global snapshot spellings): pure alias plumbing — receiver
    * checks resolve through this map (stdlibGlobalNameOf), declarations
@@ -1655,6 +1664,9 @@ export class Lowerer {
    * prepended by lowerFileInit so the bindings are live before any
    * top-level statement runs. */
   readonly jsonInitActions = new Map<ts.SourceFile, IrStmt[]>();
+  /** Flat JSON require patterns snapshot this cached document at their
+   * declaration position; their identifiers have ordinary global storage. */
+  readonly jsonRequireBindings = new WeakMap<ts.VariableDeclaration, IrGlobal>();
   /** The embedded npm runtime graph (collectNpmImports), attached to the
    * emitted module. Null without npm imports or without --dynamic. */
   npmEmbedded: IrModule["embedded"] | null = null;
@@ -2043,6 +2055,9 @@ export class Lowerer {
    * point for deferred collection diagnostics: resolving a reference to a
    * broken declaration reports what collection deferred. */
   resolveValueSymbol(ident: ts.Identifier): ts.Symbol | null {
+    const moduleDep = hasConditionalCjsExports(this) ? localModuleBindingDepOf(this, ident) : null;
+    const selectedExport = moduleDep && conditionalCjsExportSymbol(this, moduleDep);
+    if (selectedExport) return selectedExport;
     let symbol = this.checker.getSymbolAtLocation(ident);
     // A shorthand property's NAME resolves to the property symbol; the
     // VALUE binding it reads is the checker's shorthand-value symbol
@@ -2063,7 +2078,7 @@ export class Lowerer {
     if (ident.parent && ts.isPropertyAccessExpression(ident.parent) && ident.parent.name === ident) {
       const recv = ident.parent.expression;
       if (ts.isIdentifier(recv) && this.cjsLocalModuleBindingOf(recv)) {
-        const dep = this.localModuleBindingDepOf(recv);
+        const dep = localModuleBindingDepOf(this, recv);
         const exported = dep ? this.cjsModuleExportSymbol(dep, ident.text) : undefined;
         if (exported) symbol = exported;
       }
@@ -2392,42 +2407,6 @@ export class Lowerer {
     return isClass ? value : null;
   }
 
-  /** The CommonJS JS module a DEFAULT-import binding's declaration loads
-   * (`import d from "./lib.cjs"`), or null: Node's ESM-CJS interop binds
-   * the default to module.exports — exactly a require binding — so those
-   * bindings ride the CJS namespace machinery below. ESM dependencies
-   * (any .ts, ESM-syntax .js/.mjs) answer null and keep the ESM default
-   * machinery. */
-  private cjsDefaultImportDepOf(clause: ts.ImportClause): ts.SourceFile | null {
-    const importDecl = clause.parent;
-    if (!ts.isImportDeclaration(importDecl) || !ts.isStringLiteral(importDecl.moduleSpecifier)) {
-      return null;
-    }
-    const spec = importDecl.moduleSpecifier.text;
-    // Project aliases/self-references resolve through the same entry point as
-    // relative imports; an opted-in --npm-static package is the fallback.
-    const dep = resolveImport(this.program, importDecl.getSourceFile(), spec) ??
-      npmStaticDepSf7(this.program, importDecl.getSourceFile(), spec);
-    if (!dep || !isJsSourceFile(dep) || isNodeEsmFile(dep)) return null;
-    return dep;
-  }
-
-  private localModuleBindingDepOf(expr: ts.Identifier): ts.SourceFile | null {
-    const sym = this.checker.getSymbolAtLocation(expr);
-    const decls = sym ? this.checker.declarationsOf(sym) : [];
-    const decl = decls.find(ts.isImportClause) ?? decls[0];
-    if (!decl) return null;
-    if (ts.isImportClause(decl)) return this.cjsDefaultImportDepOf(decl);
-    if (!ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name) || !decl.initializer) return null;
-    const directSpec = requireSpecOf(decl.initializer);
-    if (directSpec !== null) {
-      const dep = resolveImport(this.program, decl.getSourceFile(), directSpec) ??
-        npmStaticDepSf7(this.program, decl.getSourceFile(), directSpec);
-      return dep?.fileName.endsWith(".json") === true ? null : dep;
-    }
-    return createRequireProgramModuleOf(this, decl.initializer)?.dep ?? null;
-  }
-
   private createRequireWholeExportSymbolOf(ident: ts.Identifier): ts.Symbol | null {
     const binding = this.checker.getSymbolAtLocation(ident);
     const decl = binding ? this.checker.declarationsOf(binding).find(ts.isVariableDeclaration) : undefined;
@@ -2479,7 +2458,8 @@ export class Lowerer {
   cjsLocalModuleBindingOf(expr: ts.Expression): boolean {
     if (!ts.isIdentifier(expr)) return false;
     const sym = this.checker.getSymbolAtLocation(expr);
-    if (this.localModuleBindingDepOf(expr) === null) return false;
+    const dep = localModuleBindingDepOf(this, expr);
+    if (dep === null || conditionalCjsExportSymbol(this, dep) !== null) return false;
     if (this.createRequireWholeExportSymbolOf(expr) !== null) return false;
     // SINGLE-VALUE exporters (`module.exports = Countdown` / `= double` /
     // `= 42`): the requirer's binding IS the exported value, not a
@@ -2537,7 +2517,7 @@ export class Lowerer {
   globalOf(ident: ts.Identifier): IrGlobal | null {
     const symbol = this.resolveValueSymbol(ident);
     if (!symbol) return null;
-    const g = this.globalsBySymbol.get(symbol);
+    const g = this.classFactoryCaptures?.get(symbol) ?? this.globalsBySymbol.get(symbol);
     if (g) return g;
     for (const d of this.checker.declarationsOf(symbol)) {
       const byDecl = this.globalsByDeclNode.get(d);
@@ -2789,6 +2769,8 @@ export class Lowerer {
   /** Final retention, pruning, and module assembly shared by ordinary emit
    * and the retained reachability worklist. */
   finishModule(functions: IrFunction[]): LowerResult {
+    refreshErrorToStringDispatch(this);
+    refreshInstanceConstructorNames(this);
     pruneUnusedNativeModuleCaches(this, functions);
 
     // Globals typed by a class that never REGISTERED (a JS class whose
@@ -2886,6 +2868,7 @@ export class Lowerer {
             entry: ENTRY_NAME,
             ...(this.ffiImports.length > 0 ? { ffiImports: [...this.ffiImports] } : {}),
           };
+    if (module) attachSourceStackMetadata(module, this.moduleOrder);
     const tiers: ModuleTierRow[] = this.moduleOrder.map((sf) =>
       sf !== this.entry && isIslandModulePath(sf.fileName)
         ? { module: sf.fileName, tier: "island", reason: islandModuleReason(sf.fileName) ?? "island" }
@@ -3347,6 +3330,10 @@ export class Lowerer {
     // historical emit order.
     for (;;) {
       drainInstances();
+      // Late class expressions/instances may add Error overrides after a
+      // coercion helper was created. Discover their method edges before
+      // concluding the same reachability fixpoint, not in finishModule.
+      refreshErrorToStringDispatch(this);
       if (queue.length === 0) break;
       drainUnits();
       this.restoreGenericInstanceOrder(instLowered);
@@ -4748,7 +4735,7 @@ export class Lowerer {
   /* ── the class graph (single inheritance) ─────────────────────────── */
 
   findMethodOn(info: ClassInfo | null,
-    name: string,): { declarer: ClassInfo; sig: { params: ParamShape[]; ret: IrType; abstract?: true; async?: true } } | null {
+    name: string,): { declarer: ClassInfo; sig: NonNullable<ReturnType<ClassInfo["methods"]["get"]>> } | null {
     return findMethodOn(this, info, name);
   }
 
@@ -4805,6 +4792,8 @@ export class Lowerer {
    * function-like node: recognized shape, or null for checked
    * non-qualifiers (lower-mixins.ts). */
   readonly mixinFnShapes = new Map<ts.Node, MixinFnShape | null>();
+  /** Active parameter cells of a once-evaluated class factory. */
+  classFactoryCaptures: Map<ts.Symbol, IrGlobal> | null = null;
   /** Mixin instantiations by CALL SITE (one class per once-evaluated call
    * — the class-expression identity rule); null marks a poisoned
    * instantiation so re-demands fence instead of half-collecting. */
@@ -5723,7 +5712,7 @@ export class Lowerer {
     return isStdlibGlobal(this, expr, name);
   }
 
-  stdlibGlobalMember(access: ts.PropertyAccessExpression, name: string): string | null {
+  stdlibGlobalMember(access: ts.Expression, name: string): string | null {
     return stdlibGlobalMember(this, access, name);
   }
 
@@ -6703,7 +6692,7 @@ export class Lowerer {
     return envValueType(this);
   }
 
-  lowerProcessEnvGet(expr: ts.PropertyAccessExpression): IrExpr | null {
+  lowerProcessEnvGet(expr: ts.PropertyAccessExpression | ts.ElementAccessExpression): IrExpr | null {
     return lowerProcessEnvGet(this, expr);
   }
 

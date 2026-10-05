@@ -12,6 +12,17 @@ export function lowerNativeValueProperty(
 ): IrExpr | null {
   const loc = locOf(expression);
   const name = expression.name.text;
+  // Per-call factory specialization can refine a checker-any return to
+  // a native class value. Preserve evaluation of the computed receiver.
+  if (receiver.type.kind === "classval" && name === "name") {
+    const info = L.classes.get(receiver.type.className);
+    const shadowedName = (candidate: NonNullable<typeof info>): boolean =>
+      candidate.staticFields.some(field => field.name === "name") || candidate.staticMethods?.has("name") === true ||
+      candidate.subclasses.some(shadowedName);
+    if (info && shadowedName(info)) L.unsupported("SC1090", expression,
+      "class-value names with a shadowed static name (native metadata is not the mutable property)");
+    return { kind: "libCall", fn: "class.name", args: [receiver], type: STRING, loc };
+  }
   if (name === "length") {
     if (receiver.type.kind === "array") return { kind: "arrIntrinsic", method: "length", receiver, args: [], type: F64, loc };
     if (receiver.type.kind === "string") return { kind: "strIntrinsic", method: "length", receiver, args: [], type: F64, loc };

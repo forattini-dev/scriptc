@@ -1,7 +1,7 @@
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
 import { matchStringSelfConcat, undefinedArmTag } from "../../ir/analysis.js";
-import { isRefCounted, type IrBytesElem } from "../../ir/ir.js";
+import { ERROR_TOSTRING_DISPATCH_FN, isRefCounted, type IrBytesElem } from "../../ir/ir.js";
 import { mangleRecordClone, mangleRecordNew } from "../mangle.js";
 import { arrNewCall, elemAccess } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
@@ -359,7 +359,9 @@ export function emitStringExpr(host: LlvmEmitterContext, e: ExprOf<"strConcat" |
           const helper = host.dyn.dynToStrHelper();
           const t = B.tmp();
           B.line(`${t} = call ptr @${helper}(ptr ${v.name})`);
-          return host.own({ name: t, type: e.type });
+          const result = host.own({ name: t, type: e.type });
+          if (host.mayThrow.has(ERROR_TOSTRING_DISPATCH_FN)) host.emitPendingCheck();
+          return result;
         }
         const t = B.tmp();
         if (v.type.kind === "f64") {

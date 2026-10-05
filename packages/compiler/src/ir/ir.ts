@@ -4,7 +4,7 @@ import { F64, BYTES_U8, STRING, BOOL, VOID } from "./type-constants.js";
 import type { IrUrlLibFn } from "./url-signatures.js"; import { SQLITE_MAY_THROW_LIB_FNS, type IrSqliteLibFn } from "./sqlite-signatures.js"; import type { IrEffectContextLibFn } from "./effect-context-signatures.js";
 import { THROWING_COERCION_FNS } from "./coercion-names.js";
 import type { IrNumericCoercionFn } from "./numeric-coercion.js";
-import { nativeArrayCheckSupported, nativeArrayViewSupported, nativeRecordCheckSupported, nativeTupleCheckSupported } from "./native-record.js";
+import { nativeArrayCheckSupported, nativeRecordCheckSupported, nativeTupleCheckSupported } from "./native-record.js";
 import type { IrFunction } from "./functions.js";
 export type { IrFunction } from "./functions.js";
 import { InternalCompilerError } from "../errors.js";
@@ -799,6 +799,8 @@ export interface IrModule {
    * callbacks run before promise jobs and queueMicrotask callbacks. Absent
    * preserves the historical ESM ordering for serialized IR producers. */
   entryCommonJs?: true;
+  /** Optional original-source coordinates for checked native stack capture. */
+  sourceStackFiles?: { file: string; displayFile: string; length: number; lineStarts: number[]; callOffsets?: { start: number; end: number; position: number }[] }[];
   functions: IrFunction[];
   /** Class shapes. Constructors and methods are ordinary module functions
    * named `%Class.constructor` / `%Class.method` whose first param is
@@ -1161,6 +1163,11 @@ export interface IrClassDef {
   genericOf?: string;
   loc: SrcLoc;
 }
+
+/** Generated frontend dispatcher for user-observable Error string coercion.
+ * Its ordinary IR calls preserve effects/ownership without adding slots to
+ * the runtime-provided Error vtable. Raw builtin formatting stays separate. */
+export const ERROR_TOSTRING_DISPATCH_FN = "%error.toString.dispatch";
 
 /** The runtime-provided error classes, keyed by IR class name. The names
  * are '%'-prefixed ('%' cannot appear in a TS identifier, so a user's own
@@ -1963,6 +1970,10 @@ export type IrLibFn =
    * SEMANTICS.md notes the sloppy divergence: loud, never silent). Void
    * result; in the may-throw seed set. */
   | "dyn.keySet"
+  /** Computed-reference PutValue: receiver, unconverted key, and value are
+   * dyn values. ToObject precedes key conversion, after RHS evaluation.
+   * Native symbol storage and object-key coercion keep explicit boundaries. */
+  | "dyn.keySetComputed"
   /** Destructuring pack over a dyn source — `const [a, b] = d`, a
    * destructured dyn callback param (args: the source and the STATIC
    * TypeError spelling, "" when the source has none — both borrowed;
@@ -2687,6 +2698,9 @@ export type IrLibFn =
   | "dgram.onClose"
   | "dgram.onConnect"
   | "dns.lookup"
+  | "dns.promises.lookup"
+  | "dns.lookupAsync"
+  | "dns.lookupFamily"
   /** node:test (scr_test.c — linked only when one of these appears on
    * the IR; moduleUsesNodeTest is the switch, and the main epilogue asks
    * scr_test_exit_code() for the process's exit status). Strings are
@@ -3296,6 +3310,9 @@ export type IrLibFn =
    * bytes<u8>[] arg (the list) and returns a fresh copy. `Buffer.from(u8)`
    * and `Buffer.alloc(n)` need no libFn — they lower to bytesNew. */
   | "buffer.fromStr"
+  /** Buffer.from over a checked native value, with a canonical literal
+   * encoding. Runtime kind dispatch validates the first argument. */
+  | "buffer.fromDyn"
   | "buffer.concat"
   /** Buffer.byteLength(string, enc) — enc a NORMALIZED literal like
    * fromStr's; Buffer.isEncoding(name) over a runtime string; and
@@ -3394,6 +3411,10 @@ export type IrLibFn =
   | "zlib.inflateCb"
   | "zlib.deflateRawCb"
   | "zlib.inflateRawCb"
+  /** Direct promisified raw codecs: deferred Promise<bytes<u8>>, with
+   * callback failures delivered as promise rejections. Rust-native only. */
+  | "zlib.deflateRawAsync"
+  | "zlib.inflateRawAsync"
   | "zlib.gzipCb"
   | "zlib.gunzipCb"
   | "zlib.unzipCb"
@@ -3712,6 +3733,9 @@ export type IrLibFn =
    * field to stamp. error.toString: borrowed `%Error`-typed receiver, +1
    * string in Node's "name: message" shape. None of the three throws. */
   | "error.new"
+  | "error.captureStackTrace"
+  | "error.captureStackTraceExclude"
+  | "error.stack"
   | "error.newCause"
   | "error.cause"
   /** The compiler-resolved Node-parity throw for always-throwing lowered
@@ -3795,6 +3819,12 @@ export type IrLibFn =
    * empty array; null/undefined throw Node's catchable TypeError
    * ("Cannot convert undefined or null to object"). */
   | "dyn.objKeys"
+  /** Guard the currently supported ordinary-object slice of binding rest.
+   * Borrows the source; throws a named SC1031 refusal for representations
+   * whose own enumerable properties are not faithfully modeled. */
+  | "dyn.objectRestCheck"
+  /** Guard the ordinary data-object source slice of class Object.assign. */
+  | "dyn.objectAssignSourceCheck"
   | "dyn.hasOwn"
   | "dyn.assign"
   /** Variadic Object.assign over CHECKED-DYNAMIC targets (`Object.assign(
@@ -6122,14 +6152,14 @@ export function canConvertToDyn(
   // in records/arrays/unions. isJsonSafeType rejects them, but dynFrom
   // needs only that the walker can build the dyn value, so this composite
   // fold extends the JSON-safe core.
-  if (canBoxDynComposite(t, getRecord, getUnion)) return true;
+  if (canBoxDynComposite(t, getRecord, getUnion, visiting)) return true;
   if (t.kind === "effect" || t.kind === "date" || t.kind === "regex" || t.kind === "url" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
   // %Error converts as the checked-dynamic tree's error encoding ({%error, name, message,
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
   if (t.kind === "object" && t.className === "%Error") return true;
   if (isDynTypedRefType(t)) return true;
-  if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion);
+  if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   // Promises box by REFERENCE (SCR_DYN_PROMISE): promise<dyn> carries its
   // ScrPromise directly (the payload is already a dyn value), any other
@@ -6153,8 +6183,8 @@ export function canConvertToDyn(
     return !!def && def.arms.every((a) =>
       a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion) ||
       isDynTypedRefType(a) || a.kind === "regex" || a.kind === "url" || DYN_HANDLE_KINDS.has(a.kind) ||
-      (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion)) ||
-      (a.kind === "promise" && canConvertToDyn(a, getRecord, getUnion)),
+      (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion, visiting)) ||
+      (a.kind === "promise" && canConvertToDyn(a, getRecord, getUnion, visiting)),
     );
   }
   return false;
@@ -6183,7 +6213,7 @@ function canBoxDynComposite(
     case "bytes":
       return t.elem === "u8";
     case "func":
-      return canBoxFuncIntoDyn(t, getRecord, getUnion);
+      return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
     case "array":
       return canBoxDynComposite(t.elem, getRecord, getUnion, visiting);
     case "map":
@@ -6195,18 +6225,28 @@ function canBoxDynComposite(
     case "record": {
       const shape = getRecord(t.shapeId);
       if (!shape) return false;
-      // Recursive shapes answer coinductively, like isJsonSafeType.
+      // Recursive shapes answer coinductively, including edges THROUGH a
+      // function's return type. Keep only active ancestors: a failed walk
+      // must not seed a later fallback with a falsely accepted shape.
       if (visiting.has(t.shapeId)) return true;
       visiting.add(t.shapeId);
-      if (!shape.fields.every((f) => canBoxDynComposite(f.type, getRecord, getUnion, visiting))) return false;
-      return !shape.indexValue || canBoxDynComposite(shape.indexValue, getRecord, getUnion, visiting);
+      try {
+        if (!shape.fields.every((f) => canBoxDynComposite(f.type, getRecord, getUnion, visiting))) return false;
+        return !shape.indexValue || canBoxDynComposite(shape.indexValue, getRecord, getUnion, visiting);
+      } finally {
+        visiting.delete(t.shapeId);
+      }
     }
     case "union": {
       const def = getUnion(t.unionId);
       if (!def) return false;
       if (visiting.has(t.unionId)) return true;
       visiting.add(t.unionId);
-      return def.arms.every((a) => canBoxDynComposite(a, getRecord, getUnion, visiting));
+      try {
+        return def.arms.every((a) => canBoxDynComposite(a, getRecord, getUnion, visiting));
+      } finally {
+        visiting.delete(t.unionId);
+      }
     }
     default:
       return false;
@@ -6251,6 +6291,7 @@ export function canBoxFuncIntoDyn(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
+  visiting: Set<string> = new Set(),
 ): boolean {
   return (
     t.kind === "func" &&
@@ -6266,7 +6307,7 @@ export function canBoxFuncIntoDyn(
     // A jsval return converts through the by-reference wrap
     // (dynFromJsval — the thunk's result conversion), so engine-returning
     // callbacks box too: the routed-dispatch lane's flatMap shape.
-    (t.ret.kind === "void" || t.ret.kind === "dyn" || t.ret.kind === "jsval" || canConvertToDyn(t.ret, getRecord, getUnion))
+    (t.ret.kind === "void" || t.ret.kind === "dyn" || t.ret.kind === "jsval" || canConvertToDyn(t.ret, getRecord, getUnion, visiting))
   );
 }
 
@@ -6763,6 +6804,19 @@ export function moduleUsesAssert(mod: IrModule): boolean {
   };
   visit(mod);
   return found;
+}
+
+/** Find an internal library operation, including nested initializers. */
+export function moduleHasLibCall(mod: IrModule, fn: IrLibFn): boolean {
+  const seen = new Set<object>();
+  function visit(value: unknown): boolean {
+    if (value === null || typeof value !== "object" || seen.has(value)) return false;
+    seen.add(value);
+    const node = value as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === fn) return true;
+    return Object.values(value).some(visit);
+  }
+  return visit(mod);
 }
 
 /** True when the module contains any dynInvoke node or dyn.defineProps
@@ -7350,6 +7404,8 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["zlib.inflateCb", "the async node:zlib callback surface"],
   ["zlib.deflateRawCb", "the async node:zlib callback surface"],
   ["zlib.inflateRawCb", "the async node:zlib callback surface"],
+  ["zlib.deflateRawAsync", "the promisified node:zlib surface"],
+  ["zlib.inflateRawAsync", "the promisified node:zlib surface"],
   ["zlib.gzipCb", "the async node:zlib callback surface"],
   ["zlib.gunzipCb", "the async node:zlib callback surface"],
   ["zlib.unzipCb", "the async node:zlib callback surface"],
@@ -7799,6 +7855,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "global.undefRead",
   // The compiler-resolved Node-parity throw: always throws, catchably.
   "error.nodeThrow",
+  "error.captureStackTrace",
+  "error.captureStackTraceExclude",
+  "error.stack",
   // Coercion runs user hooks; failures propagate.
   ...THROWING_COERCION_FNS,
   "dyn.objectTag",
@@ -7860,6 +7919,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.cloneMissing",
   "dyn.cloneTransferFail",
   "dyn.objKeys",
+  "dyn.objectRestCheck",
+  "dyn.objectAssignSourceCheck",
   "dyn.hasOwn",
   "dyn.hasKey", // Engine proxy traps can throw during membership tests.
   "dyn.getPrototypeOf",
@@ -7876,6 +7937,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // throws Node's catchable SyntaxError at construction.
   "regex.new",
   "dyn.keySet",
+  "dyn.keySetComputed",
   // the destructuring pack throws V8's TypeError on non-iterable dyn kinds
   "dyn.iterPack",
   "dyn.toString",
@@ -7930,6 +7992,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "crypto.pbkdf2Cb",
   "buffer.concat",
   "buffer.concatLen",
+  "buffer.fromDyn",
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.
   "buffer.compareChk",

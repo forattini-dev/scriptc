@@ -50,9 +50,9 @@ Workspace packages whose executable entry is TypeScript compile automatically as
 
 ## --npm-static (experimental)
 
-`--npm-static <pkg[,pkg…]|auto>` asks the compiler to take the named packages **out** of the island: their shipped JavaScript is compiled statically as program modules, type-informed by their own `.d.ts`.
+`--npm-static <pkg[,pkg…]|auto>` asks the compiler to take the named packages **out** of the island: their shipped JavaScript is compiled statically as program modules, with executable signatures inferred from the implementation. Executable `auto` mode also attempts readable JS packages without declarations. When installed third-party declarations are used, their package identity and version series must match; declarations never replace runtime implementations. Library-mode admission retains its declaration requirement.
 
-This is experimental. Real packages compile statically at high but partial coverage. Sites the static compiler can't take are *deferred* — the build succeeds and the report names every deferred site, but reaching one at runtime is an error naming the exact unsupported operation. Some packages' code hits the static frontier outright and fails to build statically today; a package the preflight refuses falls back to the island with a coverage note. If a package matters to you statically, try it and read the report — the answer is specific, per package.
+This is experimental. Real packages compile statically at high but partial coverage. Sites the static compiler can't take are *deferred* — the report names every deferred site, and reaching one at runtime is an error naming the exact unsupported operation. `--no-engine` rejects those deferred unsupported operations at build time. Some packages' code hits the static frontier outright and fails to build statically today; a package the preflight refuses falls back to the island with a coverage note. Eligibility authorizes an attempt, not a promise of native compatibility. If a package matters to you statically, try it and read the report — the answer is specific, per package.
 
 ## --provenance-sources (experimental)
 
@@ -64,5 +64,5 @@ The design goal is unmodified real-world packages. The measuring stick used duri
 
 ## Current limits
 
-- Packages without shipped or installed type declarations fail the typecheck gate (the standard `Could not find a declaration file` error) — add `@types/<pkg>` or a local declaration, as you would in any strict TypeScript project.
+- Without `--npm-static`, packages without shipped or installed type declarations can fail the strict typecheck gate — add `@types/<pkg>` or a local declaration. Executable `--npm-static auto` can instead infer readable runtime JS; incompatible consumer types, unsupported code, minified entries, and bundler runtimes still retain their checks or refusals.
 - Class instances and promises can't flow *into* `any` slots (no island representation); closures cross as host functions in specific shapes. Each refusal is a compile error naming the fix.

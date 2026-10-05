@@ -1,4 +1,6 @@
 import { lowerRegexStateAssign } from "./lower-regex-state.js";
+import { lowerConditionalCjsExport } from "./cjs-conditional-export.js";
+import { lowerCjsSingleValueExport } from "./cjs-single-value-export.js";
 import { lowerLocalGenericInitializer, registerModuleGenericBinding } from "./lower-local-generics.js";
 import { lowerDynamicSwitch } from "./lower-dynamic-switch.js";
 import { inferredRegexBindingType } from "./lower-regex-captures.js";
@@ -6,6 +8,8 @@ import { regexCaptureArray } from "../../ir/regex-captures.js";
 import { lowerNativeTupleArrayView, lowerNativeTupleTail } from "./lower-native-tuple.js";
 import { jsArrayInferenceBinding } from "../js-array-field-types.js";
 import { dynamicBindingType } from "./dynamic-binding-type.js";
+import { nullDefaultBinding } from "../null-default-pattern.js";
+import { lowerDynamicObjectRest } from "./lower-dynamic-object-rest.js";
 import { nativeProxyBindingType } from "./lower-native-proxy.js";
 import { lowerOpenRecordDelete } from "./lower-open-record.js";
 import { lowerArrayClearAssignment } from "./lower-native-containers.js";
@@ -32,6 +36,7 @@ import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.j
 import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfSearchParams, lowerForOfSet, lowerSafeIndexRead, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
 import { bindingGenericFnAliasInfoOf, bindingNeverReassigned, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
+import { classFactoryInstanceBindingType } from "./class-factory-captures.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
 import { genericIfaceBindingKeepsClass } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
@@ -1041,6 +1046,8 @@ export function lowerStmt(lowerer: Lowerer, stmt: ts.Statement): IrStmt | IrStmt
         const spec = requireSpecOf(decl.initializer)!;
         if (lowerer.externalTypes.has(spec)) lowerer.externalHostFence(spec, decl, false);
         if (ts.isSourceFile(stmt.parent)) {
+          const document = lowerer.jsonRequireBindings.get(decl);
+          if (document) return lowerDestructuringDecl(lowerer, decl, isLet, varRef(document.id, document.type, locOf(decl)));
           const init = lowerer.requireInitStmt(spec, decl);
           return init ? [init] : [];
         }
@@ -1262,7 +1269,7 @@ export function isParseArgsDynCheckerType(lowerer: Lowerer, type: ts.Type): bool
    * where JS binds undefined). Defaults, rest elements, and computed keys
    * are fenced — each would need machinery beyond a read (an undefined
    * test, surplus packing, dynamic lookup). */
-  export function lowerDestructuringDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt[] {
+  export function lowerDestructuringDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isLet: boolean, initializer?: IrExpr): IrStmt[] {
     const loc = locOf(decl);
     if (!decl.initializer) {
       // tsc already rejects this (TS1182); defensive.
@@ -1280,7 +1287,7 @@ export function isParseArgsDynCheckerType(lowerer: Lowerer, type: ts.Type): bool
       const tokenBound = stdlibGlobalTokenDestructure(lowerer, decl, isLet);
       if (tokenBound !== null) return tokenBound;
     }
-    let init = lowerer.lowerExpr(decl.initializer);
+    let init = initializer ?? lowerer.lowerExpr(decl.initializer);
     const parseArgsDynObject =
       init.type.kind === "dyn" && isParseArgsDynCheckerType(lowerer, lowerer.typeOf(decl.initializer));
     // A TS `any`-origin source whose lowered value is NOT a destructurable
@@ -1789,15 +1796,34 @@ export function isParseArgsDynCheckerType(lowerer: Lowerer, type: ts.Type): bool
       srcType.kind === "dyn" &&
       (isJsSourceFile(pattern.getSourceFile()) || allowDynObject)
     ) {
+      if (pattern.elements.some(el => el.dotDotDotToken !== undefined)) {
+        // Binding rest is new for checked-dynamic sources. Pin V8's
+        // RequireObjectCoercible spelling before any head/default reads;
+        // other source spellings and nested/parameter rest keep a named
+        // refusal until their CallPrinter semantics have evidence.
+        const parent = pattern.parent;
+        const spelling = ts.isVariableDeclaration(parent) && parent.initializer
+          ? destrSpellingOf(parent.initializer)
+          : null;
+        if (spelling === null) lowerer.unsupported("SC1031", pattern, "checked-dynamic object rest from a source that is not a plain variable (assign it to a variable first)");
+        const first = pattern.elements[0];
+        const prop = first && !first.dotDotDotToken ? first.propertyName ?? first.name : undefined;
+        const firstProp = prop && (ts.isIdentifier(prop) || ts.isStringLiteralLike(prop) || ts.isNumericLiteral(prop)) ? prop.text : undefined;
+        out.push({
+          kind: "exprStmt", expr: {
+            kind: "dynDestrCheck", value: srcRef(), spelling,
+            ...(firstProp !== undefined ? { firstProp } : {}), type: DYN, loc: locOf(pattern),
+          }, loc: locOf(pattern),
+        });
+      }
+      const excluded: string[] = [];
       for (const el of pattern.elements) {
         if (el.name === undefined) continue;
         const loc = locOf(el);
         if (el.dotDotDotToken) {
-          lowerer.unsupported(
-            "SC1031",
-            el,
-            "rest elements over checked-dynamic sources (the remaining-fields object has no lowering yet)",
-          );
+          if (el.initializer) lowerer.unsupported("SC1031", el, "defaults on rest elements");
+          lowerer.bindPatternTarget(el.name, lowerDynamicObjectRest(lowerer, srcRef(), excluded, loc), isLet, out, allowDynObject);
+          continue;
         }
         const prop = el.propertyName ?? el.name;
         const propName = ts.isIdentifier(prop) || ts.isComputedPropertyName(prop) || ts.isStringLiteralLike(prop) || ts.isNumericLiteral(prop)
@@ -1806,6 +1832,7 @@ export function isParseArgsDynCheckerType(lowerer: Lowerer, type: ts.Type): bool
         if (propName === null) {
           lowerer.unsupported("SC1031", el, "destructuring with computed keys that do not fold to one property name");
         }
+        excluded.push(propName);
         let value: IrExpr = {
           kind: "dynKeyGet",
           key: { kind: "strLit", value: propName, type: STRING, loc },
@@ -3196,7 +3223,7 @@ export function isParseArgsDynCheckerType(lowerer: Lowerer, type: ts.Type): bool
         value.type.kind === "dyn" &&
         (() => {
           const mapped = lowerer.mapTypeOf(lowerer.typeOf(name));
-          return mapped === null || (lowerer.dynamic && dynamicBindingType(lowerer, mapped, hostDecl?.type === undefined));
+          return nullDefaultBinding(name) || mapped === null || (lowerer.dynamic && dynamicBindingType(lowerer, mapped, hostDecl?.type === undefined));
         })();
       const mapped = lowerer.mapTypeOf(lowerer.typeOf(name));
       const genericRecordRest =
@@ -3384,9 +3411,8 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
       );
     }
 
-    // `const execFileAsync = promisify(execFile)` — the one lowered
-    // util.promisify shape: the binding registers (calls through it lower
-    // to the interned async-exec helper; value uses fence) and the
+    // The execFile/raw-zlib util.promisify projections: the binding registers
+    // (calls through it lower to its dedicated helper; value uses fence) and the
     // declaration itself emits nothing — the promisified function value
     // never exists at runtime. collectGlobals skipped registering a
     // module global for it by the same test.
@@ -3651,6 +3677,7 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
       // handles dyn (validated exits, routed engine ops for wrapped
       // island members).
       (lowerer.dynamic && init.type.kind === "dyn" && dynamicBindingType(lowerer, lowerer.mapTypeOf(lowerer.typeOf(decl.name)) ?? DYN, decl.type === undefined) ? DYN : null) ??
+      classFactoryInstanceBindingType(lowerer, decl) ??
       (bindingTainted ? null : lowerer.mapTypeOf(lowerer.typeOf(decl.name))) ??
       (init.type.kind === "dyn" ? DYN : null);
     // In inferred package JS, tsgo can retain `any` for a `var` even when
@@ -3738,7 +3765,12 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
     // static signature would wrap an arity-narrowing adapter that DROPS
     // arguments JS would deliver; calls through the dyn binding take the
     // boxed thunk's JS arity instead.
-    if (type?.kind === "func" && init.type.kind === "dyn" && isJsSourceFile(decl.getSourceFile())) {
+    // Inferred JS object bindings, including aliases, keep a value already
+    // built natively as dyn. A checker record inferred from later writes
+    // is not a storage contract: a typed snapshot would lose identity and
+    // constrain future expando writes to the checker's incomplete shape.
+    if (init.type.kind === "dyn" && isJsSourceFile(decl.getSourceFile()) &&
+      (type?.kind === "func" || (type?.kind === "record" && decl.type === undefined))) {
       type = DYN;
     }
     // An unannotated const lambda with an open any[]/unknown[] rest maps
@@ -4597,63 +4629,6 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     return { kind: "block", body, loc };
   }
 
-/** `module.exports = <single value>` — Node's whole-export REPLACEMENT by a
-   * non-table value: the requirer's binding IS the value (`const Countdown =
-   * require('./countdown'); new Countdown(...)` constructs the class). An
-   * identifier naming a program class, function, or immutable global is pure
-   * alias plumbing — tsc's export-assignment model makes requirer bindings
-   * alias straight to the original declaration symbol, so the class registry,
-   * function signatures, and globals all apply unchanged — and the statement
-   * lowers to nothing. A scalar-literal value has no declaration for aliases
-   * to land on: it assigns the pre-registered export global keyed by this
-   * statement (collectGlobals; requirer aliases resolve to the checker's
-   * `export=` symbol, whose declaration node IS this statement — globalOf's
-   * node fallback). Mutable `let` bindings fence: Node copies the VALUE at
-   * this statement, while alias plumbing would read the live binding — the
-   * exported-table lowering's rule. Null for every shape beyond the subset
-   * (the caller's generic fence). */
-  function lowerCjsSingleValueExport(lowerer: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrStmt | null {
-    let rhs: ts.Expression = expr.right;
-    while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
-    if (ts.isIdentifier(rhs)) {
-      const sym = lowerer.resolveValueSymbol(rhs);
-      if (!sym) return null;
-      if (lowerer.classBySymbol.has(sym) || lowerer.fnSigsBySymbol.has(sym) || lowerer.genericFnsBySymbol.has(sym)) {
-        return { kind: "block", body: [], loc };
-      }
-      const g = lowerer.globalsBySymbol.get(sym);
-      if (g) {
-        if (g.mutable) {
-          lowerer.unsupported(
-            "SC1090",
-            rhs,
-            `exporting the mutable 'let' binding '${rhs.text}' by reference (Node copies its VALUE at this statement — declare it const, or export a function that reads it)`,
-          );
-        }
-        return { kind: "block", body: [], loc };
-      }
-      return null;
-    }
-    // `module.exports = class …{}` — the whole export IS the class
-    // (requirers construct their binding: `const C = require('./x');
-    // new C()`). The expression collects as a program class right here —
-    // its statics queue at this statement, JS's evaluation point — and the
-    // statement itself is pure alias plumbing: requirer bindings and
-    // in-file `module.exports` references resolve to the class through
-    // its symbols (classBySymbol via the export symbol registered below,
-    // or the expression's own symbol through propertyAssignedClassInfoOf),
-    // so no storage assigns. NamedEvaluation gives these classes name ""
-    // (the LHS is a property, not a binding) — Node's answer exactly.
-    if (ts.isClassExpression(rhs)) {
-      const info = lowerer.lowerClassExpressionInfo(rhs);
-      const exportSym = lowerer.checker.getSymbolAtLocation(expr.left);
-      if (exportSym && !lowerer.classBySymbol.has(exportSym)) lowerer.classBySymbol.set(exportSym, info);
-      return { kind: "block", body: [], loc };
-    }
-    const g = lowerer.globalsByDeclNode.get(expr);
-    if (!g) return null;
-    return { kind: "assign", localId: g.id, value: lowerer.lowerExprExpecting(rhs, g.type), loc: locOf(rhs) };
-  }
 
 /** Expression-position statements: assignments, calls. Shared with
    * for-loop init/update. Parens unwrap first — `(x = v);` is the plain
@@ -4663,6 +4638,8 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
   export function lowerExprStatement(lowerer: Lowerer, expr: ts.Expression): IrStmt {
     const stmtNode = expr.parent;
     while (ts.isParenthesizedExpression(expr)) expr = expr.expression;
+    const selectedExport = lowerConditionalCjsExport(lowerer, expr);
+    if (selectedExport) return selectedExport;
     // Assignment statements over the no-storage binding families:
     //   - `f1 = f2` where the RHS roots at an ambient-undefined name:
     //     Node evaluates the RHS first and dies on the root's

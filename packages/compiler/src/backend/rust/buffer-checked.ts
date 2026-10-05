@@ -1,4 +1,5 @@
 import type { IrExpr, SrcLoc } from "../../ir/ir.js";
+import { emitRustDynamicBufferFrom } from "./buffer-from-dynamic.js";
 
 type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 
@@ -15,6 +16,12 @@ export function emitRustCheckedBufferCall(
   context: RustCheckedBufferContext,
 ): string | null {
   const dyn = context.dynTypeName();
+  if (expr.fn === "buffer.fromDyn") {
+    const [source, encoding] = expr.args;
+    if (source?.type.kind !== "dyn" || encoding?.type.kind !== "string" ||
+        expr.args.length !== 2 || !isU8Bytes(expr)) context.unsupported("checked Buffer.from shape", expr.loc);
+    return emitRustDynamicBufferFrom(source, encoding, context);
+  }
   if (expr.fn === "buffer.compareChk") {
     if (expr.args.length !== 2 || expr.args.some((arg) => arg.type.kind !== "dyn") ||
       expr.type.kind !== "f64") context.unsupported("checked Buffer.compare shape", expr.loc);

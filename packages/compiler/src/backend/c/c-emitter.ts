@@ -82,6 +82,7 @@ export function emitCModule(
   sourceText?: string,
   options: CEmitOptions = {},
 ): string {
+  assertNativeModuleBackend(mod, "c");
   return new CEmitter(scalarizeNumericRecords(mod), sourceText, options).emit();
 }
 

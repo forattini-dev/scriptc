@@ -85,6 +85,10 @@ import { fenceNodeModuleMutation, isNodeModuleValue, lowerNodeModuleIdentifier, 
 import { lowerAbstractEquality } from "./abstract-equality.js";
 import { templateRawTextOf } from "./lower-templates.js";
 import { coerceStringSearchValue, defaultAfterUndefined, lowerStaticallyUndefinedArgument } from "./optional-arguments.js";
+import { lowerErasedErrorToString, lowerErrorToString } from "./lower-error-tostring.js";
+import { lowerInstanceConstructorName } from "./lower-instance-constructor-name.js";
+import { lowerErrorStackRead } from "./lower-error-stack.js";
+import { lowerComputedAssignment } from "./lower-computed-assignment.js";
 export {
   type FieldTarget,
   fieldGetExpr,
@@ -1008,6 +1012,12 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
             `a promisified execFile as a value (call '${expr.text}' directly)`,
           );
         }
+        if (sym && lowerer.promisifiedZlibRaw.has(sym)) {
+          lowerer.unsupported("SC1090", expr, `a promisified zlib function as a value (call '${expr.text}' directly)`);
+        }
+        if (sym && lowerer.promisifiedDnsLookup.has(sym)) {
+          lowerer.unsupported("SC1090", expr, `a promisified dns.lookup as a value (call '${expr.text}' directly)`);
+        }
       }
       // Union-typed bindings read through tsc's control-flow narrowing:
       // when the checker types this USE as a single arm, maybeNarrow
@@ -1765,6 +1775,10 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
     if (ts.isConditionalExpression(expr)) return lowerTernary(lowerer, expr);
 
     if (ts.isPropertyAccessExpression(expr)) {
+      const errorStack = lowerErrorStackRead(lowerer, expr);
+      if (errorStack) return errorStack;
+      const constructorName = lowerInstanceConstructorName(lowerer, expr);
+      if (constructorName) return constructorName;
       // `super.x`: the base chain's GETTER, called directly (super
       // dispatch is static in JS — never through the dynamic class).
       // super.method() calls are routed at the call site; a bare super
@@ -2735,6 +2749,15 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
    * unrepresentable without a re-tag), or to nothing (`never` in an
    * exhaustive default) leaves the expression union-typed. */
   export function maybeNarrow(lowerer: Lowerer, expr: IrExpr, node: ts.Node): IrExpr {
+    // Inferred JS literal shapes describe observed writes, not a sealed
+    // storage contract. Aliases can change both presence and value type.
+    // Keep native dynamic reads honest; typed consumers still check their
+    // own required ABI. Explicit interface/type-literal views keep checks.
+    if (expr.kind === "dynKeyGet" && isJsSourceFile(node.getSourceFile()) &&
+        (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) {
+      const symbol = lowerer.typeOf(node.expression).getSymbol();
+      if (symbol && lowerer.checker.declarationsOf(symbol).some(ts.isObjectLiteralExpression)) return expr;
+    }
     // A dyn read tsc narrowed to a SCALAR (a typeof test proved the kind):
     // bridge with a VALIDATED extraction — dynCheck, the checked-cast
     // machinery — rather than a trusted one. After the guard the check
@@ -5222,6 +5245,12 @@ export function fenceClosureProbe(
           `generic functions as values (call '${propName.text}' directly)`,
         );
       }
+      if (lowerer.classBySymbol.has(resolved)) {
+        // `{ C }` reads the same class binding as `{ C: C }`. Use ordinary
+        // identifier lowering so decorated bindings, generic pinning and
+        // runtime-owned constructor refusals stay on their existing path.
+        return lowerer.lowerExpr(propName);
+      }
     }
     lowerer.rejectUnresolvedSymbol(
       symbol ? (symbol.flags & ts.SymbolFlags.Alias ? lowerer.checker.getAliasedSymbol(symbol) : symbol) : null,
@@ -5307,24 +5336,8 @@ export function fenceClosureProbe(
     // `process.env[expr]` — the computed twin of `process.env.NAME`; both
     // lower to the ONE process.envGet intrinsic. The read narrows like any
     // union-typed expression when the checker narrowed this occurrence.
-    if (lowerer.isProcessEnv(expr.expression)) {
-      const key = lowerer.lowerExpr(expr.argumentExpression);
-      if (key.type.kind !== "string") {
-        lowerer.unsupported(
-          "SC1090",
-          expr.argumentExpression,
-          "indexing process.env with non-string keys",
-        );
-      }
-      const get: IrExpr = {
-        kind: "libCall",
-        fn: "process.envGet",
-        args: [key],
-        type: lowerer.envValueType(),
-        loc: locOf(expr),
-      };
-      return lowerer.maybeNarrow(get, expr);
-    }
+    const env = lowerer.lowerProcessEnvGet(expr);
+    if (env !== null) return lowerer.maybeNarrow(env, expr);
     // Expando function members in element clothing (`foo[strMem]`,
     // `foo[_private]` where foo is a module-level function/callable const
     // and the key folds or is a unique-symbol const): the member's module
@@ -5961,6 +5974,10 @@ export function fenceClosureProbe(
       expr = expr.expression;
     }
     if (ts.isPropertyAccessExpression(expr)) {
+      // Aliases can mutate environment keys without checker CFA seeing the
+      // write. Keep real undefined in guards instead of narrowing by CFA.
+      const env = lowerer.lowerProcessEnvGet(expr);
+      if (env !== null) return env;
       const target = lowerer.fieldTarget(expr);
       if (target?.container !== "recordOvf") return null;
       // A JS file-scope object-literal global is record-shaped to the
@@ -5989,6 +6006,9 @@ export function fenceClosureProbe(
       };
     }
     if (!ts.isElementAccessExpression(expr)) return null;
+
+    const env = lowerer.lowerProcessEnvGet(expr);
+    if (env !== null) return env;
 
     const cachedModule = lowerRequireCacheElement(lowerer, expr);
     if (cachedModule) return cachedModule;
@@ -6499,20 +6519,18 @@ export function ensureString(lowerer: Lowerer, e: IrExpr, node: ts.Node): IrExpr
       // String(u) / `${u}`: a runtime dispatch over the dyn kind — Node's
       // String() exactly (undefined/null texts, JS number formatting,
       // strings verbatim, arrays via join, objects as "[object Object]").
-      return { kind: "toString", operand: e, type: STRING, loc: e.loc };
+      return lowerErasedErrorToString(lowerer, e) ?? { kind: "toString", operand: e, type: STRING, loc: e.loc };
     }
     if (e.type.kind === "jsval") {
       // String(v) in the engine — JS-exact (and Node-exact in templates).
       return { kind: "jsOp", op: "toStr", args: [e], type: STRING, loc: e.loc };
     }
     if (e.type.kind === "object") {
-      // String(err) / `${err}` over the Error hierarchy: Error.prototype
-      // .toString — the ONE runtime implementation (overriding it is
-      // fenced), "name: message" with the empty-side elisions, exactly
-      // Node's String(err), which carries no stack either.
+      // String(err) / `${err}` over the Error hierarchy honors the dynamic
+      // class's override, with builtin formatting only as the fallback.
       for (let c = lowerer.classes.get(e.type.className) ?? null; c; c = c.base) {
         if (c.builtinError) {
-          return { kind: "libCall", fn: "error.toString", args: [lowerer.upcastTo(e, "%Error")], type: STRING, loc: e.loc };
+          return lowerErrorToString(lowerer, e);
         }
       }
     }
@@ -7205,6 +7223,10 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
             };
           }
         }
+      }
+      if (op === ts.SyntaxKind.EqualsToken && ts.isElementAccessExpression(expr.left)) {
+        const assignment = lowerComputedAssignment(lowerer, expr.left, expr.right);
+        if (assignment) return assignment;
       }
       // Destructuring assignment in VALUE position (`(() => [i] = [i+1])()`,
       // `({} = {x} = a)`, `var d = ([] = src)`): the statement machinery's
@@ -8526,9 +8548,10 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     const local = lowerer.caughtLocalOf(node);
     if (!local) return null;
     const loc = locOf(node);
-    return {
+    const value: IrExpr = { kind: "varRef", localId: local.id, type: CAUGHT, loc };
+    return lowerErasedErrorToString(lowerer, value) ?? {
       kind: "toString",
-      operand: { kind: "varRef", localId: local.id, type: CAUGHT, loc },
+      operand: value,
       type: STRING,
       loc,
     };

@@ -1,4 +1,5 @@
 import { rustJsStringRef } from "./string-literals.js";
+import { emitRustErrorStackDefinitions } from "./error-stacks.js";
 import { discriminatedJsonGuard } from "./discriminated-records.js";
 import { emitSharedTupleOperation } from "./shared-tuples.js";
 import { emitSharedIteration } from "./shared-iteration.js";
@@ -825,6 +826,7 @@ export class RustDefinitionEmitter {
     this.context.popIndent();
     this.context.line("}");
     this.emitErrorValueStringHelper("name");
+    emitRustErrorStackDefinitions(this.context);
     this.emitErrorValueStringHelper("message");
     this.emitErrorValueStringSetter("name");
     this.emitErrorValueStringSetter("message");

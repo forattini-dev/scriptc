@@ -75,6 +75,10 @@
     "node-builtin.util": ["tests/corpus/2440-console-inspect-args.ts", "tests/corpus/2912-promisify-fs-readfile.ts"],
     "node-builtin.worker_threads": ["tests/corpus/957-builtins-namespace.ts"],
     "node-builtin.zlib": ["tests/corpus/1404-zlib-crypto-bytes.ts", "tests/corpus/2921-zlib-callbacks.ts"],
+    "node-builtin.zlib.deflateRaw": ["tests/corpus/2921-zlib-callbacks.ts", "tests/corpus/3393-promisify-zlib-raw.ts", "tests/corpus/3394-promisify-zlib-level.ts", "tests/corpus/3395-promisify-zlib-string.ts", "tests/corpus/3396-promisify-zlib-errors.js", "packages/compiler/test/promisify-zlib.test.ts"],
+    "node-builtin.zlib.deflateRawSync": ["tests/corpus/1404-zlib-crypto-bytes.ts", "tests/corpus/2921-zlib-callbacks.ts"],
+    "node-builtin.zlib.inflateRaw": ["tests/corpus/2921-zlib-callbacks.ts", "tests/corpus/3393-promisify-zlib-raw.ts", "tests/corpus/3394-promisify-zlib-level.ts", "tests/corpus/3395-promisify-zlib-string.ts", "tests/corpus/3396-promisify-zlib-errors.js", "packages/compiler/test/promisify-zlib.test.ts"],
+    "node-builtin.zlib.inflateRawSync": ["tests/corpus/1404-zlib-crypto-bytes.ts", "tests/corpus/2921-zlib-callbacks.ts"],
     "stdlib.fetch": ["tests/harness/fetch-conformance.test.ts"],
     "stdlib.headers": ["tests/harness/fetch-conformance.test.ts"],
     "stdlib.request": ["tests/harness/fetch-conformance.test.ts"],
@@ -83,6 +87,7 @@
     "stdlib.abort": ["tests/harness/fetch-conformance.test.ts"]
   },
   "features": [
+    { "chapter": "dns", "signatures": ["`dnsPromises.lookup(hostname[, options])`"], "status": "partial", "publicDetail": "Rust direct calls with a string hostname and omitted options, a numeric family, or a plain family-options record, including runtime-built records. Families 0, 4 and 6 return one result. Other options and methods remain refused; OS resolution is synchronous and resolver error parity is incomplete.", "evidence": ["tests/corpus/3451-dns-promises-lookup.ts", "tests/corpus/3452-dns-promises-errors.js", "tests/corpus/3453-dns-promisify-lookup.js", "tests/harness/dns-promises.test.ts"] },
     { "chapter": "http", "signatures": ["Class: `http.ClientRequest`", "Class: `http.Server`", "Class: `http.ServerResponse`", "Class: `http.IncomingMessage`"], "status": "partial", "evidence": ["tests/corpus/2981-http-static-events.ts", "tests/corpus/2976-http-static-incoming-state.ts"] },
     { "chapter": "http", "parent": "Class: `http.ClientRequest`", "signatures": ["`request.setSocketKeepAlive([enable][, initialDelay])`", "`request.setTimeout(timeout[, callback])`", "`destroyed` Type: {boolean}", "Event: `'timeout'`"], "status": "partial", "evidence": ["tests/corpus/2978-http-static-client-timeout.ts", "tests/corpus/2987-http-static-timeout-errors.ts"] },
     { "chapter": "http", "parent": "Class: `http.ClientRequest`", "signatures": ["`request.abort()`", "`aborted` Type: {boolean}", "Event: `'abort'`"], "status": "partial", "evidence": ["tests/corpus/2988-http-static-client-abort.ts"] },
@@ -149,7 +154,7 @@
     { "chapter": "stream", "signatures": ["Event: `'drain'`"], "status": "partial", "evidence": ["tests/corpus/2894-child-stdin-backpressure.ts", "tests/corpus/3310-child-stdin-backpressure-native.ts", "tests/corpus/3311-child-stdin-end-backpressure-native.ts"] },
     { "chapter": "webstreams", "signatures": ["`readableStream.values([options])`"], "status": "partial", "evidence": ["tests/corpus/2862-web-readable-async-iteration.ts"] },
     { "chapter": "url", "signatures": ["`hash` Type: {string}", "`port` Type: {string}"], "status": "partial", "evidence": ["tests/corpus/2946-url-port-hash.ts"] },
-    { "chapter": "util", "signatures": ["`util.promisify(original)`"], "status": "partial", "evidence": ["tests/corpus/1473-promisify-execfile.ts", "tests/corpus/1573-promisify-execfile-env-spread.ts", "tests/corpus/2912-promisify-fs-readfile.ts"] },
+    { "chapter": "util", "signatures": ["`util.promisify(original)`"], "status": "partial", "evidence": ["tests/corpus/1473-promisify-execfile.ts", "tests/corpus/1573-promisify-execfile-env-spread.ts", "tests/corpus/2912-promisify-fs-readfile.ts", "tests/corpus/3393-promisify-zlib-raw.ts", "tests/corpus/3394-promisify-zlib-level.ts", "tests/corpus/3395-promisify-zlib-string.ts", "tests/corpus/3396-promisify-zlib-errors.js", "tests/corpus/3453-dns-promisify-lookup.js", "tests/harness/dns-promises.test.ts"] },
     { "chapter": "typescript", "symbols": ["type"], "status": "supported", "evidence": ["tests/corpus/2702-type-import-link-static/main.ts", "tests/corpus/2703-type-import-link-static-reexport/main.ts", "tests/corpus/2704-type-import-link-static-success/main.ts", "tests/corpus/2707-type-import-link-static-default-reexport/main.ts", "tests/harness/errors.test.ts"] }
   ],
   "dedicated": [

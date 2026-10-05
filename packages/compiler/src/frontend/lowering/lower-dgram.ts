@@ -19,6 +19,7 @@ import { isFreshObjectWithout } from "./literal-shapes.js";
 const SIGNAL_CAPABILITIES: ReadonlySet<string> = new Set(["aborted"]);
 import { resultIsDiscarded } from "./call-position.js";
 import { lowerCallbackArg as lowerCallbackArgShared } from "./callback-arg.js";
+import { lowerDnsPromisesCall } from "./lower-dns-promises.js";
 
 const DGRAM_SURFACE_HINT =
   "bind, connect, send, address, close, unref/ref, and on/once of " +
@@ -93,6 +94,7 @@ export function lowerDgramDnsModuleCall(lowerer: Lowerer, expr: ts.CallExpressio
   bi: { module: string; member: string },
   loc: SrcLoc,): IrExpr | null {
   if (bi.module === "dns") return lowerDnsModuleCall(lowerer, expr, bi, loc);
+  if (bi.module === "dns/promises") return lowerDnsPromisesCall(lowerer, expr, bi.member, loc);
   if (bi.module !== "dgram") return null;
   const args = expr.arguments;
   if (bi.member === "createSocket") {

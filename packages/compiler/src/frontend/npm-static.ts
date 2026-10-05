@@ -64,7 +64,7 @@ import { thirdPartyDeclarationReason } from "./npm-static-declarations.js";
 import type { NpmStaticDeclarationOverloads, NpmStaticDeclarationProperties } from "./npm-static-declarations.js";
 import { rewriteBundlerCjsExports } from "./npm-static-rewrite.js";
 import { RuntimeTypeBridge, resetRuntimeTypeBridgeFiles } from "./npm-static-types.js";
-import { isTsSourceFileName } from "./tsc-codes.js";
+import { isJsSourceFileName, isTsSourceFileName } from "./tsc-codes.js";
 import { npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } from "./workspace-registry.js";
 import { trackedReadFile, trackedRealpath } from "./input-tracker.js";
 
@@ -378,8 +378,9 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
 }
 
 /* ── auto-detection (--npm-static=auto) ─────────────────────────────────
- * AUTO accepts own declarations or identity/version-matched @types.
- * Declarations only authorize an attempt; runtime JS must be readable
+ * AUTO accepts executable JS inference, own declarations, or
+ * identity/version-matched @types. Eligibility only authorizes an attempt;
+ * runtime JS must be readable
  * (unminified: real lines, ordinary line lengths), and the source shows
  * no build-transform markers (a bundled/transpiled dist is not the code
  * the author checked). Best-effort: a package that slips through and
@@ -391,7 +392,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
  * but the bundler-emitted CJS export rewrite (npm-static-rewrite.ts)
  * types the getter-table shapes and the offender attribution degrades a
  * package whose surface still breaks its consumers — so those bundles are
- * worth ATTEMPTING: eligible when the .d.ts and unminified criteria hold,
+ * worth ATTEMPTING: eligible when the source and unminified criteria hold,
  * gracefully per-package-degraded when the attempt fails. */
 const TRANSFORM_MARKERS = ["__webpack_require__"];
 
@@ -416,13 +417,15 @@ export function npmStaticIneligibleReason(
   pkgName: string,
   typesFile: string,
   jsEntry: string | null,
+  allowRuntimeInference = false,
 ): string | null {
   if (jsEntry === null) return "no runtime JS entry resolves";
   if (npmPackageNameOf(typesFile) !== pkgName) {
     const reason = thirdPartyDeclarationReason(pkgName, typesFile, jsEntry);
     if (reason !== null) return reason;
   }
-  if (!/\.d\.(ts|mts|cts)$/.test(typesFile) && !isTsSourceFileName(typesFile)) {
+  if (!/\.d\.(ts|mts|cts)$/.test(typesFile) && !isTsSourceFileName(typesFile) &&
+    !(allowRuntimeInference && isJsSourceFileName(typesFile))) {
     return "it ships no own .d.ts declaration surface";
   }
   const source = trackedReadFile(jsEntry);

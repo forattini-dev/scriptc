@@ -8,6 +8,7 @@ import { isSafeToDiscard } from "../expressions/evaluation-safety.js";
 import { lowerDynObjectLiteral } from "../expressions/object-literals.js";
 import { defaultAfterUndefined, lowerOptionalArgument, lowerStaticallyUndefinedArgument } from "../optional-arguments.js";
 import { lowerSameKindBytesSetCall } from "../bytes-set.js";
+import { lowerDynamicBufferFrom } from "../lower-buffer-from.js";
 
 /** Uint8Array.prototype.toSorted. The receiver/comparator expressions are
  * evaluated before entering the helper; the helper snapshots with
@@ -106,6 +107,33 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Float32Array: "f32",
   Float64Array: "f64",
 };
+
+/** Numeric array and same-kind typed-array factories. Unlike construction,
+ * `.from(number)` must never mean a zero-filled allocation. Other iterable
+ * shapes and mapping callbacks retain an explicit lowering refusal. */
+export function lowerBytesFromCall(lowerer: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
+  if (access.name.text !== "from" || !ts.isIdentifier(access.expression)) return null;
+  const symbol = lowerer.resolveValueSymbol(access.expression);
+  const elem = symbol ? own(BYTES_CTORS, symbol.name) : undefined;
+  if (!elem || !symbol || !lowerer.isStdlibSymbol(symbol)) return null;
+  const type = bytesOf(elem);
+  const loc = locOf(call);
+  const arg = call.arguments[0];
+  if (!arg || call.arguments.length !== 1 || call.arguments.some(ts.isSpreadElement)) {
+    lowerer.noLowering(`${symbol.name}.from with mapping callbacks, thisArg or spread arguments`, call,
+      "supported: one numeric array or same-kind typed-array source");
+  }
+  if (ts.isArrayLiteralExpression(arg) && !arg.elements.some(ts.isSpreadElement)) {
+    const elems = arg.elements.map((el) => lowerer.lowerExprExpecting(el, F64));
+    return { kind: "bytesNew", source: { kind: "arrayLit", elems, type: arrayOf(F64), loc: locOf(arg) }, type, loc };
+  }
+  const source = lowerer.lowerExpr(arg);
+  if (typeEquals(source.type, type) || (source.type.kind === "array" && source.type.elem.kind === "f64")) {
+    return { kind: "bytesNew", source, type, loc };
+  }
+  lowerer.noLowering(`${symbol.name}.from over '${lowerer.fmt(source.type)}' values`, arg,
+    "supported: one numeric array or same-kind typed-array source; cross-kind conversion and other iterables have no lowering");
+}
 
 /** `new Uint8Array(...)` / `new Uint32Array(...)` / `new Float32Array(...)` / `new Float64Array(...)`
    * (stdlib provenance — a user's own class with the name resolves through
@@ -966,6 +994,8 @@ export function lowerBufferStaticCall(lowerer: Lowerer, call: ts.CallExpression,
   const loc = locOf(call);
   const args = call.arguments;
   if (member === "from") {
+    const dynamic = lowerDynamicBufferFrom(lowerer, call);
+    if (dynamic) return dynamic;
     // Buffer.from(x.buffer[, byteOffset[, length]]): a u8 VIEW sharing
     // x's storage (Node shares the ArrayBuffer; length is in BYTES).
     // The first argument must be the SYNTACTIC `.buffer` of a typed

@@ -64,6 +64,9 @@ import { BUN_MODULE_MEMBER_ALIASES, canonicalBuiltinModule, SUPPORTED_NODE_MODUL
 import { ambientDtsPath, fallbackDtsPath, isNodeTypesPath, overridesDtsPath, tsgoPath } from "./dts-paths.js";
 import { clearWorkspacePackages, isRelativeSpecifier, isWorkspacePackageName, npmPackageNameOf, registerWorkspacePackage } from "./workspace-registry.js";
 import { trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
+import { processModuleMemberImport, processModuleMemberRequire } from "./process-module.js";
+import { requireSpecOf as requireSpecOf7 } from "./require-specifier.js";
+import { isRequireStatement as isRequireStatement7, pureRequirePrefixStatement, requireTdzRisk } from "./require-tdz.js";
 import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { setEmbedJsxOptions } from "./npm-typescript.js";
 import { checkPreflightTypes, isIslandJsFile } from "./preflight-types.js";
@@ -230,11 +233,11 @@ function adoptProjectConfig7(
   return { configFile, options: { ...BASE_OPTIONS, ...adopted, ...forced }, pathAliases, diags };
 }
 
-/** The target project's @types/node, resolved with the OWN resolver's
- * type-directive lookup anchored at the ENTRY (typeRoots-free — exactly the
- * secondary lookup 5.9.3 ran with typeRoots emptied). */
-function resolveNodeTypes7(entryPath: string): string | null {
-  const file = resolveTypeDirective("node", entryPath);
+/** Adopt the configured project's Node declarations, or an entry-local
+ * installation without a config. Ancestor development types must not replace
+ * the fallback surface of an otherwise isolated, unconfigured program. */
+function resolveNodeTypes7(entryPath: string, configured: boolean): string | null {
+  const file = configured || ts.sys.directoryExists(resolve(dirname(entryPath), "node_modules", "@types", "node")) ? resolveTypeDirective("node", entryPath) : null;
   return file !== null && isNodeTypesPath(file) ? file : null;
 }
 
@@ -489,7 +492,7 @@ function loadProgram7(
       ? configuredPaths as Record<string, string[]>
       : null,
   );
-  const nodeTypes = config.configFile ? resolveNodeTypes7(entryPath) : null;
+  const nodeTypes = resolveNodeTypes7(entryPath, config.configFile !== null);
   // The BUN surface (the Bun-target story): a project typed against
   // @types/bun chains bun-types → @types/node, whose globals carry the
   // `UseLibDomIfAvailable` discipline — bun-types STANDS DOWN where the
@@ -754,36 +757,6 @@ export function checkPreflight(load: LoadResult): ScrDiagnostic[] {
   return diags;
 }
 
-/** The specifier of a `require("...")` call: the callee is the bare
- * identifier `require` and the single argument a string literal. The one
- * recognizer preflight edges, global collection, and statement lowering
- * share — anything require-shaped it does NOT match (computed specifiers,
- * extra arguments) is not a module edge and fences at its use site. */
-function requireSpecOf7(node: ts.Node): string | null {
-  let value = node;
-  while (
-    ts.isParenthesizedExpression(value) || ts.isAsExpression(value) ||
-    ts.isTypeAssertion(value) || ts.isNonNullExpression(value)
-  ) value = value.expression;
-  if (!ts.isCallExpression(value)) return null;
-  if (!ts.isIdentifier(value.expression) || value.expression.text !== "require") return null;
-  if (value.arguments.length !== 1) return null;
-  const arg = value.arguments[0]!;
-  return ts.isStringLiteral(arg) ? arg.text : null;
-}
-
-/** True for statements that are CommonJS require IMPORTS at a module's top
- * level: `const x = require("s")` / `const { a, b } = require("s")`
- * (every declarator a require), and the bare side-effect `require("s");`.
- * These lower to NOTHING — the bindings are alias plumbing (tsc models
- * them as import aliases) and the module edge lives in the order walk. */
-function isRequireStatement7(stmt: ts.Statement): boolean {
-  if (ts.isExpressionStatement(stmt)) return requireSpecOf7(stmt.expression) !== null;
-  if (!ts.isVariableStatement(stmt)) return false;
-  const decls = stmt.declarationList.declarations;
-  return decls.length > 0 && decls.every((d) => d.initializer !== undefined && requireSpecOf7(d.initializer) !== null);
-}
-
 /** The require() occurrences of one top-level statement: the declaration
  * forms and the bare side-effect call. Empty for everything else. */
 function requiresOf7(
@@ -800,117 +773,6 @@ function requiresOf7(
     if (spec !== null) out.push({ spec, node: decl, decl });
   }
   return out;
-}
-
-/** True for top-level statements that cannot run user code: directives,
- * empty statements, hoisted declarations, require statements themselves,
- * and literal-initialized variables. A require preceded ONLY by these can
- * never have its bindings observed early — nothing above it executes. */
-function purePrefixStmt7(s: ts.Statement): boolean {
-  if (ts.isEmptyStatement(s) || ts.isFunctionDeclaration(s)) return true;
-  if (ts.isExpressionStatement(s) && ts.isStringLiteral(s.expression)) return true; // directive
-  if (isRequireStatement7(s)) return true;
-  if (ts.isVariableStatement(s)) {
-    return s.declarationList.declarations.every(
-      (d) =>
-        d.initializer === undefined ||
-        requireSpecOf7(d.initializer) !== null ||
-        ts.isStringLiteralLike(d.initializer) ||
-        ts.isNumericLiteral(d.initializer) ||
-        d.initializer.kind === ts.SyntaxKind.TrueKeyword ||
-        d.initializer.kind === ts.SyntaxKind.FalseKeyword ||
-        d.initializer.kind === ts.SyntaxKind.NullKeyword,
-    );
-  }
-  return false;
-}
-
-/** Can code that runs BEFORE the require statement at index `k` reach one
- * of the require's bindings? Node initializes them AT the require (TDZ —
- * earlier access is a ReferenceError), but the lowering aliases reads
- * through to the exporter's storage with no TDZ state, so a reachable
- * early read would silently diverge. Conservative reachability: earlier
- * statements' whole subtrees (arrows and function expressions included)
- * read the binding directly, or reference a hoisted function/class whose
- * body (transitively through other hoisted declarations) reads it — a
- * referenced function value may be invoked immediately by whatever takes
- * it. Asynchronously-scheduled callbacks run after the whole module body,
- * hence after the require: never an early read. Returns the first
- * reachable binding's name, or null when position is provably free.
- * (The CheckerFacade memoizes symbol queries, and 7's client dedupes
- * symbol identity by server handle, so the Map-keyed-by-Symbol discipline
- * carries over from the 5.9.3 original unchanged.) */
-function requireTdzRisk7(
-  program: ts.Program,
-  sf: ts.SourceFile,
-  k: number,
-  decl: ts.VariableDeclaration,
-): string | null {
-  const checker = program.getTypeChecker();
-  const bound: ts.Identifier[] = [];
-  if (ts.isIdentifier(decl.name)) bound.push(decl.name);
-  else if (ts.isObjectBindingPattern(decl.name)) {
-    for (const el of decl.name.elements) if (el.name !== undefined && ts.isIdentifier(el.name)) bound.push(el.name);
-  }
-  const bindings = new Map<ts.Symbol, string>();
-  for (const id of bound) {
-    const sym = checker.getSymbolAtLocation(id);
-    if (sym) bindings.set(sym, id.text);
-  }
-  if (bindings.size === 0) return null;
-  const stmts = sf.statements;
-  const hoisted = new Map<ts.Symbol, ts.Statement>();
-  for (const s of stmts) {
-    if ((ts.isFunctionDeclaration(s) || ts.isClassDeclaration(s)) && s.name) {
-      const sym = checker.getSymbolAtLocation(s.name);
-      if (sym) hoisted.set(sym, s);
-    }
-  }
-  let hit: string | null = null;
-  const scanned = new Set<ts.Statement>();
-  const work: ts.Statement[] = [];
-  const scan = (root: ts.Node): void => {
-    // Iterative walk (walkPreorder): a statement's subtree can be
-    // pathologically deep (the binderBinaryExpressionStress chains), and
-    // this scan must survive it so the nesting fence can answer later.
-    ts.walkPreorder(root, (n) => {
-      if (ts.isIdentifier(n)) {
-        const sym = checker.getSymbolAtLocation(n);
-        if (sym) {
-          const name = bindings.get(sym);
-          if (name !== undefined) {
-            hit = name;
-            return "stop";
-          }
-          const target = hoisted.get(sym);
-          if (target && !scanned.has(target)) {
-            scanned.add(target);
-            work.push(target);
-          }
-        }
-      }
-      return undefined;
-    });
-  };
-  // These are the exact roots the TDZ analysis scans eagerly. Their files
-  // are phase-managed already, so warm their deferred identifiers as one
-  // symbol-only batch instead of paying one IPC query per occurrence.
-  checker.prefetchSymbolRoots(
-    stmts.slice(0, k).filter((stmt) => !ts.isFunctionDeclaration(stmt)),
-  );
-  for (let i = 0; i < k && hit === null; i++) {
-    const s = stmts[i]!;
-    if (ts.isFunctionDeclaration(s)) continue;
-    scan(s);
-  }
-  while (hit === null && work.length > 0) {
-    // A scanned reference can make a hoisted declaration's body reachable
-    // to this analysis. Batch every currently discovered root before
-    // retaining the historical LIFO traversal order.
-    checker.prefetchSymbolRoots(work);
-    scan(work.pop()!);
-  }
-  return hit;
 }
 
 /** Bare `require("...")` EXPRESSION STATEMENTS anywhere below the top
@@ -1838,21 +1700,20 @@ function npmStaticProgramDep(
   return dep;
 }
 
-/** `const process = require('node:process')` (identifier binding) and the
- * bare side-effect `require('node:process')`: Node's process module IS
- * the global process object, so the binding is a stdlib-global alias
- * (surfaces.ts registers it; reads lower through the process surface) and
- * the bare load is a no-op. These forms are exempt from the SC1010
- * builtin fence; every other shape (destructuring, subpath) keeps it. */
+/** Identifier-bound and bare `require('node:process')` denote the global
+ * process object or a no-op load. Named imports of admitted members retain
+ * their object identity through binding provenance (process-module.ts).
+ * Unsupported members, binding patterns and subpaths retain their fences;
+ * admitting one binding never admits the whole process API. */
 function processModuleAliasRequire7(spec: string, decl: ts.VariableDeclaration | null): boolean {
   if (spec !== "process" && spec !== "node:process") return false;
-  return decl === null || ts.isIdentifier(decl.name);
+  return decl === null || ts.isIdentifier(decl.name) || processModuleMemberRequire(decl);
 }
 
 function processModuleAliasImport7(spec: string, stmt: ts.ImportDeclaration): boolean {
   if (spec !== "process" && spec !== "node:process") return false;
   const clause = stmt.importClause;
-  return clause !== undefined && clause.name !== undefined && clause.namedBindings === undefined;
+  return clause !== undefined && ((clause.name !== undefined && clause.namedBindings === undefined) || processModuleMemberImport(stmt));
 }
 
 /** The whole TS7-lane lifecycle for one entry: spawn (or share) a tsgo
@@ -2469,7 +2330,7 @@ function preflight7(load: LoadResult): {
       const stmts = sf.statements;
       let firstRunnable = -1;
       stmts.forEach((s, i) => {
-        if (firstRunnable < 0 && !purePrefixStmt7(s)) firstRunnable = i;
+        if (firstRunnable < 0 && !pureRequirePrefixStatement(program, s, isCjsJsFile7(sf))) firstRunnable = i;
       });
       for (let k = 0; k < stmts.length; k++) {
         const stmt = stmts[k]!;
@@ -2538,30 +2399,31 @@ function preflight7(load: LoadResult): {
           }
           // `const data = require("./x.json")`: the document is DATA known
           // at build time, exactly like the ESM default import of the same
-          // file — the binding bakes into a comptime global
-          // (collectJsonImports's require arm) and the .json file carries
-          // no init, so no module edge joins the order. Two spellings keep
-          // the fence: the destructuring form (the named-import twin above
-          // fences too — a JSON namespace has no static story) and the bare
-          // side-effect call, where Node PARSES the document and can throw,
-          // which a lowering to nothing would not reproduce.
+          // file — the binding bakes into a cached document global. A flat
+          // object pattern snapshots fields from that same document at the
+          // declaration's position; unlike ESM named imports, require()
+          // returns the JSON object itself. Bare calls keep their parse-
+          // failure fence rather than silently lowering to nothing.
           const isJsonDep = dep !== null && dep.fileName.endsWith(".json");
           if (isJsonDep && bindingKind === "createRequire") continue;
-          if (isJsonDep && (req.decl === null || !ts.isIdentifier(req.decl.name))) {
+          if (isJsonDep && req.decl === null) {
             diags.push(
               unsupportedDiag(
                 "SC1012",
                 loc,
-                req.decl === null
-                  ? "bare require() of JSON modules"
-                  : "destructuring require() of JSON modules",
+                "bare require() of JSON modules",
               ),
             );
             continue;
           }
+          if (isJsonDep && req.decl && ts.isObjectBindingPattern(req.decl.name) &&
+              req.decl.name.elements.some(element => element.propertyName !== undefined && ts.isComputedPropertyName(element.propertyName))) {
+            diags.push(unsupportedDiag("SC1012", loc, "require() destructuring with computed property names"));
+            continue;
+          }
           const tdzName =
             firstRunnable >= 0 && firstRunnable < k && req.decl
-              ? requireTdzRisk7(program, sf, k, req.decl)
+              ? requireTdzRisk(program, sf, k, req.decl)
               : null;
           if (tdzName !== null) {
             diags.push(
