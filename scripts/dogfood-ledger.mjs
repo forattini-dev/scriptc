@@ -6,13 +6,15 @@
 // with the fences broken down by code, package, family and site, the
 // unreached remainder, npm admission, and the consumer's identity.
 //
-// Usage:
+// Usage (pnpm forwards flags after the script name; a literal `--`, which
+// npm needs, is accepted and ignored):
 //   pnpm dogfood:ledger                    # table across entries + deltas vs tests/dogfood/ledger/<name>.json
-//   pnpm dogfood:ledger -- --entry <name>  # one entry (repeatable)
-//   pnpm dogfood:ledger -- --write         # store the compact records as the committed baseline
-//   pnpm dogfood:ledger -- --json          # the records as JSON instead of the table
-//   pnpm dogfood:ledger -- --mission <file> --timeout-ms <n> --top <families>
-//   pnpm dogfood:ledger -- --replay        # re-summarise the previous run's raw results instead of analyzing again
+//   pnpm dogfood:ledger --entry <name>     # one entry (repeatable)
+//   pnpm dogfood:ledger --write            # store the compact records as the committed baseline
+//   pnpm dogfood:ledger --json             # the records as JSON instead of the table
+//   pnpm dogfood:ledger --mission <file> --timeout-ms <n> --top <families>
+//   pnpm dogfood:ledger --replay           # re-summarise the previous run's kept raw results instead of analyzing again
+//                                          # (the record keeps the compiler, consumer and time stamped when the analysis ran)
 //
 // The mission file (tests/dogfood/mission.json) names the entries and the
 // root placeholders; every root resolves from an environment variable with
@@ -47,10 +49,16 @@ async function runWorker(payloadPath) {
   try {
     const { analyze } = await import(path.join(repoRoot, "packages/compiler/src/index.ts"));
     const analysis = analyze(payload.entry, payload.options);
-    const { statsByFile, provenance, ...coverage } = analysis.coverage;
+    // Per-file attribution and provenance maps are not JSON and not headline data.
+    const coverage = { ...analysis.coverage };
+    delete coverage.statsByFile;
+    delete coverage.provenance;
     result.ok = true;
     result.coverage = coverage;
     result.sources = analysis.sourceTexts.size;
+    // Scratch-only (the record keeps the count): the file list lets two runs'
+    // source sets be diffed when their counts disagree.
+    result.sourceFiles = [...analysis.sourceTexts.keys()];
     result.declarationFiles = analysis.declarationFiles ?? null;
   } catch (error) {
     result.error = {
@@ -113,6 +121,7 @@ function parseArgs(args) {
   const opts = { entries: [], write: false, json: false, replay: false, mission: path.join(repoRoot, "tests/dogfood/mission.json"), timeoutMs: 30 * 60 * 1000, top: 25 };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
+    if (a === "--") continue; // npm-style separator; pnpm forwards it literally
     if (a === "--write") opts.write = true;
     else if (a === "--json") opts.json = true;
     else if (a === "--replay") opts.replay = true;
@@ -127,7 +136,7 @@ function parseArgs(args) {
 }
 
 function usage() {
-  return "usage: pnpm dogfood:ledger -- [--entry <name>]... [--write] [--json] [--replay] [--mission <file>] [--timeout-ms <n>] [--top <n>]";
+  return "usage: pnpm dogfood:ledger [--entry <name>]... [--write] [--json] [--replay] [--mission <file>] [--timeout-ms <n>] [--top <n>]";
 }
 
 /** Resolves the mission's root placeholders: an environment override,
@@ -224,9 +233,9 @@ function sha256File(file) {
 /** The consumer's identity for the record: a git repository (HEAD and the
  * dirty path count, untracked files included — a consumer's untracked
  * source can be imported), or an npm fixture directory (lockfile hash and
- * installed versions), plus the @types/node roots the checker program
- * loaded. */
-function consumerIdentity(spec, roots, relativize, declarationFiles) {
+ * installed versions). The @types/node roots the checker program loaded
+ * are added once an analysis produced its declaration files. */
+function consumerIdentity(spec, roots, relativize) {
   if (!spec) return null;
   const identity = { kind: spec.kind };
   if (spec.kind === "git") {
@@ -249,7 +258,6 @@ function consumerIdentity(spec, roots, relativize, declarationFiles) {
       }
     }
   }
-  if (Array.isArray(declarationFiles)) identity.typesNode = typesNodeRoots(declarationFiles, relativize);
   return identity;
 }
 
@@ -281,35 +289,66 @@ function typesNodeRoots(declarationFiles, relativize) {
 async function runEntry(entry, { mission, roots, relativize, compiler, opts }) {
   const options = { ...(mission.options ?? {}), ...(entry.options ?? {}) };
   const generatedAt = new Date().toISOString();
-  const common = { name: entry.name, options, compiler, generatedAt, relativize, topFamilies: opts.top, ...(entry.note ? { note: entry.note } : {}) };
+  const common = {
+    name: entry.name,
+    options,
+    relativize,
+    topFamilies: opts.top,
+    ...(Array.isArray(entry.firstPartyPackages) ? { firstPartyPackages: entry.firstPartyPackages } : {}),
+    ...(entry.note ? { note: entry.note } : {}),
+  };
   let entryPath;
   try {
     entryPath = expandPlaceholders(entry.entry, roots);
   } catch (error) {
-    return withNote(summarizeEntry({ ...common, entry: entry.entry, unavailable: error.message }), entry);
+    return withNote(summarizeEntry({ ...common, compiler, generatedAt, entry: entry.entry, unavailable: error.message }), entry);
   }
   const missing = [entryPath, ...(entry.requires ?? []).map((r) => expandPlaceholders(r, roots))].filter((p) => !existsSync(p));
   if (missing.length > 0) {
     return withNote(summarizeEntry({
       ...common,
+      compiler,
+      generatedAt,
       entry: entryPath,
-      consumer: consumerIdentity(entry.consumer, roots, relativize, null),
+      consumer: consumerIdentity(entry.consumer, roots, relativize),
       unavailable: `missing on this machine: ${missing.join(", ")}`,
     }), entry);
   }
-  const result = opts.replay ? replayResult(entry.name) : await analyzeInChild(entry.name, entryPath, options, opts.timeoutMs);
-  const consumer = consumerIdentity(entry.consumer, roots, relativize, result.declarationFiles ?? null);
-  const entrySha256 = sha256File(entryPath);
+  let result;
+  let stamp;
+  if (opts.replay) {
+    result = replayResult(entry.name);
+    stamp = result.stamp ?? null;
+    if (stamp === null) {
+      // A kept result without a stamp cannot say which compiler or consumer
+      // produced it, so a replay would stamp it with today's state.
+      if (result.error?.name !== "NoReplay") {
+        result = { ok: false, node: result.node, error: { name: "NoReplay", message: `the kept result for ${entry.name} carries no provenance stamp; run the analysis again` } };
+      }
+      stamp = { generatedAt, compiler, entrySha256: sha256File(entryPath), consumer: consumerIdentity(entry.consumer, roots, relativize) };
+    } else if (stamp.compiler?.head !== compiler.head || stamp.compiler?.dirtyPaths !== compiler.dirtyPaths) {
+      console.error(`  ${entry.name}: replaying a result produced by compiler ${String(stamp.compiler?.head).slice(0, 8)} (${stamp.compiler?.dirtyPaths} dirty tracked paths); this checkout is ${String(compiler.head).slice(0, 8)} (${compiler.dirtyPaths})`);
+    }
+  } else {
+    // Everything that identifies this analysis is captured BEFORE it runs
+    // and travels with the kept raw result, so a later --replay reports the
+    // compiler, consumer and time the numbers came from.
+    stamp = { generatedAt, compiler, entrySha256: sha256File(entryPath), consumer: consumerIdentity(entry.consumer, roots, relativize) };
+    result = await analyzeInChild(entry.name, entryPath, options, opts.timeoutMs);
+    if (stamp.consumer !== null && Array.isArray(result.declarationFiles)) stamp.consumer.typesNode = typesNodeRoots(result.declarationFiles, relativize);
+    keepResult(entry.name, result, stamp);
+  }
+  const identity = { compiler: stamp.compiler, generatedAt: stamp.generatedAt, consumer: stamp.consumer };
   if (!result.ok) {
-    return withNote(summarizeEntry({ ...common, entry: entryPath, consumer, node: result.node, crashed: result.error, analysis: { elapsedMs: result.elapsedMs } }), entry, entrySha256);
+    return withNote(summarizeEntry({ ...common, ...identity, entry: entryPath, node: result.node, crashed: result.error, analysis: { elapsedMs: result.elapsedMs } }), entry, stamp.entrySha256);
   }
   return withNote(summarizeEntry({
     ...common,
+    ...identity,
     entry: entryPath,
-    consumer,
     node: result.node,
     analysis: { coverage: result.coverage, sources: result.sources, elapsedMs: result.elapsedMs, peakRssKiB: result.peakRssKiB },
-  }), entry, entrySha256);
+  }), entry, stamp.entrySha256);
 }
 
 function withNote(record, entry, entrySha256 = null) {
@@ -336,6 +375,16 @@ function replayResult(name) {
   return JSON.parse(readFileSync(file, "utf8"));
 }
 
+/** Keeps the worker's raw result (stamped with the run's provenance) for
+ * --replay. A failure that left no worker result (timeout, killed worker)
+ * never replaces a kept good one. */
+function keepResult(name, result, stamp) {
+  if (result.workerWrote !== true) return;
+  const raw = { ...result, stamp };
+  delete raw.workerWrote;
+  writeFileSync(path.join(resultsDir(), `latest-${name}.json`), JSON.stringify(raw));
+}
+
 function analyzeInChild(name, entry, options, timeoutMs) {
   const scratch = resultsDir();
   const stamp = `${process.pid}-${Date.now()}`;
@@ -357,9 +406,7 @@ function analyzeInChild(name, entry, options, timeoutMs) {
       clearTimeout(timer);
       if (existsSync(outPath)) {
         try {
-          const result = JSON.parse(readFileSync(outPath, "utf8"));
-          writeFileSync(path.join(scratch, `latest-${name}.json`), JSON.stringify(result));
-          resolveResult(result);
+          resolveResult({ ...JSON.parse(readFileSync(outPath, "utf8")), workerWrote: true });
           return;
         } catch (error) {
           resolveResult({ ok: false, error: { name: "LedgerError", message: `unreadable worker result: ${error.message}` } });

@@ -23,6 +23,7 @@
       "entry": "${baldim}/s3-client.ts",
       "requires": ["${baldim}/node_modules/@baldim/adapter-s3/package.json"],
       "consumer": { "kind": "npm", "dir": "${baldim}", "packages": ["@baldim/adapter-s3", "@baldim/core", "@aws-sdk/client-s3", "@smithy/core", "lodash-es", "recker", "pino", "@types/node"] },
+      "firstPartyPackages": ["@baldim/*"],
       "description": "Offline S3Client constructor smoke test over @baldim/adapter-s3: construct with dummy credentials, print the resolved config, destroy."
     },
     {
