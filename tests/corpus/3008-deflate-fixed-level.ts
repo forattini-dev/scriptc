@@ -1,3 +1,7 @@
+// @rust-only
+// Fixed-level deflateSync compiles on the Rust backend only: its runtime
+// reproduces Node's level 0, 6 and 9 streams, while the C and LLVM runtimes
+// link the system zlib, whose bytes differ, so those backends refuse the form.
 import { deflateSync, inflateSync } from "node:zlib";
 const input = Buffer.from("native native native native native native", "utf8");
 const stored = deflateSync(input, { level: 0 });
