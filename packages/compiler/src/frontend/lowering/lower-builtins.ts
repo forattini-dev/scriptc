@@ -150,42 +150,54 @@ function checkedOptionalBuiltinArm(lowerer: Lowerer, value: IrExpr, target: IrTy
     : null;
 }
 
+/** Number.isFinite/isNaN/isInteger/isSafeInteger over a tagged union that
+ * holds a number plus absence: `number | undefined` (a read that may observe a
+ * missing element) and its declared or promoted widenings with null. The
+ * statics never coerce, so every unit arm answers false and only the number
+ * arm reaches the predicate. The value stays tagged on purpose: the checker may
+ * have narrowed this use to `number`, but the stored union can still carry the
+ * absence that narrowing does not prove. */
 function lowerOptionalNumberPredicate(
   lowerer: Lowerer,
   value: IrExpr,
   fn: IrLibFn,
   loc: SrcLoc,
 ): IrExpr | null {
-  const widened = lowerer.runtimeOptionalWidening(value.type, F64);
-  if (!widened || widened.kind !== "union") return null;
-  const numberTag = lowerer.armTag(widened.unionId, F64);
-  const undefinedTag = lowerer.armTag(widened.unionId, UNDEFINED_T);
-  if (numberTag < 0 || undefinedTag < 0) return null;
-  const key = `number.optionalPredicate:${fn}:${widened.unionId}`;
+  if (value.type.kind !== "union") return null;
+  const unionId = value.type.unionId;
+  const def = lowerer.unions.get(unionId);
+  const numberTag = lowerer.armTag(unionId, F64);
+  if (!def || numberTag < 0 || lowerer.armTag(unionId, UNDEFINED_T) < 0 ||
+      !def.arms.every((arm) => typeEquals(arm, F64) || isUnitType(arm))) return null;
+  const widened = value.type;
+  const key = `number.optionalPredicate:${fn}:${unionId}`;
   let helper = lowerer.widthHelpers.get(key);
   if (!helper) {
     helper = `%number.optionalPredicate.${lowerer.widthHelpers.size}`;
     lowerer.widthHelpers.set(key, helper);
     const input = varRef("value.0", widened, loc);
+    const absent: IrStmt[] = def.arms.flatMap((arm, tag): IrStmt[] => isUnitType(arm)
+      ? [{
+          kind: "if",
+          cond: { kind: "unionIsTag", unionId, tag, negated: false, value: input, type: BOOL, loc },
+          then: [{ kind: "return", value: boolLit(false, loc), loc }],
+          else_: null,
+          loc,
+        }]
+      : []);
     lowerer.liftedFns.push({
       name: helper,
       params: [{ localId: "value.0", name: "value", type: widened }],
       returnType: BOOL,
       locals: [{ id: "value.0", name: "value", type: widened, mutable: false }],
       body: [
-        {
-          kind: "if",
-          cond: { kind: "unionIsTag", unionId: widened.unionId, tag: undefinedTag, negated: false, value: input, type: BOOL, loc },
-          then: [{ kind: "return", value: boolLit(false, loc), loc }],
-          else_: null,
-          loc,
-        },
+        ...absent,
         {
           kind: "return",
           value: {
             kind: "libCall",
             fn,
-            args: [{ kind: "unionNarrow", unionId: widened.unionId, tag: numberTag, value: input, type: F64, loc }],
+            args: [{ kind: "unionNarrow", unionId, tag: numberTag, value: input, type: F64, loc }],
             type: BOOL,
             loc,
           },
