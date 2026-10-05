@@ -31,7 +31,7 @@
       "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3446-builtin-error-call-shadowing.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…"
     },
     "runtime-crate": {
-      "cargo-clippy": "error: using `chunks_exact` with a constant chunk size (--> src/zlib.test.rs:30:14)"
+      "cargo-clippy::clippy::chunks-exact-to-as-chunks::src/zlib.test.rs": "error: using `chunks_exact` with a constant chunk size"
     }
   },
   "calibration": {

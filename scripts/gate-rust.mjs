@@ -246,7 +246,7 @@ function planRuntimeCrate(context) {
 
 async function runRuntimeCrate(context, plan) {
   const started = Date.now();
-  const step = { id: "runtime-crate", ran: true, reds: [], passed: [], skipped: [], problems: [], checks: [], scope: { kind: "cargo", testRan: false, clippyRan: false, testResultsParsed: false } };
+  const step = { id: "runtime-crate", ran: true, reds: [], passed: [], passedPrefixes: [], skipped: [], problems: [], checks: [], scope: { kind: "cargo", testRan: false, clippyRan: false, testResultsParsed: false, clippyResultsParsed: false } };
   step.toolchain = {
     pin: context.toolchain,
     rustc: toolVersion("rustc", ["--version"], plan.commands[0].env),
@@ -289,8 +289,20 @@ async function runRuntimeCrate(context, plan) {
       const parsed = parseClippyLog(text);
       step.scope.clippyRan = true;
       check.errorCount = parsed.errorCount;
-      if (run.exitCode === 0) step.passed.push("cargo-clippy");
-      else step.reds.push({ id: "cargo-clippy", firstLines: parsed.firstLines || `cargo clippy exited ${run.exitCode}` });
+      check.diagnostics = parsed.diagnostics;
+      if (run.exitCode === 0) {
+        step.passed.push("cargo-clippy");
+      } else {
+        // One red per diagnostic, keyed by lint and file, so a new lint is a new red even
+        // while another one is baselined. A nonzero exit with no parsable diagnostic (a
+        // missing component, a manifest error) is the generic `cargo-clippy` red.
+        for (const diagnostic of parsed.diagnostics) step.reds.push({ id: diagnostic.id, firstLines: diagnostic.firstLines });
+        if (parsed.diagnostics.length === 0) step.reds.push({ id: "cargo-clippy", firstLines: parsed.firstLines || `cargo clippy exited ${run.exitCode} without a parsable diagnostic` });
+      }
+      if (run.exitCode === 0 || parsed.diagnostics.length > 0) {
+        step.scope.clippyResultsParsed = true;
+        step.passedPrefixes.push("cargo-clippy::");
+      }
     }
     step.checks.push(check);
   }
@@ -715,7 +727,7 @@ async function main() {
   }
   const orderedSteps = ["runtime-crate", "corpus", "focus-node26", "focus-node24"].map((id) => steps.find((step) => step.id === id));
   if (interrupted) orderedSteps[0].problems.push({ id: "interrupted", message: "the gate was interrupted before every selected step finished" });
-  const verdict = evaluate(orderedSteps, baseline, { repoRoot, commit: repo.commit, date: startedAt.toISOString().slice(0, 10) });
+  const verdict = evaluate(orderedSteps, baseline, { repoRoot, commit: repo.commit, date: startedAt.toISOString().slice(0, 10), strictReasons: options.strictReasons });
   const finishedAt = new Date();
   const paths = { report: join(outDir, "report.json"), summary: join(outDir, "summary.txt"), outDir };
   const report = {
@@ -771,7 +783,7 @@ function rejudge(options, baseline, baselinePath, outDir, startedAt, repo) {
     process.stderr.write(`${options.rejudge} is not a gate-rust report\n`);
     return 2;
   }
-  const verdict = evaluate(previous.steps, baseline, { repoRoot, commit: previous.repo?.commit ?? repo.commit, date: (previous.startedAt ?? startedAt.toISOString()).slice(0, 10) });
+  const verdict = evaluate(previous.steps, baseline, { repoRoot, commit: previous.repo?.commit ?? repo.commit, date: (previous.startedAt ?? startedAt.toISOString()).slice(0, 10), strictReasons: options.strictReasons });
   mkdirSync(outDir, { recursive: true });
   const paths = { report: join(outDir, "report.json"), summary: join(outDir, "summary.txt"), outDir };
   const report = {

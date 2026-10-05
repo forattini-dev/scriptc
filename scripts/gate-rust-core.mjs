@@ -45,6 +45,7 @@ reds against the committed baseline.
   --isolate-cache         give each corpus shard its own SCRIPTC_CACHE_DIR (cold runtime build per shard)
   --keep-binaries         keep passed corpus binaries (default discards them to bound disk use)
   --keep-tmp              keep per-shard TMPDIRs
+  --strict-reasons        also fail when a known red fails differently than the baseline recorded
   --dry-run               print the plan (commands and environment deltas) and exit
   --help                  this text
 `;
@@ -85,6 +86,7 @@ export function parseArgs(argv, host = { cpus: 1, memoryGb: 0 }) {
     isolateCache: false,
     keepBinaries: false,
     keepTmp: false,
+    strictReasons: false,
     dryRun: false,
     help: false,
   };
@@ -119,6 +121,7 @@ export function parseArgs(argv, host = { cpus: 1, memoryGb: 0 }) {
       case "--isolate-cache": options.isolateCache = true; break;
       case "--keep-binaries": options.keepBinaries = true; break;
       case "--keep-tmp": options.keepTmp = true; break;
+      case "--strict-reasons": options.strictReasons = true; break;
       case "--dry-run": options.dryRun = true; break;
       case "--help": case "-h": options.help = true; break;
       default: throw new UsageError(`unknown argument '${arg}'`);
@@ -391,17 +394,52 @@ export function parseCargoTestLog(text) {
   return { counts, binaries, failures, passed, summaries, crashedBinaries, failedTargetLines, errorLines: errorLines.slice(0, 10) };
 }
 
-/** Clippy under -D warnings: every lint is an `error:` line. */
+/** Clippy under -D warnings: every lint is an `error:` diagnostic, and each
+ * becomes its own record keyed by lint and file (not line, so a diagnostic
+ * that merely moves keeps its id), with a `#2`, `#3` suffix for repeats of
+ * one lint in one file so an added occurrence is a new red. The lint name
+ * comes from the "`-D <lint>` implied by `-D warnings`" note; an error
+ * without one (a hard compile error) is keyed by its error code or message.
+ * An identical diagnostic printed for two targets counts once. */
 export function parseClippyLog(text) {
   const lines = text.split("\n");
-  const errors = [];
+  const diagnostics = [];
+  const seen = new Set();
+  const perKey = new Map();
+  const isStart = (line) => /^(error|warning)(\[\w+\])?: /.test(line);
   for (let i = 0; i < lines.length; i += 1) {
-    if (!/^error(\[E\d+\])?:/.test(lines[i])) continue;
-    const location = lines[i + 1] && /^\s*--> /.test(lines[i + 1]) ? lines[i + 1].trim() : "";
-    errors.push(location ? `${lines[i]} (${location})` : lines[i]);
+    const head = /^error(?:\[(\w+)\])?: (.*)$/.exec(lines[i]);
+    if (!head) continue;
+    const message = head[2];
+    if (/^could not compile |^aborting due to |^process didn't exit successfully/.test(message)) continue;
+    const block = [];
+    for (let j = i + 1; j < lines.length && !isStart(lines[j]) && block.length < 60; j += 1) block.push(lines[j]);
+    const location = block.map((line) => /^\s*--> (\S+?)(?::(\d+):(\d+))?\s*$/.exec(line)).find(Boolean) ?? null;
+    const note = block.map((line) => /`-D ([\w:-]+)` implied by `-D warnings`/.exec(line)).find(Boolean) ?? null;
+    const file = location ? location[1] : null;
+    const where = location ? `${location[1]}${location[2] ? `:${location[2]}:${location[3]}` : ""}` : null;
+    const lint = note ? note[1] : head[1] ? `rustc::${head[1]}` : "unclassified";
+    const fingerprint = `${lint}|${where ?? ""}|${message}`;
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    const slug = message.replace(/`[^`]*`/g, "_").replace(/\s+/g, " ").trim().slice(0, 80);
+    const key = `${lint}::${file ?? slug}`;
+    const ordinal = (perKey.get(key) ?? 0) + 1;
+    perKey.set(key, ordinal);
+    diagnostics.push({
+      id: `cargo-clippy::${key}${ordinal > 1 ? `#${ordinal}` : ""}`,
+      lint,
+      file,
+      message: `error: ${message}`,
+      location: where,
+      firstLines: where ? `error: ${message}\n  --> ${where}` : `error: ${message}`,
+    });
   }
-  const lints = errors.filter((line) => !/^error: could not compile|^error: aborting/.test(line));
-  return { errorCount: lints.length, firstLines: firstLines(lints.slice(0, 8).join("\n"), 8, 1600) };
+  return {
+    errorCount: diagnostics.length,
+    diagnostics,
+    firstLines: firstLines(diagnostics.slice(0, 8).map((d) => (d.location ? `${d.message} (${d.location})` : d.message)).join("\n"), 8, 1600),
+  };
 }
 
 // ---- baseline ---------------------------------------------------------------
@@ -437,6 +475,7 @@ export function inScope(scope, id) {
     }
     case "cargo": {
       if (id === "cargo-clippy") return scope.clippyRan;
+      if (id.startsWith("cargo-clippy::")) return scope.clippyRan && (scope.clippyResultsParsed ?? true);
       if (id === "cargo-test") return scope.testRan;
       if (id.startsWith("cargo-test::")) return scope.testRan && scope.testResultsParsed;
       return false;
@@ -456,6 +495,8 @@ export function evaluate(steps, baseline, context = {}) {
   const newReds = [];
   const stillRed = [];
   const reasonChanged = [];
+  const flaky = [];
+  const flakyKnown = [];
   const fixed = [];
   const stale = [];
   const skippedKnown = [];
@@ -473,13 +514,20 @@ export function evaluate(steps, baseline, context = {}) {
     }
     const redIds = new Set(step.reds.map((red) => red.id));
     const passedIds = new Set(step.passed);
+    const passedPrefixes = step.passedPrefixes ?? [];
+    const flakyIds = new Set((step.flaky ?? []).map((entry) => entry.id));
     const skippedIds = new Set(step.skipped.map((entry) => entry.id));
     const kept = {};
+    for (const entry of step.flaky ?? []) flaky.push({ step: id, id: entry.id, firstLines: entry.firstLines ?? "" });
     for (const red of step.reds) {
       const record = { step: id, id: red.id, firstLines: red.firstLines, durationMs: red.durationMs ?? null };
       if (Object.hasOwn(known, red.id)) {
         stillRed.push(record);
-        if (known[red.id] !== baselineReason(red.firstLines, context.repoRoot)) reasonChanged.push(record);
+        const now = baselineReason(red.firstLines, context.repoRoot);
+        if (known[red.id] !== now) {
+          reasonChanged.push({ ...record, was: known[red.id], now });
+          if (context.strictReasons) problems.push({ step: id, id: red.id, message: `known red changed its failure (--strict-reasons): ${known[red.id]} -> ${now}` });
+        }
       } else {
         newReds.push(record);
       }
@@ -487,7 +535,9 @@ export function evaluate(steps, baseline, context = {}) {
     }
     for (const [entry, reason] of Object.entries(known)) {
       if (redIds.has(entry)) continue;
-      if (passedIds.has(entry)) fixed.push({ step: id, id: entry });
+      // A known red that only passed on a retry is not fixed: it is flaky, and stays in the baseline.
+      if (flakyIds.has(entry) && passedIds.has(entry)) { flakyKnown.push({ step: id, id: entry }); kept[entry] = reason; }
+      else if (passedIds.has(entry) || passedPrefixes.some((prefix) => entry.startsWith(prefix))) fixed.push({ step: id, id: entry });
       else if (skippedIds.has(entry)) { skippedKnown.push({ step: id, id: entry }); kept[entry] = reason; }
       else if (inScope(step.scope, entry)) stale.push({ step: id, id: entry });
       else { notChecked.push({ step: id, id: entry }); kept[entry] = reason; }
@@ -508,6 +558,8 @@ export function evaluate(steps, baseline, context = {}) {
     newReds,
     stillRed,
     reasonChanged,
+    flaky,
+    flakyKnown,
     fixed,
     stale,
     skippedKnown,
@@ -547,7 +599,7 @@ export function scopeIsComplete(scope) {
     case "all": return true;
     case "corpus": return scope.completedShards.length === scope.shardCount;
     case "files": return scope.completedFiles.length === scope.files.length;
-    case "cargo": return scope.testRan && scope.clippyRan && scope.testResultsParsed;
+    case "cargo": return scope.testRan && scope.clippyRan && scope.testResultsParsed && (scope.clippyResultsParsed ?? true);
     default: return false;
   }
 }
@@ -574,7 +626,7 @@ export function renderSummary(report) {
     lines.push(`${step.id.padEnd(14)} ${status.padEnd(5)} ${formatDuration(step.durationMs).padStart(7)}  ${step.ran ? step.headline : step.skippedReason ?? "not selected"}`);
   }
   const b = report.baseline;
-  lines.push(`baseline ${b.path}: ${verdict.stillRed.length} known red${verdict.stillRed.length === 1 ? "" : "s"} still red, ${verdict.fixed.length} fixed, ${verdict.stale.length} stale, ${verdict.skippedKnown.length} skipped, ${verdict.notChecked.length} not checked in this run${b.updated ? " — baseline rewritten" : ""}`);
+  lines.push(`baseline ${b.path}: ${verdict.stillRed.length} known red${verdict.stillRed.length === 1 ? "" : "s"} still red (${verdict.reasonChanged.length} failing differently), ${verdict.fixed.length} fixed, ${verdict.stale.length} stale, ${verdict.skippedKnown.length} skipped, ${(verdict.flaky ?? []).length} flaky, ${verdict.notChecked.length} not checked in this run${b.updated ? " — baseline rewritten" : ""}`);
   const list = (title, entries, render) => {
     if (entries.length === 0) return;
     lines.push(`${title}:`);
@@ -584,6 +636,8 @@ export function renderSummary(report) {
   list("problems", verdict.problems, (problem) => `${problem.step}: ${problem.message}`);
   list("fixed (remove from the baseline)", verdict.fixed, (entry) => `${entry.step}::${entry.id}`);
   list("stale (no such test any more; remove from the baseline)", verdict.stale, (entry) => `${entry.step}::${entry.id}`);
+  list("known reds that now fail differently (check that the new failure is not a regression)", verdict.reasonChanged ?? [], (red) => `${red.step}::${red.id}\n      was: ${red.was}\n      now: ${red.now}`);
+  list("flaky (passed only on a retry; a known red that does this stays in the baseline)", verdict.flaky ?? [], (entry) => `${entry.step}::${entry.id}${verdict.flakyKnown?.some((known) => known.step === entry.step && known.id === entry.id) ? " (known red)" : ""}`);
   list("known reds still red", verdict.stillRed, (red) => `${red.step}::${red.id}`);
   if (report.extrapolation) lines.push(`extrapolation: ${report.extrapolation.text}`);
   lines.push(`report: ${report.paths.report}`);

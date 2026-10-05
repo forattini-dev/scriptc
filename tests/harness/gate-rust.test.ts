@@ -66,6 +66,11 @@ describe("options", () => {
     expect(parseArgs(["--", "--quick"], host).mode).toBe("quick");
   });
 
+  test("--strict-reasons is off unless asked for", () => {
+    expect(parseArgs([], host).strictReasons).toBe(false);
+    expect(parseArgs(["--strict-reasons"], host).strictReasons).toBe(true);
+  });
+
   test("usage errors name the offending argument", () => {
     expect(() => parseArgs(["--bogus"], host)).toThrow(UsageError);
     expect(() => parseArgs(["--steps", "corpus,nope"], host)).toThrow(/unknown step 'nope'/);
@@ -250,11 +255,55 @@ describe("cargo logs", () => {
     expect(parsed.errorLines).toEqual(["error[E0425]: cannot find value `y`", "error: could not compile `x`"]);
   });
 
-  test("clippy under -D warnings counts lints, not the trailing compile error", () => {
-    const parsed = parseClippyLog("error: using `chunks_exact` with a constant chunk size\n  --> src/zlib.test.rs:30:14\n   |\nerror: could not compile `scriptc-runtime` (lib test) due to 1 previous error\n");
+  test("clippy under -D warnings keys every lint by lint and file, not by line, and ignores the trailing compile error", () => {
+    const parsed = parseClippyLog([
+      "warning: unused imports: `a`",
+      "  --> vendor/zlib-rs/src/inflate.rs:28:25",
+      "",
+      "error: using `chunks_exact` with a constant chunk size",
+      "  --> src/zlib.test.rs:30:14",
+      "   |",
+      "   = note: `-D clippy::chunks-exact-to-as-chunks` implied by `-D warnings`",
+      "",
+      "error: could not compile `scriptc-runtime` (lib test) due to 1 previous error",
+    ].join("\n"));
     expect(parsed.errorCount).toBe(1);
-    expect(parsed.firstLines).toBe("error: using `chunks_exact` with a constant chunk size (--> src/zlib.test.rs:30:14)");
-    expect(parseClippyLog("    Finished `dev` profile\n")).toEqual({ errorCount: 0, firstLines: "" });
+    expect(parsed.diagnostics).toEqual([
+      {
+        id: "cargo-clippy::clippy::chunks-exact-to-as-chunks::src/zlib.test.rs",
+        lint: "clippy::chunks-exact-to-as-chunks",
+        file: "src/zlib.test.rs",
+        message: "error: using `chunks_exact` with a constant chunk size",
+        location: "src/zlib.test.rs:30:14",
+        firstLines: "error: using `chunks_exact` with a constant chunk size\n  --> src/zlib.test.rs:30:14",
+      },
+    ]);
+    expect(parsed.firstLines).toBe("error: using `chunks_exact` with a constant chunk size (src/zlib.test.rs:30:14)");
+    expect(parseClippyLog("    Finished `dev` profile\n")).toEqual({ errorCount: 0, diagnostics: [], firstLines: "" });
+  });
+
+  test("clippy: a second lint, a repeat in one file, a hard error and a diagnostic printed for two targets", () => {
+    const lint = (name: string, file: string, line: number) => `error: message for ${name}\n  --> ${file}:${line}:5\n   |\n   = note: \`-D ${name}\` implied by \`-D warnings\`\n`;
+    const log = [
+      lint("clippy::ptr-arg", "src/lib.rs", 225),
+      lint("clippy::ptr-arg", "src/lib.rs", 225), // the same diagnostic from the lib and lib-test targets
+      lint("clippy::ptr-arg", "src/lib.rs", 300), // a second occurrence of the lint in the file
+      lint("unused-variables", "src/a.rs", 3),
+      "error[E0425]: cannot find value `y` in this scope\n  --> src/b.rs:1:1\n",
+      "error: no such command: `clippy`\n",
+      "error: could not compile `x` (lib) due to 3 previous errors\n",
+    ].join("\n");
+    const ids = parseClippyLog(log).diagnostics.map((diagnostic) => diagnostic.id);
+    expect(ids).toEqual([
+      "cargo-clippy::clippy::ptr-arg::src/lib.rs",
+      "cargo-clippy::clippy::ptr-arg::src/lib.rs#2",
+      "cargo-clippy::unused-variables::src/a.rs",
+      "cargo-clippy::rustc::E0425::src/b.rs",
+      "cargo-clippy::unclassified::no such command: _",
+    ]);
+    // Moving the first occurrence must not change any id.
+    const moved = parseClippyLog(log.replace(":225:5", ":240:5").replace(":225:5", ":240:5")).diagnostics.map((diagnostic) => diagnostic.id);
+    expect(moved).toEqual(ids);
   });
 
   test("cargo test: a binary that never prints a result summary crashed, and failed-target lines are counted", () => {
@@ -377,6 +426,83 @@ describe("baseline verdict", () => {
     expect(summary).toContain("corpus         FAIL    1m05s  shards 1 of 4");
     expect(summary).toContain("focus-node24   skip      n/a  not selected");
   });
+});
+
+describe("baseline verdict: clippy lints, changed failures, retries", () => {
+  const idle = (id: string) => ({ id, ran: false, reds: [], passed: [], skipped: [], problems: [], scope: { kind: "none" } });
+  const cargoScope = { kind: "cargo", testRan: true, clippyRan: true, testResultsParsed: true, clippyResultsParsed: true };
+  const zlibLint = "cargo-clippy::clippy::chunks-exact-to-as-chunks::src/zlib.test.rs";
+  const newLint = "cargo-clippy::clippy::ptr-arg::src/lib.rs";
+  const crateStep = (reds: { id: string; firstLines: string }[], passed: string[] = []) => ({
+    id: "runtime-crate", ran: true, reds, passed: ["cargo-test", ...passed], passedPrefixes: ["cargo-clippy::"], skipped: [], problems: [], scope: cargoScope, durationMs: 1000, headline: "crate",
+  });
+  const baseline = normalizeBaseline({ schema: 1, reds: { "runtime-crate": { [zlibLint]: "error: using `chunks_exact` with a constant chunk size" } }, calibration: {} });
+  const summaryOf = (steps: object[], verdict: ReturnType<typeof evaluate>) => renderSummary({
+    mode: "custom", durationMs: 1000, finishedAt: "2026-10-05T00:00:00Z", repo: { root: "/repo", commit: "0123456789", dirty: false },
+    steps, baseline: { path: "b.json", updated: false }, verdict, paths: { report: "/out/report.json" },
+  });
+
+  test("a new lint is a new red even while another lint is baselined (the old single cargo-clippy id absorbed it)", () => {
+    const steps = [crateStep([
+      { id: zlibLint, firstLines: "error: using `chunks_exact` with a constant chunk size\n  --> src/zlib.test.rs:31:14" },
+      { id: newLint, firstLines: "error: writing `&Vec` instead of `&[_]`\n  --> src/lib.rs:225:30" },
+    ]), idle("rust-unit"), idle("corpus"), idle("focus-node26"), idle("focus-node24")];
+    const verdict = evaluate(steps, baseline, {});
+    expect(verdict.verdict).toBe("fail");
+    expect(verdict.newReds.map((red) => red.id)).toEqual([newLint]);
+    expect(verdict.stillRed.map((red) => red.id)).toEqual([zlibLint]);
+    // A moved line is not a changed failure: the baseline reason is the message line only.
+    expect(verdict.reasonChanged).toEqual([]);
+  });
+
+  test("a lint that no longer fires is fixed, not stale; a generic clippy failure is not scoped to lint entries", () => {
+    const verdict = evaluate([crateStep([]), idle("rust-unit"), idle("corpus"), idle("focus-node26"), idle("focus-node24")], baseline, {});
+    expect(verdict.verdict).toBe("pass");
+    expect(verdict.fixed).toEqual([{ step: "runtime-crate", id: zlibLint }]);
+    expect(verdict.stale).toEqual([]);
+    const unparsed = { ...crateStep([{ id: "cargo-clippy", firstLines: "error: 'cargo-clippy' is not installed" }]), passedPrefixes: [], scope: { ...cargoScope, clippyResultsParsed: false } };
+    const failing = evaluate([unparsed, idle("rust-unit"), idle("corpus"), idle("focus-node26"), idle("focus-node24")], baseline, {});
+    expect(failing.verdict).toBe("fail");
+    expect(failing.newReds.map((red) => red.id)).toEqual(["cargo-clippy"]);
+    expect(failing.notChecked).toEqual([{ step: "runtime-crate", id: zlibLint }]);
+    expect(inScope({ ...cargoScope, clippyResultsParsed: false }, zlibLint)).toBe(false);
+    expect(inScope(cargoScope, zlibLint)).toBe(true);
+  });
+
+  test("a known red that fails differently is shown with both reasons, and --strict-reasons makes it fail", () => {
+    const steps = [crateStep([{ id: zlibLint, firstLines: "error: something else entirely\n  --> src/zlib.test.rs:30:14" }]), idle("rust-unit"), idle("corpus"), idle("focus-node26"), idle("focus-node24")];
+    const lenient = evaluate(steps, baseline, {});
+    expect(lenient.verdict).toBe("pass");
+    expect(lenient.reasonChanged).toHaveLength(1);
+    const summary = summaryOf(steps, lenient);
+    expect(summary).toContain("known reds that now fail differently");
+    expect(summary).toContain(`runtime-crate::${zlibLint}\n      was: error: using \`chunks_exact\` with a constant chunk size\n      now: error: something else entirely`);
+    expect(summary).toContain("(1 failing differently)");
+    const strict = evaluate(steps, baseline, { strictReasons: true });
+    expect(strict.verdict).toBe("fail");
+    expect(strict.problems).toHaveLength(1);
+    expect(strict.problems[0].message).toContain("changed its failure");
+  });
+
+  test("a retry that passes is listed as flaky, and a known red that only passes on retry stays in the baseline instead of being fixed", () => {
+    const known = normalizeBaseline({ schema: 1, reds: { "focus-node26": { "a.test.ts > flaky one": "old", "a.test.ts > solid fix": "old" } }, calibration: {} });
+    const step = {
+      id: "focus-node26", ran: true, reds: [], skipped: [], problems: [], durationMs: 5, headline: "focus",
+      passed: ["a.test.ts > flaky one", "a.test.ts > solid fix", "a.test.ts > other flaky"],
+      flaky: [{ id: "a.test.ts > flaky one", firstLines: "ETXTBSY" }, { id: "a.test.ts > other flaky", firstLines: "EAGAIN" }],
+      scope: { kind: "files", files: ["a.test.ts"], completedFiles: ["a.test.ts"] },
+    };
+    const steps = [idle("runtime-crate"), idle("rust-unit"), idle("corpus"), step, idle("focus-node24")];
+    const verdict = evaluate(steps, known, {});
+    expect(verdict.fixed).toEqual([{ step: "focus-node26", id: "a.test.ts > solid fix" }]);
+    expect(verdict.flakyKnown).toEqual([{ step: "focus-node26", id: "a.test.ts > flaky one" }]);
+    expect(verdict.nextBaseline.reds["focus-node26"]).toEqual({ "a.test.ts > flaky one": "old" });
+    const summary = summaryOf(steps, verdict);
+    expect(summary).toContain("flaky (passed only on a retry");
+    expect(summary).toContain("focus-node26::a.test.ts > flaky one (known red)");
+    expect(summary).toContain("focus-node26::a.test.ts > other flaky");
+  });
+
 });
 
 describe("command line", () => {
