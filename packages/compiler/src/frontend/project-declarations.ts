@@ -152,6 +152,13 @@ export class ProjectDeclarations {
     return program;
   }
 
+  /** Gives back every file this load shadowed, so a host shared with a later
+   * load serves the real copies again. */
+  release(): void {
+    for (const file of this.shadowed) this.host.unshadowFile(file);
+    this.shadowed.clear();
+  }
+
   /** The ambient surface copies the project configuration governing `file`
    * (its nearest tsconfig) selected and the program does not carry, in
    * discovery order. */

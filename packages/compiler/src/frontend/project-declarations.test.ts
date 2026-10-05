@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { checkPreflightTypes } from "./preflight-types.js";
 import { compareSurfaceVersions } from "./project-declarations.js";
-import { loadProgram, type LoadResult } from "./program.js";
+import { checkPreflightTs7, loadProgram, type LoadResult } from "./program.js";
+import { Ts7Host } from "./ts7/program-adapter.js";
 
 /* One copy of each ambient Node type package per program
  * (ProjectDeclarations): the newest copy any reached project resolves wins,
@@ -356,6 +357,23 @@ test("a declaration-shaped error inside the stood-down project carries the hint 
       expect(inLib).toHaveLength(1);
       expect(inLib[0]!.hint).toBeUndefined();
     } finally { load.dispose(); }
+  });
+});
+
+test("a host shared with a later load serves the real copies again: a load gives its shadows back", () => {
+  withWorkspace((ws) => {
+    stubNodeTypes(ws.app, "24.0.0-entry");
+    stubNodeTypes(ws.lib, "26.0.0-reached");
+    const solo = join(ws.app, "solo.ts");
+    writeFileSync(solo, 'import { version } from "node:fixture-surface";\nexport const v: string = version;\n');
+    const host = new Ts7Host({ cwd: ws.dir });
+    try {
+      // The first load elects lib's copy and serves the app's empty...
+      const typeErrors = (entry: string): string[] => checkPreflightTs7(entry, host).diags.filter((d) => d.code === "SC0001").map((d) => d.message);
+      expect(typeErrors(ws.entry)).toEqual([]);
+      // ...the second load reaches only the app's copy, which must be whole.
+      expect(typeErrors(solo)).toEqual([]);
+    } finally { host.close(); }
   });
 });
 

@@ -95,7 +95,7 @@ test("semantic diagnostics are reused across preflight and later consumers of on
   }
 });
 
-test("shadowFile serves a real file empty to the next program even after an earlier snapshot loaded it", () => {
+test("shadowFile serves a real file empty to the next program even after an earlier snapshot loaded it; unshadowFile restores it", () => {
   const dir = mkdtempSync(join(tmpdir(), "scriptc-ts7-shadow-"));
   const declaration = join(dir, "surface.d.ts");
   const entry = join(dir, "entry.ts");
@@ -117,6 +117,13 @@ test("shadowFile serves a real file empty to the next program even after an earl
       expect(after.getSourceFile(declaration)?.text).toBe("");
       expect(after.getSemanticDiagnostics().map((d) => d.code)).toEqual([2307]);
     } finally { after.dispose(); }
+
+    host.unshadowFile(declaration);
+    const restored = host.createProgram([entry, declaration], options);
+    try {
+      expect(restored.getSourceFile(declaration)?.text).toContain("x:surface");
+      expect(restored.getSemanticDiagnostics()).toEqual([]);
+    } finally { restored.dispose(); }
   } finally {
     host.close();
     rmSync(dir, { recursive: true, force: true });

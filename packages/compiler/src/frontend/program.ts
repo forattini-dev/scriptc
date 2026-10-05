@@ -630,7 +630,10 @@ function loadProgram7(
       const view = projectDeclarations.createProgram(programRoots.filter((root) => root !== overridesDtsPath()), options);
       try { return action(view); } finally { view.dispose(); }
     },
-    disposeAll: () => program.dispose(),
+    disposeAll: () => {
+      program.dispose();
+      projectDeclarations.release();
+    },
   };
 }
 

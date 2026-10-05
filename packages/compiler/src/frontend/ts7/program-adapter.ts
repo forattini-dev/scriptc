@@ -266,6 +266,13 @@ export class Ts7Host {
     this.changedSinceSnapshot.add(name);
   }
 
+  /** Undoes shadowFile: the real file is served again from the next snapshot on. */
+  unshadowFile(path: string): void {
+    const name = tsgoPath(path);
+    this.virtualFiles.delete(name);
+    this.changedSinceSnapshot.add(name);
+  }
+
   /** tsgo's own tsconfig parser (extends chains resolved server-side) — the
    * 7-world replacement for ts.readConfigFile + ts.parseJsonConfigFileContent.
    * Returns raw option values (strings for enum-ish knobs) and the resolved
