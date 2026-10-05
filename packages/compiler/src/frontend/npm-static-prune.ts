@@ -388,6 +388,16 @@ export function planNpmStaticReexports(
     modulePackagePure(sf) && !awaitsAtTopLevel(sf) &&
     moduleEdgesOf(sf).every(({ spec, dep }) => (dep !== null && inProgram(dep)) || unscannedImportCovered(sf, spec));
 
+  const closureMemo = new Map<ts.SourceFile, boolean>();
+  interface Visit {
+    sf: ts.SourceFile;
+    /** Discovery order, and the lowest order this module can reach. */
+    at: number;
+    low: number;
+    covered: boolean;
+    edges: readonly ModuleEdge[];
+    next: number;
+  }
   /** True when everything `root` can load is covered by the purity
    * declaration and none of it sits on an import cycle or awaits at the top
    * level: every module it reaches belongs to a package that makes the
@@ -397,7 +407,6 @@ export function planNpmStaticReexports(
    * skipping `root` neither skip an uncovered module's evaluation nor
    * change the order in which the remaining modules evaluate. Tarjan,
    * memoized across roots: a component is final when its root pops. */
-  const closureMemo = new Map<ts.SourceFile, boolean>();
   const closureCovered = (root: ts.SourceFile): boolean => {
     if (root.fileName.endsWith(".json")) return true;
     const known = closureMemo.get(root);
@@ -406,46 +415,53 @@ export function planNpmStaticReexports(
       closureMemo.set(root, false);
       return false;
     }
-    let counter = 0;
-    const index = new Map<ts.SourceFile, number>();
+    // Iterative on purpose: an import chain thousands of modules deep
+    // (generated code does that) must not overflow the compiler's stack.
+    const visits = new Map<ts.SourceFile, Visit>();
     const onStack = new Set<ts.SourceFile>();
-    const stack: ts.SourceFile[] = [];
-    // Returns the lowest stack index the module reaches.
-    const connect = (v: ts.SourceFile): number => {
-      const at = counter++;
-      index.set(v, at);
-      stack.push(v);
-      onStack.add(v);
-      let lowest = at;
-      let covered = moduleCovered(v);
-      for (const { dep } of moduleEdgesOf(v)) {
-        if (dep === null || dep === v || dep.fileName.endsWith(".json") || !available.has(dep)) continue;
+    const stack: Visit[] = [];
+    const path: Visit[] = [];
+    const enter = (sf: ts.SourceFile): void => {
+      const visit: Visit = { sf, at: visits.size, low: visits.size, covered: moduleCovered(sf), edges: moduleEdgesOf(sf), next: 0 };
+      visits.set(sf, visit);
+      stack.push(visit);
+      onStack.add(sf);
+      path.push(visit);
+    };
+    enter(root);
+    for (let visit = path.at(-1); visit !== undefined; visit = path.at(-1)) {
+      const next = visit.edges[visit.next++];
+      if (next !== undefined) {
+        const dep = next.dep;
+        if (dep === null || dep === visit.sf || dep.fileName.endsWith(".json") || !available.has(dep)) continue;
         const done = closureMemo.get(dep);
         if (done !== undefined) {
-          covered &&= done;
+          visit.covered &&= done;
           continue;
         }
-        const seen = index.get(dep);
-        if (seen === undefined) {
-          lowest = Math.min(lowest, connect(dep));
-          covered &&= closureMemo.get(dep) ?? true;
-        } else if (onStack.has(dep)) {
-          lowest = Math.min(lowest, seen);
+        const seen = visits.get(dep);
+        if (seen === undefined) enter(dep);
+        else if (onStack.has(dep)) visit.low = Math.min(visit.low, seen.at);
+        continue;
+      }
+      path.pop();
+      if (visit.low === visit.at) {
+        const component: ts.SourceFile[] = [];
+        for (let member = stack.pop(); member !== undefined; member = stack.pop()) {
+          onStack.delete(member.sf);
+          component.push(member.sf);
+          if (member === visit) break;
         }
+        // A component of several modules is an import cycle.
+        const result = component.length === 1 && visit.covered;
+        for (const member of component) closureMemo.set(member, result);
       }
-      if (lowest !== at) return lowest;
-      const component: ts.SourceFile[] = [];
-      for (let member = stack.pop(); member !== undefined; member = stack.pop()) {
-        onStack.delete(member);
-        component.push(member);
-        if (member === v) break;
+      const parent = path.at(-1);
+      if (parent !== undefined) {
+        parent.low = Math.min(parent.low, visit.low);
+        parent.covered &&= closureMemo.get(visit.sf) ?? true;
       }
-      // A component of several modules is an import cycle.
-      const result = component.length === 1 && covered;
-      for (const member of component) closureMemo.set(member, result);
-      return lowest;
-    };
-    connect(root);
+    }
     return closureMemo.get(root) ?? false;
   };
 
@@ -463,10 +479,14 @@ export function planNpmStaticReexports(
   };
   const exportNamesMemo = new Map<ts.SourceFile, ReadonlySet<string> | null>();
   const exportNamesVisiting = new Set<ts.SourceFile>();
+  // The star chain is walked recursively: past this depth the surface is
+  // answered as not enumerable (the whole target is followed), which is
+  // always sound and keeps a pathological chain from overflowing the stack.
+  const MAX_STAR_DEPTH = 64;
   const exportNamesOf = (sf: ts.SourceFile): ReadonlySet<string> | null => {
     const cached = exportNamesMemo.get(sf);
     if (cached !== undefined) return cached;
-    if (exportNamesVisiting.has(sf)) return null;
+    if (exportNamesVisiting.has(sf) || exportNamesVisiting.size >= MAX_STAR_DEPTH) return null;
     const shape = shapeOf(sf);
     let names: Set<string> | null = shape === null ? null : new Set(shape.names);
     if (shape !== null && names !== null) {

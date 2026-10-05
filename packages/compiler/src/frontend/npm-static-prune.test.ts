@@ -1,4 +1,6 @@
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { checkPreflight, loadProgram } from "./program.js";
 import { prunedNpmStaticModules, type NpmStaticPrunedPackage } from "./npm-static-prune.js";
@@ -15,7 +17,7 @@ interface Plan {
 }
 
 function moduleOrder(entry: string, packages: string | string[]): Plan {
-  const load = loadProgram(join(fixtureRoot, entry), { npmStatic: typeof packages === "string" ? [packages] : packages });
+  const load = loadProgram(resolve(fixtureRoot, entry), { npmStatic: typeof packages === "string" ? [packages] : packages });
   try {
     const diagnostics = checkPreflight(load);
     return {
@@ -280,5 +282,72 @@ describe("npm static re-export pruning stays inside what the declaration covers"
     const plan = moduleOrder("commonjsbarrel-cli.ts", "commonjsbarrel");
     expect(packageFiles(plan.files, "commonjsbarrel").sort()).toEqual(["a.mjs", "b.mjs", "index.mjs"]);
     expect(plan.pruned).toEqual([]);
+  });
+});
+
+/** Generated packages whose import graph is deeper than the compiler's
+ * stack could recurse: the plan must degrade, never throw. */
+describe("npm static re-export pruning on deep import graphs", () => {
+  function deepPackage(shape: "import" | "star", length: number): { entry: string; dispose: () => void } {
+    const directory = mkdtempSync(join(tmpdir(), "scriptc-prune-deep-"));
+    const root = join(directory, "node_modules", "deep");
+    mkdirSync(root, { recursive: true });
+    const write = (name: string, text: string): void => writeFileSync(join(root, name), text);
+    write("package.json", JSON.stringify({
+      name: "deep",
+      version: "1.0.0",
+      type: "module",
+      sideEffects: false,
+      exports: { ".": { types: "./index.d.ts", import: "./index.js" } },
+    }));
+    write("index.d.ts", "export declare const a: string;\nexport declare const z: number;\n");
+    write("a.js", 'export const a = "a";\n');
+    // index.js demands `a` only: the chain behind `z` is never asked for.
+    write("index.js", `export { a } from "./a.js";\n${shape === "star" ? "export * from" : 'export { z } from'} "./m0.js";\n`);
+    for (let i = 0; i < length; i++) {
+      const last = i + 1 === length;
+      write(
+        `m${i}.js`,
+        last ? "export const z = 1;\n" : shape === "star" ? `export * from "./m${i + 1}.js";\n` : `import "./m${i + 1}.js";\nexport { z } from "./m${i + 1}.js";\n`,
+      );
+    }
+    writeFileSync(join(directory, "main.ts"), 'import { a } from "deep";\n\nconsole.log(a);\n');
+    return { entry: join(directory, "main.ts"), dispose: () => rmSync(directory, { recursive: true, force: true }) };
+  }
+
+  const prunedCount = (plan: Plan): number => plan.pruned.find((p) => p.package === "deep")?.modules.length ?? 0;
+
+  test("an import chain far deeper than the call stack is walked without recursion", () => {
+    const { entry, dispose } = deepPackage("import", 6000);
+    try {
+      const plan = moduleOrder(entry, "deep");
+      expect(plan.diagnostics).toEqual([]);
+      expect(prunedCount(plan)).toBe(6000);
+    } finally {
+      dispose();
+    }
+  });
+
+  test("an export-star chain is enumerated up to a bounded depth and pruned by name", () => {
+    const { entry, dispose } = deepPackage("star", 20);
+    try {
+      const plan = moduleOrder(entry, "deep");
+      expect(plan.diagnostics).toEqual([]);
+      expect(prunedCount(plan)).toBe(20);
+    } finally {
+      dispose();
+    }
+  });
+
+  test("an export-star chain deeper than the bound is followed whole instead of overflowing", () => {
+    const { entry, dispose } = deepPackage("star", 150);
+    try {
+      const plan = moduleOrder(entry, "deep");
+      expect(plan.diagnostics).toEqual([]);
+      expect(plan.pruned).toEqual([]);
+      expect(packageFiles(plan.files, "deep")).toHaveLength(152);
+    } finally {
+      dispose();
+    }
   });
 });
