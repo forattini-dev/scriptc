@@ -163,6 +163,9 @@ Prebuilds release runtime objects and native TLS/dynamic-engine archives for tar
   <dt><code>SCRIPTC_LINKER</code></dt>
   <dd>Platform linker driver for ordinary macOS arm64 LLVM-tier executables. The driver receives only the helper-produced program object, precompiled runtime objects/archives, FFI inputs, and system libraries; it locates the platform SDK and CRT inputs but does not compile scriptc-generated or runtime C.</dd>
 
+  <dt><code>SCRIPTC_LIST_PRUNED</code></dt>
+  <dd>Set to <code>1</code> to make <code>scriptc coverage</code> list, under each <code>--npm-static</code> package, the modules the program never evaluates because only unused re-exports of a <code>sideEffects</code>-free package reach them. Without it the report prints the count alone. See <a href="/limitations">Limitations</a>.</dd>
+
   <dt><code>SCRIPTC_TARGET</code></dt>
   <dd>Target triple for cross-compilation, e.g. <code>aarch64-linux-gnu.2.36</code>, <code>x86_64-windows-gnu</code>, or <code>wasm32-wasi</code>. WASI builds default to a <code>.wasm</code> output name. See <a href="/platforms">Platform Support</a>.</dd>
 </dl>
