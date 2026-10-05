@@ -355,7 +355,7 @@ describe("baseline reasons", () => {
     expect(baselineReason("\n  boom   at  /repo/src/x.ts\nsecond line")).toBe("boom at /repo/src/x.ts");
     expect(baselineReason("failed in /repo/packages/a.ts", "/repo/")).toBe("failed in <repo>packages/a.ts");
     expect(baselineReason("Command failed: /home/u/.cache/tmp/gr-lv92d6e5/rust-unit/scriptc-rust-error-coercion-wTml4X/program Uncaught TypeError"))
-      .toBe("Command failed: /home/u/.cache/tmp/gr-<run>/rust-unit/scriptc-rust-error-coercion-<rand>/program Uncaught TypeError");
+      .toBe("Command failed: <tmp>/rust-unit/scriptc-rust-error-coercion-<rand>/program Uncaught TypeError");
     expect(baselineReason("LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: scriptc-llvm-codegen is missing")).toBe("LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: scriptc-llvm-codegen is missing");
     expect(baselineReason("x".repeat(250))).toBe(`${"x".repeat(200)}…`);
   });
