@@ -204,3 +204,66 @@ describe("npm static named re-export pruning", () => {
     expect(plan.pruned).toEqual([]);
   });
 });
+
+/** A package's files in the module order, relative to its root. */
+function packageFiles(files: readonly string[], name: string): string[] {
+  const marker = `/node_modules/${name}/`;
+  return files.filter((file) => file.includes(marker)).map((file) => file.slice(file.indexOf(marker) + marker.length));
+}
+
+describe("npm static re-export pruning stays inside what the declaration covers", () => {
+  // phantombarrel declares sideEffects false and no dependencies, and its
+  // modules import packages it never declares: Node runs their top level
+  // when the barrel loads, whether or not a name from that module is used.
+  const PHANTOM_KEPT = ["a.js", "impure.js", "index.js", "missing-dep.js"];
+
+  test("an undeclared import of a package outside the declaration keeps its module", () => {
+    // phantomimpure promises nothing and prints at load. Admitted or not,
+    // the import is outside the proof, so impure.js evaluates as in Node.
+    for (const packages of [["phantombarrel", "phantomimpure"], ["phantombarrel"]]) {
+      const plan = moduleOrder("phantombarrel-cli.ts", packages);
+      expect(packageFiles(plan.files, "phantombarrel").sort(), packages.join()).toEqual(PHANTOM_KEPT);
+      expect(plan.pruned.find((p) => p.package === "phantombarrel")?.modules, packages.join()).toEqual(["builtin.js", "covered.js"]);
+    }
+  });
+
+  test("an undeclared import of a package that makes the promise itself, or of a builtin, does not keep it", () => {
+    // Opted in (scanned through the program) or not (resolved from disk).
+    for (const packages of [["phantombarrel", "phantomimpure", "phantompure"], ["phantombarrel", "phantomimpure"]]) {
+      const plan = moduleOrder("phantombarrel-cli.ts", packages);
+      const kept = packageFiles(plan.files, "phantombarrel");
+      expect(kept, packages.join()).not.toContain("covered.js");
+      expect(kept, packages.join()).not.toContain("builtin.js");
+    }
+  });
+
+  test("an import nothing resolves keeps its module", () => {
+    const plan = moduleOrder("phantombarrel-cli.ts", ["phantombarrel", "phantomimpure"]);
+    expect(packageFiles(plan.files, "phantombarrel")).toContain("missing-dep.js");
+    expect(plan.pruned.flatMap((p) => p.modules)).not.toContain("missing-dep.js");
+  });
+
+  test("an edge whose target reaches an import cycle is kept, so the cycle is entered in Node's order", () => {
+    // Node: index -> q -> b -> a (a's import of b is the back edge), so the
+    // order is a, b, q, index. Pruning q would enter the cycle at a -> b,
+    // which evaluates b first and refuses a program Node runs.
+    const plan = moduleOrder("cyclebarrel-cli.ts", "cyclebarrel");
+    expect(plan.diagnostics).toEqual([]);
+    expect(packageFiles(plan.files, "cyclebarrel")).toEqual(["a.js", "b.js", "q.js", "index.js"]);
+    // r.js reaches no cycle: pruned although a cycle exists elsewhere.
+    expect(plan.pruned).toEqual([{ package: "cyclebarrel", modules: ["r.js"] }]);
+  });
+
+  test("a re-export edge into another package is never pruned", () => {
+    const plan = moduleOrder("crossbarrel-cli.ts", ["crossbarrel", "crossleaf"]);
+    expect(plan.diagnostics).toEqual([]);
+    expect(packageFiles(plan.files, "crossleaf").sort()).toEqual(["index.js", "leaf.js"]);
+    expect(plan.pruned).toEqual([]);
+  });
+
+  test("a package scoped as CommonJS keeps every re-export even when it declares sideEffects false", () => {
+    const plan = moduleOrder("commonjsbarrel-cli.ts", "commonjsbarrel");
+    expect(packageFiles(plan.files, "commonjsbarrel").sort()).toEqual(["a.mjs", "b.mjs", "index.mjs"]);
+    expect(plan.pruned).toEqual([]);
+  });
+});

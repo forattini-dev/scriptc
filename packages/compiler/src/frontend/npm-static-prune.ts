@@ -10,14 +10,30 @@
  * and evaluates it, so its top-level statements run, and a missing file,
  * syntax error, link error or top-level throw inside it fails the program
  * at startup. The package's whole-tree `sideEffects: false` declaration is
- * the proof that the evaluation is unobservable; the failure cases are not
+ * what makes the evaluation unobservable; the failure cases are not
  * reproduced, exactly as a bundler does not reproduce them. A package that
- * declares `sideEffects: false` untruthfully diverges here.
+ * declares `sideEffects: false` untruthfully diverges here. So does a
+ * dependency package outside the program (its files are never scanned)
+ * that imports an undeclared package which runs code at load. A nested
+ * format scope's own package.json (dist/esm/package.json) is not
+ * consulted: the named package root decides.
+ *
+ * Two conditions keep the decision from reaching beyond that declaration.
+ * An edge is pruned only when everything its target can reach is covered
+ * by it: no import of a package the purity check did not prove (an
+ * undeclared, hoisted or dev dependency would have run its top level in
+ * Node), no import Node resolves outside the program, and no import cycle.
+ * The cycle condition keeps evaluation order exact: dropping a subtree
+ * that could enter a cycle through a different module changes which module
+ * of the cycle evaluates first, and scriptc's TDZ guard then refuses (or,
+ * worse, admits) a program Node runs in another order. Cycle-free pure
+ * subtrees only reorder modules that have no effects to order.
  *
  * Keep the decision per tsgo program: preflight, the link checks, and
  * emitted module init headers must see one graph. */
 
 import * as ts from "./ts7/adapter.js";
+import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { nearestPackageType, resolveBareModule } from "./resolve.js";
 import { npmStaticPackageOfPath } from "./npm-static.js";
@@ -268,6 +284,139 @@ export function planNpmStaticReexports(
     return result;
   };
 
+  const valueReexport = (stmt: ts.Statement): stmt is ts.ExportDeclaration & { moduleSpecifier: ts.StringLiteral } =>
+    ts.isExportDeclaration(stmt) && !erasedTypeOnlyReexport(stmt) &&
+    stmt.moduleSpecifier !== undefined && ts.isStringLiteral(stmt.moduleSpecifier);
+
+  /** Everything one module evaluates at load besides itself, as written:
+   * its import declarations, its value re-exports and its literal
+   * require() and import() calls (anywhere in the file, an over-approximation
+   * of what runs at load), each with the module the program resolved or
+   * null when it resolved to none. */
+  interface ModuleEdge {
+    spec: string;
+    dep: ts.SourceFile | null;
+  }
+  const moduleEdgesMemo = new Map<ts.SourceFile, readonly ModuleEdge[]>();
+  const moduleEdgesOf = (sf: ts.SourceFile): readonly ModuleEdge[] => {
+    const cached = moduleEdgesMemo.get(sf);
+    if (cached !== undefined) return cached;
+    const out: ModuleEdge[] = [];
+    for (const stmt of sf.statements) {
+      if (ts.isImportDeclaration(stmt)) {
+        if (ts.isStringLiteral(stmt.moduleSpecifier) && !erasedTypeOnlyImport(stmt)) {
+          out.push({ spec: stmt.moduleSpecifier.text, dep: edge(sf, stmt.moduleSpecifier.text) });
+        }
+      } else if (valueReexport(stmt)) {
+        out.push({ spec: stmt.moduleSpecifier.text, dep: edge(sf, stmt.moduleSpecifier.text) });
+      }
+    }
+    ts.walkPreorder(sf, (node) => {
+      if (!ts.isCallExpression(node) || node.arguments.length !== 1) return undefined;
+      const arg = node.arguments[0];
+      if (arg === undefined || !ts.isStringLiteralLike(arg)) return undefined;
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          ts.isIdentifier(node.expression) && node.expression.text === "require") {
+        out.push({ spec: arg.text, dep: edge(sf, arg.text) });
+      }
+      return undefined;
+    });
+    moduleEdgesMemo.set(sf, out);
+    return out;
+  };
+
+  // Whether the module's own package makes the whole-tree promise.
+  const modulePurityMemo = new Map<ts.SourceFile, boolean>();
+  const modulePackagePure = (sf: ts.SourceFile): boolean => {
+    let pure = modulePurityMemo.get(sf);
+    if (pure === undefined) {
+      const pkg = npmStaticPackageOfPath(sf.fileName);
+      const pkgPath = pkg === null ? null : packageRootJsonPath(sf.fileName, pkg);
+      pure = pkgPath !== null && purePackageTree(pkgPath, pureMemo, new Set()).pure;
+      modulePurityMemo.set(sf, pure);
+    }
+    return pure;
+  };
+
+  /** An import the program never scanned: a Node builtin, or a bare
+   * specifier naming another package whose whole declared tree makes the
+   * promise. Anything else (a file outside the program, an unresolvable
+   * name, the module's own package by its name, a `#imports` entry) is
+   * outside what the declaration covers. */
+  const unscannedImportCovered = (from: ts.SourceFile, spec: string): boolean => {
+    if (isBuiltin(spec)) return true;
+    if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("#")) return false;
+    const resolved = resolveBareModule(from.fileName, spec, "js-only");
+    if (resolved === null || resolved.packageName === npmStaticPackageOfPath(from.fileName)) return false;
+    const rootPath = packageRootJsonPath(resolved.typesFile, resolved.packageName);
+    return rootPath !== null && purePackageTree(rootPath, pureMemo, new Set()).pure;
+  };
+
+  const inProgram = (dep: ts.SourceFile): boolean => dep.fileName.endsWith(".json") || available.has(dep);
+  const moduleCovered = (sf: ts.SourceFile): boolean =>
+    modulePackagePure(sf) &&
+    moduleEdgesOf(sf).every(({ spec, dep }) => (dep !== null && inProgram(dep)) || unscannedImportCovered(sf, spec));
+
+  /** True when everything `root` can load is covered by the purity
+   * declaration and none of it sits on an import cycle: every module it
+   * reaches belongs to a package that makes the whole-tree promise, every
+   * import it makes is a program module, a builtin or a package that
+   * does, and the reachable graph is acyclic. Only then does skipping
+   * `root` neither skip an uncovered module's evaluation nor change the
+   * order in which the remaining modules evaluate. Tarjan, memoized across
+   * roots: a component is final when its root pops. */
+  const closureMemo = new Map<ts.SourceFile, boolean>();
+  const closureCovered = (root: ts.SourceFile): boolean => {
+    if (root.fileName.endsWith(".json")) return true;
+    const known = closureMemo.get(root);
+    if (known !== undefined) return known;
+    if (!available.has(root)) {
+      closureMemo.set(root, false);
+      return false;
+    }
+    let counter = 0;
+    const index = new Map<ts.SourceFile, number>();
+    const onStack = new Set<ts.SourceFile>();
+    const stack: ts.SourceFile[] = [];
+    // Returns the lowest stack index the module reaches.
+    const connect = (v: ts.SourceFile): number => {
+      const at = counter++;
+      index.set(v, at);
+      stack.push(v);
+      onStack.add(v);
+      let lowest = at;
+      let covered = moduleCovered(v);
+      for (const { dep } of moduleEdgesOf(v)) {
+        if (dep === null || dep === v || dep.fileName.endsWith(".json") || !available.has(dep)) continue;
+        const done = closureMemo.get(dep);
+        if (done !== undefined) {
+          covered &&= done;
+          continue;
+        }
+        const seen = index.get(dep);
+        if (seen === undefined) {
+          lowest = Math.min(lowest, connect(dep));
+          covered &&= closureMemo.get(dep) ?? true;
+        } else if (onStack.has(dep)) {
+          lowest = Math.min(lowest, seen);
+        }
+      }
+      if (lowest !== at) return lowest;
+      const component: ts.SourceFile[] = [];
+      for (let member = stack.pop(); member !== undefined; member = stack.pop()) {
+        onStack.delete(member);
+        component.push(member);
+        if (member === v) break;
+      }
+      // A component of several modules is an import cycle.
+      const result = component.length === 1 && covered;
+      for (const member of component) closureMemo.set(member, result);
+      return lowest;
+    };
+    connect(root);
+    return closureMemo.get(root) ?? false;
+  };
+
   // Every export name an ES module can provide, `export *` targets
   // included, or null when the surface is not syntactically enumerable: a
   // CommonJS or JSON target, an unresolved star target, or a star cycle.
@@ -308,7 +457,9 @@ export function planNpmStaticReexports(
   /** The names a value re-export asks of its target, given what is
    * demanded from the re-exporting module: null for the whole target, an
    * empty list when nothing is — the statement is then pruned. An empty
-   * answer is only ever given for a prunable edge. */
+   * answer is only ever given for a prunable edge whose target's whole
+   * closure the purity declaration covers (closureCovered); an edge that
+   * fails it answers as a statement that cannot be pruned. */
   const reexportDemand = (
     sf: ts.SourceFile,
     stmt: ts.ExportDeclaration,
@@ -320,6 +471,16 @@ export function planNpmStaticReexports(
       npmStaticPackageOfPath(dep.fileName) === pkg
       ? names
       : null;
+    const answer = demandThrough(stmt, dep, narrowed);
+    if (answer === null || answer.length > 0 || (dep !== null && closureCovered(dep))) return answer;
+    return demandThrough(stmt, dep, null);
+  };
+
+  const demandThrough = (
+    stmt: ts.ExportDeclaration,
+    dep: ts.SourceFile | null,
+    narrowed: ReadonlySet<string> | null,
+  ): readonly string[] | null => {
     const clause = stmt.exportClause;
     if (clause === undefined) {
       // `export * from`: by name only where the target's candidates are
@@ -343,10 +504,6 @@ export function planNpmStaticReexports(
     const followed = narrowed === null ? elements : elements.filter((element) => narrowed.has(element.name.text));
     return [...new Set(followed.map((element) => (element.propertyName ?? element.name).text))];
   };
-
-  const valueReexport = (stmt: ts.Statement): stmt is ts.ExportDeclaration & { moduleSpecifier: ts.StringLiteral } =>
-    ts.isExportDeclaration(stmt) && !erasedTypeOnlyReexport(stmt) &&
-    stmt.moduleSpecifier !== undefined && ts.isStringLiteral(stmt.moduleSpecifier);
 
   // Imports and require()/import() calls evaluate their target whatever
   // is demanded from this module: one pass per file. Re-exports depend on
@@ -410,7 +567,7 @@ export function planNpmStaticReexports(
   }
   planByProgram.set(program, {
     statements: pruned,
-    packages: prunedPackages(prunedTargets, available, demanded, edge),
+    packages: prunedPackages(prunedTargets, available, demanded, moduleEdgesOf),
   });
   return files.filter((sf) => npmStaticPackageOfPath(sf.fileName) === null || demanded.has(sf));
 }
@@ -423,7 +580,7 @@ function prunedPackages(
   targets: readonly ts.SourceFile[],
   available: ReadonlySet<ts.SourceFile>,
   demanded: ReadonlyMap<ts.SourceFile, Demand>,
-  edge: (from: ts.SourceFile, spec: string) => ts.SourceFile | null,
+  edgesOf: (sf: ts.SourceFile) => readonly { dep: ts.SourceFile | null }[],
 ): NpmStaticPrunedPackage[] {
   const skipped = new Set<ts.SourceFile>();
   const queue: ts.SourceFile[] = [];
@@ -434,27 +591,7 @@ function prunedPackages(
   };
   for (const target of targets) visit(target);
   for (let index = 0; index < queue.length; index++) {
-    const sf = queue[index]!;
-    for (const stmt of sf.statements) {
-      if (ts.isImportDeclaration(stmt)) {
-        if (ts.isStringLiteral(stmt.moduleSpecifier) && !erasedTypeOnlyImport(stmt)) visit(edge(sf, stmt.moduleSpecifier.text));
-      } else if (
-        ts.isExportDeclaration(stmt) && !erasedTypeOnlyReexport(stmt) &&
-        stmt.moduleSpecifier !== undefined && ts.isStringLiteral(stmt.moduleSpecifier)
-      ) {
-        visit(edge(sf, stmt.moduleSpecifier.text));
-      }
-    }
-    ts.walkPreorder(sf, (node) => {
-      if (!ts.isCallExpression(node) || node.arguments.length !== 1) return undefined;
-      const arg = node.arguments[0];
-      if (arg === undefined || !ts.isStringLiteralLike(arg)) return undefined;
-      if (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-          ts.isIdentifier(node.expression) && node.expression.text === "require") {
-        visit(edge(sf, arg.text));
-      }
-      return undefined;
-    });
+    for (const { dep } of edgesOf(queue[index]!)) visit(dep);
   }
   const byPackage = new Map<string, string[]>();
   for (const sf of skipped) {
