@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
   diffHeadline,
   familyOf,
+  firstPartyMatcher,
   foldDiagnostics,
   foldInstantiation,
   foldPreflight,
@@ -9,6 +10,7 @@ import {
   headline,
   isCascade,
   isFenceMirror,
+  isImportFence,
   packageOfPath,
   quotedNames,
   renderLedger,
@@ -162,7 +164,7 @@ test("a fenced entry counts blockers as lowering diagnostics plus reached fences
   });
   expect(record.stage).toBe("fenced");
   expect(record.entry).toBe("${app}/src/main.ts");
-  expect(record.blockers).toMatchObject({ total: 2, loweringDiagnostics: 0, reachedFences: 2, fenceMirrors: 2, postLoweringDiagnostics: 1 });
+  expect(record.blockers).toMatchObject({ total: 2, loweringDiagnostics: 0, importFences: 0, reachedFences: 2, fenceMirrors: 2, postLoweringDiagnostics: 1, atLeast: false });
   expect(record.diagnostics.postLowering.byCode).toEqual({ SC9001: 1 });
   expect(record.diagnostics.engineRequired).toBe(false);
   expect(record.fences.total).toBe(2);
@@ -182,7 +184,10 @@ test("stages follow the pipeline: frontier, rejected, clean, preflight-failed, u
   const base = { name: "s", entry: "/e.ts", options };
   const frontier = summarizeEntry({ ...base, analysis: { coverage: { ...fencedCoverage(), execution: undefined, diagnostics: [diag("SC2013", "importing 'he' requires the embedded dynamic engine, which this build does not include")], runtimeFences: [diag("SC1090", "spread arguments are not supported yet")], runtimeFenceSites: ["function"] } } });
   expect(frontier.stage).toBe("frontier");
-  expect(frontier.blockers).toMatchObject({ total: 2, loweringDiagnostics: 1, reachedFences: 1, postLoweringDiagnostics: 0 });
+  // The post-lowering wall is UNMEASURED while the module did not lower (IR validation and backend checks never ran): null, not 0, and the total is a floor.
+  expect(frontier.blockers).toMatchObject({ total: 2, loweringDiagnostics: 1, reachedFences: 1, postLoweringDiagnostics: null, atLeast: true });
+  expect(frontier.diagnostics.postLowering).toBeNull();
+  expect(frontier.diagnostics.engineRequired).toBeNull();
   expect(frontier.diagnostics.lowering.families[0]).toMatchObject({ code: "SC2013", family: "importing '_' requires the embedded dynamic engine, which this build does not include", count: 1 });
 
   const rejected = summarizeEntry({ ...base, analysis: { coverage: { ...fencedCoverage(), diagnostics: [diag("SC3001", "the Rust backend has no lowering for this construct yet")], runtimeFences: undefined, runtimeFenceSites: undefined } } });
@@ -213,6 +218,57 @@ test("stages follow the pipeline: frontier, rejected, clean, preflight-failed, u
   expect(crashed.elapsedMs).toBe(10);
 });
 
+test("preflight import-form fences are blockers even when the module lowered", () => {
+  // analyze() lets SC1010/SC1012-SC1015 through preflight, prepends them and keeps lowering; a build refuses them before lowering.
+  expect(["SC1010", "SC1012", "SC1013", "SC1014", "SC1015"].every((code) => isImportFence(diag(code, "x")))).toBe(true);
+  expect(isImportFence(diag("SC1090", "x"))).toBe(false);
+  const base = { name: "s", entry: "/e.ts", options };
+  const importOnly = summarizeEntry({
+    ...base,
+    analysis: { coverage: { ...fencedCoverage(), diagnostics: [diag("SC1010", "importing 'bun:sqlite' is not supported yet")], runtimeFences: undefined, runtimeFenceSites: undefined, unreached: undefined } },
+  });
+  expect(importOnly.stage).toBe("frontier");
+  expect(importOnly.blockers).toMatchObject({ total: 1, loweringDiagnostics: 1, importFences: 1, reachedFences: 0, postLoweringDiagnostics: 0, atLeast: true });
+  expect(importOnly.diagnostics.lowering.byCode).toEqual({ SC1010: 1 });
+  expect(importOnly.diagnostics.postLowering.total).toBe(0);
+  // Beside real post-lowering rows and fence mirrors they keep their own wall: only the non-import rows are post-lowering.
+  const mixed = summarizeEntry({ ...base, analysis: { coverage: { ...fencedCoverage(), diagnostics: [diag("SC1013", "namespace imports of CommonJS modules is not supported yet"), ...fencedCoverage().diagnostics] } } });
+  expect(mixed.stage).toBe("frontier");
+  expect(mixed.blockers).toMatchObject({ total: 3, loweringDiagnostics: 1, importFences: 1, reachedFences: 2, fenceMirrors: 2, postLoweringDiagnostics: 1 });
+  // While the module did not lower, an import fence is one of the lowering rows and still counted once.
+  const notLowered = summarizeEntry({ ...base, analysis: { coverage: { ...fencedCoverage(), execution: undefined, diagnostics: [diag("SC1010", "importing 'bun:sqlite' is not supported yet"), diag("SC2013", "importing 'he' requires the embedded dynamic engine, which this build does not include")] } } });
+  expect(notLowered.blockers).toMatchObject({ total: 4, loweringDiagnostics: 2, importFences: 1, postLoweringDiagnostics: null });
+});
+
+test("first party means program files plus the consumer's declared packages", () => {
+  const isFirstParty = firstPartyMatcher(["@baldim/*", "exact.pkg"]);
+  expect(["<program>", "@baldim/core", "@baldim/adapter-s3", "exact.pkg"].map(isFirstParty)).toEqual([true, true, true, true]);
+  expect(["lodash-es", "@baldimx/core", "exactXpkg", "@aws-sdk/client-s3"].map(isFirstParty)).toEqual([false, false, false, false]);
+  expect(firstPartyMatcher()("@baldim/core")).toBe(false);
+  const nm = (pkg: string) => `/w/app/node_modules/${pkg}/index.js`;
+  const fences = [diag("SC1090", "spread arguments are not supported yet", nm("@baldim/core")), diag("SC1090", "spread arguments are not supported yet", nm("lodash-es")), diag("SC1090", "spread arguments are not supported yet", "/w/app/src/a.ts")];
+  expect(foldDiagnostics(fences).firstParty).toBe(1);
+  expect(foldDiagnostics(fences, { isFirstParty }).firstParty).toBe(2);
+  const record = summarizeEntry({
+    name: "s",
+    entry: "/e.ts",
+    options,
+    firstPartyPackages: ["@baldim/*"],
+    analysis: { coverage: { ...fencedCoverage(), runtimeFences: fences, runtimeFenceSites: ["function", "function", "function"], diagnostics: [], unreached: undefined } },
+  });
+  expect(record.firstPartyPackages).toEqual(["@baldim/*"]);
+  expect(record.fences).toMatchObject({ firstParty: 2, thirdParty: 1, byPackage: { "@baldim/core": 1, "lodash-es": 1, "<program>": 1 } });
+  const preflight = summarizeEntry({
+    name: "p",
+    entry: "/p.ts",
+    options,
+    firstPartyPackages: ["@baldim/*"],
+    analysis: { coverage: { file: "/p.ts", dynamic: false, preflightFailed: true, stats: stats(0, 0), diagnostics: [diag("SC0001", "Property 'on' does not exist on type 'Server'.", nm("@baldim/core")), diag("SC0001", "Property 'on' does not exist on type 'Server'.", nm("pino"))] } },
+  });
+  expect(preflight.preflight).toMatchObject({ firstParty: 1, thirdParty: 1 });
+  expect(summarizeEntry({ name: "n", entry: "/e.ts", options, analysis: { coverage: { ...fencedCoverage(), diagnostics: [] } } }).firstPartyPackages).toBeUndefined();
+});
+
 test("headline deltas name every changed metric and ignore wall time", () => {
   const before = summarizeEntry({ name: "s", entry: "/e.ts", options, analysis: { coverage: fencedCoverage(), sources: 12, elapsedMs: 100 } });
   const after = summarizeEntry({
@@ -233,6 +289,19 @@ test("headline deltas name every changed metric and ignore wall time", () => {
   expect(diffHeadline(undefined, after).find((d) => d.metric === "stage")).toEqual({ metric: "stage", before: null, after: "fenced", delta: null });
 });
 
+test("an unmeasured post-lowering wall is not a zero in the headline or the delta", () => {
+  const base = { name: "s", entry: "/e.ts", options };
+  const frontier = summarizeEntry({ ...base, analysis: { coverage: { ...fencedCoverage(), execution: undefined, diagnostics: [diag("SC2013", "importing 'he' requires the embedded dynamic engine, which this build does not include")] } } });
+  const fenced = summarizeEntry({ ...base, analysis: { coverage: fencedCoverage() } });
+  expect(headline(frontier).postLoweringDiagnostics).toBeNull();
+  expect(headline(fenced).postLoweringDiagnostics).toBe(1);
+  const delta = diffHeadline(frontier, fenced).find((d) => d.metric === "postLoweringDiagnostics");
+  expect(delta).toEqual({ metric: "postLoweringDiagnostics", before: null, after: 1, delta: null });
+  const out = renderLedger([fenced], new Map([["s", frontier]]));
+  expect(out).toContain("postLoweringDiagnostics  (unmeasured → 1)");
+  expect(out).not.toMatch(/\+1\s+postLoweringDiagnostics/);
+});
+
 test("the table renders one row per entry, preflight families, and deltas", () => {
   const fenced = summarizeEntry({ name: "fenced-entry", entry: "/e.ts", options, analysis: { coverage: fencedCoverage(), sources: 12, elapsedMs: 100 } });
   const preflight = summarizeEntry({ name: "preflight-entry", entry: "/p.ts", options, analysis: { coverage: { file: "/p.ts", dynamic: false, preflightFailed: true, stats: stats(0, 0), diagnostics: [diag("SC0001", "Property 'on' does not exist on type 'Server'."), diag("SC0001", "Property 'off' does not exist on type 'Server'.")] }, sources: 3, elapsedMs: 5 } });
@@ -240,7 +309,9 @@ test("the table renders one row per entry, preflight families, and deltas", () =
   const previous = summarizeEntry({ name: "fenced-entry", entry: "/e.ts", options, generatedAt: "2026-10-01T00:00:00.000Z", analysis: { coverage: { ...fencedCoverage(), stats: stats(100, 12) }, sources: 12, elapsedMs: 100 } });
   const out = renderLedger([fenced, preflight, missing], new Map([["fenced-entry", previous]]));
   expect(out).toContain("entry");
-  expect(out).toMatch(/fenced-entry\s+fenced\s+2\s+0\s+1\s+2\s+1\s+1\s+0\/2\s+100\s+10\s+90/);
+  expect(out).toMatch(/fenced-entry\s+fenced\s+2\s+0\s+1\s+2\s+1\s+1\s+0\/2\s+100\s+10\s+90\s+40\s+1\s+1\s+12/);
+  expect(out.split("\n")[0]).toMatch(/entry\s+stage\s+blockers\s+diags\s+post\s+fences\s+init\s+cascade\s+1st\/3rd\s+stmts\s+failed\s+pass%\s+unreached\s+un\.diags\s+un\.fences\s+sources/);
+  expect(out).toContain("init = fences recorded in module top-level initialisation, a lower bound on startup");
   expect(out).toMatch(/preflight-entry\s+preflight-failed\s+-\s+2 TS/);
   expect(out).toContain("missing-entry: unavailable — missing on this machine: /m.ts");
   expect(out).toContain("×2    Property '_' does not exist on type '_'.  [SC0001] (off · Server ×1, on · Server ×1)");
@@ -248,4 +319,16 @@ test("the table renders one row per entry, preflight families, and deltas", () =
   expect(out).toContain("-2  statementsFailed  (12 → 10)");
   expect(out).toContain("no committed record yet for preflight-entry, missing-entry");
   expect(out).toContain("blockers = lowering diagnostics + reached runtime fences");
+  expect(out).toContain("N+ = a floor");
+});
+
+test("a frontier row prints its blockers as a floor and its post wall as unmeasured", () => {
+  const frontier = summarizeEntry({
+    name: "frontier-entry",
+    entry: "/e.ts",
+    options,
+    analysis: { coverage: { ...fencedCoverage(), execution: undefined, diagnostics: [diag("SC2013", "importing 'he' requires the embedded dynamic engine, which this build does not include")], runtimeFences: [diag("SC1090", "spread arguments are not supported yet")], runtimeFenceSites: ["function"] }, sources: 1, elapsedMs: 1 },
+  });
+  // blockers 2+, diags 1, post "-" (unmeasured), fences 1
+  expect(renderLedger([frontier])).toMatch(/frontier-entry\s+frontier\s+2\+\s+1\s+-\s+1\s/);
 });

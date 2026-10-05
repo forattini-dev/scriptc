@@ -11,13 +11,16 @@
 // lowering diagnostics reach zero. A "N diagnostics" headline alone is the
 // non-deferrable slice, never the distance.
 
-export const LEDGER_SCHEMA = 1;
+/** Schema 2: the post-lowering wall is null (unmeasured) while the module
+ * did not lower, import-form fences count as blockers, and first-party
+ * attribution can name consumer packages. */
+export const LEDGER_SCHEMA = 2;
 
 /** Where a no-engine build of the entry stops today, in pipeline order.
  * - unavailable: the consumer (entry, or a required installed path) is missing on this machine.
  * - crashed: analyze() threw (an uncaught compiler exception, not a diagnostic).
  * - preflight-failed: tsc preflight failed; nothing lowered.
- * - frontier: lowering diagnostics above zero (the module did not lower).
+ * - frontier: lowering diagnostics above zero (the module did not lower, or a preflight import-form fence stands; its blockers are a floor).
  * - fenced: the module lowered with zero diagnostics, but reached runtime fences remain (each is an SC3003 without an engine).
  * - rejected: zero diagnostics and zero fences from lowering, but IR validation or backend emission refused the module.
  * - clean: nothing blocks a no-engine build. */
@@ -27,6 +30,27 @@ const FENCE_MIRROR_PREFIX = "--no-engine refuses deferred unsupported functional
 const CASCADE_RE = /^uses of '.*' inherit the blocker on its declaration/;
 const INSTANTIATION_MARK = " (instantiating '";
 const PROGRAM = "<program>";
+
+/** Import-FORM fences (unsupported import/require/export shapes). Only the
+ * frontend's preflight raises them; analyze() lets them through, prepends
+ * them to the diagnostics and keeps analysing, while a build refuses them
+ * before lowering. They are blockers whether or not the module lowered. */
+const IMPORT_FENCE_CODES = new Set(["SC1010", "SC1012", "SC1013", "SC1014", "SC1015"]);
+
+/** True for a preflight import-form fence row. */
+export function isImportFence(diagnostic) {
+  return IMPORT_FENCE_CODES.has(diagnostic.code);
+}
+
+/** A package-name matcher for "first party": the program's own files
+ * (`<program>`, outside node_modules) plus the consumer's declared
+ * packages, each an exact name or a glob where `*` matches any run of
+ * characters ("@baldim/*"). */
+export function firstPartyMatcher(patterns = []) {
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regexes = patterns.map((pattern) => new RegExp(`^${pattern.split("*").map(escape).join(".*")}$`));
+  return (pkg) => pkg === PROGRAM || regexes.some((re) => re.test(pkg));
+}
 
 /** The npm package a file belongs to: the LAST node_modules segment of the
  * path (pnpm's virtual store nests `node_modules/.pnpm/<id>/node_modules/
@@ -165,7 +189,7 @@ function bumpSite(sites, site) {
 
 /** Folds diagnostics into code / package / family tallies. `sites` is the
  * parallel RuntimeFenceSite array when the rows are runtime fences. */
-export function foldDiagnostics(diagnostics, { sites = null, topFamilies = 25, relativize = (s) => s } = {}) {
+export function foldDiagnostics(diagnostics, { sites = null, topFamilies = 25, relativize = (s) => s, isFirstParty = (pkg) => pkg === PROGRAM } = {}) {
   const byCode = new Map();
   const byPackage = new Map();
   const families = new Map();
@@ -180,7 +204,7 @@ export function foldDiagnostics(diagnostics, { sites = null, topFamilies = 25, r
     const pkg = packageOfPath(diagnostic.loc?.file ?? "");
     bump(byCode, diagnostic.code);
     bump(byPackage, pkg);
-    if (pkg === PROGRAM) firstParty++;
+    if (isFirstParty(pkg)) firstParty++;
     if (site !== null) bumpSite(bySite, site);
     if (isCascade(diagnostic)) {
       cascades++;
@@ -226,7 +250,7 @@ export function foldDiagnostics(diagnostics, { sites = null, topFamilies = 25, r
 /** Groups TypeScript preflight errors (SC0001 pass-through rows) into
  * message families: the pattern with quoted names normalised, plus the
  * distinct name tuples that instantiate it. */
-export function foldPreflight(diagnostics, { topFamilies = 25, topVariants = 8, relativize = (s) => s } = {}) {
+export function foldPreflight(diagnostics, { topFamilies = 25, topVariants = 8, relativize = (s) => s, isFirstParty = (pkg) => pkg === PROGRAM } = {}) {
   const byCode = new Map();
   const byPackage = new Map();
   const families = new Map();
@@ -235,7 +259,7 @@ export function foldPreflight(diagnostics, { topFamilies = 25, topVariants = 8, 
     const pkg = packageOfPath(diagnostic.loc?.file ?? "");
     bump(byCode, diagnostic.code);
     bump(byPackage, pkg);
-    if (pkg === PROGRAM) firstParty++;
+    if (isFirstParty(pkg)) firstParty++;
     const { folded, names } = scanQuotes(diagnostic.message);
     const key = `${diagnostic.code}\u0000${folded}`;
     let row = families.get(key);
@@ -273,7 +297,10 @@ function pct(numerator, denominator) {
  * unavailable or the analysis crashed (then `unavailable` / `crashed`
  * carry the reason). The record never holds per-fence rows or absolute
  * machine paths: `relativize` maps every path-bearing string onto the
- * mission's root placeholders before it lands in the record. */
+ * mission's root placeholders before it lands in the record.
+ * `firstPartyPackages` names the consumer's own packages (exact names or
+ * `*` globs) that live in node_modules; files outside node_modules are
+ * always first party. */
 export function summarizeEntry({
   name,
   entry,
@@ -287,7 +314,9 @@ export function summarizeEntry({
   node = null,
   relativize = (s) => s,
   topFamilies = 25,
+  firstPartyPackages = [],
 }) {
+  const isFirstParty = firstPartyMatcher(firstPartyPackages);
   const base = {
     schema: LEDGER_SCHEMA,
     name,
@@ -297,6 +326,7 @@ export function summarizeEntry({
     entry: relativize(entry),
     options,
     ...(consumer === null ? {} : { consumer }),
+    ...(firstPartyPackages.length === 0 ? {} : { firstPartyPackages }),
   };
   if (unavailable !== null) {
     return { ...base, stage: "unavailable", unavailable: relativize(unavailable) };
@@ -317,7 +347,7 @@ export function summarizeEntry({
     npmStatic: summarizeNpmStatic(coverage.npmStatic ?? [], relativize),
   };
   if (coverage.preflightFailed) {
-    const preflight = foldPreflight(coverage.diagnostics, { topFamilies, relativize });
+    const preflight = foldPreflight(coverage.diagnostics, { topFamilies, relativize, isFirstParty });
     return {
       ...base,
       stage: "preflight-failed",
@@ -329,20 +359,24 @@ export function summarizeEntry({
   const mirrors = coverage.diagnostics.filter(isFenceMirror);
   const real = coverage.diagnostics.filter((d) => !isFenceMirror(d));
   // analyze() appends IR validation, backend and engine-requirement rows
-  // only once the module lowered (then `execution` is set and the lowering
-  // diagnostics were empty); otherwise every row is a lowering/import blocker.
+  // only once the module lowered (then `execution` is set and lowering left
+  // no diagnostics of its own). While the module did not lower, every row is
+  // a blocker and the post-lowering wall is UNMEASURED (null), not zero.
+  // Preflight import-form fences are blockers either way: analyze() prepends
+  // them, they do not stop the lowering, and a build refuses them first.
   const lowered = coverage.execution !== undefined;
-  const loweringDiagnostics = lowered ? [] : real;
-  const postLowering = lowered ? real : [];
+  const importFences = real.filter(isImportFence);
+  const loweringDiagnostics = lowered ? importFences : real;
+  const postLowering = lowered ? real.filter((d) => !isImportFence(d)) : null;
   const fences = coverage.runtimeFences ?? [];
   // analyze() omits both arrays when nothing fenced; an empty site list
   // keeps the site breakdown present (all zero) for such a record.
   const fenceSites = coverage.runtimeFenceSites ?? (fences.length === 0 ? [] : null);
-  const engineRequired = coverage.execution !== undefined && coverage.execution.engine !== "none";
+  const engineRequired = lowered ? coverage.execution.engine !== "none" : null;
   const stage =
     loweringDiagnostics.length > 0 ? "frontier"
       : fences.length > 0 ? "fenced"
-        : postLowering.length > 0 ? "rejected"
+        : postLowering !== null && postLowering.length > 0 ? "rejected"
           : "clean";
   const un = coverage.unreached ?? null;
   const unreachedFences = un?.runtimeFences ?? [];
@@ -354,17 +388,19 @@ export function summarizeEntry({
     blockers: {
       total: loweringDiagnostics.length + fences.length,
       loweringDiagnostics: loweringDiagnostics.length,
+      importFences: importFences.length,
       reachedFences: fences.length,
       fenceMirrors: mirrors.length,
-      postLoweringDiagnostics: postLowering.length,
-      note: "what a no-engine build must clear: the lowering diagnostics plus every reached runtime fence (each becomes an SC3003 once lowering is clean); post-lowering diagnostics are a later wall",
+      postLoweringDiagnostics: postLowering === null ? null : postLowering.length,
+      atLeast: stage === "frontier",
+      note: "what a no-engine build must clear: the lowering diagnostics plus every reached runtime fence (each becomes an SC3003 once lowering is clean). At a frontier the total is a floor: code behind a failing statement is not measured, and IR validation and backend checks (the post-lowering wall, null here) run only once the module lowers.",
     },
     diagnostics: {
-      lowering: foldDiagnostics(loweringDiagnostics, { topFamilies, relativize }),
-      postLowering: foldDiagnostics(postLowering, { topFamilies, relativize }),
+      lowering: foldDiagnostics(loweringDiagnostics, { topFamilies, relativize, isFirstParty }),
+      postLowering: postLowering === null ? null : foldDiagnostics(postLowering, { topFamilies, relativize, isFirstParty }),
       engineRequired,
     },
-    fences: foldDiagnostics(fences, { sites: fenceSites, topFamilies, relativize }),
+    fences: foldDiagnostics(fences, { sites: fenceSites, topFamilies, relativize, isFirstParty }),
     statements: {
       total: stats.statementsTotal,
       failed: stats.statementsFailed,
@@ -377,8 +413,8 @@ export function summarizeEntry({
       failed: un.stats.statementsFailed,
       island: un.stats.statementsIsland,
       functionsSkipped: un.stats.functionsSkipped,
-      diagnostics: foldDiagnostics(un.diagnostics, { topFamilies: Math.min(topFamilies, 10), relativize }),
-      fences: foldDiagnostics(unreachedFences, { sites: unreachedSites, topFamilies: Math.min(topFamilies, 10), relativize }),
+      diagnostics: foldDiagnostics(un.diagnostics, { topFamilies: Math.min(topFamilies, 10), relativize, isFirstParty }),
+      fences: foldDiagnostics(unreachedFences, { sites: unreachedSites, topFamilies: Math.min(topFamilies, 10), relativize, isFirstParty }),
     },
     ...measured,
   };
@@ -407,7 +443,8 @@ export function headline(record) {
   }
   h.blockers = record.blockers.total;
   h.loweringDiagnostics = record.blockers.loweringDiagnostics;
-  h.postLoweringDiagnostics = record.blockers.postLoweringDiagnostics;
+  // null while the module did not lower: the wall is unmeasured, never zero.
+  h.postLoweringDiagnostics = record.blockers.postLoweringDiagnostics ?? null;
   h.fences = record.fences.total;
   h.fencesDirect = record.fences.direct;
   h.fencesCascades = record.fences.cascades.total;
@@ -449,6 +486,10 @@ export function diffHeadline(before, after) {
 
 const fmt = (v) => (v === null || v === undefined ? "-" : typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(1)) : String(v));
 
+/** A delta side: the post-lowering wall reads "unmeasured" (not "-") while
+ * the module did not lower. */
+const fmtMetric = (metric, v) => (v === null && metric === "postLoweringDiagnostics" ? "unmeasured" : fmt(v));
+
 function table(headers, rows) {
   const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => fmt(r[i]).length)));
   const line = (cells) => cells.map((c, i) => (i === 0 ? fmt(c).padEnd(widths[i]) : fmt(c).padStart(widths[i]))).join("  ");
@@ -460,26 +501,30 @@ function table(headers, rows) {
  * preflight-failed entry. */
 export function renderLedger(records, committed = new Map()) {
   const out = [];
-  const headers = ["entry", "stage", "blockers", "diags", "post", "fences", "startup", "cascade", "1st/3rd", "stmts", "failed", "pass%", "unreached", "un.fences", "sources", "npm s/f", "ms"];
+  const headers = ["entry", "stage", "blockers", "diags", "post", "fences", "init", "cascade", "1st/3rd", "stmts", "failed", "pass%", "unreached", "un.diags", "un.fences", "sources", "npm s/f", "ms"];
   const rows = records.map((r) => {
     if (r.stage === "unavailable" || r.stage === "crashed") {
-      return [r.name, r.stage, "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", r.elapsedMs ?? "-"];
+      return [r.name, r.stage, "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", r.elapsedMs ?? "-"];
     }
     const npm = r.npmStatic ? `${r.npmStatic.static}/${r.npmStatic.fallbackCount}` : "-";
     if (r.stage === "preflight-failed") {
-      return [r.name, r.stage, "-", `${r.preflight.total} TS`, "-", "-", "-", "-", `${r.preflight.firstParty}/${r.preflight.thirdParty}`, "0", "-", "-", "-", "-", r.sources, npm, r.elapsedMs];
+      return [r.name, r.stage, "-", `${r.preflight.total} TS`, "-", "-", "-", "-", `${r.preflight.firstParty}/${r.preflight.thirdParty}`, "0", "-", "-", "-", "-", "-", r.sources, npm, r.elapsedMs];
     }
-    const startup = r.fences.bySite ? r.fences.bySite.moduleInit : "-";
+    const init = r.fences.bySite ? r.fences.bySite.moduleInit : "-";
+    // A frontier total is a floor (see the footnote), so it prints as "N+".
+    const blockers = r.blockers.atLeast ? `${r.blockers.total}+` : r.blockers.total;
     return [
-      r.name, r.stage, r.blockers.total, r.blockers.loweringDiagnostics, r.blockers.postLoweringDiagnostics, r.fences.total,
-      startup, r.fences.cascades.total, `${r.fences.firstParty}/${r.fences.thirdParty}`, r.statements.total, r.statements.failed, r.statements.passingPct,
-      r.unreached ? r.unreached.statements : "-", r.unreached ? r.unreached.fences.total : "-", r.sources, npm, r.elapsedMs,
+      r.name, r.stage, blockers, r.blockers.loweringDiagnostics, r.blockers.postLoweringDiagnostics ?? null, r.fences.total,
+      init, r.fences.cascades.total, `${r.fences.firstParty}/${r.fences.thirdParty}`, r.statements.total, r.statements.failed, r.statements.passingPct,
+      r.unreached ? r.unreached.statements : "-", r.unreached ? r.unreached.diagnostics.total : "-", r.unreached ? r.unreached.fences.total : "-", r.sources, npm, r.elapsedMs,
     ];
   });
   out.push(table(headers, rows));
   out.push("");
   out.push("blockers = lowering diagnostics + reached runtime fences: what a no-engine build must clear (each reached fence is an SC3003 once lowering is clean).");
-  out.push("startup = fences recorded in module top-level initialisation; post = IR validation/backend diagnostics behind the fences; 1st/3rd = first-party/third-party fences.");
+  out.push("N+ = a floor: at a frontier, code behind a failing statement is not measured and IR validation/backend checks (post, shown as -) do not run until the module lowers.");
+  out.push("init = fences recorded in module top-level initialisation, a lower bound on startup: top-level IIFEs and class static/field initialisers count as function bodies, and a lazily required module initialises at its require.");
+  out.push("1st/3rd = fences in first-party code (program files outside node_modules plus the entry's declared first-party packages) versus every other package; un.diags/un.fences = blockers/fences in code the entry path does not reach.");
   const uncommitted = records.filter((r) => !committed.has(r.name)).map((r) => r.name);
   for (const r of records) {
     if (r.stage === "unavailable") {
@@ -507,7 +552,7 @@ export function renderLedger(records, committed = new Map()) {
     out.push(`${r.name}: vs committed record${previous.generatedAt ? ` (${previous.generatedAt})` : ""}:`);
     for (const d of delta) {
       const sign = d.delta === null ? "" : d.delta > 0 ? `+${d.delta}` : String(d.delta);
-      out.push(`  ${sign.padStart(7)}  ${d.metric}  (${fmt(d.before)} → ${fmt(d.after)})`);
+      out.push(`  ${sign.padStart(7)}  ${d.metric}  (${fmtMetric(d.metric, d.before)} → ${fmtMetric(d.metric, d.after)})`);
     }
   }
   if (uncommitted.length > 0) {
