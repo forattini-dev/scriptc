@@ -178,6 +178,10 @@ function preserveTransportBoms(project: Project): void {
  * the snapshot. */
 export class Ts7Host {
   private readonly virtualFiles = new Map<string, string>();
+  /** Real files whose served content was replaced since the last snapshot:
+   * the server caches parsed files by path, so the next snapshot must be
+   * told they changed (see shadowFile). */
+  private readonly changedSinceSnapshot = new Set<string>();
   private readonly api: API;
   private closed = false;
 
@@ -251,6 +255,17 @@ export class Ts7Host {
     this.virtualFiles.set(tsgoPath(path), content);
   }
 
+  /** Serves `path` as an empty file from now on, even when it is already
+   * part of a loaded program: the next snapshot is told it changed (tsgo
+   * keeps parsed files by path, so a replaced file is otherwise served
+   * stale). The file stays in any program that reaches it, with no
+   * content. */
+  shadowFile(path: string): void {
+    const name = tsgoPath(path);
+    this.virtualFiles.set(name, "");
+    this.changedSinceSnapshot.add(name);
+  }
+
   /** tsgo's own tsconfig parser (extends chains resolved server-side) — the
    * 7-world replacement for ts.readConfigFile + ts.parseJsonConfigFileContent.
    * Returns raw option values (strings for enum-ish knobs) and the resolved
@@ -274,7 +289,12 @@ export class Ts7Host {
       configPath,
       JSON.stringify({ compilerOptions: serializeOptions(options), files: roots, include: [] }),
     );
-    const snapshot = this.api.updateSnapshot({ openProjects: [configPath] });
+    const changed = [...this.changedSinceSnapshot];
+    this.changedSinceSnapshot.clear();
+    const snapshot = this.api.updateSnapshot({
+      openProjects: [configPath],
+      ...(changed.length > 0 ? { fileChanges: { changed } } : {}),
+    });
     const project = snapshot.getProject(configPath);
     if (!project) {
       snapshot.dispose();

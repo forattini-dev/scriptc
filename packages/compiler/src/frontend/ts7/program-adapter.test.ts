@@ -94,3 +94,31 @@ test("semantic diagnostics are reused across preflight and later consumers of on
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("shadowFile serves a real file empty to the next program even after an earlier snapshot loaded it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scriptc-ts7-shadow-"));
+  const declaration = join(dir, "surface.d.ts");
+  const entry = join(dir, "entry.ts");
+  writeFileSync(declaration, 'declare module "x:surface" { export const v: 1; }\n');
+  writeFileSync(entry, 'import { v } from "x:surface";\nexport const w: number = v;\n');
+  const host = new Ts7Host({ cwd: dir });
+  const options = { strict: true, noLib: true, types: [] };
+  try {
+    const before = host.createProgram([entry, declaration], options);
+    expect(before.getSourceFile(declaration)?.text).toContain("x:surface");
+    expect(before.getSemanticDiagnostics()).toEqual([]);
+    before.dispose();
+
+    // tsgo keeps parsed files by path: the replacement is only served
+    // because the next snapshot is told the file changed.
+    host.shadowFile(declaration);
+    const after = host.createProgram([entry, declaration], options);
+    try {
+      expect(after.getSourceFile(declaration)?.text).toBe("");
+      expect(after.getSemanticDiagnostics().map((d) => d.code)).toEqual([2307]);
+    } finally { after.dispose(); }
+  } finally {
+    host.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
