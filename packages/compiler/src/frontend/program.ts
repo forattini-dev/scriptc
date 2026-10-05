@@ -70,7 +70,7 @@ import { isRequireStatement as isRequireStatement7, pureRequirePrefixStatement, 
 import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { setEmbedJsxOptions } from "./npm-typescript.js";
 import { checkPreflightTypes, isIslandJsFile } from "./preflight-types.js";
-import { ProjectDeclarations } from "./project-declarations.js";
+import { ProjectDeclarations, type NodeTypeSurfaceStandDown } from "./project-declarations.js";
 import { jsoncSyntaxError } from "./config-json.js";
 import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js"; import { calleeChainInert, isDtsMemberCall, isHoistedFunctionBinding, isInertHoistedFunctionCallee, isNamespaceMemberRead, isOutsideClusterProgramCallee, kernelCallHoldsCallbacks, makeReachesCluster } from "./cycle-inert.js";
 import { forkTargetPaths } from "./fork-target.js";
@@ -282,6 +282,11 @@ export interface LoadResult {
    * specifier. Multiple exact module names may deliberately share one
    * declaration surface. */
   externalTypeSpecifiersByFile: ReadonlyMap<string, readonly string[]>;
+  /** The Node type surface copies that stood down for the project
+   * configuration governing `file` (one Node type surface per program —
+   * see ProjectDeclarations). Preflight hints a type error in such a
+   * project with the declarations it was really checked against. */
+  nodeTypeSurfaceStandDowns: (file: string) => readonly NodeTypeSurfaceStandDown[];
   withProjectWorld: <T>(action: (program: ts.Program) => T) => T;
 }
 
@@ -552,7 +557,11 @@ function loadProgram7(
   // surfaces join when the project carries both. skipLibCheck applies
   // whenever a REAL surface is present (see the nodeTypes note).
   const nodeSurface = nodeTypes ?? bunTypes ?? fallbackDtsPath();
-  const projectDeclarations = new ProjectDeclarations(host);
+  // The entry project's surface is THE program's Node type surface: a
+  // reached project whose own tsconfig resolves another @types/node copy
+  // contributes its other declarations, never that second copy
+  // (ProjectDeclarations owns the rule and records the stand-downs).
+  const projectDeclarations = new ProjectDeclarations(host, [nodeTypes, bunTypes].filter((file): file is string => file !== null));
   const coreRoots = [entryPath, ambientDtsPath(), nodeSurface, ...projectDeclarations.collect([entryPath])];
   if (bunTypes !== null && nodeTypes !== null) coreRoots.push(bunTypes);
   coreRoots.push(overridesDtsPath());
@@ -608,6 +617,7 @@ function loadProgram7(
     configDiags: config.diags,
     externalTypes,
     externalTypeSpecifiersByFile,
+    nodeTypeSurfaceStandDowns: (file) => projectDeclarations.standDownsFor(file),
     withProjectWorld: (action) => {
       const view = projectDeclarations.createProgram(programRoots.filter((root) => root !== overridesDtsPath()), options);
       try { return action(view); } finally { view.dispose(); }

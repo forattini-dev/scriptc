@@ -363,6 +363,20 @@ export function tscPassthroughDiag(message: string, loc: SrcLoc): ScrDiagnostic 
   return { code: "SC0001", message, loc };
 }
 
+/** The hint riding a tsc error inside a project whose own tsconfig resolves
+ * a Node type surface copy the program does not carry (one Node type
+ * surface per program; the entry project's wins). The error may be a
+ * declaration difference between the two copies rather than a defect. */
+export function nodeTypeSurfaceHint(
+  standDowns: readonly { package: string; dropped: { version: string | null }; kept: { version: string | null } | null }[],
+): string | null {
+  const nodeCopies = standDowns.filter((entry) => entry.package === "@types/node" || entry.package === "bun-types");
+  const first = nodeCopies[0] ?? standDowns[0];
+  if (first === undefined) return null;
+  const spell = (pkg: string, version: string | null): string => version === null ? pkg : `${pkg} ${version}`;
+  return `this file's project resolves ${spell(first.package, first.dropped.version)}, but a program carries one Node type surface and this one is checked against ${first.kept === null ? "another copy" : spell(first.package, first.kept.version)} (the entry project's); align the versions if this error names a declaration that differs between them`;
+}
+
 /** Node's package scope forces CommonJS, but the source contains a marker
  * that is legal only when the file is parsed as ESM (static import/export,
  * import.meta, top-level await, or a lexical CommonJS-wrapper redeclaration).

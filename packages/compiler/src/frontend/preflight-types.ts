@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
 import * as ts from "./ts7/adapter.js";
-import { tscPassthroughDiag, type ScrDiagnostic } from "../diagnostics/diagnostic.js";
+import { nodeTypeSurfaceHint, tscPassthroughDiag, type ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import type { LoadResult } from "./program.js";
 import { isNodeModulesPath, resolveBareAsset, resolveBareModule, resolveRelativeAsset } from "./resolve.js";
 import { npmStaticPackageOfPath } from "./npm-static.js";
@@ -113,7 +113,12 @@ export function checkPreflightTypes(load: LoadResult): ScrDiagnostic[] {
     const file = d.fileName ?? entry.fileName;
     const start = d.fileName !== undefined ? d.pos : 0;
     const end = d.fileName !== undefined ? d.end : 0;
-    return tscPassthroughDiag(message, { file, start, end });
+    const diag = tscPassthroughDiag(message, { file, start, end });
+    // A project checked against the entry project's Node type surface
+    // instead of the copy its own tsconfig resolves learns so from the
+    // error, not from a build that fails for no visible reason.
+    const hint = d.fileName === undefined ? null : nodeTypeSurfaceHint(load.nodeTypeSurfaceStandDowns(d.fileName));
+    return hint === null ? diag : { ...diag, hint };
   };
   /* TS7 checker change (not finding 5, same discipline): tsgo types a
    * NAMESPACE import as the spec's non-callable module namespace object

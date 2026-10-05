@@ -17,6 +17,7 @@ node_modules/
 !tests/fixtures/fetch/node_modules/
 !tests/fixtures/gateway-e2e/node_modules/
 !tests/fixtures/node-types/node_modules/
+!tests/fixtures/node-type-surface/lib/node_modules/
 dist/
 /packages/llvm-darwin-arm64/bin/
 /packages/runtime-darwin-arm64/artifacts/
