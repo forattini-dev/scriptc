@@ -28,7 +28,7 @@ test("the unreached remainder's deferred fences render in their own dimmed group
   });
   expect(out).toContain("statements analyzed   4");
   expect(out).toContain("compile statically    2  (50%)");
-  expect(out).toContain("deferred in unreached code   3 sites (never lowered — JS statements that would throw their fence if reached)");
+  expect(out).toContain("deferred in unreached code   3 sites (lowered only in a throwaway pass — JS statements that would throw their fence if reached)");
   expect(out).toContain("×2  uses of 'ext' inherit the blocker on its declaration");
   expect(out).toContain("×1  'string' values where '(string) => string' is expected  SC1090");
   // Unreached fences never join the reached "deferred to runtime" group.

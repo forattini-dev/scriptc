@@ -354,7 +354,9 @@ export interface LowerResult {
    * lowered in a throwaway pass — blockers in it can never fail a build.
    * `runtimeFences` are the remainder's JS statements whose fences would
    * defer to runtime if a reference ever reached them: no build carries
-   * them, and the report counts them so the unreached share is measurable. */
+   * them, and the report counts them so the unreached share is measurable.
+   * A site the reached `runtimeFences` already hold (same file, span and
+   * code) is not repeated here, so the two lists never double-count. */
   unreached?: {
     diagnostics: ScrDiagnostic[];
     runtimeFences: ScrDiagnostic[];
@@ -762,15 +764,39 @@ export function lowerToIr(
     externalTypeSpecifiersByFile,
   });
   const rem = remainder.run();
+  const unreachedFences = fencesNotAlreadyReached(result.runtimeFences, rem.runtimeFences, rem.runtimeFenceSites);
   return {
     ...result,
     unreached: {
       diagnostics: rem.diagnostics,
-      runtimeFences: rem.runtimeFences,
-      runtimeFenceSites: rem.runtimeFenceSites,
+      runtimeFences: unreachedFences.runtimeFences,
+      runtimeFenceSites: unreachedFences.runtimeFenceSites,
       stats: rem.stats,
     },
   };
+}
+
+/** The remainder pass re-lowers generic bodies it instantiates differently
+ * from the reached pass (the same function with other argument types), so
+ * some of its fences sit at a source site the reached list already holds.
+ * Those sites are already counted as reached, so the unreached group keeps
+ * only the sites no reached fence covers: same file, span and code. The
+ * parallel site array stays aligned. */
+export function fencesNotAlreadyReached(
+  reached: readonly ScrDiagnostic[],
+  fences: readonly ScrDiagnostic[],
+  sites: readonly RuntimeFenceSite[],
+): { runtimeFences: ScrDiagnostic[]; runtimeFenceSites: RuntimeFenceSite[] } {
+  const siteKey = (d: ScrDiagnostic): string => `${d.code}\u0000${d.loc.file}\u0000${d.loc.start}\u0000${d.loc.end}`;
+  const covered = new Set(reached.map(siteKey));
+  const runtimeFences: ScrDiagnostic[] = [];
+  const runtimeFenceSites: RuntimeFenceSite[] = [];
+  fences.forEach((fence, index) => {
+    if (covered.has(siteKey(fence))) return;
+    runtimeFences.push(fence);
+    runtimeFenceSites.push(sites[index]!);
+  });
+  return { runtimeFences, runtimeFenceSites };
 }
 
 /** The island-handle type a `import(...)` initializer gives a binding

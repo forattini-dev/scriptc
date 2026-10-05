@@ -37,7 +37,9 @@ export interface CoverageInput {
    * build — the report shows them as a secondary, dimmed group.
    * `runtimeFences` are the remainder's deferred JS fences: no build
    * carries them, and they report in their own dimmed group so the
-   * unreached share of the dynamic gap is measurable. */
+   * unreached share of the dynamic gap is measurable. A site already in
+   * the reached `runtimeFences` (same file, span and code) is not repeated
+   * among them. */
   unreached?: {
     stats: LowerStats;
     diagnostics: ScrDiagnostic[];
@@ -345,8 +347,8 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
   }
 
   // The same deferral in code nothing on the entry path reaches: those
-  // bodies never lower, so no build carries these fences — a reference
-  // that reached them would. Counted apart from the sites above and
+  // bodies lower only in the throwaway analysis pass, so no build carries
+  // these fences — a reference that reached them would. Counted apart from the sites above and
   // rendered last, dimmed like the other unreached group.
   const unreachedFences = un?.runtimeFences ?? [];
   const renderUnreachedFences = () => {
@@ -355,7 +357,7 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
     const widestU = Math.max(...grouped.map((b) => b.what.length));
     if (out[out.length - 1] !== "") out.push("");
     out.push(
-      `  ${c(DIM, "deferred in unreached code")}   ${c(DIM, `${unreachedFences.length} site${unreachedFences.length === 1 ? "" : "s"} (never lowered — JS statements that would throw their fence if reached)`)}`,
+      `  ${c(DIM, "deferred in unreached code")}   ${c(DIM, `${unreachedFences.length} site${unreachedFences.length === 1 ? "" : "s"} (lowered only in a throwaway pass — JS statements that would throw their fence if reached)`)}`,
     );
     for (const b of grouped) {
       out.push(

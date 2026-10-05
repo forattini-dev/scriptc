@@ -5,6 +5,6 @@ scriptc coverage tests/coverage-fixtures/js-unreached-fence.js
   statements analyzed   4
   compile statically    2  (50%)
 
-  deferred in unreached code   2 sites (never lowered — JS statements that would throw their fence if reached)
+  deferred in unreached code   2 sites (lowered only in a throwaway pass — JS statements that would throw their fence if reached)
       ×1  'string' values where '(string) => string' is expected  SC1090
       ×1  uses of 'ext' inherit the blocker on its declaration    SC2004
