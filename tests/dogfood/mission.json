@@ -1,0 +1,58 @@
+{
+  "status": "proposal",
+  "owner": "maintainer",
+  "description": "The Rust-lane dogfood mission as probed so far: three real consumers (Baldim's S3 adapter, redskilled's CLI and statusline, redwall's renderer) compiled with no JavaScript engine. The entries mirror the probe history; the maintainer owns the definition of done and this file does not define acceptance criteria.",
+  "roots": {
+    "repo": { "description": "this checkout: where scripts/dogfood-ledger.mjs runs" },
+    "main": { "env": "SCRIPTC_DOGFOOD_MAIN", "description": "the main scriptc checkout; defaults to the parent of the git common directory, so a worktree finds the consumers beside the main checkout" },
+    "workspace": { "env": "SCRIPTC_DOGFOOD_WORKSPACE", "default": "${main}/..", "description": "the directory holding the consumer repositories as siblings of the main checkout" },
+    "red-skills": { "env": "SCRIPTC_DOGFOOD_RED_SKILLS", "default": "${workspace}/red-skills", "description": "the red-skills monorepo (apps/redskilled)" },
+    "red-dev": { "env": "SCRIPTC_DOGFOOD_RED_DEV", "default": "${workspace}/red-dev", "description": "the red-dev repository (the redwall renderer)" },
+    "baldim": { "env": "SCRIPTC_DOGFOOD_BALDIM", "default": "${repo}/tests/dogfood/consumers/baldim-s3", "description": "the installed Baldim S3 probe workspace: the tracked fixture after `npm ci`, or an already installed probe directory through the override" }
+  },
+  "options": {
+    "backend": "rust",
+    "allowEngine": false,
+    "npmStatic": "auto",
+    "target": "node26",
+    "optimization": "dev"
+  },
+  "entries": [
+    {
+      "name": "baldim-s3-smoke",
+      "entry": "${baldim}/s3-client.ts",
+      "requires": ["${baldim}/node_modules/@baldim/adapter-s3/package.json"],
+      "consumer": { "kind": "npm", "dir": "${baldim}", "packages": ["@baldim/adapter-s3", "@baldim/core", "@aws-sdk/client-s3", "@smithy/core", "lodash-es", "recker", "pino", "@types/node"] },
+      "description": "Offline S3Client constructor smoke test over @baldim/adapter-s3: construct with dummy credentials, print the resolved config, destroy."
+    },
+    {
+      "name": "baldim-aws-only",
+      "entry": "${baldim}/aws-config-probe.ts",
+      "requires": ["${baldim}/node_modules/@aws-sdk/client-s3/package.json"],
+      "consumer": { "kind": "npm", "dir": "${baldim}", "packages": ["@aws-sdk/client-s3", "@smithy/core", "@types/node"] },
+      "description": "The AWS SDK slice alone: construct an @aws-sdk/client-s3 S3Client and destroy it."
+    },
+    {
+      "name": "redskilled-statusline",
+      "entry": "${red-skills}/apps/redskilled/src/statusline-main.ts",
+      "requires": ["${red-skills}/node_modules"],
+      "consumer": { "kind": "git", "root": "${red-skills}" },
+      "description": "The redskilled statusline renderer entry: the only redskilled entry that has reached lowering so far."
+    },
+    {
+      "name": "redskilled-cli",
+      "entry": "${red-skills}/apps/redskilled/src/cli.ts",
+      "requires": ["${red-skills}/node_modules"],
+      "consumer": { "kind": "git", "root": "${red-skills}" },
+      "description": "The redskilled CLI/daemon entry."
+    },
+    {
+      "name": "redwall-render",
+      "entry": "${main}/.red/tmp/ts-rust-stable-audit-20260930/redwall-render.ts",
+      "requires": ["${red-dev}/src/redwall-render.ts", "${red-dev}/node_modules"],
+      "consumer": { "kind": "git", "root": "${red-dev}", "dirtyTree": true },
+      "note": "Targets a dirty red-dev working tree through an ad hoc wrapper in the main checkout's scratch directory; another workstream is requalifying redwall against a clean clone and this entry will be replaced at integration.",
+      "description": "The redwall renderer through the existing audit wrapper (renderRedwall over the red-dev sources)."
+    }
+  ]
+}
