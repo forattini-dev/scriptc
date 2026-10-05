@@ -21,7 +21,7 @@ export const CORPUS_TEST_FILE = "tests/harness/rust-differential.test.ts";
  * emission suites (source-shape and compile-and-run tests), the Rust
  * backend's co-located unit tests, the Rust-specific harness files, the
  * npm-static family that covers the mission's npmStatic path, and CI's
- * oracle-selection contract and the gate's own unit tests (RUST_UNIT_GLOBS). By content: every other
+ * oracle-selection contract and the gate's own test files (RUST_UNIT_GLOBS). By content: every other
  * vitest file whose source pins the Rust backend, `backend: "rust"` or
  * `--backend rust` (RUST_PIN_PATTERN), which is how the admission and
  * no-engine suites that gate the mission's compile path are found without a
@@ -37,7 +37,7 @@ export const RUST_UNIT_GLOBS = [
   "tests/harness/rust-*.test.ts",
   "tests/harness/runtime-rust-package.test.ts",
   "tests/harness/oracle-environment.test.ts",
-  "tests/harness/gate-rust.test.ts",
+  "tests/harness/gate-rust*.test.ts",
 ];
 
 /** The files vitest runs by default (vitest.config.ts `include`), the

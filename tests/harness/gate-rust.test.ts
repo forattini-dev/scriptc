@@ -615,6 +615,7 @@ describe("rust-unit file selection", () => {
     expect(files).toContain("packages/compiler/test/no-engine.test.ts");
     expect(files).toContain("tests/harness/npm-static.test.ts");
     expect(files).toContain("tests/harness/oracle-environment.test.ts");
+    for (const own of ["gate-rust", "gate-rust-lock", "gate-rust-reporter"]) expect(files, own).toContain(`tests/harness/${own}.test.ts`);
     for (const file of RUST_UNIT_NEVER) expect(files).not.toContain(file);
     expect(files).toEqual([...files].sort());
     expect(new Set(files).size).toBe(files.length);
