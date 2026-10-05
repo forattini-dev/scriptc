@@ -61,10 +61,16 @@ describe("npm static named re-export pruning", () => {
         package: "pure-barrel",
         status: "static",
         // fenced.js and chain/spare.js hang off names nobody demands;
-        // meta-extra.js is behind a star whose names are known.
-        prunedModules: ["chain/spare.js", "fenced.js", "meta-extra.js"],
+        // meta-extra.js is behind a star whose names are known; beta.js is
+        // the other element of a statement only `alpha` is demanded through.
+        prunedModules: ["beta.js", "chain/spare.js", "fenced.js", "meta-extra.js"],
       }]);
-      await expectNodeParity(result.binaryPath, entry, target, "hello, scriptc\nNAMED RE-EXPORTS!\n6\n1.0.0 pure-barrel@1.0.0\n");
+      await expectNodeParity(
+        result.binaryPath,
+        entry,
+        target,
+        "hello, scriptc\nNAMED RE-EXPORTS!\n6\n1.0.0 pure-barrel@1.0.0\nalpha gamma named-re-exports\n",
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -94,6 +100,63 @@ describe("npm static named re-export pruning", () => {
       expect(result.runtimeFences).toEqual([]);
       expect(npmStaticStatuses(entry, target).npmStatic).toEqual([{ package: "stateful-barrel", status: "static" }]);
       await expectNodeParity(result.binaryPath, entry, target, "counter module initialized\nregistry module initialized\nmain\nhello, scriptc\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test.each(TARGETS)("a namespace import follows the barrel's own names only (%s)", async (target) => {
+    const directory = await mkdtemp(join(tmpdir(), "scriptc-named-reexport-"));
+    const entry = corpus("3472-npm-namespace-import-reexport-pruning");
+    try {
+      const result = await compileEngineFree(entry, target, directory);
+      expect(result.ok, result.ok ? undefined : JSON.stringify(result.diagnostics)).toBe(true);
+      if (!result.ok) return;
+      expect(result.execution).toEqual({ engine: "none", externalFfi: false });
+      expect(result.runtimeFences).toEqual([]);
+      // The whole barrel is demanded, yet `hidden` is no export of it: the
+      // sub-barrel's other re-export stays pruned.
+      expect(npmStaticStatuses(entry, target).npmStatic).toEqual([
+        { package: "ns-barrel", status: "static", prunedModules: ["chain/hidden.js"] },
+      ]);
+      await expectNodeParity(result.binaryPath, entry, target, "first\n5\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test.each(TARGETS)("a pruned module's undeclared import still evaluates in Node's order (%s)", async (target) => {
+    const directory = await mkdtemp(join(tmpdir(), "scriptc-named-reexport-"));
+    const entry = corpus("3473-npm-reexport-undeclared-dependency");
+    try {
+      const result = await compileEngineFree(entry, target, directory);
+      expect(result.ok, result.ok ? undefined : JSON.stringify(result.diagnostics)).toBe(true);
+      if (!result.ok) return;
+      expect(result.runtimeFences).toEqual([]);
+      await expectNodeParity(result.binaryPath, entry, target, "phantom-dep initialized\na\n");
+      // The barrel declares sideEffects false but not phantom-dep, which
+      // prints at load: the module importing it is not pruned.
+      const statuses = npmStaticStatuses(entry, target).npmStatic;
+      expect(statuses).toContainEqual({ package: "phantom-pure", status: "static" });
+      expect(statuses.flatMap((status) => status.prunedModules ?? [])).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test.each(TARGETS)("a pruned subtree that could enter an import cycle keeps Node's evaluation order (%s)", async (target) => {
+    const directory = await mkdtemp(join(tmpdir(), "scriptc-named-reexport-"));
+    const entry = corpus("3474-npm-reexport-cycle-order");
+    try {
+      const result = await compileEngineFree(entry, target, directory);
+      expect(result.ok, result.ok ? undefined : JSON.stringify(result.diagnostics)).toBe(true);
+      if (!result.ok) return;
+      expect(result.runtimeFences).toEqual([]);
+      await expectNodeParity(result.binaryPath, entry, target, "true\n");
+      // q.js reaches the a.js/b.js cycle, so it stays; r.js reaches none.
+      expect(npmStaticStatuses(entry, target).npmStatic).toEqual([
+        { package: "cycle-barrel", status: "static", prunedModules: ["r.js"] },
+      ]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
