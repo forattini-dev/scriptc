@@ -30,6 +30,7 @@
     "manifest": "tsx scripts/surface-manifest.mjs",
     "manifest:parity": "tsx scripts/manifest-parity.mjs",
     "dogfood:scoreboard": "node scripts/dogfood-scoreboard.mjs",
+    "dogfood:ledger": "tsx scripts/dogfood-ledger.mjs",
     "upstream:drift": "node scripts/upstream-drift.mjs",
     "node-compat": "pnpm --filter @internal/compatibility run update",
     "node-compat:backlog": "pnpm --filter @internal/compatibility run backlog --",

@@ -1611,7 +1611,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       ) {
         throw err;
       }
-      lowerer.runtimeFences.push(...lowerer.diags.splice(propDiagsBefore));
+      lowerer.recordRuntimeFences(lowerer.diags.splice(propDiagsBefore));
       droppedNames.add(name);
       continue;
     }

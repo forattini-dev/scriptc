@@ -317,6 +317,22 @@ export function stmtUsesIsland(stmts: IrStmt | IrStmt[]): boolean {
   return found;
 }
 
+/** The lowering context a deferred runtime fence was recorded in — what
+ * decides WHEN its throw can execute:
+ * - "module-init": while a file's top-level statements lowered into its
+ *   run-once init function, outside every function, method, and closure
+ *   body. Evaluating that module executes the statement, so the fence
+ *   throws at startup (or at the require/import() that first loads the
+ *   module) unless control flow skips it.
+ * - "function": inside a function, method, accessor, constructor, or
+ *   closure body — including bodies the compiler synthesizes, such as
+ *   class field and static initializers. The fence throws only when that
+ *   body runs.
+ * - "declaration": while declarations registered, before any body lowered
+ *   (deferred JS collection failures). No statement carries the entry
+ *   itself: the declaring statement and every use site record their own. */
+export type RuntimeFenceSite = "module-init" | "function" | "declaration";
+
 export interface LowerResult {
   /** Present iff diagnostics is empty. */
   module: IrModule | null;
@@ -324,6 +340,9 @@ export interface LowerResult {
   /** JS statements whose compile fences DEFERRED to runtime (runtimeFence
    * statements in the module) — off the build, on the coverage report. */
   runtimeFences: ScrDiagnostic[];
+  /** Parallel to `runtimeFences`: the lowering context each entry was
+   * recorded in (see RuntimeFenceSite). */
+  runtimeFenceSites: RuntimeFenceSite[];
   stats: LowerStats;
   /** --provenance-sources only: per-file statement attribution (the
    * coverage report aggregates it per provenance package). */
@@ -332,8 +351,18 @@ export interface LowerResult {
    * consts in fetched source modules — off the build, on the report. */
   provenanceElided?: ScrDiagnostic[];
   /** Coverage only (LowerOptions.coverage): the unreached remainder,
-   * lowered in a throwaway pass — blockers in it can never fail a build. */
-  unreached?: { diagnostics: ScrDiagnostic[]; stats: LowerStats };
+   * lowered in a throwaway pass — blockers in it can never fail a build.
+   * `runtimeFences` are the remainder's JS statements whose fences would
+   * defer to runtime if a reference ever reached them: no build carries
+   * them, and the report counts them so the unreached share is measurable.
+   * A site the reached `runtimeFences` already hold (same file, span and
+   * code) is not repeated here, so the two lists never double-count. */
+  unreached?: {
+    diagnostics: ScrDiagnostic[];
+    runtimeFences: ScrDiagnostic[];
+    runtimeFenceSites: RuntimeFenceSite[];
+    stats: LowerStats;
+  };
   /** The static frontier (present when any module is island-classified):
    * every program module with its tier and the reason. */
   tiers?: ModuleTierRow[];
@@ -735,7 +764,39 @@ export function lowerToIr(
     externalTypeSpecifiersByFile,
   });
   const rem = remainder.run();
-  return { ...result, unreached: { diagnostics: rem.diagnostics, stats: rem.stats } };
+  const unreachedFences = fencesNotAlreadyReached(result.runtimeFences, rem.runtimeFences, rem.runtimeFenceSites);
+  return {
+    ...result,
+    unreached: {
+      diagnostics: rem.diagnostics,
+      runtimeFences: unreachedFences.runtimeFences,
+      runtimeFenceSites: unreachedFences.runtimeFenceSites,
+      stats: rem.stats,
+    },
+  };
+}
+
+/** The remainder pass re-lowers generic bodies it instantiates differently
+ * from the reached pass (the same function with other argument types), so
+ * some of its fences sit at a source site the reached list already holds.
+ * Those sites are already counted as reached, so the unreached group keeps
+ * only the sites no reached fence covers: same file, span and code. The
+ * parallel site array stays aligned. */
+export function fencesNotAlreadyReached(
+  reached: readonly ScrDiagnostic[],
+  fences: readonly ScrDiagnostic[],
+  sites: readonly RuntimeFenceSite[],
+): { runtimeFences: ScrDiagnostic[]; runtimeFenceSites: RuntimeFenceSite[] } {
+  const siteKey = (d: ScrDiagnostic): string => `${d.code}\u0000${d.loc.file}\u0000${d.loc.start}\u0000${d.loc.end}`;
+  const covered = new Set(reached.map(siteKey));
+  const runtimeFences: ScrDiagnostic[] = [];
+  const runtimeFenceSites: RuntimeFenceSite[] = [];
+  fences.forEach((fence, index) => {
+    if (covered.has(siteKey(fence))) return;
+    runtimeFences.push(fence);
+    runtimeFenceSites.push(sites[index] ?? "function"); // parallel to `fences` by construction
+  });
+  return { runtimeFences, runtimeFenceSites };
 }
 
 /** The island-handle type a `import(...)` initializer gives a binding
@@ -883,7 +944,7 @@ export function trapUseThrowExpr(
     `runtime trap: '${tm.module}.${tm.member}' has no compiled-binary equivalent (the module requires the runtime that provides it)`,
     loc,
   );
-  lowerer.runtimeFences.push(d);
+  lowerer.recordRuntimeFences([d]);
   const runtime = tm.module === "bun" || tm.module.startsWith("bun:") ? "Bun" : "V8";
   return nodeThrowExpr(
     0,
@@ -904,7 +965,7 @@ export function trapUseThrowExpr(
 export function ladderFenceExpr(lowerer: Lowerer, surface: string, node: ts.Node, hint?: string): IrExpr {
   const loc = locOf(node);
   const d = noLoweringDiag(surface, loc, hint);
-  lowerer.runtimeFences.push(d);
+  lowerer.recordRuntimeFences([d]);
   const sf = node.getSourceFile();
   const pos = ts.getLineAndCharacterOfPosition(sf, loc.start);
   return {
@@ -1894,8 +1955,15 @@ export class Lowerer {
   diagSink: ScrDiagnostic[] | null = null;
   /** Diagnostics converted into runtimeFence statements (JS sources —
    * see lowerStmts): off the build, preserved here so coverage reporting
-   * can still name every deferred fence. */
+   * can still name every deferred fence. Appended only through
+   * recordRuntimeFences, which keeps runtimeFenceSites parallel. */
   readonly runtimeFences: ScrDiagnostic[] = [];
+  /** Parallel to runtimeFences: the lowering context of each entry. */
+  readonly runtimeFenceSites: RuntimeFenceSite[] = [];
+  /** The function contexts of the per-file init functions (lowerFileInit):
+   * a fence recorded while one of them is the ONLY open function context
+   * sits in module top-level initialisation. */
+  readonly fileInitContexts = new WeakSet<FnCtx>();
   /** --provenance-sources: diagnostics of ELIDED pure-annotated dead
    * consts in fetched source modules (lowerStmts's elision rule) — off
    * the build entirely (the statement lowers to its poisoned bindings and
@@ -2755,6 +2823,7 @@ export class Lowerer {
         module: null,
         diagnostics: this.diags,
         runtimeFences: this.runtimeFences,
+        runtimeFenceSites: this.runtimeFenceSites,
         stats: this.stats,
         ...(this.statsByFile.size > 0 ? { statsByFile: this.statsByFile } : {}),
         ...(this.provenanceElided.length > 0 ? { provenanceElided: this.provenanceElided } : {}),
@@ -2877,6 +2946,7 @@ export class Lowerer {
       module,
       diagnostics: this.diags,
       runtimeFences: this.runtimeFences,
+      runtimeFenceSites: this.runtimeFenceSites,
       stats: this.stats,
       ...(tiers.some((t) => t.tier === "island") ? { tiers } : {}),
       ...(this.statsByFile.size > 0 ? { statsByFile: this.statsByFile } : {}),
@@ -3392,6 +3462,25 @@ export class Lowerer {
 
   /* ── diagnostics plumbing ─────────────────────────────────────────── */
 
+  /** Appends deferred fences to the runtime-fence ledger, tagging each with
+   * the lowering context open right now (RuntimeFenceSite). The single
+   * writer of runtimeFences/runtimeFenceSites. Bookkeeping only: it never
+   * changes what lowers or which diagnostics report. */
+  recordRuntimeFences(fences: readonly ScrDiagnostic[]): void {
+    if (fences.length === 0) return;
+    const frames = this.env.frames;
+    const site: RuntimeFenceSite =
+      frames.length === 0
+        ? "declaration"
+        : frames.length === 1 && this.fileInitContexts.has(frames[0]!)
+          ? "module-init"
+          : "function";
+    for (const fence of fences) {
+      this.runtimeFences.push(fence);
+      this.runtimeFenceSites.push(site);
+    }
+  }
+
   /** Converts diagnostics recorded since `diagsBefore` into a runtime
    * fence. ICEs stay on the compile-diagnostic path; every other captured
    * diagnostic moves to the runtime-fence ledger. Function targets share
@@ -3429,7 +3518,7 @@ export class Lowerer {
       this.diags.push(...captured);
       return null;
     }
-    this.runtimeFences.push(...captured);
+    this.recordRuntimeFences(captured);
 
     const first = captured[0];
     const loc = locOf(node);

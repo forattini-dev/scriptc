@@ -1,0 +1,897 @@
+{
+  "schema": 2,
+  "name": "redskilled-statusline",
+  "generatedAt": "2026-10-05T19:20:47.104Z",
+  "node": "v26.8.1",
+  "compiler": {
+    "head": "8585bf513a70c9dbbf1bf98db605a77094e39cbb",
+    "branch": "dogfood/ledger",
+    "dirtyPaths": 0
+  },
+  "entry": "${red-skills}/apps/redskilled/src/statusline-main.ts",
+  "options": {
+    "backend": "rust",
+    "allowEngine": false,
+    "npmStatic": "auto",
+    "target": "node26",
+    "optimization": "dev"
+  },
+  "consumer": {
+    "kind": "git",
+    "root": "${red-skills}",
+    "head": "b1ed1432cf3fa9c43efef6e43da79f8fbe5995b1",
+    "branch": "main",
+    "dirtyPaths": 0,
+    "typesNode": {
+      "distinctVersions": [
+        "22.20.1"
+      ],
+      "roots": [
+        {
+          "version": "22.20.1",
+          "root": "${red-skills}/node_modules/.pnpm/@types+node@22.20.1/node_modules/@types/node",
+          "files": 68
+        }
+      ]
+    }
+  },
+  "stage": "frontier",
+  "blockers": {
+    "total": 171,
+    "loweringDiagnostics": 39,
+    "importFences": 0,
+    "reachedFences": 132,
+    "fenceMirrors": 0,
+    "postLoweringDiagnostics": null,
+    "atLeast": true,
+    "note": "what a no-engine build must clear: the lowering diagnostics plus every reached runtime fence (each becomes an SC3003 once lowering is clean). At a frontier the total is a floor: code behind a failing statement is not measured, and IR validation and backend checks (the post-lowering wall, null here) run only once the module lowers."
+  },
+  "diagnostics": {
+    "lowering": {
+      "total": 39,
+      "direct": 38,
+      "cascades": {
+        "total": 1,
+        "distinctBindings": 1
+      },
+      "instantiated": 3,
+      "byCode": {
+        "SC2013": 25,
+        "SC1090": 6,
+        "SC2020": 3,
+        "SC2009": 2,
+        "SC1120": 1,
+        "SC2001": 1,
+        "SC2004": 1
+      },
+      "byPackage": {
+        "<program>": 39
+      },
+      "firstParty": 39,
+      "thirdParty": 0,
+      "familyCount": 11,
+      "families": [
+        {
+          "code": "SC2013",
+          "family": "importing '_' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+          "count": 18,
+          "packages": {
+            "<program>": 18
+          }
+        },
+        {
+          "code": "SC2013",
+          "family": "values from the '_' package run in the embedded dynamic engine, which this build does not include",
+          "count": 7,
+          "packages": {
+            "<program>": 7
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "'_' values where '_' is expected",
+          "count": 3,
+          "packages": {
+            "<program>": 3
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "object spread of '_' sources (only known record shapes spread — narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms)",
+          "count": 2,
+          "packages": {
+            "<program>": 2
+          }
+        },
+        {
+          "code": "SC2020",
+          "family": "'_' is part of the standard library types but has no scriptc lowering yet",
+          "count": 2,
+          "packages": {
+            "<program>": 2
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "a checked cast of '_' to '_' (a dynamic value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those)",
+          "count": 1,
+          "packages": {
+            "<program>": 1
+          }
+        },
+        {
+          "code": "SC1120",
+          "family": "replacement callbacks other than the one-argument `(match) => string` form",
+          "count": 1,
+          "packages": {
+            "<program>": 1
+          }
+        },
+        {
+          "code": "SC2001",
+          "family": "values of type '_' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and '_')",
+          "count": 1,
+          "packages": {
+            "<program>": 1
+          }
+        },
+        {
+          "code": "SC2009",
+          "family": "values of type '_' cannot be compiled: the record shape is supported, but its member '_' has type '_', which does not compile (the array shape is supported, but its element type '_' does not compile (the record shape is supported, but its member '_' has type '_', which does not compile (the record shape is supported, but its member '_' has type '_', which does not compile (the union shape is supported, but its arm '_' does not compile))))",
+          "count": 1,
+          "packages": {
+            "<program>": 1
+          }
+        },
+        {
+          "code": "SC2009",
+          "family": "values of type '_' cannot be compiled: the union shape is supported, but its arm '_' does not compile",
+          "count": 1,
+          "packages": {
+            "<program>": 1
+          }
+        },
+        {
+          "code": "SC2020",
+          "family": "'_' is typed by @types/node but has no scriptc lowering yet",
+          "count": 1,
+          "packages": {
+            "<program>": 1
+          }
+        }
+      ]
+    },
+    "postLowering": null,
+    "engineRequired": null
+  },
+  "fences": {
+    "total": 132,
+    "direct": 96,
+    "cascades": {
+      "total": 36,
+      "distinctBindings": 20,
+      "bySite": {
+        "moduleInit": 5,
+        "function": 31,
+        "declaration": 0
+      }
+    },
+    "instantiated": 59,
+    "byCode": {
+      "SC1090": 64,
+      "SC2004": 36,
+      "SC2020": 18,
+      "SC1120": 3,
+      "SC2011": 3,
+      "SC1031": 2,
+      "SC1052": 2,
+      "SC1100": 2,
+      "SC1043": 1,
+      "SC2009": 1
+    },
+    "byPackage": {
+      "@octokit/plugin-throttling": 29,
+      "@octokit/plugin-rest-endpoint-methods": 17,
+      "@octokit/endpoint": 15,
+      "before-after-hook": 13,
+      "json-with-bigint": 12,
+      "<program>": 11,
+      "cli-args-parser": 8,
+      "@octokit/plugin-retry": 5,
+      "@octokit/request": 5,
+      "content-type": 4,
+      "@octokit/graphql": 3,
+      "@octokit/plugin-paginate-rest": 3,
+      "@octokit/auth-token": 2,
+      "@octokit/core": 2,
+      "bottleneck": 2,
+      "@octokit/rest": 1
+    },
+    "firstParty": 11,
+    "thirdParty": 121,
+    "bySite": {
+      "moduleInit": 21,
+      "function": 111,
+      "declaration": 0
+    },
+    "familyCount": 30,
+    "families": [
+      {
+        "code": "SC2020",
+        "family": "'_' is part of the standard library types but has no scriptc lowering yet",
+        "count": 17,
+        "sites": {
+          "moduleInit": 3,
+          "function": 14,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/endpoint": 4,
+          "@octokit/plugin-paginate-rest": 3,
+          "json-with-bigint": 3,
+          "@octokit/plugin-rest-endpoint-methods": 2,
+          "@octokit/request": 2
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "Function.prototype.bind on a compiled function value (compiled calls are direct — no runtime '_' or arguments object exists to re-route; spell the call directly: '_')",
+        "count": 12,
+        "sites": {
+          "moduleInit": 5,
+          "function": 7,
+          "declaration": 0
+        },
+        "packages": {
+          "before-after-hook": 4,
+          "@octokit/core": 2,
+          "@octokit/endpoint": 2,
+          "@octokit/plugin-retry": 2,
+          "@octokit/auth-token": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "method calls like '_'",
+        "count": 9,
+        "sites": {
+          "moduleInit": 2,
+          "function": 7,
+          "declaration": 0
+        },
+        "packages": {
+          "before-after-hook": 4,
+          "@octokit/plugin-retry": 2,
+          "@octokit/endpoint": 1,
+          "@octokit/plugin-rest-endpoint-methods": 1,
+          "@octokit/rest": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "assignment to non-variables",
+        "count": 8,
+        "sites": {
+          "moduleInit": 0,
+          "function": 8,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/plugin-throttling": 7,
+          "content-type": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "constructing values other than classes declared in the program",
+        "count": 7,
+        "sites": {
+          "moduleInit": 0,
+          "function": 7,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/plugin-throttling": 6,
+          "content-type": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "the reference to '_' (a binding form with no lowering)",
+        "count": 7,
+        "sites": {
+          "moduleInit": 0,
+          "function": 7,
+          "declaration": 0
+        },
+        "packages": {
+          "<program>": 6,
+          "bottleneck": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "spread arguments in calls through '_' values",
+        "count": 4,
+        "sites": {
+          "moduleInit": 0,
+          "function": 4,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/plugin-rest-endpoint-methods": 2,
+          "cli-args-parser": 2
+        }
+      },
+      {
+        "code": "SC2011",
+        "family": "values of type '_' have no static representation but run in the embedded dynamic engine, which this build does not include",
+        "count": 3,
+        "sites": {
+          "moduleInit": 0,
+          "function": 3,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/endpoint": 2,
+          "cli-args-parser": 1
+        }
+      },
+      {
+        "code": "SC1052",
+        "family": "for-in over '_' receivers (records, index-signature shapes, arrays, and globalThis enumerate)",
+        "count": 2,
+        "sites": {
+          "moduleInit": 0,
+          "function": 2,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/endpoint": 1,
+          "@octokit/graphql": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "'_' on '_' receivers (process.env keys and pure Record<string, T> keys delete)",
+        "count": 2,
+        "sites": {
+          "moduleInit": 0,
+          "function": 2,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/plugin-rest-endpoint-methods": 1,
+          "json-with-bigint": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "'_' with computed (non-literal) keys (a const whose type is one string literal folds; a string-typed key answers over index-signature record receivers)",
+        "count": 2,
+        "sites": {
+          "moduleInit": 0,
+          "function": 2,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/plugin-rest-endpoint-methods": 1,
+          "<program>": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "JSON methods as values (call '_' directly)",
+        "count": 2,
+        "sites": {
+          "moduleInit": 2,
+          "function": 0,
+          "declaration": 0
+        },
+        "packages": {
+          "json-with-bigint": 2
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "reading '_' on a union-typed value (every arm must be an object/record with a same-typed field '_'; narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms)",
+        "count": 2,
+        "sites": {
+          "moduleInit": 0,
+          "function": 2,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/endpoint": 1,
+          "cli-args-parser": 1
+        }
+      },
+      {
+        "code": "SC1100",
+        "family": "passing '_' values where '_' is expected",
+        "count": 2,
+        "sites": {
+          "moduleInit": 1,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "<program>": 1,
+          "bottleneck": 1
+        }
+      },
+      {
+        "code": "SC1120",
+        "family": "replacement callbacks other than the one-argument `(match) => string` form",
+        "count": 2,
+        "sites": {
+          "moduleInit": 0,
+          "function": 2,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/endpoint": 1,
+          "json-with-bigint": 1
+        }
+      },
+      {
+        "code": "SC1031",
+        "family": "array destructuring of non-array values (the source is union-typed)",
+        "count": 1,
+        "sites": {
+          "moduleInit": 1,
+          "function": 0,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/plugin-rest-endpoint-methods": 1
+        }
+      },
+      {
+        "code": "SC1031",
+        "family": "object destructuring of non-record values (the source is url-typed)",
+        "count": 1,
+        "sites": {
+          "moduleInit": 0,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/plugin-throttling": 1
+        }
+      },
+      {
+        "code": "SC1043",
+        "family": "comparing non-number, non-string values",
+        "count": 1,
+        "sites": {
+          "moduleInit": 0,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "content-type": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "'_' right-hand sides other than classes declared in the program",
+        "count": 1,
+        "sites": {
+          "moduleInit": 0,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/endpoint": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "assignment to non-array elements",
+        "count": 1,
+        "sites": {
+          "moduleInit": 0,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "cli-args-parser": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "assignment to non-variables as an expression (only `x = e` over a variable yields a value; write property/destructuring assignments as statements)",
+        "count": 1,
+        "sites": {
+          "moduleInit": 0,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "cli-args-parser": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic)",
+        "count": 1,
+        "sites": {
+          "moduleInit": 0,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/plugin-retry": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "indexing process.env with non-string keys",
+        "count": 1,
+        "sites": {
+          "moduleInit": 0,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "cli-args-parser": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "module namespace objects as values (access '_' members directly)",
+        "count": 1,
+        "sites": {
+          "moduleInit": 0,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "@octokit/plugin-throttling": 1
+        }
+      },
+      {
+        "code": "SC1090",
+        "family": "reading '_' from a value of type '_'",
+        "count": 1,
+        "sites": {
+          "moduleInit": 0,
+          "function": 1,
+          "declaration": 0
+        },
+        "packages": {
+          "<program>": 1
+        }
+      }
+    ]
+  },
+  "statements": {
+    "total": 2492,
+    "failed": 137,
+    "island": 0,
+    "passingPct": 94.5,
+    "functionsSkipped": 0
+  },
+  "unreached": {
+    "statements": 5211,
+    "failed": 207,
+    "island": 0,
+    "functionsSkipped": 62,
+    "diagnostics": {
+      "total": 205,
+      "direct": 188,
+      "cascades": {
+        "total": 17,
+        "distinctBindings": 16
+      },
+      "instantiated": 12,
+      "byCode": {
+        "SC1090": 47,
+        "SC2009": 46,
+        "SC2013": 39,
+        "SC2020": 34,
+        "SC2004": 17,
+        "SC2003": 7,
+        "SC2002": 6,
+        "SC1120": 3,
+        "SC1100": 2,
+        "SC1031": 1,
+        "SC1101": 1,
+        "SC2011": 1,
+        "SC2012": 1
+      },
+      "byPackage": {
+        "<program>": 203,
+        "@octokit/auth-app": 1,
+        "toad-cache": 1
+      },
+      "firstParty": 203,
+      "thirdParty": 2,
+      "familyCount": 41,
+      "families": [
+        {
+          "code": "SC2013",
+          "family": "values from the '_' package run in the embedded dynamic engine, which this build does not include",
+          "count": 39,
+          "packages": {
+            "<program>": 39
+          }
+        },
+        {
+          "code": "SC2009",
+          "family": "values of type '_' cannot be compiled: the record shape is supported, but its member '_' has type '_', which does not compile (the array shape is supported, but its element type '_' does not compile (the record shape is supported, but its member '_' has type '_', which does not compile (the record shape is supported, but its member '_' has type '_', which does not compile (the union shape is supported, but its arm '_' does not compile))))",
+          "count": 25,
+          "packages": {
+            "<program>": 25
+          }
+        },
+        {
+          "code": "SC2020",
+          "family": "'_' is part of the standard library types but has no scriptc lowering yet",
+          "count": 17,
+          "packages": {
+            "<program>": 17
+          }
+        },
+        {
+          "code": "SC2020",
+          "family": "'_' is typed by @types/node but has no scriptc lowering yet",
+          "count": 17,
+          "packages": {
+            "<program>": 17
+          }
+        },
+        {
+          "code": "SC2003",
+          "family": "union types must match exactly: expected '_', got '_' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+          "count": 7,
+          "packages": {
+            "<program>": 7
+          }
+        },
+        {
+          "code": "SC2009",
+          "family": "values of type '_' cannot be compiled: the record shape is supported, but its member '_' has type '_', which does not compile (the record shape is supported, but its member '_' has type '_', which does not compile (the union shape is supported, but its arm '_' does not compile))",
+          "count": 7,
+          "packages": {
+            "<program>": 7
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "'_' / '!= null' on a '_' value that isn't a plain read (both unit arms need the operand twice — bind it to a const first)",
+          "count": 6,
+          "packages": {
+            "<program>": 6
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "library functions as values (call '_' directly)",
+          "count": 6,
+          "packages": {
+            "<program>": 6
+          }
+        },
+        {
+          "code": "SC2009",
+          "family": "values of type '_' cannot be compiled: the record shape is supported, but its member '_' has type '_', which does not compile (the union shape is supported, but its arm '_' does not compile (the function shape is supported, but its parameter '_' has type '_', which does not compile (the union shape is supported, and unions in the '_' family ride the checked-dynamic representation wholesale, but '_' arms have a typed representation whose semantics (identity, methods, dispatch) do not survive that collapse)))",
+          "count": 6,
+          "packages": {
+            "<program>": 6
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "narrowing '.filter' with a hand-written type predicate (a written '_' is an unchecked assertion nothing validates at runtime — keep the receiver's element type instead — annotate the callback's return ': boolean' (the checker then skips the predicate) or annotate the result with the receiver's own element type — and narrow the elements after)",
+          "count": 5,
+          "packages": {
+            "<program>": 5
+          }
+        }
+      ]
+    },
+    "fences": {
+      "total": 65,
+      "direct": 53,
+      "cascades": {
+        "total": 12,
+        "distinctBindings": 8,
+        "bySite": {
+          "moduleInit": 0,
+          "function": 12,
+          "declaration": 0
+        }
+      },
+      "instantiated": 5,
+      "byCode": {
+        "SC1090": 25,
+        "SC2020": 16,
+        "SC2004": 12,
+        "SC1031": 4,
+        "SC1100": 3,
+        "SC1043": 2,
+        "SC2009": 2,
+        "SC1101": 1
+      },
+      "byPackage": {
+        "toad-cache": 16,
+        "@octokit/auth-app": 14,
+        "@octokit/oauth-methods": 10,
+        "universal-github-app-jwt": 9,
+        "@octokit/auth-oauth-user": 5,
+        "@octokit/auth-oauth-app": 3,
+        "@octokit/plugin-retry": 2,
+        "@octokit/request": 2,
+        "cli-args-parser": 2,
+        "@octokit/auth-oauth-device": 1,
+        "@octokit/request-error": 1
+      },
+      "firstParty": 0,
+      "thirdParty": 65,
+      "bySite": {
+        "moduleInit": 0,
+        "function": 65,
+        "declaration": 0
+      },
+      "familyCount": 18,
+      "families": [
+        {
+          "code": "SC2020",
+          "family": "'_' is part of the standard library types but has no scriptc lowering yet",
+          "count": 11,
+          "sites": {
+            "moduleInit": 0,
+            "function": 11,
+            "declaration": 0
+          },
+          "packages": {
+            "@octokit/oauth-methods": 3,
+            "@octokit/auth-app": 2,
+            "universal-github-app-jwt": 2,
+            "@octokit/auth-oauth-device": 1,
+            "@octokit/auth-oauth-user": 1
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "compound assignment to fields of computed receivers",
+          "count": 9,
+          "sites": {
+            "moduleInit": 0,
+            "function": 9,
+            "declaration": 0
+          },
+          "packages": {
+            "toad-cache": 9
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "'_' on '_' receivers (process.env keys and pure Record<string, T> keys delete)",
+          "count": 8,
+          "sites": {
+            "moduleInit": 0,
+            "function": 8,
+            "declaration": 0
+          },
+          "packages": {
+            "@octokit/oauth-methods": 4,
+            "toad-cache": 4
+          }
+        },
+        {
+          "code": "SC1031",
+          "family": "checked-dynamic object rest from a source that is not a plain variable (assign it to a variable first)",
+          "count": 4,
+          "sites": {
+            "moduleInit": 0,
+            "function": 4,
+            "declaration": 0
+          },
+          "packages": {
+            "@octokit/auth-app": 1,
+            "@octokit/auth-oauth-app": 1,
+            "@octokit/auth-oauth-user": 1,
+            "@octokit/oauth-methods": 1
+          }
+        },
+        {
+          "code": "SC2020",
+          "family": "'_' is typed by @types/node but has no scriptc lowering yet",
+          "count": 3,
+          "sites": {
+            "moduleInit": 0,
+            "function": 3,
+            "declaration": 0
+          },
+          "packages": {
+            "universal-github-app-jwt": 3
+          }
+        },
+        {
+          "code": "SC1043",
+          "family": "comparing non-number, non-string values",
+          "count": 2,
+          "sites": {
+            "moduleInit": 0,
+            "function": 2,
+            "declaration": 0
+          },
+          "packages": {
+            "@octokit/auth-app": 1,
+            "toad-cache": 1
+          }
+        },
+        {
+          "code": "SC1090",
+          "family": "constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic)",
+          "count": 2,
+          "sites": {
+            "moduleInit": 0,
+            "function": 2,
+            "declaration": 0
+          },
+          "packages": {
+            "@octokit/oauth-methods": 1,
+            "@octokit/plugin-retry": 1
+          }
+        },
+        {
+          "code": "SC1100",
+          "family": "optional chaining on '_' values",
+          "count": 2,
+          "sites": {
+            "moduleInit": 0,
+            "function": 2,
+            "declaration": 0
+          },
+          "packages": {
+            "@octokit/auth-oauth-user": 2
+          }
+        },
+        {
+          "code": "SC2009",
+          "family": "values of type '_' cannot be compiled: the function shape is supported, but its parameter '_' has type '_', which does not compile",
+          "count": 2,
+          "sites": {
+            "moduleInit": 0,
+            "function": 2,
+            "declaration": 0
+          },
+          "packages": {
+            "@octokit/auth-app": 2
+          }
+        },
+        {
+          "code": "SC2020",
+          "family": "'.keys() outside an immediate array spread' is part of the standard library types but has no scriptc lowering yet",
+          "count": 2,
+          "sites": {
+            "moduleInit": 0,
+            "function": 2,
+            "declaration": 0
+          },
+          "packages": {
+            "toad-cache": 2
+          }
+        }
+      ]
+    }
+  },
+  "elapsedMs": 61162,
+  "peakRssKiB": 697304,
+  "sources": 160,
+  "npmStatic": {
+    "static": 31,
+    "fallbackCount": 1,
+    "fallback": [
+      {
+        "package": "@reddb-io/toon",
+        "reason": "its inferred export surface breaks 3 import sites in program files — the package serves from the island instead (bundler-emitted surfaces type only as far as inference reaches)"
+      }
+    ]
+  },
+  "entrySha256": "d4251ce0efcabd24c156ec14199a5a625e158651347d6b4c45517cdb6b09e134"
+}

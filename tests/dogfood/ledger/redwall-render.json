@@ -1,0 +1,103 @@
+{
+  "schema": 2,
+  "name": "redwall-render",
+  "generatedAt": "2026-10-05T19:24:52.904Z",
+  "node": "v26.8.1",
+  "compiler": {
+    "head": "8585bf513a70c9dbbf1bf98db605a77094e39cbb",
+    "branch": "dogfood/ledger",
+    "dirtyPaths": 0
+  },
+  "entry": "${main}/.red/tmp/ts-rust-stable-audit-20260930/redwall-render.ts",
+  "options": {
+    "backend": "rust",
+    "allowEngine": false,
+    "npmStatic": "auto",
+    "target": "node26",
+    "optimization": "dev"
+  },
+  "consumer": {
+    "kind": "git",
+    "root": "${red-dev}",
+    "head": "b715031ce6fbe07ae085a451d2a4bfc47b1dc077",
+    "branch": "main",
+    "dirtyPaths": 226,
+    "dirtyTree": true,
+    "typesNode": {
+      "distinctVersions": [
+        "26.1.2",
+        "24.13.3"
+      ],
+      "roots": [
+        {
+          "version": "26.1.2",
+          "root": "${red-dev}/node_modules/@types/node",
+          "files": 82
+        },
+        {
+          "version": "24.13.3",
+          "root": "${main}/node_modules/.pnpm/@types+node@24.13.3/node_modules/@types/node",
+          "files": 66
+        }
+      ]
+    }
+  },
+  "stage": "preflight-failed",
+  "blockers": {
+    "total": null,
+    "note": "preflight failed: nothing lowered, so the lowering distance is unmeasured"
+  },
+  "preflight": {
+    "total": 6,
+    "byCode": {
+      "SC0001": 6
+    },
+    "byPackage": {
+      "<program>": 6
+    },
+    "firstParty": 6,
+    "thirdParty": 0,
+    "familyCount": 3,
+    "families": [
+      {
+        "code": "SC0001",
+        "pattern": "Parameter '_' implicitly has an '_' type.",
+        "count": 3,
+        "files": 1,
+        "variants": {
+          "code · any": 1,
+          "error · any": 1,
+          "signal · any": 1
+        }
+      },
+      {
+        "code": "SC0001",
+        "pattern": "Property '_' does not exist on type '_'.",
+        "count": 2,
+        "files": 1,
+        "variants": {
+          "on · ChildProcess": 2
+        }
+      },
+      {
+        "code": "SC0001",
+        "pattern": "Cannot find module '_' or its corresponding type declarations.",
+        "count": 1,
+        "files": 1,
+        "variants": {
+          "tuiuiu.js/red-dev": 1
+        }
+      }
+    ]
+  },
+  "elapsedMs": 5747,
+  "peakRssKiB": 393192,
+  "sources": 105,
+  "npmStatic": {
+    "static": 0,
+    "fallbackCount": 0,
+    "fallback": []
+  },
+  "entrySha256": "bd34e39fe83397a4e5ed379da568d06ef27ad84bc8fe1bd24192984f8dcffe7e",
+  "note": "Targets a dirty red-dev working tree through an ad hoc wrapper in the main checkout's scratch directory; another workstream is requalifying redwall against a clean clone and this entry will be replaced at integration."
+}

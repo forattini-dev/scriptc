@@ -121,6 +121,7 @@ export {
   renderDiagnostic,
 } from "./diagnostics/render.js";
 export { renderCoverage, type CoverageInput } from "./coverage/report.js";
+export type { RuntimeFenceSite } from "./frontend/lowering/lowerer.js";
 export {
   generateSurfaceManifest,
   renderSurfaceManifest,
@@ -391,6 +392,11 @@ export type CompileRequestResult = CompileSourceResult | CompileExecutableResult
 export interface AnalyzeResult {
   coverage: CoverageInput;
   sourceTexts: Map<string, string>;
+  /** Every declaration file the checker program loaded (default libs,
+   * @types, ambient and package .d.ts) — the type universe the analysis
+   * ran against. Tooling reads it to see, for example, which @types/node
+   * packages one program mixed; nothing in the analysis depends on it. */
+  declarationFiles: string[];
 }
 
 /** The platform the BUILD is for — the SCRIPTC_TARGET triple's OS under a
@@ -459,6 +465,8 @@ interface Frontend {
    * dispose — it reads the ts7 AST). */
   entryContract: () => ContractFacts;
   sourceTexts: () => Map<string, string>;
+  /** The program's declaration files (AnalyzeResult.declarationFiles). */
+  declarationFiles: () => string[];
   lower: (opts: LowerOptions) => LowerResult;
   /** Every program module in evaluation order (the tiering fixpoint's
    * universe of movable modules). */
@@ -706,6 +714,7 @@ function runFrontendWithDeclarations(
           (sf) => [sf.fileName, sf.text],
         ),
       ),
+    declarationFiles: () => finalLoad.program.getSourceFiles().filter((sf) => sf.isDeclarationFile).map((sf) => sf.fileName),
     lower: (opts) => lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, {
       ...opts,
       startupCrash: finalLoad.startupCrash ?? null,
@@ -797,6 +806,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
           preflightFailed: true,
         },
         sourceTexts: new Map(),
+        declarationFiles: [],
       };
     }
     ffi = loaded.profile;
@@ -826,6 +836,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
           preflightFailed: true,
         },
         sourceTexts: fe.sourceTexts(),
+        declarationFiles: fe.declarationFiles(),
       };
     }
     // Coverage also lowers unreached bodies in a separate throwaway pass.
@@ -882,7 +893,9 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
         diagnostics,
         ...(opts.backend === undefined ? {} : { backend: opts.backend }),
         ...(execution === undefined ? {} : { execution }),
-        ...(lowered.runtimeFences.length > 0 ? { runtimeFences: lowered.runtimeFences } : {}),
+        ...(lowered.runtimeFences.length > 0
+          ? { runtimeFences: lowered.runtimeFences, runtimeFenceSites: lowered.runtimeFenceSites }
+          : {}),
         ...(lowered.unreached ? { unreached: lowered.unreached } : {}),
         ...(lowered.npmBuiltins ? { npmBuiltins: lowered.npmBuiltins } : {}),
         ...(lowered.npmLazyTraps ? { npmLazyTraps: lowered.npmLazyTraps } : {}),
@@ -896,6 +909,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
         preflightFailed: false,
       },
       sourceTexts: fe.sourceTexts(),
+      declarationFiles: fe.declarationFiles(),
     };
   } finally {
     fe.dispose();

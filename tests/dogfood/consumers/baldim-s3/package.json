@@ -1,0 +1,13 @@
+{
+  "name": "scriptc-baldim-rust-probe",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@baldim/adapter-s3": "0.1.2",
+    "@baldim/core": "0.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "25.5.2",
+    "@types/lodash-es": "4.17.12"
+  }
+}

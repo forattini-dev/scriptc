@@ -82,6 +82,20 @@ test("JavaScript builtin aliases keep their deferred value fence", async () => {
   );
 });
 
+test("deferred fences in unreached JavaScript report in their own group", async () => {
+  // The entry path is clean and the never-called function's fences are
+  // what the remainder pass finds: they render dim, apart from the reached
+  // "deferred to runtime" sites, so the unreached share is measurable —
+  // and the structured result carries them beside the remainder's stats.
+  await expect(report(fixture("js-unreached-fence.js"))).toMatchFileSnapshot(
+    "__snapshots__/coverage-js-unreached-fence.txt",
+  );
+  const { coverage } = analyze(fixture("js-unreached-fence.js"));
+  expect(coverage.runtimeFences).toBeUndefined();
+  expect(coverage.unreached?.runtimeFences?.map((d) => d.code)).toEqual(["SC1090", "SC2004"]);
+  expect(coverage.unreached?.runtimeFenceSites).toEqual(["function", "function"]);
+});
+
 test("any-typed checked-dynamic locals honor the --dynamic coverage promise", () => {
   const file = join(repoRoot, "tests/corpus/2856-dynamic-any-local-operators.ts");
   const staticCoverage = analyze(file).coverage;

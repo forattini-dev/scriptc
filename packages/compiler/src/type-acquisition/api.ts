@@ -31,6 +31,6 @@ export async function analyzeAsync(entry: string, options: AsyncAnalyzeOptions =
       file: entry, dynamic: options.dynamic ?? false, preflightFailed: true,
       stats: { statementsTotal: 0, statementsFailed: 0, statementsIsland: 0, functionsSkipped: 0 },
       diagnostics: [diagnostic],
-    }, sourceTexts: new Map(),
+    }, sourceTexts: new Map(), declarationFiles: [],
   }));
 }

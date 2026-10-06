@@ -916,7 +916,7 @@ function deferJsCollectionDiags(lowerer: Lowerer, sf: ts.SourceFile, diagsBefore
   const captured = lowerer.diags.splice(diagsBefore);
   const ice = captured.filter((d) => d.code === "SC9001");
   if (ice.length > 0) lowerer.diags.push(...ice);
-  lowerer.runtimeFences.push(...captured.filter((d) => d.code !== "SC9001"));
+  lowerer.recordRuntimeFences(captured.filter((d) => d.code !== "SC9001"));
 }
 
 /** A scalar-literal expression a single-value `module.exports =` can carry
