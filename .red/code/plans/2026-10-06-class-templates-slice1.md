@@ -54,3 +54,18 @@ The existing top-level specialisation (`class-factory-*`, `lower-mixins.ts`) kee
 - `class D extends <expr>` admits a template evaluation when the checker's type of the expression is a single class static side declared by a template node and the lowered value is exactly that template's evaluation class. Unions, `any`, refused templates, and derived classes that are not top-level declarations keep named refusals.
 - Rust backend: reading an immutable object-typed module global in its temporal dead zone now throws Node's `ReferenceError: Cannot access 'X' before initialization` instead of panicking (`values.ts`), which the heritage TDZ case needs.
 - Known gap left untouched: `new C(arguments[0])` inside a function that reads `arguments` produces Rust that does not compile (pre-existing, reproduced without templates).
+
+## Measurement (M3)
+
+`scripts/dogfood-ledger.mjs --entry baldim-aws-only --json` with `SCRIPTC_DOGFOOD_BALDIM` pointing at the read-only probe workspace `baldim-rust-20261001-nDbseO`, options `{backend: rust, allowEngine: false, target: node26, optimization: dev, npmStatic: auto}`, Node 26.8.1. The baseline ran with the compiler sources of `5675ef93` checked out in this worktree; the second run is this branch.
+
+| | baseline `5675ef93` | class templates |
+| --- | --- | --- |
+| stage | fenced | frontier (totals are a floor) |
+| blockers | 1054 (0 lowering + 1054 reached fences) | 937 (115 lowering + 822 reached fences) |
+| fence `extending computed expressions` | 113 | 0 |
+| fence SC2004 cascades / SC1090 | 321 / 379 | 196 / 267 |
+| statements total / failed | 8558 / 727 | 8698 / 832 |
+| elapsed / peak RSS | 43.0 s / 716 MB | 42.6 s / 596 MB |
+
+The 112 command declarations did not retire: they moved from runtime fences to 112 SC2004 lowering cascades on the one binding `command = makeBuilder(...)` in `@aws-sdk/client-s3`. The template inside `ClassBuilder.build()` now collects, and its remaining root blockers are two field initializers of the returned class, `serialize = closure._serializer` and `deserialize = closure._deserializer` ("reading '_serializer' from a value of type 'this'": the builder's `_serializer = null` field has no usable lowering through the captured polymorphic `this`). A third direct diagnostic is a separate template, `buildNativeClass$1(nativeCrc32)` in `@smithy/core` checksum, refused because the captured `zlib.crc32` function type has no lowering. Newly reached code adds five `compound assignment as an expression` fences, five instanceof-on-non-instance fences and four standard-library fences. The `loadConfig`/`getEndpointPlugin` chain was not reached by this run, so nothing about it is measured here.
