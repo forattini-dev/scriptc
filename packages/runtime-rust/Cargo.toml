@@ -38,7 +38,7 @@ regress = { version = "0.12.0", features = ["prohibit-unsafe", "utf16"] }
 ring = "=0.17.14"
 scriptc-island-v8 = { path = "island-v8", optional = true }
 rusqlite = { version = "=0.40.1", default-features = false, features = ["bundled", "serialize", "cache"], optional = true }
-rustls = { version = "=0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "=2.2.0"
 signal-hook = { version = "=0.4.4", default-features = false }
 url = "=2.5.0"
