@@ -26,8 +26,8 @@ regex.ts:11:17 - error SC1090: regex methods as values (call 'test' directly) ar
 regex.ts:15:22 - error SC2020: 'RegExpExecArray.groups' is part of the standard library types but has no scriptc lowering yet
 
   14 |   const m = re.exec("2024-07");
-  15 |   if (m) console.log(m.groups);
-     |                      ^~~~~~~~
+  15 |   if (m) console.log(m?.groups);
+     |                      ^~~~~~~~~
   16 | }
 
   hint: '.groups' lowers when the match's regex is STATICALLY known — a regex literal, or a const initialized with one (the group-name table is built at compile time) — and the read is not an optional-chain step: narrow the match instead (if (m) { m.groups } or m!.groups)

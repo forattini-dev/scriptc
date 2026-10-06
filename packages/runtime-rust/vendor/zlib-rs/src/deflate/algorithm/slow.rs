@@ -15,15 +15,15 @@ pub fn deflate_slow(stream: &mut DeflateStream, flush: DeflateFlush) -> BlockSta
     let mut dist;
     let mut match_len;
 
-    let use_longest_match_slow = stream.state.max_chain_length > 1024;
+    let node_slow = crate::deflate::node_slow_level(stream.state.level);
+    let use_longest_match_slow = stream.state.max_chain_length > 1024 && !node_slow;
     let valid_distance_range = 1..=stream.state.max_dist() as isize;
 
     let mut match_available = stream.state.match_available;
     // Node inserts a three-byte terminal match too; fill_window initializes
     // the fourth hash byte in the lookahead padding. Keep upstream behavior
     // for all levels not owned by the opt-in compatibility patch.
-    let node_level_six = cfg!(feature = "scriptc-node-level6") && stream.state.level == 6;
-    let min_insert = if node_level_six {
+    let min_insert = if node_slow {
         STD_MIN_MATCH
     } else {
         WANT_MIN_MATCH
@@ -78,7 +78,7 @@ pub fn deflate_slow(stream: &mut DeflateStream, flush: DeflateFlush) -> BlockSta
 
             // Node's TOO_FAR heuristic rejects three-byte matches farther
             // than 4096 bytes, even with the default (unfiltered) strategy.
-            let distant_three_byte_match = node_level_six
+            let distant_three_byte_match = node_slow
                 && match_len == STD_MIN_MATCH
                 && state.strstart - state.match_start as usize > 4096;
             if match_len <= 5 && (state.strategy == Strategy::Filtered || distant_three_byte_match)

@@ -5272,7 +5272,9 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
    * string receiver whose FIRST ARGUMENT is a regex (the string-pattern
    * overloads keep their island lowering — the argument's mapped type is
    * what routes here, before lowerIslandMethodCall can claim the name).
-   * Null when neither shape matches. */
+   * Null when neither shape matches.
+   *
+   * @deprecated Dead twin: nothing calls this copy. The live implementation is `lowerRegexMethodCall` in `containers/string-and-regexp.ts`, and a fix made only here never takes effect (the lost `.set`, stateful regex and function-replacement behaviours were hidden this way). */
   export function lowerRegexMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,
     dynReceiver?: () => IrExpr,): IrExpr | null {
@@ -5455,7 +5457,9 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
    * optional arguments are omitted from `args` — the backend fills the
    * documented defaults; the IR never encodes them (Infinity isn't
    * JSON-safe). tsc has already checked arity and argument types against
-   * ambient/scriptc.d.ts. */
+   * ambient/scriptc.d.ts.
+   *
+   * @deprecated Dead twin: nothing calls this copy. The live implementation is `lowerStringMethodCall` in `containers/string-and-regexp.ts`, and a fix made only here never takes effect (the lost `.set`, stateful regex and function-replacement behaviours were hidden this way). */
   export function lowerStringMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,
     dynReceiver?: () => IrExpr,): IrExpr | null {
@@ -5647,7 +5651,9 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
    * ArrayLike/Iterable union, which cannot map — the Set-seed pattern), or
    * a number[]-typed value. ArrayBuffer/view forms are fenced: scriptc
    * typed arrays own their storage. Null when this isn't a stdlib
-   * typed-array construction. */
+   * typed-array construction.
+   *
+   * @deprecated Dead twin: nothing calls this copy. The live implementation is `lowerBytesNew` in `containers/bytes.ts`, and a fix made only here never takes effect (the lost `.set`, stateful regex and function-replacement behaviours were hidden this way). */
   export function lowerBytesNew(lowerer: Lowerer, expr: ts.NewExpression, symbol: ts.Symbol | null | undefined): IrExpr | null {
     if (symbol && symbol.name === "DataView" && lowerer.isStdlibSymbol(symbol)) {
       return lowerDataViewNew(lowerer, expr);
@@ -5840,7 +5846,9 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
    * whole numeric read/write family (fixed widths BE/LE and the
    * variable-width read/writeUIntLE quartet — BUF_NUM_METHODS). Everything
    * else the lib declares (fill, indexOf, reverse, ...) falls through to
-   * the SC2020 member fence. Null when this isn't a bytes method call. */
+   * the SC2020 member fence. Null when this isn't a bytes method call.
+   *
+   * @deprecated Dead twin: nothing calls this copy. The live implementation is `lowerBytesMethodCall` in `containers/bytes.ts`, and a fix made only here never takes effect (the lost `.set`, stateful regex and function-replacement behaviours were hidden this way). */
   export function lowerBytesMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (lowerer.chainBlocked(access, call)) return null;
@@ -6445,7 +6453,9 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
 /** The Buffer statics — `Buffer.from(...)`, `Buffer.alloc(n)`,
    * `Buffer.concat(list)`, `Buffer.isBuffer(x)` — on THE stdlib Buffer
    * global (name + provenance; fallback and @types/node alike). Null when
-   * the callee isn't a Buffer-static access. */
+   * the callee isn't a Buffer-static access.
+   *
+   * @deprecated Dead twin: nothing calls this copy. The live implementation is `lowerBufferStaticCall` in `containers/bytes.ts`, and a fix made only here never takes effect (the lost `.set`, stateful regex and function-replacement behaviours were hidden this way). */
   export function lowerBufferStaticCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;

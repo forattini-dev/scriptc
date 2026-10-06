@@ -1,6 +1,7 @@
 // @no-engine
 // Compression borrows only the selected view and releases it before the next
 // alias write. Print decompressed bytes: compressed output is codec-dependent.
+// The fixed-level forms are Rust-only; corpus 3489 runs them over the same views.
 import {
   deflateRawSync,
   deflateSync,
@@ -12,8 +13,6 @@ import {
 
 function check(input: Uint8Array): void {
   console.log("default", inflateSync(deflateSync(input)).toString("hex"));
-  console.log("level0", inflateSync(deflateSync(input, { level: 0 })).toString("hex"));
-  console.log("level9", inflateSync(deflateSync(input, { level: 9 })).toString("hex"));
   console.log("raw", inflateRawSync(deflateRawSync(input)).toString("hex"));
   console.log("gzip", gunzipSync(gzipSync(input)).toString("hex"));
 }

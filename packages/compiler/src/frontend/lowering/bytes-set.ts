@@ -3,9 +3,23 @@ import { BOOL, F64, VOID, isUnitType, typeEquals, type IrExpr, type IrStmt, type
 import { numLit, varRef } from "../../ir/build.js";
 import { locOf } from "../program.js";
 import { nodeThrowExpr, type Lowerer } from "./lowerer.js";
+import { lowerBytesSetCall } from "./lower-native-containers.js";
 
-/** The existing same-kind TypedArray.set contract, with a Rust-only
- * presence-aware source path for array iteration. Other forms still refuse. */
+/** Sources that copy element by element: number[], array literals and
+ * homogeneous numeric tuples. The checker's type decides, before any operand
+ * lowers, so the numeric-sequence path never lowers an operand twice. */
+function isNumericSequenceSource(L: Lowerer, node: ts.Expression): boolean {
+  if (ts.isArrayLiteralExpression(node) && !node.elements.some(ts.isSpreadElement)) return true;
+  const type = L.mapTypeOf(L.typeOf(node));
+  if (type?.kind === "array") return type.elem.kind === "f64";
+  if (type?.kind !== "record") return false;
+  const shape = L.shapes.get(type.shapeId);
+  return shape?.tuple === true && shape.fields.every((field) => field.type.kind === "f64");
+}
+
+/** TypedArray.set: a same-kind typed array copies in, number[] and numeric
+ * tuples convert element by element (lowerBytesSetCall), and a Rust-only
+ * presence-aware source path serves array iteration. Other forms still refuse. */
 export function lowerSameKindBytesSetCall(
   L: Lowerer,
   call: ts.CallExpression,
@@ -16,6 +30,7 @@ export function lowerSameKindBytesSetCall(
   if (call.arguments.length < 1 || call.arguments.length > 2) {
     L.noLowering(`.set with ${call.arguments.length} arguments on typed arrays`, call);
   }
+  if (isNumericSequenceSource(L, call.arguments[0]!)) return lowerBytesSetCall(L, call, access, expected);
   const receiver = L.lowerExpr(access.expression);
   const source = L.lowerExpr(call.arguments[0]!);
   const optional = lowerOptionalBytesSet(L, call, receiver, source, expected);
@@ -24,7 +39,7 @@ export function lowerSameKindBytesSetCall(
     L.noLowering(
       `.set from '${L.fmt(source.type)}' values`,
       call.arguments[0]!,
-      "only a same-kind typed array copies in (number[] sources have no lowering — narrow unions first)",
+      "supported sources are a same-kind typed array, number[] or a numeric tuple (narrow unions first)",
     );
   }
   const args = [source];

@@ -1,7 +1,7 @@
 import { lowerNumericParser } from "./lower-numeric-parser.js";
 import { lowerFsWriteOptions } from "./lower-fs-write-options.js";
 import { fsConstantValue } from "./fs-constants.js";
-import { lowerDeflateLevel, lowerZlibModuleCall } from "./lower-zlib.js";
+import { lowerZlibModuleCall } from "./lower-zlib.js";
 import { registerPromisifiedZlibRaw } from "./lower-promisify-zlib.js";
 import { registerPromisifiedDnsLookup } from "./lower-dns-promises.js";
 import { InternalCompilerError } from "../../errors.js";
@@ -141,8 +141,19 @@ function lowerBuiltinValuePreservingUndefined(lowerer: Lowerer, node: ts.Express
     lowerer.lowerExpr(node);
 }
 
+/** The union that carries `target` plus only unit arms (`T | null | undefined`)
+ * and so can hold a narrowed use of `T` together with the absence that the
+ * narrowing does not prove. */
+function unitPaddedUnion(lowerer: Lowerer, actual: IrType, target: IrType): IrType | null {
+  if (actual.kind !== "union") return null;
+  const def = lowerer.unions.get(actual.unionId);
+  if (!def || lowerer.armTag(actual.unionId, UNDEFINED_T) < 0) return null;
+  const rest = def.arms.filter((arm) => !isUnitType(arm));
+  return rest.length === 1 && typeEquals(rest[0]!, target) ? actual : null;
+}
+
 function checkedOptionalBuiltinArm(lowerer: Lowerer, value: IrExpr, target: IrType): IrExpr | null {
-  const widened = lowerer.runtimeOptionalWidening(value.type, target);
+  const widened = lowerer.runtimeOptionalWidening(value.type, target) ?? unitPaddedUnion(lowerer, value.type, target);
   if (!widened || widened.kind !== "union") return null;
   const helper = lowerer.narrowedArmHelper(widened.unionId, target, value.loc);
   return helper
@@ -150,42 +161,53 @@ function checkedOptionalBuiltinArm(lowerer: Lowerer, value: IrExpr, target: IrTy
     : null;
 }
 
+/** Number.isFinite/isNaN/isInteger/isSafeInteger over a tagged union that
+ * holds a number plus absence: `number | undefined` (a read that may observe a
+ * missing element), `number | null` and the three-arm union. The statics never
+ * coerce, so every unit arm answers false and only the number arm reaches the
+ * predicate. The value stays tagged on purpose: the checker may have narrowed
+ * this use to `number`, but the stored union can still carry the absence that
+ * narrowing does not prove. */
 function lowerOptionalNumberPredicate(
   lowerer: Lowerer,
   value: IrExpr,
   fn: IrLibFn,
   loc: SrcLoc,
 ): IrExpr | null {
-  const widened = lowerer.runtimeOptionalWidening(value.type, F64);
-  if (!widened || widened.kind !== "union") return null;
-  const numberTag = lowerer.armTag(widened.unionId, F64);
-  const undefinedTag = lowerer.armTag(widened.unionId, UNDEFINED_T);
-  if (numberTag < 0 || undefinedTag < 0) return null;
-  const key = `number.optionalPredicate:${fn}:${widened.unionId}`;
+  if (value.type.kind !== "union") return null;
+  const unionId = value.type.unionId;
+  const def = lowerer.unions.get(unionId);
+  const numberTag = lowerer.armTag(unionId, F64);
+  if (!def || numberTag < 0 || !def.arms.every((arm) => typeEquals(arm, F64) || isUnitType(arm))) return null;
+  const widened = value.type;
+  const key = `number.optionalPredicate:${fn}:${unionId}`;
   let helper = lowerer.widthHelpers.get(key);
   if (!helper) {
     helper = `%number.optionalPredicate.${lowerer.widthHelpers.size}`;
     lowerer.widthHelpers.set(key, helper);
     const input = varRef("value.0", widened, loc);
+    const absent: IrStmt[] = def.arms.flatMap((arm, tag): IrStmt[] => isUnitType(arm)
+      ? [{
+          kind: "if",
+          cond: { kind: "unionIsTag", unionId, tag, negated: false, value: input, type: BOOL, loc },
+          then: [{ kind: "return", value: boolLit(false, loc), loc }],
+          else_: null,
+          loc,
+        }]
+      : []);
     lowerer.liftedFns.push({
       name: helper,
       params: [{ localId: "value.0", name: "value", type: widened }],
       returnType: BOOL,
       locals: [{ id: "value.0", name: "value", type: widened, mutable: false }],
       body: [
-        {
-          kind: "if",
-          cond: { kind: "unionIsTag", unionId: widened.unionId, tag: undefinedTag, negated: false, value: input, type: BOOL, loc },
-          then: [{ kind: "return", value: boolLit(false, loc), loc }],
-          else_: null,
-          loc,
-        },
+        ...absent,
         {
           kind: "return",
           value: {
             kind: "libCall",
             fn,
-            args: [{ kind: "unionNarrow", unionId: widened.unionId, tag: numberTag, value: input, type: F64, loc }],
+            args: [{ kind: "unionNarrow", unionId, tag: numberTag, value: input, type: F64, loc }],
             type: BOOL,
             loc,
           },
@@ -1858,17 +1880,6 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     }
     const writeOptions = lowerFsWriteOptions(lowerer, expr, bi, loc);
     if (writeOptions) return writeOptions;
-    if (bi.module === "zlib" && bi.member === "deflateSync" && expr.arguments.length === 2) return lowerDeflateLevel(lowerer, expr);
-    if (bi.module === "zlib" && expr.arguments.length >= 1) {
-      const dataIr = lowerer.mapTypeOf(lowerer.typeOf(expr.arguments[0]!));
-      if (!(dataIr?.kind === "bytes" && dataIr.elem === "u8")) {
-        lowerer.noLowering(
-          `${bi.member} of '${dataIr ? lowerer.fmt(dataIr) : lowerer.checker.typeToString(lowerer.typeOf(expr.arguments[0]!))}' data`,
-          expr.arguments[0]!,
-          `zlib works on Buffers: ${bi.member}(Buffer.from(s, "utf8"))`,
-        );
-      }
-    }
     if (fn.variadicPack) {
       // join(...parts) forwards the array itself; mixing spread and plain
       // arguments (or spreading anything but a string[]) stays out.

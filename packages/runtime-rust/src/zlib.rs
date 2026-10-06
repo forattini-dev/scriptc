@@ -244,23 +244,32 @@ fn zlib_compress_bytes(source: &[u8], zlib_header: bool) -> Vec<u8> {
     zlib_compress_bytes_level(source, zlib_header, Compression::default())
 }
 
+/// Node hands zlib one `Z_DEFAULT_CHUNK` (16 KiB) output buffer per call and
+/// loops while it comes back full. Stored blocks are cut against the output
+/// space available, so the block layout of `{ level: 0 }` (and the stored
+/// fallback inside any level) only matches Node when the compressor sees the
+/// same buffer size.
+const NODE_ZLIB_CHUNK: usize = 16 * 1024;
+
 fn zlib_compress_bytes_level(source: &[u8], zlib_header: bool, level: Compression) -> Vec<u8> {
     let mut compressor = Compress::new(level, zlib_header);
     let mut output = Vec::new();
+    let mut chunk = vec![0_u8; NODE_ZLIB_CHUNK];
     let mut consumed = 0;
     loop {
-        output.reserve(32 * 1024);
         let input_before = compressor.total_in();
         let output_before = compressor.total_out();
         let status = compressor
-            .compress_vec(&source[consumed..], &mut output, FlushCompress::Finish)
+            .compress(&source[consumed..], &mut chunk, FlushCompress::Finish)
             .expect("scriptc: zlib deflate failed");
         consumed += (compressor.total_in() - input_before) as usize;
+        let produced = (compressor.total_out() - output_before) as usize;
+        output.extend_from_slice(&chunk[..produced]);
         if status == Status::StreamEnd {
             return output;
         }
         assert!(
-            compressor.total_in() != input_before || compressor.total_out() != output_before,
+            compressor.total_in() != input_before || produced != 0,
             "scriptc: zlib deflate made no progress",
         );
     }

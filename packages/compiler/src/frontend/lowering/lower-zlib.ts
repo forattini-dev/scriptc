@@ -24,7 +24,7 @@ export function lowerDeflateLevel(L: Lowerer, call: ts.CallExpression): IrExpr {
     L.noLowering("deflateSync compression level", property.initializer, "native fixed levels currently cover -1 (default), 0 (stored), and 9 (best); fast/intermediate byte compatibility is not implemented");
   }
   return { kind: "libCall", fn: "zlib.deflateSyncLevel", args: [
-    L.lowerExprExpecting(call.arguments[0]!, BYTES_U8), L.lowerExprExpecting(property.initializer, F64),
+    zlibInputBytes(L, call.arguments[0]!, locOf(call)), L.lowerExprExpecting(property.initializer, F64),
   ], type: BYTES_U8, loc: locOf(call) };
 }
 
@@ -108,6 +108,15 @@ export function lowerZlibModuleCall(
   }
   const syncFn = ZLIB_SYNC_FNS[member];
   if (syncFn !== undefined) {
+    // The fixed-level deflate form is the one explicit-options shape with a
+    // byte-compatible native path, and only where the runtime reproduces
+    // Node's streams (Rust). The C and LLVM runtimes use the system zlib,
+    // whose bytes differ, so there the call keeps the explicit-options
+    // refusal below. It has to be decided here: this function is the zlib
+    // entry point, so a later dispatch never sees the call.
+    if (member === "deflateSync" && expr.arguments.length === 2 && lowerer.nativeDeflateLevels) {
+      return lowerDeflateLevel(lowerer, expr);
+    }
     if (expr.arguments.length !== 1) {
       lowerer.noLowering(
         `${member} with explicit options`,
