@@ -1,0 +1,126 @@
+{
+  "schema": 1,
+  "reds": {
+    "corpus": {
+      "2534-object-rest-decl.ts": "AssertionError: expected '1 2 3 4\\n{\"beta\":2,\"delta\":4,\"gamma\":…' to be '1 2 3 4\\n{\"beta\":2,\"gamma\":3,\"delta\":…' // Object.is equality",
+      "2736-agentic-safe-own-property.ts": "rust backend regressed out of full-corpus parity on 2736-agentic-safe-own-property.ts: SC2020 'Object.prototype.hasOwnProperty with this property key' is part of the standard library types but has no …",
+      "2906-bigint-wasi-width.ts": "rust backend regressed out of full-corpus parity on 2906-bigint-wasi-width.ts: SC2003 union types must match exactly: expected 'number', got 'number | undefined' (a union re-tags into another union on…",
+      "2917-builtin-callable-widths.ts": "rust backend regressed out of full-corpus parity on 2917-builtin-callable-widths.ts: SC1090 library functions as values (call 'basename' directly) are not supported yet; SC1090 library functions as va…",
+      "2972-http-static-distinct-snapshots.ts": "rust backend regressed out of full-corpus parity on 2972-http-static-distinct-snapshots.ts: SC2020 'IncomingMessage.rawTrailers' is part of the standard library types but has no scriptc lowering yet; …",
+      "2975-http-static-client-controls.ts": "rust backend regressed out of full-corpus parity on 2975-http-static-client-controls.ts: SC3001 rust backend does not support library call 'http.clientWritableEnded' yet",
+      "2983-http-static-close-idle.ts": "rust backend regressed out of full-corpus parity on 2983-http-static-close-idle.ts: SC3001 rust backend does not support library call 'http.serverCloseIdleConnections' yet",
+      "2984-http-static-close-upgrade.ts": "rust backend regressed out of full-corpus parity on 2984-http-static-close-upgrade.ts: SC3001 rust backend does not support library call 'http.serverOnUpgrade' yet",
+      "2988-http-static-client-abort.ts": "rust backend regressed out of full-corpus parity on 2988-http-static-client-abort.ts: SC3001 rust backend does not support library call 'http.clientAborted' yet",
+      "3052-array-construction.ts": "AssertionError: expected 'count 4 true true\\ncount-write 4 true…' to be 'count 4 false true\\ncount-write 4 tru…' // Object.is equality",
+      "3207-native-bigint-dynamic-operations.js": "AssertionError: expected '' to be '20 14 51 5 2 4913\\n20 14 51 5.6666666…' // Object.is equality"
+    },
+    "focus-node24": {
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3447-cjs-conditional-function/main.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3448-cjs-conditional-require/main.cjs'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3449-cjs-conditional-export-forwardin…'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3444-builtin-error-calls.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3445-builtin-error-call-causes.cjs'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3446-builtin-error-call-shadowing.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…"
+    },
+    "focus-node26": {
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3447-cjs-conditional-function/main.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3448-cjs-conditional-require/main.cjs'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-cjs-conditional-export.test.ts > 'llvm' 'dev' selects CommonJS exports at runtime: '3449-cjs-conditional-export-forwardin…'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3444-builtin-error-calls.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3445-builtin-error-call-causes.cjs'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…",
+      "packages/compiler/test/native-error-call.test.ts > 'llvm' preserves callable builtin Error constructors: '3446-builtin-error-call-shadowing.ts'": "AssertionError: SC3005: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false t…"
+    },
+    "runtime-crate": {
+      "cargo-clippy::clippy::chunks-exact-to-as-chunks::src/zlib.test.rs": "error: using `chunks_exact` with a constant chunk size"
+    },
+    "rust-unit": {
+      "packages/compiler/test/class-shorthand-values.test.ts > 'llvm': '3375-js-error-class-registry.js' preserves class identity, names and construction": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/class-shorthand-values.test.ts > 'llvm': '3376-js-error-class-registry-modules/…' preserves class identity, names and construction": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/emit-rust-dynamic-error-subclass.test.ts > Rust dynamic error coercion preserves formatting and own conversion hooks": "Command failed: <tmp>/rust-unit/scriptc-rust-error-coercion-<rand>/program",
+      "packages/compiler/test/emit-rust-fs-checked.test.ts > Rust filesystem argument ladders match Node byte-for-byte": "AssertionError: rust backend does not support fs.readFileChk checked filesystem shape yet: expected false to be true // Object.is equality",
+      "packages/compiler/test/emit-rust.test.ts > Rust async state machines resume settled promises on microtasks": "AssertionError: expected 214037 to be less than 200000",
+      "packages/compiler/test/emit-rust.test.ts > Rust dynamic prototype dispatch preserves array mutation and string conversion": "Test timed out in 120000ms.",
+      "packages/compiler/test/inherited-field-reset.test.ts > llvm bare inherited fields reset to undefined at their own initialization position": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/instance-constructor-name.test.ts > 'llvm': '3377-js-instance-constructor-name.js' reads the runtime class name": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/instance-constructor-name.test.ts > 'llvm': '3378-js-instance-constructor-late.js' reads the runtime class name": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/instance-constructor-name.test.ts > 'llvm': '3379-instance-constructor-late-dispat…' reads the runtime class name": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/instance-constructor-name.test.ts > 'llvm': '3380-js-instance-constructor-name-eff…' reads the runtime class name": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/js-object-rest.test.ts > 'llvm': '3371-js-object-rest-super.js' matches Node with fresh shallow rest": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/js-object-rest.test.ts > 'llvm': '3372-js-object-rest-order.js' matches Node with fresh shallow rest": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/js-object-rest.test.ts > 'llvm': '3373-js-object-rest-nullish.js' matches Node with fresh shallow rest": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/js-object-rest.test.ts > 'llvm': 'source-boundary.js' retains a named refusal outside ordinary data objects": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/js-recursive-closure-factory.test.ts > 'llvm' module-scope factories preserve captures and independent instance state: '3361-js-recursive-closure-factory.js'": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/js-recursive-closure-factory.test.ts > 'llvm' module-scope factories preserve captures and independent instance state: '3362-js-untyped-closure-factory.js'": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/js-rest-binding-pattern.test.ts > llvm rest patterns preserve JavaScript packing and typed tuple semantics: 2085-destructuring-heads-rest-params.ts": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/js-rest-binding-pattern.test.ts > llvm rest patterns preserve JavaScript packing and typed tuple semantics: 3358-js-rest-binding-pattern.js": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/js-throw-only-virtual-return.test.ts > 'llvm' virtual calls preserve override values and base throws: '3359-js-throw-only-virtual-return.js'": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/js-throw-only-virtual-return.test.ts > 'llvm' virtual calls preserve override values and base throws: '3360-js-throw-only-virtual-family.js'": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/native-container-admission.test.ts > deflate level -2 retains an explicit compatibility refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > deflate level 1 retains an explicit compatibility refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > deflate level 10 retains an explicit compatibility refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > deflate level 2 retains an explicit compatibility refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > deflate level 3 retains an explicit compatibility refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > deflate level 4 retains an explicit compatibility refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > deflate level 5 retains an explicit compatibility refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > deflate level 6 retains an explicit compatibility refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > deflate level 7 retains an explicit compatibility refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > deflate level 8 retains an explicit compatibility refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > length writes that introduce holes retain their refusal": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-container-admission.test.ts > written filter refuses an unproven payload tag: (value = \"replacement\"): value is string => value != null": "AssertionError: expected false to be true // Object.is equality",
+      "packages/compiler/test/native-factory-admission.test.ts > factory methods using this retain their existing explicit refusal": "AssertionError: expected undefined to be true // Object.is equality",
+      "packages/compiler/test/native-import-corpus-admission.test.ts > native import corpus prohibits the engine: <repo>tests/corpus/3046-array-indexed-ref-identity.ts": "AssertionError: expected 'type Item = { label: string };\\n\\ncon…' to contain '// @no-engine'",
+      "packages/compiler/test/native-tuple-check.test.ts > checked homogeneous tuple views validate arrays and preserve extra positions": "AssertionError: expected 'identity false true a\\nlength 2 [\"cha…' to be 'identity true true changed\\nlength 3 …' // Object.is equality",
+      "packages/compiler/test/no-engine.test.ts > deferred runtime refusals fail native admission at the original source location": "AssertionError: expected 'SC1090' to be 'SC3003' // Object.is equality",
+      "packages/compiler/test/npm-static-inherited-methods.test.ts > llvm npm-static implicit methods preserve base-typed virtual dispatch and super calls": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/object-assign-class.test.ts > 'llvm': '3381-js-object-assign-class.js' mutates class fields in place": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/object-assign-class.test.ts > 'llvm': '3382-js-object-assign-class-dynamic.js' mutates class fields in place": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/object-assign-class.test.ts > 'llvm': '3383-object-assign-class-presence.ts' mutates class fields in place": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/object-assign-class.test.ts > 'llvm': 'unknown-key.js' retains an explicit runtime boundary": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/process-module-members.test.ts > LLVM process member bindings preserve imported and destructured live env access": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "packages/compiler/test/regex-stateful.test.ts > Rust admits stateful exec while legacy backends keep an explicit refusal": "AssertionError: expected [ { code: 'SC1121', …(4) } ] to deeply equal []",
+      "packages/compiler/test/regex-stateful.test.ts > Rust admits stateful test while legacy backends keep an explicit refusal": "AssertionError: expected [ { code: 'SC1121', …(4) } ] to deeply equal []",
+      "packages/compiler/test/typed-array-from.test.ts > llvm TypedArray.from coerces numeric elements and makes independent copies": "AssertionError: [{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scri…",
+      "tests/harness/npm-inferred-containers.test.ts > llvm retains array properties after npm string specialization": "AssertionError: {\"ok\":false,\"diagnostics\":[{\"code\":\"SC3005\",\"message\":\"LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen …",
+      "tests/harness/npm-static-contextual-any.test.ts > a changed declaration invalidates prior callback admission with llvm": "AssertionError: expected false to be true // Object.is equality",
+      "tests/harness/npm-static-contextual-any.test.ts > an originally untyped callback still fails the strict TypeScript gate": "AssertionError: expected true to be false // Object.is equality",
+      "tests/harness/npm-static-contextual-any.test.ts > contextual callbacks preserve runtime values with llvm": "AssertionError: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false to be tru…",
+      "tests/harness/npm-static-transitive.test.ts > auto discovers a dependency named only by a transitive reexport": "AssertionError: expected false to be true // Object.is equality",
+      "tests/harness/npm-static-transitive.test.ts > transitive auto native parity with backend llvm": "AssertionError: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false to be tru…",
+      "tests/harness/npm-static-types.test.ts > type-only npm exports match Node with backend llvm and no engine": "AssertionError: LLVM native helper package @scriptc/llvm-linux-x64-gnu is incomplete: <repo>packages/llvm-linux-x64-gnu/bin/scriptc-llvm-codegen is missing; reinstall scriptc: expected false to be tru…",
+      "tests/harness/rust-regex-stateful.test.ts > Rust regex parity: npm-static/is-extglob-native/main.ts": "AssertionError: [{\"code\":\"SC3003\",\"message\":\"--no-engine refuses deferred unsupported functionality: [SC1121] '.test()' on a regex with the 'g' or 'y' flag is not supported yet\",\"loc\":{\"file\":\"<repo>t…",
+      "tests/harness/rust-regex-stateful.test.ts > Rust regex parity: regex-stateful/main.ts": "AssertionError: [{\"code\":\"SC1121\",\"message\":\"'.test()' on a regex with the 'g' or 'y' flag is not supported yet\",\"loc\":{\"file\":\"<repo>tests/fixtures/regex-stateful/main.ts\",\"start\":23,\"end\":38},\"miles…"
+    }
+  },
+  "calibration": {
+    "corpus": {
+      "commit": "170c4dc2ebc9128af7ebfca1e57ca6e45e35c539",
+      "date": "2026-10-05",
+      "scope": "shards 1,21 of 40",
+      "complete": false
+    },
+    "focus-node24": {
+      "commit": "170c4dc2ebc9128af7ebfca1e57ca6e45e35c539",
+      "date": "2026-10-05",
+      "scope": "28 of 28 files",
+      "complete": true
+    },
+    "focus-node26": {
+      "commit": "170c4dc2ebc9128af7ebfca1e57ca6e45e35c539",
+      "date": "2026-10-05",
+      "scope": "28 of 28 files",
+      "complete": true
+    },
+    "runtime-crate": {
+      "commit": "170c4dc2ebc9128af7ebfca1e57ca6e45e35c539",
+      "date": "2026-10-05",
+      "scope": "cargo test + cargo clippy",
+      "complete": true
+    },
+    "rust-unit": {
+      "commit": "170c4dc2ebc9128af7ebfca1e57ca6e45e35c539",
+      "date": "2026-10-05",
+      "scope": "195 of 195 files",
+      "complete": true
+    }
+  }
+}

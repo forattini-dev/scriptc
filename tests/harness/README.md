@@ -1,6 +1,6 @@
 # Test harness
 
-Two lanes over the same suite: plain (`pnpm test`) and sanitized (`SCRIPTC_SAN=1 pnpm test`, ASan + the runtime RC audit). Corpus programs use Node as the oracle: they run under Node and as compiled binaries, and outputs must match exactly. The Test262 profile uses upstream assertions as its oracle. Both lanes must be green before a commit.
+Two lanes over the same suite: plain (`pnpm test`) and sanitized (`SCRIPTC_SAN=1 pnpm test`, ASan + the runtime RC audit). Corpus programs use Node as the oracle: they run under Node and as compiled binaries, and outputs must match exactly. The Test262 profile uses upstream assertions as its oracle. Both lanes must be green before synchronising with upstream; this fork's per-change bar is the Rust gate (`pnpm gate:rust`, see tests/dogfood/rust-gate.md).
 
 The Node that hosts Vitest/the TypeScript compiler and the Node that supplies
 the semantic oracle are separate inputs. They are identical by default;
@@ -34,7 +34,7 @@ A fifth lane covers LIBRARY MODE across targets: `SCRIPTC_CROSS=1 pnpm exec vite
 
 ## Workflow
 
-Iterate filtered, gate full: while developing, run just what you're touching (`pnpm exec vitest run tests/harness/differential.test.ts -t <name>` or a single test file); run the full lanes (`pnpm test`, then `SCRIPTC_SAN=1 pnpm test`) as the gate before committing.
+Iterate filtered, gate full: while developing, run just what you're touching (`pnpm exec vitest run tests/harness/differential.test.ts -t <name>` or a single test file); run the Rust gate (`pnpm gate:rust`) before committing in this fork, and the full lanes (`pnpm test`, then `SCRIPTC_SAN=1 pnpm test`) before synchronising with upstream.
 
 ### Builtin-class compatibility profiles
 

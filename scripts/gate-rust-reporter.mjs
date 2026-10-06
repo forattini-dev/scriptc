@@ -1,0 +1,167 @@
+/* Vitest reporter for scripts/gate-rust.mjs: one JSON line per event,
+ * appended synchronously to the file named by SCRIPTC_GATE_RESULTS.
+ *
+ * The built-in JSON reporter writes its file once, at the end of the run,
+ * so a shard that is killed (timeout, OOM, a crashed worker) leaves no
+ * record of the hundreds of programs it had already judged. This reporter
+ * streams instead: every finished test lands on disk before the next one
+ * starts, the gate rebuilds the inventory from whatever reached the file,
+ * and the tests that never produced a line are reported as "did not run".
+ *
+ * Event lines (all carry `type`):
+ *   run-start        { modules: [relative module ids] }
+ *   module-collected { file, tests: [test names in collection order] }
+ *   test             { file, name, fullName, state, durationMs, retryCount,
+ *                      flaky, note, errors: [first lines of each error] }
+ *   suite            { file, name, fullName, state, errors } — only suites
+ *                    that carry errors of their own (a failing beforeAll or
+ *                    afterAll in a describe), which no test record shows
+ *   module-end       { file, state, durationMs, errors }
+ *   console          { file, stream, content } — only the harness's own
+ *                    ledger lines ("rust parity: N/M ...")
+ *   run-end          { reason, unhandledErrors }
+ *
+ * Orphan guard: when SCRIPTC_GATE_PARENT_PID names the gate process, this
+ * reporter (which runs in the vitest main process, the leader of the
+ * process group the gate created) polls that pid and kills its own group
+ * once the gate is gone. A gate killed with SIGKILL or by the OOM killer
+ * cannot clean up after itself, and without this its shard processes would
+ * keep compiling until their wall-clock cap. */
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, relative } from "node:path";
+
+const MAX_ERROR_LINES = 8;
+const MAX_ERROR_CHARS = 1200;
+
+/** Strip ANSI escapes and keep the head of a message. */
+export function firstLines(text, lines = MAX_ERROR_LINES, chars = MAX_ERROR_CHARS) {
+  const plain = String(text ?? "").replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
+  const head = plain.split("\n").slice(0, lines).join("\n");
+  return head.length > chars ? `${head.slice(0, chars)}…` : head;
+}
+
+/** True while a process with this pid exists (EPERM means it exists). */
+export function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+/** Kill this process's own group (the gate spawns vitest detached, so the
+ * vitest main process leads one) and then this process; when it is not a
+ * group leader the group kill fails and only this process dies. */
+function abandonGroup() {
+  try { process.kill(-process.pid, "SIGKILL"); } catch { /* not a group leader */ }
+  try { process.kill(process.pid, "SIGKILL"); } catch { /* already gone */ }
+}
+
+function serializeError(error) {
+  if (error === null || error === undefined) return "";
+  if (typeof error === "string") return firstLines(error);
+  const name = typeof error.name === "string" && error.name !== "Error" ? `${error.name}: ` : "";
+  const message = typeof error.message === "string" ? error.message : String(error);
+  return firstLines(`${name}${message}`);
+}
+
+export default class GateRustReporter {
+  constructor() {
+    this.path = process.env["SCRIPTC_GATE_RESULTS"];
+    if (!this.path) {
+      throw new Error("gate-rust reporter requires SCRIPTC_GATE_RESULTS to name its output file");
+    }
+    this.root = process.cwd();
+    mkdirSync(dirname(this.path), { recursive: true });
+    writeFileSync(this.path, "");
+    const parent = Number(process.env["SCRIPTC_GATE_PARENT_PID"]);
+    if (Number.isInteger(parent) && parent > 0) {
+      const pollMs = Number(process.env["SCRIPTC_GATE_PARENT_POLL_MS"]) || 10_000;
+      const watchdog = setInterval(() => {
+        if (!pidAlive(parent)) abandonGroup();
+      }, pollMs);
+      watchdog.unref();
+    }
+  }
+
+  onInit(vitest) {
+    this.root = vitest?.config?.root ?? this.root;
+  }
+
+  write(record) {
+    appendFileSync(this.path, `${JSON.stringify(record)}\n`);
+  }
+
+  file(moduleId) {
+    return relative(this.root, moduleId);
+  }
+
+  onTestRunStart(specifications) {
+    this.write({ type: "run-start", modules: specifications.map((spec) => this.file(spec.moduleId)) });
+  }
+
+  onTestModuleCollected(testModule) {
+    const tests = [];
+    for (const test of testModule.children.allTests()) tests.push(test.name);
+    this.write({ type: "module-collected", file: this.file(testModule.moduleId), tests });
+  }
+
+  onTestCaseResult(testCase) {
+    const result = testCase.result();
+    const diagnostic = testCase.diagnostic();
+    this.write({
+      type: "test",
+      file: this.file(testCase.module.moduleId),
+      name: testCase.name,
+      fullName: testCase.fullName,
+      state: result.state,
+      durationMs: diagnostic === undefined ? null : Math.round(diagnostic.duration),
+      retryCount: diagnostic?.retryCount ?? 0,
+      flaky: diagnostic?.flaky ?? false,
+      note: result.state === "skipped" ? result.note ?? null : null,
+      errors: (result.errors ?? []).map(serializeError),
+    });
+  }
+
+  onTestSuiteResult(testSuite) {
+    const errors = testSuite.errors();
+    if (errors.length === 0) return;
+    this.write({
+      type: "suite",
+      file: this.file(testSuite.module.moduleId),
+      name: testSuite.name,
+      fullName: testSuite.fullName,
+      state: testSuite.state(),
+      errors: errors.map(serializeError),
+    });
+  }
+
+  onTestModuleEnd(testModule) {
+    const diagnostic = testModule.diagnostic();
+    this.write({
+      type: "module-end",
+      file: this.file(testModule.moduleId),
+      state: testModule.state(),
+      durationMs: Math.round(diagnostic.duration),
+      errors: testModule.errors().map(serializeError),
+    });
+  }
+
+  onUserConsoleLog(log) {
+    if (!/rust parity:/.test(log.content)) return;
+    this.write({
+      type: "console",
+      stream: log.type,
+      content: firstLines(log.content.trim(), 20, 4000),
+    });
+  }
+
+  onTestRunEnd(_testModules, unhandledErrors, reason) {
+    this.write({
+      type: "run-end",
+      reason,
+      unhandledErrors: unhandledErrors.map(serializeError),
+    });
+  }
+}
