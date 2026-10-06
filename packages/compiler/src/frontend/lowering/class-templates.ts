@@ -523,9 +523,20 @@ export function templateHeritageInit(L: Lowerer, info: ClassInfo): IrStmt[] {
   if (!heritage) return [];
   const loc = locOf(heritage.expr);
   const type = objectType(info.base!.template!.objectClass);
-  const value = L.lowerExprExpecting(heritage.expr, type);
-  if (value.type.kind !== "object" || value.type.className !== info.base!.template!.objectClass) {
-    L.unsupported("SC1090", heritage.expr, "extending an expression whose lowering is not exactly one evaluation of a class template");
+  L.stats.statementsTotal++;
+  L.bumpFileStat(loc.file, "total");
+  try {
+    const value = L.lowerExprExpecting(heritage.expr, type);
+    if (value.type.kind !== "object" || value.type.className !== info.base!.template!.objectClass) {
+      L.unsupported("SC1090", heritage.expr, "extending an expression whose lowering is not exactly one evaluation of a class template");
+    }
+    return [{ kind: "assign", localId: heritage.globalId, value: { ...value, type }, loc }];
+  } catch (e) {
+    // The diagnostic is recorded; the class statement's other
+    // declaration-time code still lowers (the static-initializer rule).
+    if (!(e instanceof PoisonError)) throw e;
+    L.stats.statementsFailed++;
+    L.bumpFileStat(loc.file, "failed");
+    return [];
   }
-  return [{ kind: "assign", localId: heritage.globalId, value: { ...value, type }, loc }];
 }

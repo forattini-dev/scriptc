@@ -79,3 +79,14 @@ test("a class template heritage in its temporal dead zone throws Node's Referenc
     expect(native.stderr.toString()).toContain(message);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+// A refused heritage argument is a diagnostic at the class statement, never
+// a lowering crash that escapes the module initializer.
+test("a refused class template heritage reports instead of crashing", async () => {
+  const result = await compile(resolve("tests/fixtures/class-templates/heritage-refused-argument.ts"), { backend: "rust", allowEngine: false });
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(result.diagnostics.some(diagnostic => diagnostic.code === "SC2020" && diagnostic.message.includes("'eval'")),
+    JSON.stringify(result.diagnostics)).toBe(true);
+  expect(result.diagnostics.some(diagnostic => diagnostic.code === "SC9001")).toBe(false);
+});
