@@ -2431,7 +2431,7 @@ function preflight7(load: LoadResult): {
           }
           const tdzName =
             firstRunnable >= 0 && firstRunnable < k && req.decl
-              ? requireTdzRisk(program, sf, k, req.decl)
+              ? requireTdzRisk(program, sf, k, req.decl, isCjsJsFile7(sf), specifier => resolveImport7(program, sf, specifier) === sf)
               : null;
           if (tdzName !== null) {
             diags.push(
