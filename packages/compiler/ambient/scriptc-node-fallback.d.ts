@@ -1791,6 +1791,12 @@ declare module "child_process" {
     on(event: "disconnect", listener: () => void): void;
     once(event: "message", listener: (message: any) => void): void;
     once(event: "disconnect", listener: () => void): void;
+    /* off removes by identity, the same event set @types/node declares;
+     * the static tier fences it per member until a lowering exists. */
+    off(event: "exit" | "close", listener: (code: number | null, signal: string | null) => void): void;
+    off(event: "error", listener: (err: Error) => void): void;
+    off(event: "spawn" | "disconnect", listener: () => void): void;
+    off(event: "message", listener: (message: any) => void): void;
     /* The lifecycle members, Node's exact shapes: pid is undefined exactly
      * when the spawn failed; exitCode is null while running, the code
      * after a normal exit, null for a signal death, and -errno once a
@@ -2447,6 +2453,14 @@ declare module "net" {
     once(event: "error", listener: (err: Error) => void): void;
     once(event: "upgrade", listener: (req: import("http").IncomingMessage, socket: Socket, head: Buffer) => void): void;
     once(event: "request", listener: (req: import("http").IncomingMessage, res: import("http").ServerResponse) => void): void;
+    /* off removes by identity, the same event set as on; the static tier
+     * fences it per member until a lowering exists. */
+    off(event: "connection" | "secureConnection", listener: (socket: Socket) => void): void;
+    off(event: "close" | "listening", listener: () => void): void;
+    off(event: "timeout", listener: (socket: Socket) => void): void;
+    off(event: "error", listener: (err: Error) => void): void;
+    off(event: "upgrade", listener: (req: import("http").IncomingMessage, socket: Socket, head: Buffer) => void): void;
+    off(event: "request", listener: (req: import("http").IncomingMessage, res: import("http").ServerResponse) => void): void;
   }
   /* The Socket VALUE — the `x instanceof net.Socket` narrowing target
    * (the h2 compat 'connect' listener's test). Constructing bare sockets

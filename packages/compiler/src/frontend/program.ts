@@ -61,7 +61,7 @@ import { provenanceEntryFor, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import { ADOPTED_OPTIONS, isJsSourceFileName, isRuntimeSourceFileName } from "./tsc-codes.js";
 import { BUN_MODULE_MEMBER_ALIASES, canonicalBuiltinModule, SUPPORTED_NODE_MODULES, isTrapRuntimeModule, unsupportedModuleFeatureOf } from "./builtin-modules.js";
-import { ambientDtsPath, fallbackDtsPath, isNodeTypesPath, overridesDtsPath, tsgoPath } from "./dts-paths.js";
+import { ambientDtsPath, fallbackDtsPath, isNodeTypesPath, nodeTypeSurfacePackageOf, overridesDtsPath, resetNodeTypesPathCache, tsgoPath } from "./dts-paths.js";
 import { clearWorkspacePackages, isRelativeSpecifier, isWorkspacePackageName, npmPackageNameOf, registerWorkspacePackage } from "./workspace-registry.js";
 import { trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 import { processModuleMemberImport, processModuleMemberRequire } from "./process-module.js";
@@ -70,7 +70,7 @@ import { isRequireStatement as isRequireStatement7, pureRequirePrefixStatement, 
 import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { setEmbedJsxOptions } from "./npm-typescript.js";
 import { checkPreflightTypes, isIslandJsFile } from "./preflight-types.js";
-import { ProjectDeclarations } from "./project-declarations.js";
+import { ProjectDeclarations, type NodeTypeSurfaceStandDown } from "./project-declarations.js";
 import { jsoncSyntaxError } from "./config-json.js";
 import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js"; import { calleeChainInert, isDtsMemberCall, isHoistedFunctionBinding, isInertHoistedFunctionCallee, isNamespaceMemberRead, isOutsideClusterProgramCallee, kernelCallHoldsCallbacks, makeReachesCluster } from "./cycle-inert.js";
 import { forkTargetPaths } from "./fork-target.js";
@@ -121,18 +121,21 @@ function adoptProjectConfig7(
    * project's own toolchain) and the preflight resolver (which answers the
    * aliased edge as an ordinary user module — see resolveTsPathsMapping). */
   pathAliases: ReadonlyMap<string, readonly string[]> | null;
+  /** The project's explicit tsconfig "typeRoots" (absolute), the primary
+   * lookup for the Node type directives; empty when it declares none. */
+  typeRoots: readonly string[];
   diags: ScrDiagnostic[];
 } {
   const configFile = ts.findConfigFile(dirname(entryPath), ts.sys.fileExists) ?? null;
   setEmbedJsxOptions(null);
   if (!configFile) {
-    return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, pathAliases: null, diags: [] };
+    return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, pathAliases: null, typeRoots: [], diags: [] };
   }
   const diags: ScrDiagnostic[] = [];
   const syntaxError = jsoncSyntaxError(ts.sys.readFile(configFile) ?? "");
   if (syntaxError !== null) {
     diags.push(tscPassthroughDiag(syntaxError, { file: configFile, start: 0, end: 0 }));
-    return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, pathAliases: null, diags };
+    return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, pathAliases: null, typeRoots: [], diags };
   }
   const parsed = host.parseConfigFile(configFile);
   const adopted: Record<string, unknown> = {};
@@ -230,15 +233,19 @@ function adoptProjectConfig7(
   // lib never reduces the checker surface below es2025).
   const forced: ts.Ts7CompilerOptions = { ...FORCED_OPTIONS };
   if (adopted["lib"] !== undefined) delete forced.lib;
-  return { configFile, options: { ...BASE_OPTIONS, ...adopted, ...forced }, pathAliases, diags };
+  const rawTypeRoots = parsed.options["typeRoots"];
+  const typeRoots = Array.isArray(rawTypeRoots) ? rawTypeRoots.filter((root): root is string => typeof root === "string") : [];
+  return { configFile, options: { ...BASE_OPTIONS, ...adopted, ...forced }, pathAliases, typeRoots, diags };
 }
 
 /** Adopt the configured project's Node declarations, or an entry-local
  * installation without a config. Ancestor development types must not replace
  * the fallback surface of an otherwise isolated, unconfigured program. */
-function resolveNodeTypes7(entryPath: string, configured: boolean): string | null {
-  const file = configured || ts.sys.directoryExists(resolve(dirname(entryPath), "node_modules", "@types", "node")) ? resolveTypeDirective("node", entryPath) : null;
-  return file !== null && isNodeTypesPath(file) ? file : null;
+function resolveNodeTypes7(entryPath: string, configured: boolean, typeRoots: readonly string[]): string | null {
+  const file = configured || ts.sys.directoryExists(resolve(dirname(entryPath), "node_modules", "@types", "node")) ? resolveTypeDirective("node", entryPath, typeRoots) : null;
+  // A copy is a copy wherever a tsconfig's typeRoots put it: a vendored
+  // directory outside node_modules is identified by its package.json name.
+  return file !== null && (isNodeTypesPath(file) || nodeTypeSurfacePackageOf(file) !== null) ? file : null;
 }
 
 export interface LoadResult {
@@ -282,6 +289,12 @@ export interface LoadResult {
    * specifier. Multiple exact module names may deliberately share one
    * declaration surface. */
   externalTypeSpecifiersByFile: ReadonlyMap<string, readonly string[]>;
+  /** The ambient Node type surface copies the project configuration
+   * governing `file` selected that the program does not carry (one copy of
+   * each per program, the newest — see ProjectDeclarations). Preflight hints
+   * a declaration-shaped type error in such a project with the declarations
+   * it was really checked against. */
+  nodeTypeSurfaceStandDowns: (file: string) => readonly NodeTypeSurfaceStandDown[];
   withProjectWorld: <T>(action: (program: ts.Program) => T) => T;
 }
 
@@ -497,7 +510,7 @@ function loadProgram7(
       ? configuredPaths as Record<string, string[]>
       : null,
   );
-  const nodeTypes = resolveNodeTypes7(entryPath, config.configFile !== null);
+  const nodeTypes = resolveNodeTypes7(entryPath, config.configFile !== null, config.typeRoots);
   // The BUN surface (the Bun-target story): a project typed against
   // @types/bun chains bun-types → @types/node, whose globals carry the
   // `UseLibDomIfAvailable` discipline — bun-types STANDS DOWN where the
@@ -508,7 +521,7 @@ function loadProgram7(
   // bun surface resolves FIRST when it exists: it IS the project's
   // dialect. When both surfaces resolve, both join (they are designed to
   // coexist).
-  const bunTypes = config.configFile ? resolveTypeDirective("bun", entryPath) : null;
+  const bunTypes = config.configFile ? resolveTypeDirective("bun", entryPath, config.typeRoots) : null;
   // skipLibCheck is FORCED with @types/node in the program: checking a
   // third-party lib's internals against OUR lib choice (es2025, no dyn) is
   // not scriptc's fence and drowns real diagnostics in hundreds of
@@ -552,7 +565,11 @@ function loadProgram7(
   // surfaces join when the project carries both. skipLibCheck applies
   // whenever a REAL surface is present (see the nodeTypes note).
   const nodeSurface = nodeTypes ?? bunTypes ?? fallbackDtsPath();
-  const projectDeclarations = new ProjectDeclarations(host);
+  // A program carries ONE copy of each ambient Node type package: the entry
+  // project's own resolution competes with every reached project's, and the
+  // newest copy is the surface (ProjectDeclarations owns the rule and records
+  // the stand-downs).
+  const projectDeclarations = new ProjectDeclarations(host, [nodeTypes, bunTypes].filter((file): file is string => file !== null), entryPath);
   const coreRoots = [entryPath, ambientDtsPath(), nodeSurface, ...projectDeclarations.collect([entryPath])];
   if (bunTypes !== null && nodeTypes !== null) coreRoots.push(bunTypes);
   coreRoots.push(overridesDtsPath());
@@ -608,11 +625,15 @@ function loadProgram7(
     configDiags: config.diags,
     externalTypes,
     externalTypeSpecifiersByFile,
+    nodeTypeSurfaceStandDowns: (file) => projectDeclarations.standDownsFor(file),
     withProjectWorld: (action) => {
       const view = projectDeclarations.createProgram(programRoots.filter((root) => root !== overridesDtsPath()), options);
       try { return action(view); } finally { view.dispose(); }
     },
-    disposeAll: () => program.dispose(),
+    disposeAll: () => {
+      program.dispose();
+      projectDeclarations.release();
+    },
   };
 }
 
@@ -707,6 +728,7 @@ export function loadProgram(
   // Non-opted workspace packages register lazily as preflight's own
   // resolver discovers their import edges.
   clearWorkspacePackages();
+  resetNodeTypesPathCache();
   for (const pkg of opts?.npmStatic ?? []) {
     const probe = resolveBareModule(entryPath, pkg);
     if (probe?.workspaceDir !== undefined) registerWorkspacePackage(probe.packageName, probe.workspaceDir);
