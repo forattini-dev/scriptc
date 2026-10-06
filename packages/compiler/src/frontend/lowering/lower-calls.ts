@@ -31,7 +31,7 @@ import { enforceLibBoundary } from "./lib-boundary.js";
 import { STRING_INDEX_METHODS, STR_METHODS, builtinFenceHintOf, builtinModuleFnOf } from "./surfaces.js";
 import { ffiBindingDiag, ffiSignatureDiag, libCallbackDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
-import { mixinFnShapeOf } from "./lower-mixins.js";
+import { isOpaqueMixinShape, mixinFnShapeOf } from "./lower-mixins.js";
 import { dynStringReceiver, lowerArrayConstructor, lowerArrayFlatMapCall, lowerArrayHofCall, lowerArrayFromCall, lowerArrayOfCall, lowerArrayReduceCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerDynArrayMapCall, lowerDynArrayReduceCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectFromEntriesCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { bufEncoding, lowerBytesFromCall } from "./containers/bytes.js";
 import { lowerRegexMethodCall, lowerStringIndexCall, lowerStringMethodCall, lowerStringPaddingCall, lowerStringSplitCall } from "./containers/string-and-regexp.js";
@@ -1062,7 +1062,10 @@ export function collectSignatureInner(lowerer: Lowerer, decl: ts.FunctionDeclara
     // body (run()/discover() skip by the same test). Generic mixins still
     // register their generic signature below: non-mixin-shaped calls
     // degrade to the generic machinery's own per-site fences.
-    if (!decl.typeParameters && mixinFnShapeOf(lowerer, decl)) return;
+    // Closed-base class FACTORIES are ordinary functions too: top-level
+    // pinned calls specialize per site, every other call evaluates the
+    // returned class as a template (class-templates.ts).
+    if (!decl.typeParameters && isOpaqueMixinShape(mixinFnShapeOf(lowerer, decl))) return;
     const isAsync = decl.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) === true;
     const isGenerator = decl.asteriskToken !== undefined;
     if (decl.typeParameters) {

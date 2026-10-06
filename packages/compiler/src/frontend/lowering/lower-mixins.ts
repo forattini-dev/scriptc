@@ -252,7 +252,14 @@ function mixinFnNodeOfBinding(
  * this test. */
 export function isMixinFnBinding(lowerer: Lowerer, decl: ts.VariableDeclaration): boolean {
   const fn = mixinFnNodeOfBinding(decl);
-  return fn !== null && mixinFnShapeOf(lowerer, fn) !== null;
+  return fn !== null && isOpaqueMixinShape(mixinFnShapeOf(lowerer, fn));
+}
+
+/** A mixin over a parameter base has no runtime function of its own. A
+ * closed-base class FACTORY is an ordinary function as well: only its
+ * pinned top-level calls specialize per site. */
+export function isOpaqueMixinShape(shape: MixinFnShape | null | undefined): boolean {
+  return !!shape && !shape.factory;
 }
 
 /** The class a mixin ARGUMENT statically names, with every unsupported
@@ -377,6 +384,9 @@ export function mixinCallClassInfoOf(lowerer: Lowerer, call: ts.CallExpression):
   }
   const shape = mixinFnOfCallee(lowerer, call.expression);
   if (!shape) return null;
+  // A factory call that may evaluate more than once is an ordinary call:
+  // its class expression evaluates as a template (class-templates.ts).
+  if (shape.factory && !pinnedFactoryCallPosition(call)) return null;
   try {
     const info = instantiateMixinCall(lowerer, call, shape);
     lowerer.mixinInstanceByCall.set(call, info);
@@ -583,6 +593,16 @@ export function mixinIntersectionInstanceType(lowerer: Lowerer, widened: ts.Type
  * argument slots): such instantiations register before any body lowers in
  * both passes, so the intersection resolver above may name them without
  * discovery/emit drift. */
+function pinnedFactoryCallPosition(call: ts.CallExpression): boolean {
+  if (!classFactoryStatementOf(call)) return false;
+  let prev: ts.Node = call;
+  for (let p: ts.Node = call.parent; !ts.isSourceFile(p); prev = p, p = p.parent) {
+    if (ts.isFunctionLike(p) || ts.isClassStaticBlockDeclaration(p)) return false;
+    if ((ts.isClassDeclaration(p) || ts.isClassExpression(p)) && !ts.isHeritageClause(prev)) return false;
+  }
+  return true;
+}
+
 function pinnedMixinCallPosition(call: ts.CallExpression): boolean {
   let n: ts.Node = call;
   for (let p: ts.Node = n.parent; !ts.isSourceFile(p); n = p, p = p.parent) {

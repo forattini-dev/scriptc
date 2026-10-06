@@ -63,7 +63,8 @@ import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerStaticFieldRead } from "./lower-classes.js";
 import { bindingNeverReassigned, implicitMonoFile, lowerTaggedTemplate, nullishGenericBindingUnitOf, omittedArgFor } from "./lower-calls.js";
-import { mixinFnOfCallee } from "./lower-mixins.js";
+import { isOpaqueMixinShape, mixinFnOfCallee } from "./lower-mixins.js";
+import { lowerTemplateInstanceof, lowerTemplateSelfAssignment, templateOfObjectType } from "./class-templates.js";
 import { familyFnNodeOf, lowerFamilyImpl } from "./lower-families.js";
 import {
   isConstAssertionTypeNode,
@@ -1484,7 +1485,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
         // exists — calls instantiate a class per call site
         // (lower-mixins.ts). Generic mixins took the generic-fn value
         // fence above; this names the non-generic spelling.
-        if (mixinFnOfCallee(lowerer, expr)) {
+        if (isOpaqueMixinShape(mixinFnOfCallee(lowerer, expr))) {
           lowerer.unsupported(
             "SC1090",
             expr,
@@ -7076,6 +7077,8 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
       const regexAssignment = lowerRegexStateAssign(lowerer, expr);
       if (regexAssignment !== null) return regexAssignment;
       if (op === ts.SyntaxKind.EqualsToken && ts.isIdentifier(expr.left)) {
+        const selfTemplate = lowerTemplateSelfAssignment(lowerer, expr);
+        if (selfTemplate) return selfTemplate;
         const target = lowerer.resolveWritable(expr.left);
         if (!target) {
           lowerer.rejectUnresolved(expr.left, `assignment to '${expr.left.text}' (not a writable local or module global)`);
@@ -8688,6 +8691,8 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
       // (itself — no descendants can flow into the slot), so the answer
       // folds statically exactly like the named-target folds below.
       const rhsClassval = lowerer.mapTypeOf(lowerer.typeOf(expr.right));
+      const rhsTemplate = templateOfObjectType(lowerer, rhsClassval);
+      if (rhsTemplate && !lowerer.caughtLocalOf(expr.left)) return lowerTemplateInstanceof(lowerer, expr, rhsTemplate);
       if (rhsClassval?.kind === "classval" && !lowerer.caughtLocalOf(expr.left)) {
         const targetInfo = lowerer.classes.get(rhsClassval.className);
         if (!targetInfo) {

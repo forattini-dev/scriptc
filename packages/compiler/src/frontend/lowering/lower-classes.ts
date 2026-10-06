@@ -41,6 +41,7 @@ import { lowerSqlErrorNew } from "./lower-sql-client.js";
 import { implicitMethodMayBeOverridden } from "./implicit-method-overrides.js";
 import { classFactoryArgumentInits, classFactorySelfInit, classFactoryReturnType, withClassFactoryCaptures } from "./class-factory-captures.js";
 import { classFactoryMethodOf } from "./class-factory-shapes.js";
+import { admitClassTemplate, classTemplateSelfReturnType, fenceClassTemplate, lowerTemplateEvaluation, lowerTemplateStaticCall, templateCtorPrologue, templateEnvOfStaticChain, templateNameRead, templateOfObjectType, templateMethodPrologue, templateObjectCtor, templateStaticPrologue, type ClassTemplateInfo } from "./class-templates.js";
 import { deferJsAsyncMethod, noteDeferredJsAsyncMethod, ownsDeferredJsAsyncMethod } from "./js-async-methods.js";
 
 export interface ClassInfo {
@@ -228,6 +229,14 @@ export interface ClassInfo {
    * fences — the binding never initializes, so compiled code can never
    * legitimately reach one. */
   decorationThrows?: { name: string };
+  /** CLASS TEMPLATE (a class expression evaluated inside a function —
+   * class-templates.ts): the per-evaluation object class and captures. */
+  template?: ClassTemplateInfo;
+  /** The synthetic per-evaluation object class of `template` owner. */
+  templateObjectOf?: ClassInfo;
+  /** A once-evaluated class extending a template evaluation: the module
+   * global holding that evaluation (its heritage value). */
+  templateBase?: { globalId: string };
 }
 
 /** A decorated class's decoration state (see ClassInfo.classDecorators). */
@@ -1043,7 +1052,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
             member.asteriskToken === undefined
           ) {
             const { shapes, funcType: ft } = lowerer.lambdaSignature(member);
-            if (ft.ret.kind === "dyn") ft.ret = classFactoryReturnType(lowerer, member) ?? ft.ret;
+            if (ft.ret.kind === "dyn") ft.ret = classFactoryReturnType(lowerer, member) ?? classTemplateSelfReturnType(lowerer, member) ?? ft.ret;
             staticMethods.set(member.name.text, { params: shapes, ret: ft.ret, member });
           }
           // GENERIC static methods monomorphize like top-level generic
@@ -1565,7 +1574,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
             }
           }
           const { shapes, funcType: ft } = lowerer.lambdaSignature(member);
-          if (ft.ret.kind === "dyn") ft.ret = classFactoryReturnType(lowerer, member) ?? ft.ret;
+          if (ft.ret.kind === "dyn") ft.ret = classFactoryReturnType(lowerer, member) ?? classTemplateSelfReturnType(lowerer, member) ?? ft.ret;
           if (fields.has(mName)) {
             lowerer.unsupported("SC1090", member.name, "methods shadowing inherited fields");
           }
@@ -2679,6 +2688,9 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
    * (interned by the backend, so `C.m === C.m` holds). */
   function staticMethodValue(lowerer: Lowerer, declarer: ClassInfo, name: string,
     sig: { params: ParamShape[]; ret: IrType }, blame: ts.Expression, loc: SrcLoc): IrExpr {
+    if (declarer.template) {
+      lowerer.unsupported("SC1090", blame, "static methods of a class evaluated inside a function taken as values (call them directly)");
+    }
     const fnName = `%${declarer.def.name}.static:${name}`;
     lowerer.noteEdge(fnName);
     const funcType = functionAbi(sig.params, sig.ret);
@@ -2868,16 +2880,17 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
       );
     }
     const esbuildOnce = classExpressionRunsOnceInEsbuildInitializer(lowerer, expr);
+    let template = false;
     for (let p: ts.Node = expr.parent; !ts.isSourceFile(p); p = p.parent) {
       if (ts.isFunctionLike(p) || ts.isClassStaticBlockDeclaration(p)) {
         if (esbuildOnce && ts.isArrowFunction(p)) break;
-        lowerer.unsupported(
-          "SC1090",
-          expr,
-          "class expressions inside functions (each evaluation creates a DISTINCT class in JS — fresh identity, fresh statics; declare the class at top level)",
-        );
+        // Each evaluation mints a DISTINCT class: a template (one shape,
+        // one object per evaluation — class-templates.ts).
+        template = true;
+        break;
       }
     }
+    if (template) fenceClassTemplate(lowerer, expr);
     lowerer.collectingExprClasses.add(expr);
     try {
       lowerer.collectClassShapeInner(expr, namedEvaluationName(expr));
@@ -2886,6 +2899,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
     }
     const info = lowerer.classes.get(lowerer.classNamer(expr));
     if (!info) throw new PoisonError(); // collection poisoned and reported
+    if (template) admitClassTemplate(lowerer, expr, info);
     lowerer.exprClassInfoByNode.set(expr, info);
     lowerer.exprClasses.push(info);
     lowerer.onExprClassCollected?.(info);
@@ -2951,7 +2965,9 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
         }
       }
     }
-    return classValueRef(lowerer, lowerClassExpressionInfo(lowerer, expr), expr);
+    const info = lowerClassExpressionInfo(lowerer, expr);
+    if (info.template) return lowerTemplateEvaluation(lowerer, expr, info);
+    return classValueRef(lowerer, info, expr);
   }
 
 /** The class a PROPERTY-ASSIGNMENT binding pins — the salsa/CJS
@@ -3065,6 +3081,10 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
   export function lowerStaticMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (access.questionDotToken) return null;
+    {
+      const template = templateOfObjectType(lowerer, lowerer.mapTypeOf(lowerer.typeOf(access.expression)));
+      if (template) return lowerTemplateStaticCall(lowerer, call, access, template);
+    }
     // `module.exports.describe()` in a module whose whole export IS a
     // class expression: the receiver is exactly that class (the kept
     // export assignment pins it) — the direct-name rules apply.
@@ -3175,6 +3195,13 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
     const fnName = `%${found.declarer.def.name}.static:${access.name.text}`;
     lowerer.noteEdge(fnName);
     const args = lowerer.completeArgs(call.arguments, found.method.params, loc, call);
+    if (found.declarer.template) {
+      // Inherited by a once-evaluated class extending a template
+      // evaluation: that evaluation (the heritage value) is the environment.
+      const env = templateEnvOfStaticChain(info, found.declarer, loc);
+      if (!env) lowerer.unsupported("SC1090", call, "static methods of a class template reached without its evaluation");
+      args.unshift(env);
+    }
     return { kind: "call", callee: fnName, args, type: found.method.ret, loc };
   }
 
@@ -3188,6 +3215,11 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
   export function lowerClassValueProperty(lowerer: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (expr.questionDotToken) return null;
     const recvT = lowerer.mapTypeOf(lowerer.typeOf(expr.expression));
+    const template = templateOfObjectType(lowerer, recvT);
+    if (template) {
+      if (expr.name.text === "name") return templateNameRead(lowerer, lowerer.lowerExpr(expr.expression), template, locOf(expr));
+      lowerer.unsupported("SC1090", expr, `reading '${expr.name.text}' through the value of a class evaluated inside a function (only .name, construction, static calls, instanceof and identity are lowered)`);
+    }
     if (recvT?.kind !== "classval") return null;
     const loc = locOf(expr);
     const member = expr.name.text;
@@ -3474,7 +3506,7 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
     // demand-driven like generic-fn instances, not reachability units:
     // they are never registered as units, so wantBody's name-keyed gate
     // cannot apply — every member of a demanded instantiation lowers.
-    const always = info.genericInstance !== undefined || info.mixinInstance !== undefined;
+    const always = info.genericInstance !== undefined || info.mixinInstance !== undefined || info.templateObjectOf !== undefined;
     // A FAMILY has no constructor function at all (nothing constructs it;
     // construction resolves to instantiations) and declares no instance
     // members — only its statics lower below.
@@ -3519,6 +3551,7 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
   }
 
   function lowerClassCtorInner(lowerer: Lowerer, info: ClassInfo): IrFunction {
+    if (info.templateObjectOf) return templateObjectCtor(lowerer, info);
     const className = info.def.name;
     const thisType: IrType = { kind: "object", className };
     const prevClass = lowerer.currentClass;
@@ -3527,7 +3560,7 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
       return lowerer.env.inFunction(newFnCtx(false, null, null, VOID), () => {
         const thisLocal = lowerer.declareThis(thisType);
         const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
-        const body: IrStmt[] = [];
+        const body: IrStmt[] = templateCtorPrologue(lowerer, info, thisLocal, params, locOf(info.ctor ?? info.decl!));
         // The construction-relevant base: generic families are transparent
         // (an instantiation of a base-less generic class IS a base class —
         // its source has no super()).
@@ -3888,11 +3921,12 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
       return lowerer.env.inFunction(fnCtx, () => {
         const thisLocal = lowerer.declareThis(thisType);
         const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
+        const captures = templateMethodPrologue(lowerer, info, thisLocal, locOf(fnLike));
         // `this` is declared first, so method parameter DEFAULTS may use it
         // (JS allows this in method defaults; it is param 0 here).
         const declared = lowerer.declareParams(fnLike.parameters, sig.params);
         params.push(...declared.params);
-        const body = [...declared.prologue, ...lowerer.lowerStmts(fnBody.statements)];
+        const body = [...captures, ...declared.prologue, ...lowerer.lowerStmts(fnBody.statements)];
         if (sig.throwOnlyReturnAbi) appendImplicitUndefinedReturn(lowerer, body, bodyReturn, locOf(fnLike));
         const fn: IrFunction = {
           name: `%${className}.${mName}`,
@@ -3942,11 +3976,13 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
           memberBody,
           (keyword) => `'${keyword}' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead)`,
         );
+        const hiddenParams: IrParam[] = [];
+        const captures = templateStaticPrologue(lowerer, info, hiddenParams, locOf(entry.member));
         const declared = lowerer.declareParams(entry.member.parameters, entry.params);
-        const body = [...declared.prologue, ...lowerer.lowerStmts(memberBody.statements)];
+        const body = [...captures, ...declared.prologue, ...lowerer.lowerStmts(memberBody.statements)];
         const fn: IrFunction = {
           name: `%${info.def.name}.static:${name}`,
-          params: declared.params,
+          params: [...hiddenParams, ...declared.params],
           returnType: bodyReturn,
           locals: lowerer.ctx.locals,
           body,
@@ -5178,6 +5214,24 @@ export function lowerNew(lowerer: Lowerer, expr: ts.NewExpression): IrExpr {
           });
         }
         return { kind: "call", callee: helper, args: [data], type: t, loc };
+      }
+    }
+    // `new X(...)` through a CLASS TEMPLATE evaluation: the template's one
+    // constructor, with the evaluation as its hidden first argument
+    // (evaluated before the arguments — JS's callee-first order).
+    {
+      const template = templateOfObjectType(lowerer, lowerer.mapTypeOf(lowerer.typeOf(expr.expression)));
+      if (template) {
+        if (template.def.abstract) lowerer.unsupported("SC1090", expr, "constructing an abstract class template");
+        const callee = lowerer.lowerExpr(expr.expression);
+        lowerer.noteEdge(`%${template.def.name}.constructor`);
+        return {
+          kind: "new",
+          className: template.def.name,
+          args: [callee, ...lowerer.completeArgs(expr.arguments ?? [], template.ctorParams, loc, expr)],
+          type: { kind: "object", className: template.def.name },
+          loc,
+        };
       }
     }
     // `new X(...)` through a class VALUE (a classval-typed binding, array

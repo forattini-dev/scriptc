@@ -395,6 +395,11 @@ export interface TypeMapperCtx {
    * inside members, self-referential member types), null outside any
    * mixin context (the type alone cannot name a call site). */
   mixinClassInstance?: (decl: ts.ClassLikeDeclaration) => IrType | null;
+  /** CLASS TEMPLATES (a class expression evaluated inside a function):
+   * the instance type maps to the one template class, the static side to
+   * the per-evaluation object class. Null when the node is no template or
+   * its collection was refused. */
+  classTemplate?: (decl: ts.ClassLikeDeclaration) => { instance: string; object: string } | null;
   /** MIXIN instance INTERSECTIONS (`Tagged.C & Derived` — values built
    * through a mixin result): resolved by chain structure to the unique
    * pinned instantiation they describe; null when ambiguous or when no
@@ -1107,9 +1112,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return viaMixin;
       }
     }
-    // A class expression inside a function/static block never registers
-    // (a distinct class per evaluation): unmappable for the same reason.
-    if (classExprNeverRegisters(classDecl)) return null;
+    // A class expression inside a function/static block is a TEMPLATE
+    // (one shape, a distinct class object per evaluation); refused ones
+    // never register and stay unmappable.
+    if (classExprNeverRegisters(classDecl)) {
+      const template = ctx.classTemplate?.(classDecl);
+      return template ? { kind: "object", className: template.instance } : null;
+    }
     // A GENERIC class's instance type (`Box<number>`) maps to the concrete
     // INSTANTIATION's class (`Box%0`), registered on demand — the Lowerer
     // hook owns the instance table (monomorphization by flow).
@@ -1144,7 +1153,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return { kind: "classval", className: viaMixin.className };
       }
     }
-    if (classExprNeverRegisters(classDecl)) return null;
+    if (classExprNeverRegisters(classDecl)) {
+      const template = ctx.classTemplate?.(classDecl);
+      return template ? { kind: "object", className: template.object } : null;
+    }
     // A GENERIC class's static side: only an INSTANTIATED one maps — an
     // instantiation expression's type (`Box<number>` as a value) carries a
     // construct signature returning the concrete instance, which maps to
