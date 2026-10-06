@@ -41,7 +41,7 @@ import { lowerSqlErrorNew } from "./lower-sql-client.js";
 import { implicitMethodMayBeOverridden } from "./implicit-method-overrides.js";
 import { classFactoryArgumentInits, classFactorySelfInit, classFactoryReturnType, withClassFactoryCaptures } from "./class-factory-captures.js";
 import { classFactoryMethodOf } from "./class-factory-shapes.js";
-import { admitClassTemplate, classTemplateNamesOf, classTemplateSelfReturnType, fenceClassTemplate, lowerTemplateEvaluation, lowerTemplateStaticCall, templateCtorPrologue, templateEnvOfStaticChain, templateNameRead, templateOfObjectType, templateMethodPrologue, templateObjectCtor, templateStaticPrologue, type ClassTemplateInfo } from "./class-templates.js";
+import { admitClassTemplate, classTemplateNamesOf, registerTemplateHeritage, templateHeritageBaseOf, templateHeritageInit, classTemplateSelfReturnType, fenceClassTemplate, lowerTemplateEvaluation, lowerTemplateStaticCall, templateCtorPrologue, templateEnvOfStaticChain, templateNameRead, templateOfObjectType, templateMethodPrologue, templateObjectCtor, templateStaticPrologue, type ClassTemplateInfo } from "./class-templates.js";
 import { deferJsAsyncMethod, noteDeferredJsAsyncMethod, ownsDeferredJsAsyncMethod } from "./js-async-methods.js";
 
 export interface ClassInfo {
@@ -236,7 +236,7 @@ export interface ClassInfo {
   templateObjectOf?: ClassInfo;
   /** A once-evaluated class extending a template evaluation: the module
    * global holding that evaluation (its heritage value). */
-  templateBase?: { globalId: string };
+  templateBase?: { globalId: string; expr: ts.Expression };
 }
 
 /** A decorated class's decoration state (see ClassInfo.classDecorators). */
@@ -653,6 +653,8 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
       // base is its family (whose base is the declared one) — the heritage
       // clause resolved when the family collected.
       let base: ClassInfo | null = inst ? inst.family : mixin ? mixin.base : null;
+      /** The heritage expression when the base is a class TEMPLATE evaluation. */
+      let templateHeritage: ts.Expression | undefined;
       const schema = !inst && !mixin ? kernelSchemaClassOf(lowerer.checker, decl) : null;
       // A family whose `extends` clause mentions its OWN type parameters
       // (`class D<T> extends Box<T>`) would need a different base per
@@ -805,6 +807,16 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
             continue;
           }
         }
+        // `class D extends f()` where the heritage value is provably one
+        // evaluation of a class TEMPLATE (class-templates.ts).
+        if (t && !t.typeArguments && !ts.isIdentifier(t.expression)) {
+          const viaTemplate = templateHeritageBaseOf(lowerer, decl, t.expression);
+          if (viaTemplate) {
+            base = viaTemplate;
+            templateHeritage = t.expression;
+            continue;
+          }
+        }
         if (!t || !ts.isIdentifier(t.expression)) {
           lowerer.unsupported("SC1090", clause, "extending computed expressions");
         }
@@ -872,6 +884,12 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
         if (t.typeArguments) lowerer.unsupported("SC1090", t, "extending generic classes");
         base = named;
         if (!base) {
+          const viaTemplate = templateHeritageBaseOf(lowerer, decl, t.expression);
+          if (viaTemplate) {
+            base = viaTemplate;
+            templateHeritage = t.expression;
+            continue;
+          }
           lowerer.unsupported(
             "SC1090",
             t,
@@ -2178,6 +2196,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
         lowerer.genericClassByDecl.set(decl, info.generic);
       }
       if (base) base.subclasses.push(info);
+      if (templateHeritage) registerTemplateHeritage(lowerer, info, templateHeritage);
       lowerer.classes.set(className, info);
       // A NAMED class binds its name (declarations in their scope, class
       // expressions inside their own bodies — tsc resolves both to this
@@ -2361,7 +2380,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
     // Mixin instantiations lower their initializers under the
     // instantiation's bindings/context (a no-op for everything else —
     // generic FAMILIES own their statics and carry no genericInstance).
-    return [...classFactoryArgumentInits(lowerer, info),
+    return [...templateHeritageInit(lowerer, info), ...classFactoryArgumentInits(lowerer, info),
       ...withInstanceBindings(lowerer, info, () => lowerStaticFieldInitsInner(lowerer, info)),
       ...classFactorySelfInit(lowerer, info)];
   }
@@ -4241,6 +4260,13 @@ export function lowerClassMembers(lowerer: Lowerer, info: ClassInfo): IrFunction
       type: { kind: "object", className: info.def.name },
       loc,
     };
+    if (base.template) {
+      // Into a class TEMPLATE's constructor: the evaluation this class
+      // extends (its heritage value) is the hidden first argument.
+      const env = templateEnvOfStaticChain(info, base, loc);
+      if (!env) lowerer.unsupported("SC1090", info.decl ?? lowerer.entry, "constructing a class template subclass without its heritage evaluation");
+      args = [env, ...args];
+    }
     if (base.builtinError) {
       // super(message) into the runtime-provided Error constructor: stamps
       // name/message on the (already-allocated) object. Receiver + message

@@ -11,10 +11,11 @@ The decision brief referenced by the mission (`2026-10-05-class-factory-decision
 - The existing factory path specialises one immortal class per once-evaluated top-level call site, with captures in module globals. It cannot express two evaluations from one call position.
 - `classval` is a `usize` preorder in the Rust backend (`values.ts`, `expressions.ts` `classRef`/`newValue`/`instanceOfValue`); it carries no per-evaluation identity or environment.
 - The Rust runtime collects cycles (`heap.rs` trace/clear-edges), so an evaluation object referenced from its own instances is reclaimed.
+- The frontend already carries backend-specific lowering flags (`native*` options in `index.ts`), but templates need none: they use only existing IR.
 
 ## Representation chosen
 
-A template is lowered entirely in the frontend onto existing IR constructs. There is no new IR node, no validator change and no backend change, so the C and LLVM backends are untouched by construction; templates are admitted only when the backend is Rust.
+A template is lowered entirely in the frontend onto existing IR constructs. There is no new IR node and no validator change; C and LLVM backend sources are untouched. Templates are not gated by backend because they are ordinary IR, but only the Rust backend was differential-tested in this slice.
 
 - The class expression `E` inside function `F` is collected ONCE as an ordinary IR class `T` (one static shape: fields, vtable methods, base chain). `T` gets one hidden instance field `%template` of type `object:T%class`.
 - `T%class` is a synthetic standalone IR class. One instance is allocated per evaluation of `E`; that object IS the class value. It holds a snapshot of every binding of `F` (or enclosing functions) that `E`'s members read.
@@ -44,3 +45,12 @@ A captured binding is admitted only if it cannot change after the evaluation: a 
 - Flowing a template class value into a `typeof C` classval slot, `X.prototype`, and `C`/`LLVM` backends.
 
 The existing top-level specialisation (`class-factory-*`, `lower-mixins.ts`) keeps precedence for its admitted call sites; only positions it refuses (calls inside functions) fall through to templates. Mixins over a parameter base keep their own path.
+
+## As implemented
+
+- `packages/compiler/src/frontend/lowering/class-templates.ts` holds the whole mechanism; the integration points are `lowerClassExpressionInfo`/`lowerClassExpression`, the constructor, method and static-method lowering, `superCallStmt`, `lowerNew`, the static-call and class-value-property paths (`lower-classes.ts`), `instanceof` and the self-assignment in `lower-exprs.ts`, the class-static type mapping hook (`type-mapper.ts`), and the heritage evaluation at the class statement (`lower-module-init.ts`).
+- The type mapper collects a template on demand. A refused collection reports its diagnostics to the declaration that needed the type; builder-method class nodes probe silently so the per-site specialization keeps its own fences.
+- The closed-factory specialization (`class-factory-*`) now applies only when every reference to the factory is a pinned top-level call (`everyFactoryReferencePinned` in `lower-mixins.ts`); otherwise the factory is an ordinary function returning a template. Builder methods whose class is an admitted template are collected as ordinary methods.
+- `class D extends <expr>` admits a template evaluation when the checker's type of the expression is a single class static side declared by a template node and the lowered value is exactly that template's evaluation class. Unions, `any`, refused templates, and derived classes that are not top-level declarations keep named refusals.
+- Rust backend: reading an immutable object-typed module global in its temporal dead zone now throws Node's `ReferenceError: Cannot access 'X' before initialization` instead of panicking (`values.ts`), which the heritage TDZ case needs.
+- Known gap left untouched: `new C(arguments[0])` inside a function that reads `arguments` produces Rust that does not compile (pre-existing, reproduced without templates).

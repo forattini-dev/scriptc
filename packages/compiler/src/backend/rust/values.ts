@@ -145,7 +145,9 @@ export class RustValueEmitter {
     const global = this.context.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
-      if (type.kind === "func" && !global.mutable) {
+      // A const binding's slot is empty exactly in its temporal dead zone
+      // (a function called above the declaration): Node's ReferenceError.
+      if (!global.mutable && (type.kind === "func" || type.kind === "object")) {
         const message = this.context.rustString(`Cannot access '${global.name}' before initialization`);
         return `${name}.with(|slot| slot.borrow().as_ref().cloned().unwrap_or_else(|| runtime::throw_reference_error("${message}".to_owned())))`;
       }

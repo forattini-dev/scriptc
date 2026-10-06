@@ -485,3 +485,47 @@ export function lowerTemplateInstanceof(L: Lowerer, expr: ts.BinaryExpression, t
     result: { kind: "boolLit", value: false, type: BOOL, loc }, type: BOOL, loc,
   };
 }
+
+/** `class D extends <expr>`: the template whose evaluation the heritage
+ * provably yields — the checker's type of the expression is exactly that
+ * template's static side (one class; never a union, never any), so its IR
+ * type is the evaluation class, which only evaluating the template can
+ * produce. Null when the heritage is not a template evaluation; a template
+ * heritage in an unsupported position is a named refusal. */
+export function templateHeritageBaseOf(L: Lowerer, decl: ts.ClassLikeDeclaration, heritage: ts.Expression): ClassInfo | null {
+  const type = L.typeOf(heritage);
+  if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Union)) return null;
+  const symbol = type.getSymbol();
+  const declared = symbol ? L.checker.valueDeclarationOf(symbol) : undefined;
+  if (!declared || !ts.isClassExpression(declared) || !isClassTemplateNode(declared)) return null;
+  const template = L.checker.getConstructSignatures(type).length > 0 ? templateOfObjectType(L, L.mapTypeOf(type)) : null;
+  if (!template) {
+    const reason = templateProbeFailures.get(L)?.get(declared)?.[0]?.message.replace(/ (is|are) not supported yet$/, "");
+    L.unsupported("SC1090", heritage, `extending a class evaluated inside a function whose template was refused${reason ? ` (${reason})` : ""}`);
+  }
+  if (!ts.isClassDeclaration(decl) || !ts.isSourceFile(decl.parent)) {
+    L.unsupported("SC1090", heritage, "extending a class evaluated inside a function from a class that may itself evaluate more than once (declare the derived class at top level)");
+  }
+  return template;
+}
+
+export function registerTemplateHeritage(L: Lowerer, info: ClassInfo, heritage: ts.Expression): void {
+  const template = info.base!.template!;
+  const global = { id: `%g.${info.def.name}.%base`, name: `${info.def.jsName ?? info.def.name}.%base`,
+    type: objectType(template.objectClass), mutable: true };
+  L.globalsList.push(global);
+  info.templateBase = { globalId: global.id, expr: heritage };
+}
+
+/** The heritage evaluates at the class statement, before its statics. */
+export function templateHeritageInit(L: Lowerer, info: ClassInfo): IrStmt[] {
+  const heritage = info.templateBase;
+  if (!heritage) return [];
+  const loc = locOf(heritage.expr);
+  const type = objectType(info.base!.template!.objectClass);
+  const value = L.lowerExpr(heritage.expr);
+  if (value.type.kind !== "object" || value.type.className !== info.base!.template!.objectClass) {
+    L.unsupported("SC1090", heritage.expr, "extending an expression whose lowering is not exactly one evaluation of a class template");
+  }
+  return [{ kind: "assign", localId: heritage.globalId, value: { ...value, type }, loc }];
+}

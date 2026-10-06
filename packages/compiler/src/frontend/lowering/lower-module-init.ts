@@ -328,7 +328,9 @@ export function prepareModuleInits(L: Lowerer, parts: FileParts[]): void {
           // SITE's position instead (below) — their inner class node may
           // even live in another file.
           c.decl && ts.isClassDeclaration(c.decl) && !c.mixinInstance && c.decl.getSourceFile() === sf &&
-          (c.staticFields.length > 0 || (c.staticBlocks?.length ?? 0) > 0 || c.classDecorators !== undefined))
+          (c.staticFields.length > 0 || (c.staticBlocks?.length ?? 0) > 0 || c.classDecorators !== undefined ||
+            // A class TEMPLATE heritage evaluates at the class statement.
+            c.templateBase !== undefined))
         .map((c) => ({ pos: c.decl!.getStart(), info: c }));
       // Statics-bearing MIXIN instantiations whose call evaluates in THIS
       // file: their declaration-time code runs when the call does — the

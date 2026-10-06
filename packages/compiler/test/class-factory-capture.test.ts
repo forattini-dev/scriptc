@@ -49,8 +49,6 @@ test.each([
   ["reloadable/main.cjs", "reloadable CommonJS modules"],
   ["builder-tdz.mjs", "builder class initializes"],
   ["builder-self-static.mjs", "self-referencing class factories with static initializers"],
-  ["builder-effects.mjs", "extending computed expressions"],
-  ["builder-frame.mjs", "extending computed expressions"],
 ])("retains an explicit class factory boundary: %s", async (fixture, message) => {
   const result = await compile(resolve("tests/fixtures/class-factory", fixture), {
     backend: "rust", allowEngine: false,
