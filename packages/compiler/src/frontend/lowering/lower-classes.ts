@@ -3245,7 +3245,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
       lowerer.classBySymbol.get(lowerer.resolveValueSymbol(expr.expression)!) !== undefined;
     const template = directClass ? null : templateOfObjectType(lowerer, recvT);
     if (template) {
-      if (expr.name.text === "name") return templateNameRead(lowerer, lowerer.lowerExpr(expr.expression), template, locOf(expr));
+      if (expr.name.text === "name") return templateNameRead(lowerer, lowerer.lowerExprExpecting(expr.expression, { kind: "object", className: template.template!.objectClass }), template, locOf(expr));
       lowerer.unsupported("SC1090", expr, `reading '${expr.name.text}' through the value of a class evaluated inside a function (only .name, construction, static calls, instanceof and identity are lowered)`);
     }
     if (recvT?.kind !== "classval") return null;
@@ -5258,7 +5258,7 @@ export function lowerNew(lowerer: Lowerer, expr: ts.NewExpression): IrExpr {
       const template = templateOfObjectType(lowerer, lowerer.mapTypeOf(lowerer.typeOf(expr.expression)));
       if (template) {
         if (template.def.abstract) lowerer.unsupported("SC1090", expr, "constructing an abstract class template");
-        const callee = lowerer.lowerExpr(expr.expression);
+        const callee = lowerer.lowerExprExpecting(expr.expression, { kind: "object", className: template.template!.objectClass });
         lowerer.noteEdge(`%${template.def.name}.constructor`);
         return {
           kind: "new",

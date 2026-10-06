@@ -448,7 +448,7 @@ export function lowerTemplateStaticCall(L: Lowerer, call: ts.CallExpression, acc
   if (!found || found.method === undefined) {
     L.unsupported("SC1090", call, `the static member '${name}' through the value of a class evaluated inside a function (static fields and accessors have no per-evaluation lowering)`);
   }
-  const receiver = L.lowerExpr(access.expression);
+  const receiver = L.lowerExprExpecting(access.expression, objectType(template.template!.objectClass));
   const callee = `%${found.declarer.def.name}.static:${name}`;
   L.noteEdge(callee);
   const args = L.completeArgs(call.arguments, found.method.params, loc, call);
@@ -465,7 +465,7 @@ export function lowerTemplateStaticCall(L: Lowerer, call: ts.CallExpression, acc
 export function lowerTemplateInstanceof(L: Lowerer, expr: ts.BinaryExpression, template: ClassInfo): IrExpr {
   const loc = locOf(expr);
   const left = L.lowerExpr(expr.left);
-  const right = L.lowerExpr(expr.right);
+  const right = L.lowerExprExpecting(expr.right, objectType(template.template!.objectClass));
   if (left.type.kind !== "object" || !L.classes.has(left.type.className)) {
     L.unsupported("SC1090", expr, "'instanceof' a class evaluated inside a function on values other than class instances");
   }
@@ -523,7 +523,7 @@ export function templateHeritageInit(L: Lowerer, info: ClassInfo): IrStmt[] {
   if (!heritage) return [];
   const loc = locOf(heritage.expr);
   const type = objectType(info.base!.template!.objectClass);
-  const value = L.lowerExpr(heritage.expr);
+  const value = L.lowerExprExpecting(heritage.expr, type);
   if (value.type.kind !== "object" || value.type.className !== info.base!.template!.objectClass) {
     L.unsupported("SC1090", heritage.expr, "extending an expression whose lowering is not exactly one evaluation of a class template");
   }

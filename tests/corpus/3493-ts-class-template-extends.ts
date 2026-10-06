@@ -21,11 +21,6 @@ function make(tag: string) {
 }
 
 function current() { return Late; }
-try {
-  current();
-} catch (error) {
-  console.log((error as Error).name, (error as Error).message);
-}
 
 class First extends make("first") {
   extra: string;
