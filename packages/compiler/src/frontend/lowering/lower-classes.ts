@@ -41,7 +41,7 @@ import { lowerSqlErrorNew } from "./lower-sql-client.js";
 import { implicitMethodMayBeOverridden } from "./implicit-method-overrides.js";
 import { classFactoryArgumentInits, classFactorySelfInit, classFactoryReturnType, withClassFactoryCaptures } from "./class-factory-captures.js";
 import { classFactoryMethodOf } from "./class-factory-shapes.js";
-import { admitClassTemplate, classTemplateSelfReturnType, fenceClassTemplate, lowerTemplateEvaluation, lowerTemplateStaticCall, templateCtorPrologue, templateEnvOfStaticChain, templateNameRead, templateOfObjectType, templateMethodPrologue, templateObjectCtor, templateStaticPrologue, type ClassTemplateInfo } from "./class-templates.js";
+import { admitClassTemplate, classTemplateNamesOf, classTemplateSelfReturnType, fenceClassTemplate, lowerTemplateEvaluation, lowerTemplateStaticCall, templateCtorPrologue, templateEnvOfStaticChain, templateNameRead, templateOfObjectType, templateMethodPrologue, templateObjectCtor, templateStaticPrologue, type ClassTemplateInfo } from "./class-templates.js";
 import { deferJsAsyncMethod, noteDeferredJsAsyncMethod, ownsDeferredJsAsyncMethod } from "./js-async-methods.js";
 
 export interface ClassInfo {
@@ -1495,12 +1495,17 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
           // A body-less method is an OVERLOAD SIGNATURE (abstract methods
           // collected above): type-world, exactly the constructor story.
           if (!member.body) continue;
-          // A class-returning builder method has no single class-value ABI.
-          // Only an exact newly constructed receiver's once-evaluated wrapper
-          // specializes it; ordinary calls and override families stay fenced.
-          if (classFactoryMethodOf(lowerer, member) && !fields.has(mName) &&
-            !lowerer.findMethodOn(base, mName) && !findGenericMethodOn(lowerer, base, mName) &&
-            !implicitMethodMayBeOverridden(lowerer, mName)) continue;
+          // A class-returning builder method is an ordinary method when the
+          // class it returns is an admitted template (one object per
+          // evaluation — class-templates.ts). Otherwise it has no single
+          // class-value ABI: only an exact newly constructed receiver's
+          // once-evaluated wrapper specializes it (class-factory-captures.ts).
+          {
+            const factoryMethod = classFactoryMethodOf(lowerer, member);
+            if (factoryMethod && !classTemplateNamesOf(lowerer, factoryMethod.classNode, true) && !fields.has(mName) &&
+              !lowerer.findMethodOn(base, mName) && !findGenericMethodOn(lowerer, base, mName) &&
+              !implicitMethodMayBeOverridden(lowerer, mName)) continue;
+          }
           // GENERIC methods (own type parameters): collected aside — never
           // in `methods` (no single ABI signature, no vtable slot); bodies
           // lower per call-site instantiation as `%C.m%n`. Mixing generic
@@ -3081,7 +3086,9 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
   export function lowerStaticMethodCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (access.questionDotToken) return null;
-    {
+    // A class TEMPLATE evaluation as the receiver (never a name the
+    // per-site specializations registered — those resolve directly).
+    if (!ts.isIdentifier(access.expression) || !lowerer.classBySymbol.get(lowerer.resolveValueSymbol(access.expression)!)) {
       const template = templateOfObjectType(lowerer, lowerer.mapTypeOf(lowerer.typeOf(access.expression)));
       if (template) return lowerTemplateStaticCall(lowerer, call, access, template);
     }
@@ -3215,7 +3222,9 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
   export function lowerClassValueProperty(lowerer: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (expr.questionDotToken) return null;
     const recvT = lowerer.mapTypeOf(lowerer.typeOf(expr.expression));
-    const template = templateOfObjectType(lowerer, recvT);
+    const directClass = ts.isIdentifier(expr.expression) &&
+      lowerer.classBySymbol.get(lowerer.resolveValueSymbol(expr.expression)!) !== undefined;
+    const template = directClass ? null : templateOfObjectType(lowerer, recvT);
     if (template) {
       if (expr.name.text === "name") return templateNameRead(lowerer, lowerer.lowerExpr(expr.expression), template, locOf(expr));
       lowerer.unsupported("SC1090", expr, `reading '${expr.name.text}' through the value of a class evaluated inside a function (only .name, construction, static calls, instanceof and identity are lowered)`);

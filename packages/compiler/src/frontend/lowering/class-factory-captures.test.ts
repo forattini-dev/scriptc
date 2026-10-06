@@ -42,7 +42,11 @@ test("builder factories retain distinct receiver objects and self-referencing cl
     expect(selves.every(global => global.type.kind === "classval")).toBe(true);
     expect(new Set(selves.map(global => global.type.kind === "classval" ? global.type.className : "")).size).toBe(2);
     expect(new Set(globals.map(global => global.id)).size).toBe(globals.length);
-    expect(result.module.classes?.filter(definition => definition.jsName === "CommandRef")).toHaveLength(2);
+    // Two per-site specializations; Builder.build itself stays an ordinary
+    // method whose class compiles once as a template (class-templates.ts).
+    const commandRefs = result.module.classes?.filter(definition => definition.jsName === "CommandRef") ?? [];
+    expect(commandRefs.filter(definition => definition.name.includes("%mx"))).toHaveLength(2);
+    expect(commandRefs.filter(definition => !definition.name.includes("%mx"))).toHaveLength(2);
     const assignments = result.module.functions.flatMap(fn => fn.body).filter(statement => statement.kind === "assign");
     for (const receiver of receivers) {
       const selfId = receiver.id.replace(/\.receiver$/, ".self");

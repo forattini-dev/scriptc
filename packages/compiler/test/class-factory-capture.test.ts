@@ -44,13 +44,10 @@ for (const optimization of ["dev", "release"] as const) test.each([
 });
 
 test.each([
-  ["repeated-call.ts", "class factory calls inside functions"],
   ["default-argument.ts", "class factories with default"],
-  ["multi-declarator.ts", "class factories outside a single top-level"],
   ["base-tdz.mjs", "base class initializes"],
   ["reloadable/main.cjs", "reloadable CommonJS modules"],
   ["builder-tdz.mjs", "builder class initializes"],
-  ["builder-repeat.mjs", "class factory calls inside functions"],
   ["builder-self-static.mjs", "self-referencing class factories with static initializers"],
   ["builder-effects.mjs", "extending computed expressions"],
   ["builder-frame.mjs", "extending computed expressions"],

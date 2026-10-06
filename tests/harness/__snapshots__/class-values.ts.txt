@@ -51,30 +51,30 @@ class-values.ts:48:13 - error SC1090: reading the static member 'tag' through a 
      |             ^~~~~~~~~~~~~
   49 | 
 
-class-values.ts:52:10 - error SC1090: class expressions inside functions (each evaluation creates a DISTINCT class in JS — fresh identity, fresh statics; declare the class at top level) are not supported yet
+class-values.ts:53:18 - error SC1090: static fields in class expressions evaluated inside functions (each evaluation mints a distinct class) are not supported yet
 
-  51 | function make(): unknown {
-  52 |   return class {};
-     |          ^~~~~~~~
-  53 | }
+  52 | function make(): unknown {
+  53 |   return class { static count = 1; };
+     |                  ^~~~~~~~~~~~~~~~~
+  54 | }
 
-class-values.ts:59:18 - error SC1090: class expressions with static initializers or static blocks outside a whole-initializer position (their declaration-time code must run exactly where the expression evaluates — bind the class in its own top-level `const C = class …` statement) is not supported yet
+class-values.ts:60:18 - error SC1090: class expressions with static initializers or static blocks outside a whole-initializer position (their declaration-time code must run exactly where the expression evaluates — bind the class in its own top-level `const C = class …` statement) is not supported yet
 
-  58 | // evaluates.
-  59 | const pair = [1, class WithStatic { static x = 1; }] as const;
+  59 | // evaluates.
+  60 | const pair = [1, class WithStatic { static x = 1; }] as const;
      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  60 | 
+  61 | 
 
-class-values.ts:69:16 - error SC1090: constructing through a union of class values (annotate the slot with the common constructor type — e.g. `new () => Base` — or narrow first) are not supported yet
+class-values.ts:70:16 - error SC1090: constructing through a union of class values (annotate the slot with the common constructor type — e.g. `new () => Base` — or narrow first) are not supported yet
 
-  68 | let pick: typeof Left | typeof Right = Left;
-  69 | const picked = new pick();
+  69 | let pick: typeof Left | typeof Right = Left;
+  70 | const picked = new pick();
      |                ^~~~~~~~~~
-  70 | void picked;
+  71 | void picked;
 
-class-values.ts:75:12 - error SC1090: 'this' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead) are not supported yet
+class-values.ts:76:12 - error SC1090: 'this' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead) are not supported yet
 
-  74 |   static self(): string {
-  75 |     return this.name;
+  75 |   static self(): string {
+  76 |     return this.name;
      |            ^~~~
-  76 |   }
+  77 |   }

@@ -63,7 +63,7 @@ import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerStaticFieldRead } from "./lower-classes.js";
 import { bindingNeverReassigned, implicitMonoFile, lowerTaggedTemplate, nullishGenericBindingUnitOf, omittedArgFor } from "./lower-calls.js";
-import { isOpaqueMixinShape, mixinFnOfCallee } from "./lower-mixins.js";
+import { mixinFnOfCallee } from "./lower-mixins.js";
 import { lowerTemplateInstanceof, lowerTemplateSelfAssignment, templateOfObjectType } from "./class-templates.js";
 import { familyFnNodeOf, lowerFamilyImpl } from "./lower-families.js";
 import {
@@ -1485,7 +1485,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
         // exists — calls instantiate a class per call site
         // (lower-mixins.ts). Generic mixins took the generic-fn value
         // fence above; this names the non-generic spelling.
-        if (isOpaqueMixinShape(mixinFnOfCallee(lowerer, expr))) {
+        if (mixinFnOfCallee(lowerer, expr)) {
           lowerer.unsupported(
             "SC1090",
             expr,

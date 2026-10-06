@@ -5,6 +5,8 @@ import type { Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import type { MixinFnShape } from "./lower-mixins.js";
 import { probeExactInstanceClassOf } from "./lower-class-bindings.js";
+import { findGenericMethodOn } from "./lower-classes.js";
+import { implicitMethodMayBeOverridden } from "./implicit-method-overrides.js";
 
 export interface ClassFactoryCaptures {
   slots: Map<ts.Symbol, IrGlobal>;
@@ -58,8 +60,11 @@ export function prepareClassFactoryCaptures(L: Lowerer, call: ts.CallExpression,
     }
     const ownerSymbol = method.owner.name ? L.resolveValueSymbol(method.owner.name) : null;
     const owner = ownerSymbol ? L.classBySymbol.get(ownerSymbol) : undefined;
-    if (!owner || owner.fields.has(method.declaration.name.getText()) ||
-      owner.methods.has(method.declaration.name.getText())) {
+    const methodName = method.declaration.name.getText();
+    // Not skipped at collection (a template-returning method is ordinary)
+    // is fine; only inherited/overridable or field-shadowed members fence.
+    if (!owner || owner.fields.has(methodName) || L.findMethodOn(owner.base, methodName) ||
+      findGenericMethodOn(L, owner.base, methodName) || implicitMethodMayBeOverridden(L, methodName)) {
       L.unsupported("SC1090", call, "class factory wrappers without a closed, non-overridden builder method");
     }
     const closureSymbol = L.checker.getSymbolAtLocation(method.closure.name);

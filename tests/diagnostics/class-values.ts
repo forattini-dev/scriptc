@@ -47,9 +47,10 @@ someClass.tag = "write";
 // runtime class decides which declaration answers.
 console.log(someClass.tag);
 
-// Class expressions inside functions mint a DISTINCT class per evaluation.
+// Class expressions inside functions mint a DISTINCT class per evaluation:
+// they compile as templates, but per-evaluation static fields stay fenced.
 function make(): unknown {
-  return class {};
+  return class { static count = 1; };
 }
 make();
 

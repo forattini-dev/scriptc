@@ -105,7 +105,11 @@ export function mixinFnShapeOf(
 ): MixinFnShape | null {
   const cached = lowerer.mixinFnShapes.get(fn);
   if (cached !== undefined) return cached;
-  const shape = mixinFnShapeInner(lowerer, fn) ?? closedClassFactoryShapeOf(lowerer, fn);
+  let shape = mixinFnShapeInner(lowerer, fn) ?? closedClassFactoryShapeOf(lowerer, fn);
+  // A closed-base factory specializes per call site only when EVERY
+  // reference is a once-evaluated pinned call; otherwise it is an ordinary
+  // function whose returned class evaluates as a template.
+  if (shape?.factory && !everyFactoryReferencePinned(lowerer, fn)) shape = null;
   lowerer.mixinFnShapes.set(fn, shape);
   return shape;
 }
@@ -252,14 +256,7 @@ function mixinFnNodeOfBinding(
  * this test. */
 export function isMixinFnBinding(lowerer: Lowerer, decl: ts.VariableDeclaration): boolean {
   const fn = mixinFnNodeOfBinding(decl);
-  return fn !== null && isOpaqueMixinShape(mixinFnShapeOf(lowerer, fn));
-}
-
-/** A mixin over a parameter base has no runtime function of its own. A
- * closed-base class FACTORY is an ordinary function as well: only its
- * pinned top-level calls specialize per site. */
-export function isOpaqueMixinShape(shape: MixinFnShape | null | undefined): boolean {
-  return !!shape && !shape.factory;
+  return fn !== null && mixinFnShapeOf(lowerer, fn) !== null;
 }
 
 /** The class a mixin ARGUMENT statically names, with every unsupported
@@ -384,9 +381,6 @@ export function mixinCallClassInfoOf(lowerer: Lowerer, call: ts.CallExpression):
   }
   const shape = mixinFnOfCallee(lowerer, call.expression);
   if (!shape) return null;
-  // A factory call that may evaluate more than once is an ordinary call:
-  // its class expression evaluates as a template (class-templates.ts).
-  if (shape.factory && !pinnedFactoryCallPosition(call)) return null;
   try {
     const info = instantiateMixinCall(lowerer, call, shape);
     lowerer.mixinInstanceByCall.set(call, info);
@@ -593,16 +587,6 @@ export function mixinIntersectionInstanceType(lowerer: Lowerer, widened: ts.Type
  * argument slots): such instantiations register before any body lowers in
  * both passes, so the intersection resolver above may name them without
  * discovery/emit drift. */
-function pinnedFactoryCallPosition(call: ts.CallExpression): boolean {
-  if (!classFactoryStatementOf(call)) return false;
-  let prev: ts.Node = call;
-  for (let p: ts.Node = call.parent; !ts.isSourceFile(p); prev = p, p = p.parent) {
-    if (ts.isFunctionLike(p) || ts.isClassStaticBlockDeclaration(p)) return false;
-    if ((ts.isClassDeclaration(p) || ts.isClassExpression(p)) && !ts.isHeritageClause(prev)) return false;
-  }
-  return true;
-}
-
 function pinnedMixinCallPosition(call: ts.CallExpression): boolean {
   let n: ts.Node = call;
   for (let p: ts.Node = n.parent; !ts.isSourceFile(p); n = p, p = p.parent) {
@@ -638,4 +622,55 @@ function staticsEvalStatementOf(call: ts.CallExpression): ts.Statement | null {
     if (ts.isClassDeclaration(p) && ts.isSourceFile(p.parent) && ts.isHeritageClause(n)) return p;
     return null;
   }
+}
+
+/** True when every reference to the factory's binding, across the
+ * program's files, is the callee of a pinned top-level call (a single
+ * const initializer or a top-level class heritage). Anything else — a
+ * call inside a function, the function as a value, a renamed import or
+ * export — keeps the factory an ordinary function. Pure; the caller caches. */
+function everyFactoryReferencePinned(
+  lowerer: Lowerer,
+  fn: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression,
+): boolean {
+  const nameNode = ts.isFunctionDeclaration(fn)
+    ? fn.name
+    : ts.isVariableDeclaration(fn.parent) && ts.isIdentifier(fn.parent.name) ? fn.parent.name : undefined;
+  if (!nameNode) return false;
+  const target = lowerer.checker.getSymbolAtLocation(nameNode);
+  if (!target) return false;
+  const name = nameNode.text;
+  for (const sf of lowerer.programSourceFiles()) {
+    if (!sf.text.includes(name)) continue;
+    let pinned = true;
+    ts.walkPreorder(sf, (node) => {
+      if (!ts.isIdentifier(node) || node.text !== name || node === nameNode) return undefined;
+      const parent = node.parent;
+      if ((ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent))) {
+        if (parent.propertyName && parent.propertyName !== node) { pinned = false; return "stop"; }
+        return undefined;
+      }
+      let symbol = lowerer.checker.getSymbolAtLocation(node);
+      if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = lowerer.checker.getAliasedSymbol(symbol);
+      if (symbol !== target) return undefined;
+      const call = parent;
+      if (!ts.isCallExpression(call) || call.expression !== node || !pinnedFactoryCallPosition(call)) {
+        pinned = false;
+        return "stop";
+      }
+      return undefined;
+    });
+    if (!pinned) return false;
+  }
+  return true;
+}
+
+function pinnedFactoryCallPosition(call: ts.CallExpression): boolean {
+  if (!classFactoryStatementOf(call)) return false;
+  let prev: ts.Node = call;
+  for (let p: ts.Node = call.parent; !ts.isSourceFile(p); prev = p, p = p.parent) {
+    if (ts.isFunctionLike(p) || ts.isClassStaticBlockDeclaration(p)) return false;
+    if ((ts.isClassDeclaration(p) || ts.isClassExpression(p)) && !ts.isHeritageClause(prev)) return false;
+  }
+  return true;
 }

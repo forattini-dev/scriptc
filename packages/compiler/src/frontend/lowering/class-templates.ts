@@ -30,7 +30,9 @@ import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
 import { findStaticOn, type ClassInfo } from "./lower-classes.js";
 import { newFnCtx } from "./scope-env.js";
-import { PoisonError } from "./lowerer.js";
+import { PoisonError, Lowerer as LowererClass } from "./lowerer.js";
+import { mixinFnShapeOf } from "./lower-mixins.js";
+import { classFactoryMethodOf } from "./class-factory-shapes.js";
 
 /** The hidden instance field of a template class naming its evaluation. */
 export const TEMPLATE_FIELD = "%template";
@@ -195,7 +197,7 @@ export function admitClassTemplate(L: Lowerer, expr: ts.ClassExpression, info: C
         ((ts.isPropertyAssignment(parent) || ts.isMethodDeclaration(parent) || ts.isPropertyDeclaration(parent) ||
           ts.isGetAccessor(parent) || ts.isSetAccessor(parent)) && parent.name === node) ||
         isTypePosition(node)) return undefined;
-      let symbol = ts.isShorthandPropertyAssignment(parent) && parent.name === node
+      const symbol = ts.isShorthandPropertyAssignment(parent) && parent.name === node
         ? L.checker.getShorthandAssignmentValueSymbol(parent)
         : L.checker.getSymbolAtLocation(node);
       if (!symbol || (symbol.flags & ts.SymbolFlags.Value) === 0) return undefined;
@@ -392,20 +394,49 @@ export function templateNameRead(L: Lowerer, receiver: IrExpr, template: ClassIn
 }
 
 /** The type mapper's view of a template node: collected on demand (the
- * generic-instance precedent), named deterministically while collecting. */
-export function classTemplateNamesOf(L: Lowerer, decl: ts.ClassLikeDeclaration): { instance: string; object: string } | null {
+ * generic-instance precedent), named deterministically while collecting.
+ * A refused collection answers null and reports its diagnostics to the
+ * declaration that needed the type (a silent probe only asks). The class
+ * node of a recognized mixin/factory shape belongs to that machinery. */
+export function classTemplateNamesOf(L: Lowerer, decl: ts.ClassLikeDeclaration, silent = false): { instance: string; object: string } | null {
   if (!isClassTemplateNode(decl)) return null;
+  const owner = enclosingFunctionOf(decl);
+  // A builder method's class: when refused, the method keeps the per-site
+  // specialization path (lower-classes skips it), which owns the fences.
+  if (owner && ts.isMethodDeclaration(owner) && classFactoryMethodOf(L, owner)?.classNode === decl) silent = true;
+  const failed = templateProbeFailures.get(L)?.get(decl);
+  if (failed) {
+    if (!silent) for (const diagnostic of failed) L.pushDiag(diagnostic);
+    return null;
+  }
   const names = { instance: L.classNamer(decl), object: templateObjectClassName(L, decl) };
   if (L.collectingExprClasses.has(decl)) return names;
   const cached = L.exprClassInfoByNode.get(decl);
   if (cached) return cached.template ? names : null;
+  if (owner && (ts.isFunctionDeclaration(owner) || ts.isArrowFunction(owner) || ts.isFunctionExpression(owner)) &&
+    mixinFnShapeOf(L, owner)?.classNode === decl) return null;
+  const saved = L.diagSink;
+  const captured: typeof L.diags = [];
+  L.diagSink = captured;
   try {
-    return L.lowerClassExpressionInfo(decl).template ? names : null;
+    const info = L.lowerClassExpressionInfo(decl);
+    L.diagSink = saved;
+    for (const diagnostic of captured) L.pushDiag(diagnostic);
+    return info.template ? names : null;
   } catch (e) {
-    if (e instanceof PoisonError) return null;
-    throw e;
+    L.diagSink = saved;
+    if (!(e instanceof PoisonError)) throw e;
+    const failures = templateProbeFailures.get(L) ?? new Map();
+    failures.set(decl, captured);
+    templateProbeFailures.set(L, failures);
+    // The refusal belongs to whatever declaration needed this type (its
+    // deferral sink decides when it reports); a silent probe only asks.
+    if (!silent) for (const diagnostic of captured) L.pushDiag(diagnostic);
+    return null;
   }
 }
+
+const templateProbeFailures = new WeakMap<Lowerer, Map<ts.ClassLikeDeclaration, LowererClass["diags"]>>();
 
 /** `X.m(args)` with X an evaluation: an own static takes X as its hidden
  * environment; a static inherited from the (static) base calls directly. */
