@@ -4,8 +4,51 @@ import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import type { Checker, Type } from "typescript/unstable/sync";
 import * as ts from "./adapter.js";
-import { CheckerFacade } from "./checker.js";
+import { CheckerFacade, constituentTypes } from "./checker.js";
 import { Ts7Host } from "./program-adapter.js";
+
+test("empty tuple references retain their union arms and instantiated element types", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scriptc-empty-tuple-reference-"));
+  const entry = join(dir, "main.ts");
+  writeFileSync(entry, `
+    type Empty = readonly [];
+    type Pair = readonly [string, number];
+    type Either = Empty | Pair;
+    function pairs(lines: string[]): [string, string][] {
+      return lines.flatMap(line => {
+        const at = line.indexOf("=");
+        return at < 0 ? [] : [[line.slice(0, at), line.slice(at + 1)]];
+      });
+    }
+  `);
+  const host = new Ts7Host({ cwd: dir });
+  const program = host.createProgram([entry], { strict: true, target: ts.ScriptTarget.ESNext });
+  try {
+    expect(program.getSemanticDiagnostics()).toEqual([]);
+    const file = program.getSourceFile(entry)!;
+    const checker = program.getTypeChecker();
+    const aliases = file.statements.filter(ts.isTypeAliasDeclaration);
+    const either = checker.getTypeFromTypeNode(aliases.find(alias => alias.name.text === "Either")!.type);
+    const arms = constituentTypes(either);
+    expect(arms).toHaveLength(2);
+    expect(arms.map(arm => checker.getTypeArguments(arm as ts.TypeReference).length).sort()).toEqual([0, 2]);
+    for (const arm of arms) {
+      expect(checker.isTupleType(arm)).toBe(true);
+      expect(arm.flags & ts.TypeFlags.Any).toBe(0);
+    }
+    ts.walkPreorder(file, node => {
+      if (ts.isArrayLiteralExpression(node) && node.elements.length === 0) {
+        const type = checker.raw.getTypeAtLocation(node);
+        expect(type).toBeDefined();
+        if (!type) throw new Error("empty array type was lost");
+        expect(type.flags & ts.TypeFlags.Any).toBe(0);
+      }
+    });
+  } finally {
+    program.dispose(); host.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("assignability caches true and false by ordered pair and retries failed queries", () => {
   const source = {} as Type, target = {} as Type;

@@ -1,0 +1,2 @@
+# Patch context prefixes precede Go tabs; retain stable bytes for its build digest.
+packages/compiler/native-checker/tuple-reference.patch text eol=lf whitespace=-space-before-tab

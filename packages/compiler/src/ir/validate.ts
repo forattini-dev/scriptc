@@ -387,6 +387,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
     argTypes: [STRING, arrayOf(STRING), F64, STRING, F64, F64, F64, arrayOf(STRING)],
     result: SPAWNRES_T,
   },
+  "cp.spawnSyncOptsCwd": {
+    argTypes: [STRING, arrayOf(STRING), F64, STRING, F64, F64, F64, STRING], result: SPAWNRES_T,
+  },
+  "cp.spawnSyncOptsEnvCwd": {
+    argTypes: [STRING, arrayOf(STRING), F64, STRING, F64, F64, F64, arrayOf(STRING), STRING], result: SPAWNRES_T,
+  },
   "cp.spawnSyncStdioStr": {
     argTypes: [STRING, arrayOf(STRING), F64, STRING, STRING],
     result: SPAWNRES_T,

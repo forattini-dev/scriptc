@@ -55,6 +55,9 @@ export async function compilerImplementationIdentity(
   const files: string[] = [];
   const dependencies: CompilerImplementationDependency[] = [];
   const walk = async (directory: string): Promise<void> => {
+    // Source checkouts and developer build caches are not shipped compiler
+    // implementation. The verified server in native-checker/bin is hashed.
+    if (relative(implementationRoot, directory).replaceAll("\\", "/") === "node_modules/.cache/scriptc-tsgo") return;
     const directoryInfo = dependency(directory, await lstat(directory));
     if (captureDependencies && directoryInfo !== null) dependencies.push(directoryInfo);
     const entries = await readdir(directory, { withFileTypes: true });

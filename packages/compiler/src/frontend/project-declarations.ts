@@ -4,6 +4,7 @@ import * as ts from "./ts7/adapter.js";
 import { isNodeModulesPath, projectDtsRuntimeSibling } from "./resolve.js";
 import { parseConfigJson } from "./config-json.js";
 import { npmStaticPackageOfPath } from "./npm-static.js";
+import { trackedRealpath } from "./input-tracker.js";
 
 /** Only configured declaration roots join the checker. A tsconfig's other
  * files are not additional executable entrypoints. Each reached workspace
@@ -20,7 +21,11 @@ export class ProjectDeclarations {
   private readonly declarations = new Set<string>();
   private readonly structural = new Set<string>();
 
-  constructor(private readonly host: ts.Ts7Host) {}
+  private readonly nodeTypeRoot: string | null;
+
+  constructor(private readonly host: ts.Ts7Host, nodeTypes?: string | null) {
+    this.nodeTypeRoot = nodeTypes ? nodePackageRoot(nodeTypes) : null;
+  }
 
   collect(files: readonly string[]): readonly string[] {
     for (const file of files) {
@@ -76,6 +81,11 @@ export class ProjectDeclarations {
       }, this.host);
       try {
         for (const sf of program.getSourceFiles()) {
+          // Node declarations define one global runtime world. A workspace's
+          // development @types/node version must not merge a second set of
+          // EventEmitter/Server/ChildProcess declarations into the entry's world.
+          const nodeRoot = nodePackageRoot(sf.fileName);
+          if (this.nodeTypeRoot !== null && nodeRoot !== null && nodeRoot !== this.nodeTypeRoot) continue;
           if (sf.isDeclarationFile && !hasRuntimeTwin(sf.fileName)) {
             this.declarations.add(sf.fileName);
             this.preserveStructuralDeclaration(sf.fileName);
@@ -106,6 +116,14 @@ export class ProjectDeclarations {
     const source = ts.sys.readFile(path);
     if (source !== undefined) this.host.addVirtualFile(path, source);
   }
+}
+
+function nodePackageRoot(path: string): string | null {
+  const marker = "/node_modules/@types/node/";
+  if (!path.replaceAll("\\", "/").includes(marker)) return null;
+  const canonical = (trackedRealpath(path) ?? path).replaceAll("\\", "/");
+  const index = canonical.lastIndexOf(marker);
+  return index < 0 ? null : canonical.slice(0, index + marker.length);
 }
 
 function hasRuntimeTwin(path: string): boolean {

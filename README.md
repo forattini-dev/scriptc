@@ -10,6 +10,8 @@ scriptc is experimental and targets macOS, Linux, Windows, and WebAssembly via W
 
 The compiler requires Node.js 24 or newer. Default native builds require Cargo and rustc. Source outputs (`--emit=ir|c|rust|llvm`) require only Node. LLVM assembly/object output uses the matching platform helper; LLVM executables additionally need a linker and SDK/sysroot. Explicit C and sanitizer builds require a C compiler. Generated executables do not require Node.
 
+Building this fork's compiler from source also requires Git and Go 1.26 or newer to prepare its pinned TypeScript checker patch. The build caches the checker and its library declarations; `SCRIPTC_GO_BIN` can select a local Go executable. See [the native checker build notes](packages/compiler/native-checker/README.md).
+
 ```console
 $ npm install -g scriptc
 ```

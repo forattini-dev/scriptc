@@ -218,6 +218,10 @@ jobs:
       # with an OIDC authentication error before anything uploads.
       # Trusted publishing requires npm >= 11.5.1 (bundled with Node 24).
 
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.9'
+          cache: false
       - name: Install and build
         run: |
           pnpm install --frozen-lockfile

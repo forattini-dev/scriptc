@@ -948,6 +948,16 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     }
     return `runtime::child_spawn_sync_stdio(&(${context.emitExpr(arg)}), &(${context.emitExpr(argv)}), ${context.emitExpr(timeout)}, &(${context.emitExpr(signal)}), &(${context.emitExpr(stdio)}))`;
   }
+  if ((expr.fn === "cp.spawnSyncOptsCwd" || expr.fn === "cp.spawnSyncOptsEnvCwd") && arg !== undefined) {
+    const withEnv = expr.fn === "cp.spawnSyncOptsEnvCwd";
+    const [argv, timeout, signal, stdinMode, stdoutMode, stderrMode] = expr.args.slice(1);
+    const cwd = expr.args[withEnv ? 8 : 7], envPairs = withEnv ? expr.args[7] : undefined;
+    if (expr.args.length !== (withEnv ? 9 : 8) || argv === undefined || timeout === undefined || signal === undefined ||
+        stdinMode === undefined || stdoutMode === undefined || stderrMode === undefined || cwd === undefined || (withEnv && envPairs === undefined)) {
+      context.unsupported(`${expr.fn} arguments`, expr.loc);
+    }
+    return `runtime::child_spawn_sync_full(&(${context.emitExpr(arg)}), &(${context.emitExpr(argv)}), ${context.emitExpr(timeout)}, &(${context.emitExpr(signal)}), ${context.emitExpr(stdinMode)}, ${context.emitExpr(stdoutMode)}, ${context.emitExpr(stderrMode)}, ${envPairs === undefined ? "None" : `Some(&(${context.emitExpr(envPairs)}))`}, &(${context.emitExpr(cwd)}))`;
+  }
   if ((expr.fn === "spawnRes.stdout" || expr.fn === "spawnRes.stderr") && expr.args.length === 1 && arg !== undefined) {
     return `runtime::spawn_result_${expr.fn === "spawnRes.stdout" ? "stdout" : "stderr"}(&(${context.emitExpr(arg)}))`;
   }

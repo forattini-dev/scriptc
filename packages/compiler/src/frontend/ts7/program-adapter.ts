@@ -32,6 +32,7 @@ import { CheckerFacade } from "./checker.js";
 import { enumKeyOf, JsxEmit, ModuleDetectionKind, ModuleKind, ModuleResolutionKind, ScriptTarget } from "./enums.js";
 import { tsgoPath } from "../dts-paths.js";
 import { trackedAccessibleEntries, trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "../input-tracker.js";
+import { patchedCheckerPath } from "./native-checker.js";
 
 /** The compiler options our createProgram accepts: TS7's CompilerOptions
  * shape (numeric enums for target/module/moduleResolution — the enums module
@@ -130,7 +131,7 @@ function binaryPathOf(explicit: string | undefined, cwd: string): string | undef
       }
     }
     const parent = dirname(dir);
-    if (parent === dir) return undefined;
+    if (parent === dir) return patchedCheckerPath();
     dir = parent;
   }
 }

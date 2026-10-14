@@ -1745,6 +1745,7 @@ declare module "child_process" {
       killSignal?: string;
       stdio?: "pipe" | "ignore" | "inherit" | ("pipe" | "ignore" | "inherit")[];
       env?: { [key: string]: string | undefined };
+      cwd?: string;
       windowsHide?: boolean;
     },
   ): SpawnSyncReturns;

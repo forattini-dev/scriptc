@@ -348,6 +348,8 @@ export interface LowerResult {
 }
 
 export interface LowerOptions {
+  /** Rust spawnSync can set the child directory without changing the parent. */
+  nativeChildProcessCwd?: boolean;
   /** Rust models unset exitCode reads and preserves omitted exit arguments. */
   nativeProcessExitState?: boolean;
   /** Rust preserves undefined JSON roots instead of converting them to text. */
@@ -467,6 +469,7 @@ type RuntimeFenceTarget =
 
 /** The Lowerer's pass configuration (see lowerToIr). */
 export interface LowererMode {
+  nativeChildProcessCwd?: boolean;
   nativeProcessExitState?: boolean;
   nativeJsonRootUndefined?: boolean;
   nativeRecordOwnOrder?: boolean;
@@ -612,6 +615,7 @@ export function lowerToIr(
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
     nativeStringNormalize: options.nativeStringNormalize ?? false,
+    nativeChildProcessCwd: options.nativeChildProcessCwd ?? false,
     nativeProcessExitState: options.nativeProcessExitState ?? false,
     nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
     nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
@@ -646,6 +650,7 @@ export function lowerToIr(
         nativeStringSubstr: options.nativeStringSubstr ?? false,
         nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
         nativeStringNormalize: options.nativeStringNormalize ?? false,
+        nativeChildProcessCwd: options.nativeChildProcessCwd ?? false,
         nativeProcessExitState: options.nativeProcessExitState ?? false,
         nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
         nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
@@ -688,6 +693,7 @@ export function lowerToIr(
       nativeStringSubstr: options.nativeStringSubstr ?? false,
       nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
       nativeStringNormalize: options.nativeStringNormalize ?? false,
+      nativeChildProcessCwd: options.nativeChildProcessCwd ?? false,
       nativeProcessExitState: options.nativeProcessExitState ?? false,
       nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
       nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
@@ -724,6 +730,7 @@ export function lowerToIr(
     nativeStringSubstr: options.nativeStringSubstr ?? false,
     nativeStringConcatDyn: options.nativeStringConcatDyn ?? false,
     nativeStringNormalize: options.nativeStringNormalize ?? false,
+    nativeChildProcessCwd: options.nativeChildProcessCwd ?? false,
     nativeProcessExitState: options.nativeProcessExitState ?? false,
     nativeJsonRootUndefined: options.nativeJsonRootUndefined ?? false,
     nativeRecordOwnOrder: options.nativeRecordOwnOrder ?? false,
@@ -1150,6 +1157,7 @@ export class Lowerer {
   readonly nativeStringConcatDyn: boolean;
   readonly nativeStringNormalize: boolean;
   readonly nativeProcessExitState: boolean;
+  readonly nativeChildProcessCwd: boolean;
   readonly nativeJsonRootUndefined: boolean;
   readonly nativeRecordOwnOrder: boolean;
   readonly checker: ts.TypeChecker;
@@ -1943,6 +1951,7 @@ export class Lowerer {
     this.nativeStringConcatDyn = mode.nativeStringConcatDyn ?? false;
     this.nativeStringNormalize = mode.nativeStringNormalize ?? false;
     this.nativeProcessExitState = mode.nativeProcessExitState ?? false;
+    this.nativeChildProcessCwd = mode.nativeChildProcessCwd ?? false;
     this.nativeJsonRootUndefined = mode.nativeJsonRootUndefined ?? false;
     this.nativeRecordOwnOrder = mode.nativeRecordOwnOrder ?? false;
     this.reachable = mode.reachable ?? null;

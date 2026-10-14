@@ -382,6 +382,11 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     if (ts.isBinaryExpression(e)) {
       const op = e.operatorToken.kind;
       if (op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.BarBarToken) {
+        // A freshly constructed container always exists, including an empty
+        // array. Its contextual element type cannot make the container absent.
+        // Avoid asking TS7 to serialize its contextual empty-tuple reference.
+        const fallback = peel(e.right);
+        if (ts.isArrayLiteralExpression(fallback) || ts.isObjectLiteralExpression(fallback)) return false;
         const right = lowerer.mapTypeOf(lowerer.typeOf(e.right));
         return mayBeOptional(e.right) || right?.kind === "void" || right?.kind === "dyn" || right?.kind === "jsval" ||
           (right?.kind === "union" && lowerer.armTag(right.unionId, UNDEFINED_T) >= 0);

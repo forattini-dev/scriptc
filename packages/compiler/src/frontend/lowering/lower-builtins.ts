@@ -2063,7 +2063,8 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * "ignore"/"inherit" string form or a 3-tuple of those — non-piped
    * outputs read "" where Node types them null, spawnSync's documented
    * stance), and `windowsHide` (a POSIX no-op, evaluated for side
-   * effects). Everything else (shell, cwd, env, input, maxBuffer, ...)
+   * effects). Rust also carries `cwd` and replacement `env` to the child.
+   * Other options (shell, input, maxBuffer, ...)
    * fences by name. The bare `{ encoding: "utf8" }` shape keeps its
    * historical cp.spawnSync lowering. */
   export function lowerSpawnSyncCall(lowerer: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr {
@@ -2074,8 +2075,15 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         "the supported form is spawnSync(command, args?, options?)",
       );
     }
-    const cmd = lowerer.lowerExprExpecting(expr.arguments[0]!, STRING);
-    const argv = lowerer.lowerChildArgsArg(expr.arguments[1], loc);
+    const preparation: IrStmt[] = [];
+    const capture = (value: IrExpr): IrExpr => {
+      if (!lowerer.nativeChildProcessCwd || droppableStatic(value)) return value;
+      const saved = lowerer.declareHiddenLocal("%spawnSyncArgument", value.type);
+      preparation.push({ kind: "varDecl", localId: saved.id, init: value, loc: value.loc });
+      return { kind: "varRef", localId: saved.id, type: value.type, loc: value.loc };
+    };
+    const cmd = capture(lowerer.lowerExprExpecting(expr.arguments[0]!, STRING));
+    const argv = capture(lowerer.lowerChildArgsArg(expr.arguments[1], loc));
     const optsNode = expr.arguments[2];
 
     let timeout: IrExpr = numLit(0, loc);
@@ -2089,6 +2097,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // literal; the runtime maps the value to the modes at the call.
     let stdioStr: IrExpr | null = null;
     let envPairs: IrExpr | null = null;
+    let cwd: IrExpr | null = null;
     let plain = true; // no behavior-changing option: the historical libCall
 
     if (optsNode) {
@@ -2175,10 +2184,11 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
                 'outputs are captured as utf8 — pass { encoding: "utf8" }',
               );
             }
+            if (lowerer.nativeChildProcessCwd) capture(lowerer.lowerExpr(m.value));
             break;
           }
           case "timeout":
-            timeout = lowerer.lowerExprExpecting(m.value, F64);
+            timeout = capture(lowerer.lowerExprExpecting(m.value, F64));
             plain = false;
             break;
           case "killSignal": {
@@ -2190,32 +2200,47 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
                 'a signal-name literal from Node\'s table ("SIGTERM", "SIGKILL", ...) is the supported form',
               );
             }
-            killSignal = { kind: "strLit", value: t.value, type: STRING, loc };
+            killSignal = lowerer.nativeChildProcessCwd ? capture(lowerer.lowerExprExpecting(m.value, STRING)) : { kind: "strLit", value: t.value, type: STRING, loc };
             plain = false;
             break;
           }
           case "stdio":
             applyStdio(m.value);
+            if (stdioStr !== null) stdioStr = capture(stdioStr);
+            else if (lowerer.nativeChildProcessCwd && !ts.isArrayLiteralExpression(m.value)) capture(lowerer.lowerExpr(m.value));
             plain = false;
             break;
           case "env":
-            envPairs = lowerer.recordToEnvPairs(m.value);
+            envPairs = capture(lowerer.recordToEnvPairs(m.value));
+            plain = false;
+            break;
+          case "cwd":
+            if (!lowerer.nativeChildProcessCwd) lowerer.noLowering("spawnSync option 'cwd'", p);
+            cwd = capture(lowerBuiltinOptionalDefault(lowerer, m.value, STRING, { kind: "strLit", value: "", type: STRING, loc }));
             plain = false;
             break;
           case "windowsHide":
-            lowerer.lowerExpr(m.value); // Node no-op on POSIX
+            capture(lowerer.lowerExpr(m.value)); // value effects survive the platform no-op
             break;
           default:
             lowerer.noLowering(
               `spawnSync option '${m.name}'`,
               p,
-              "encoding, timeout, killSignal, stdio, env, and windowsHide are the supported options",
+              "encoding, timeout, killSignal, stdio, env, windowsHide, and Rust cwd are the supported options",
             );
         }
       }
     }
+    const finishSpawn = (result: IrExpr): IrExpr => preparation.length === 0 ? result : {
+      kind: "seqExpr", stmts: preparation, result, type: result.type, loc,
+    };
+    if (cwd !== null) {
+      if (stdioStr !== null) lowerer.noLowering("spawnSync with cwd and a runtime stdio string", optsNode ?? expr, "pass a literal stdio value or tuple");
+      return finishSpawn({ kind: "libCall", fn: envPairs === null ? "cp.spawnSyncOptsCwd" : "cp.spawnSyncOptsEnvCwd",
+        args: [cmd, argv, timeout, killSignal, numLit(inMode, loc), numLit(outMode, loc), numLit(errMode, loc), ...(envPairs === null ? [] : [envPairs]), cwd], type: SPAWNRES_T, loc });
+    }
     if (plain) {
-      return { kind: "libCall", fn: "cp.spawnSync", args: [cmd, argv], type: SPAWNRES_T, loc };
+      return finishSpawn({ kind: "libCall", fn: "cp.spawnSync", args: [cmd, argv], type: SPAWNRES_T, loc });
     }
     if (envPairs !== null) {
       if (stdioStr !== null) {
@@ -2225,30 +2250,30 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           "use a literal stdio value or tuple when passing env",
         );
       }
-      return {
+      return finishSpawn({
         kind: "libCall",
         fn: "cp.spawnSyncOptsEnv",
         args: [cmd, argv, timeout, killSignal, numLit(inMode, loc), numLit(outMode, loc), numLit(errMode, loc), envPairs],
         type: SPAWNRES_T,
         loc,
-      };
+      });
     }
     if (stdioStr !== null) {
-      return {
+      return finishSpawn({
         kind: "libCall",
         fn: "cp.spawnSyncStdioStr",
         args: [cmd, argv, timeout, killSignal, stdioStr],
         type: SPAWNRES_T,
         loc,
-      };
+      });
     }
-    return {
+    return finishSpawn({
       kind: "libCall",
       fn: "cp.spawnSyncOpts",
       args: [cmd, argv, timeout, killSignal, numLit(inMode, loc), numLit(outMode, loc), numLit(errMode, loc)],
       type: SPAWNRES_T,
       loc,
-    };
+    });
   }
 
   /** `spawn(command, args?, options)` → one cp.spawn / cp.spawnOpts

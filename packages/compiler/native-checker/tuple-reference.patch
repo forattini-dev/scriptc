@@ -1,0 +1,13 @@
+diff --git a/internal/api/proto.go b/internal/api/proto.go
+index 0917c385..8c7e1acb 100644
+--- a/internal/api/proto.go
++++ b/internal/api/proto.go
+@@ -672,7 +672,7 @@ func newTypeResponse(t *checker.Type, id TypeID) *TypeResponse {
+ 		if objectFlags&checker.ObjectFlagsReference != 0 {
+ 			var ref *checker.TypeReference
+ 			if objectFlags&checker.ObjectFlagsTuple != 0 {
+-				tuple := t.AsTupleType()
++				tuple := t.TargetTupleType()
+ 				ref = tuple.AsTypeReference()
+ 				resp.ElementFlags = tuple.ElementFlags()
+ 				fixedLen := tuple.FixedLength()

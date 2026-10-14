@@ -4639,6 +4639,9 @@ export type IrLibFn =
   /** cp.spawnSyncOpts plus a replacement environment carried as
    * [key, value, ...] pairs. An empty array intentionally clears env. */
   | "cp.spawnSyncOptsEnv"
+  /** Rust options form with a child cwd; parent cwd remains unchanged. */
+  | "cp.spawnSyncOptsCwd"
+  | "cp.spawnSyncOptsEnvCwd"
   /** cp.spawnSyncOpts with the stdio carried as a RUNTIME string —
    * "pipe" | "ignore" | "inherit", proven by the call site's TYPE (the
    * defaultRunner idiom `stdio: options?.stdio ?? "pipe"`); the runtime

@@ -552,7 +552,7 @@ function loadProgram7(
   // surfaces join when the project carries both. skipLibCheck applies
   // whenever a REAL surface is present (see the nodeTypes note).
   const nodeSurface = nodeTypes ?? bunTypes ?? fallbackDtsPath();
-  const projectDeclarations = new ProjectDeclarations(host);
+  const projectDeclarations = new ProjectDeclarations(host, nodeTypes);
   const coreRoots = [entryPath, ambientDtsPath(), nodeSurface, ...projectDeclarations.collect([entryPath])];
   if (bunTypes !== null && nodeTypes !== null) coreRoots.push(bunTypes);
   coreRoots.push(overridesDtsPath());

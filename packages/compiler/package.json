@@ -23,13 +23,16 @@
   "files": [
     "dist",
     "ambient",
+    "native-checker",
+    "scripts",
     "surface-manifest.json"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "node node_modules/typescript/bin/tsc -p tsconfig.json"
+    "build": "node scripts/build-native-checker.mjs && node node_modules/typescript/bin/tsc -p tsconfig.json",
+    "build:checker": "node scripts/build-native-checker.mjs"
   },
   "dependencies": {
     "@scriptc/runtime": "workspace:*",
