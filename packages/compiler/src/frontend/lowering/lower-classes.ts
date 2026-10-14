@@ -708,7 +708,10 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
           if (!t.expression.questionDotToken && nsMemberIdentOf(lowerer, t.expression)) {
             if (t.typeArguments) lowerer.unsupported("SC1090", t, "extending generic classes");
             if (memberSym) fenceEarlyNsMemberRef(lowerer, t.expression, memberSym);
-            const nsBase = resolved ? lowerer.classBySymbol.get(resolved) : undefined;
+            // CommonJS namespace members may name an exports property whose
+            // value aliases the class. Use the same resolution as `new N.C`.
+            const baseSymbol = lowerer.resolveValueSymbol(t.expression.name) ?? resolved;
+            const nsBase = baseSymbol ? lowerer.classBySymbol.get(baseSymbol) : undefined;
             if (!nsBase) {
               lowerer.unsupported(
                 "SC1090",

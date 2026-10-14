@@ -920,11 +920,8 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       }
       const builtin = lowerBuiltinTypeof(lowerer, expr, loc);
       if (builtin !== null) return builtin;
-      // Island values ask the engine; static primitives constant-fold to
-      // the JS answer (the operand still evaluates — JS evaluates typeof
-      // operands too — but primitives here are side-effect-free varRefs/
-      // literals after lowering, so folding away the value is safe only
-      // when the operand is trivial; otherwise keep it simple and reject).
+      // Island values ask the engine; a static representation determines
+      // the answer, but the operand still evaluates exactly once first.
       let operand = runtimeTypeRead(lowerer.lowerExpr(expr.expression));
       if (operand.type.kind === "jsval") {
         return { kind: "jsOp", op: "typeof", args: [operand], type: STRING, loc };
@@ -946,8 +943,11 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
         undefinedT: "undefined", nullT: "object",
       };
       const folded = FOLD[operand.type.kind];
-      if (folded && droppableStatic(operand)) {
-        return { kind: "strLit", value: folded, type: STRING, loc };
+      if (folded) {
+        const result: IrExpr = { kind: "strLit", value: folded, type: STRING, loc };
+        return droppableStatic(operand) ? result : {
+          kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: operand, loc }], result, type: STRING, loc,
+        };
       }
       // A union operand: every arm's typeof answer is static, so the value
       // form is a ternary chain over runtime TAG tests (arms grouped by
@@ -3856,7 +3856,14 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
         };
       }
     }
-    return lowerer.ensureBool(lowerAbsenceProbe(lowerer, expr) ?? lowerer.lowerExpr(expr), expr);
+    const condition = lowerer.ensureBool(lowerAbsenceProbe(lowerer, expr) ?? lowerer.lowerExpr(expr), expr);
+    // An implicit JS specialization can prove a typeof test from its actual
+    // argument. Fold only literal operands; effectful reads remain runtime.
+    if (lowerer.implicitParamTypes !== null && condition.kind === "strEq" &&
+        condition.left.kind === "strLit" && condition.right.kind === "strLit") {
+      return { kind: "boolLit", value: (condition.left.value === condition.right.value) !== condition.negated, type: BOOL, loc: condition.loc };
+    }
+    return condition;
   }
 
   export function runtimeOptionalLocalOf(lowerer: Lowerer, node: ts.Expression): IrLocal | null {

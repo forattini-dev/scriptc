@@ -22,7 +22,9 @@ export function coercibleValue(L: Lowerer, src: IrType, dst: IrType): boolean {
           canMarshalTypedFuncIntoIsland(src, (id) => L.shapes.get(id), (id) => L.unions.get(id))))
     );
   }
-  if (src.kind === "jsval") return L.boundaryExitSafe(dst);
+  // coerceToExpected wraps handles into dyn by reference. Promise views
+  // and function adapters must admit that same identity-preserving edge.
+  if (src.kind === "jsval") return dst.kind === "dyn" || L.boundaryExitSafe(dst);
   if (dst.kind === "dyn") return src.kind !== "dyn" && L.dynConvertible(src);
   if (src.kind === "dyn") {
     // The checked-dynamic function boundary's OUT direction joins the

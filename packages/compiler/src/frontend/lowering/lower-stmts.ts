@@ -811,6 +811,12 @@ export function lowerStmt(lowerer: Lowerer, stmt: ts.Statement): IrStmt | IrStmt
     }
     if (ts.isIfStatement(stmt)) {
       const cond = lowerer.lowerCondition(stmt.expression);
+      // Specializations must not lower operations in a branch their concrete
+      // argument cannot reach. Hoisted var bindings are collected separately.
+      if (lowerer.implicitParamTypes !== null && cond.kind === "boolLit") {
+        const chosen = cond.value ? stmt.thenStatement : stmt.elseStatement;
+        return chosen ? { kind: "block", body: lowerer.lowerScopedBlock(chosen), loc: locOf(stmt) } : null;
+      }
       // Aliased-typeof narrows (ms's `var type = typeof val` guard): the
       // then-branch lowers under what a TRUE condition proves, the
       // else-branch under a FALSE one — the var/let alias narrowing the

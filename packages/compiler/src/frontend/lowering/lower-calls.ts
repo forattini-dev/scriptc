@@ -8947,7 +8947,8 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
    * under its own symbol, so calls (`h(3)`) and pinned values (`take(h)`)
    * resolve exactly like the target's own name, and the binding itself has
    * no runtime value (a generic function value cannot materialize). Claims
-   * only bindings whose OWN type still keeps type parameters — a
+   * bindings whose OWN type still keeps type parameters, or a shipped-JS
+   * alias inheriting its target's implicit-any signature — a
    * concrete-annotated alias (`const h: (x: number) => number = id`) is a
    * pinned VALUE, the existing lowerGenericFnValue story. Null when the
    * shape doesn't match or the target isn't a registered generic; fences
@@ -8961,8 +8962,14 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
     if (!target) return null;
     // A concrete annotation pins one signature — that value story
     // (lowerGenericFnValue at the reference) stays untouched.
-    const ownSigs = lowerer.checker.getCallSignatures(lowerer.typeOf(decl.name));
-    if (ownSigs.length === 0 || !ownSigs.every((s) => s.getTypeParameters().length > 0)) return null;
+    const ownType = lowerer.typeOf(decl.name);
+    const ownSigs = lowerer.checker.getCallSignatures(ownType);
+    // A shipped-JS alias inherits its target's exact inferred signature.
+    // Forward its implicit-any specialization too; a separately typed alias
+    // keeps the pinned function-value path instead of losing its annotation.
+    const implicitAlias = target.implicitParams !== undefined && implicitMonoFile(decl.getSourceFile()) &&
+      ownType === lowerer.typeOf(init);
+    if (ownSigs.length === 0 || (!implicitAlias && !ownSigs.every((s) => s.getTypeParameters().length > 0))) return null;
     const sym = lowerer.checker.getSymbolAtLocation(decl.name);
     if (!sym) return null;
     const existing = lowerer.genericFnsBySymbol.get(sym);

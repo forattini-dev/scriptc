@@ -66,6 +66,7 @@ export function packageNameOfSpecifier(specifier: string): string {
  * node_modules segment answer their registered workspace package (the
  * realpath'd home of a symlinked workspace install), else null. */
 export function npmPackageNameOf(file: string): string | null {
+  file = file.replaceAll("\\", "/");
   const parts = file.split("/");
   const i = parts.lastIndexOf("node_modules");
   if (i < 0 || i + 1 >= parts.length) return workspacePackageOfPath(file);
