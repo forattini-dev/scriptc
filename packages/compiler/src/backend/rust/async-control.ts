@@ -10,6 +10,7 @@ import { asyncTrampolineCall } from "./async-trampoline.js";
 import { isRustAwaitExpr, type IrAwaitExpr } from "./model.js";
 import { rustAsyncExpressionOperands } from "./async-values.js";
 import { emitAsyncIf } from "./async-if.js";
+import { emitAsyncTryCatch } from "./async-try.js";
 import { emitAsyncProtectedForOf } from "./async-protected-for-of.js";
 import { emitAsyncProtectedIf, emitAsyncProtectedWhile } from "./async-protected-loop.js"; import { emitAsyncProtectedTry } from "./async-protected-try.js";
 
@@ -350,13 +351,7 @@ export class RustAsyncControlEmitter {
     remaining: readonly IrStmt[],
     onComplete: (() => void) | null,
   ): void {
-    const outerLocals = new Set(this.context.currentAsyncLocals() ?? []);
-    const resume = this.emitAsyncResumeHelper(remaining, onComplete, outerLocals, stmt.loc, "try_continue");
-    this.emitAsyncProtectedSequence(stmt.tryBody, outerLocals, {
-      fallthrough: () => this.emitAsyncFinally(stmt, [], outerLocals, { kind: "fallthrough" }, resume),
-      returned: (value, adopt = false) => this.emitAsyncFinally(stmt, [], outerLocals, { kind: "return", value, adopt }, resume),
-      thrown: (reason) => this.emitAsyncCatch(stmt, [], outerLocals, reason, resume),
-    }, stmt.loc);
+    emitAsyncTryCatch(this, stmt, remaining, onComplete);
   }
 
   emitAsyncIf(
