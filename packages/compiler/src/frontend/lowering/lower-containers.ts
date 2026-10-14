@@ -1,5 +1,6 @@
 import { regexCaptureArray } from "../../ir/regex-captures.js";
 import { lowerArrayMapDynamic } from "./lower-array-map-dynamic.js";
+import { lowerFreshArrayMapExpecting } from "./lower-fresh-array-map.js";
 import { lowerDynamicArrayConstructor } from "./lower-dynamic-array-constructor.js";
 import { lowerArraySpreadInsert, lowerBytesSetCall, lowerTupleJoinCall } from "./lower-native-containers.js";
 import { InternalCompilerError } from "../../errors.js";
@@ -1326,6 +1327,12 @@ function arraySearchHelper(
     elem: IrType,
     receiverOverride?: IrExpr,): IrExpr {
     const loc = locOf(call);
+    if (method === "map" && !receiverOverride) {
+      const context = lowerer.checker.getContextualType(call);
+      const expected = context && lowerer.mapTypeOf(context);
+      const fresh = expected && lowerFreshArrayMapExpecting(lowerer, call, expected);
+      if (fresh) return fresh;
+    }
     const receiver = receiverOverride ?? lowerer.lowerExpr(access.expression);
     const argNode = call.arguments[0];
     if (!argNode) lowerer.unsupported("SC1090", call, "this call form"); // tsc-guarded

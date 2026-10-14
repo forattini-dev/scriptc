@@ -1710,6 +1710,7 @@ export class Lowerer {
    * per-literal array types there, which has no mapping, while the
    * declared `U` is the type every return path coerces into. */
   readonly lambdaReturnOverrides = new WeakMap<ts.Node, IrType>();
+  readonly freshObjectLiteralTypes = new WeakMap<ts.ObjectLiteralExpression, IrType>();
   /** File → qualifier prefix: "" for the entry, "%mI." otherwise. */
   readonly fileTag = new Map<ts.SourceFile, string>();
   /** Namespace ModuleBlocks this program lowers, filled by splitFiles:

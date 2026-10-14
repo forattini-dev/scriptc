@@ -4,17 +4,20 @@
 import * as ts from "./ts7/adapter.js";
 
 /** A generic member that becomes a closure-FAMILY slot of its record shape: a required, single-signature member declared
- * by an interface/type-literal SIGNATURE, on a shape that also carries non-generic members (a service interface). Object
- * literal members and all-generic shapes keep their static resolution (defining literal, exact class binding). */
+ * by an interface/type-literal SIGNATURE. Mixed service shapes and all-generic promise-returning services use stored
+ * dispatch. All-generic synchronous method interfaces retain their exact-class/static resolution. */
 export function isFamilySlotMember(checker: ts.TypeChecker, record: ts.Type, prop: ts.Symbol): boolean {
   if ((prop.flags & ts.SymbolFlags.Optional) !== 0) return false;
   if (familyIdOf(checker, checker.getTypeOfSymbol(prop)) === null) return false;
   const declarations = checker.declarationsOf(prop);
   if (declarations.length === 0 || !declarations.every((d) => ts.isPropertySignature(d) || d.kind === ts.SyntaxKind.MethodSignature)) return false;
-  return checker.getPropertiesOfType(record).some((p) => {
-    const t = checker.getTypeOfSymbol(p);
-    return checker.getCallSignatures(t).length === 0 || !checker.getCallSignatures(t).every((s) => s.getTypeParameters().length > 0);
-  });
+  const members = checker.getPropertiesOfType(record);
+  const signatures = members.map((p) => checker.getCallSignatures(checker.getTypeOfSymbol(p)));
+  if (signatures.some((sigs) => sigs.length === 0 || !sigs.every((s) => s.getTypeParameters().length > 0))) return true;
+  // Exact-class synchronous interfaces can still be used as empty structural
+  // views. Adding closure slots there would break the class projection ABI.
+  // Promise services have a stored family implementation, not that view.
+  return signatures.every((sigs) => sigs.length === 1 && checker.getReturnTypeOfSignature(sigs[0]!).getSymbol()?.name === "Promise");
 }
 
 export function familyIdOf(checker: ts.TypeChecker, type: ts.Type): string | null {

@@ -6894,7 +6894,9 @@ function loweredTemplateStrings(
                   : [voidTernaryIfStmtOrExprStmt(value, locOf(node.body!))];
             }
           } else {
-            let value = lowerer.lowerExpr(bodyExpr);
+            let value = lowerer.lambdaReturnOverrides.has(node)
+              ? lowerer.lowerExprExpecting(bodyExpr, bodyReturn)
+              : lowerer.lowerExpr(bodyExpr);
             // An async concise body whose value is itself a promise
             // (`async () => p`): the async machinery RESOLVES the returned
             // thenable into the function's own promise — lowerReturnValue's

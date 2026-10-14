@@ -34,6 +34,7 @@ import { familyFnOfValue, lowerFamilyImpl } from "./lower-families.js";
 import type { Lowerer } from "./lowerer.js";
 import { jsFuncNameOf } from "./lowerer.js";
 import { lowerFiniteFromEntriesExpecting } from "./lower-finite-from-entries.js";
+import { lowerFreshArrayMapExpecting } from "./lower-fresh-array-map.js";
 
   /** Coerce typed slots with checked shared views, canonical union wraps
    * and structural adapters; incompatible pairs keep their shape fences. */
@@ -657,6 +658,8 @@ import { lowerFiniteFromEntriesExpecting } from "./lower-finite-from-entries.js"
       }
     }
     if (expected?.kind === "array") {
+      const freshMap = lowerFreshArrayMapExpecting(lowerer, node, expected);
+      if (freshMap) return freshMap;
       let x: ts.Expression = node;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
       if (ts.isArrayLiteralExpression(x) && x.elements.length === 0) {

@@ -114,7 +114,9 @@ export function lowerFamilyImpl(L: Lowerer, node: FamilyFn, familyId: string | n
     return { kind: "familyClosure", familyId: id, impl: existing.qualifiedName, captures: existing.family.captureSources, type: { kind: "genericFunc", familyId: id }, loc };
   }
   if (node.asteriskToken !== undefined) L.unsupported("SC1071", node, "generator generic function values");
-  if (node.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) L.unsupported("SC1090", node, "async generic function values");
+  // Generic instances already use the async function path: the body lowers
+  // against the promise's inner type and the emitted entry returns a promise.
+  // Family dispatch calls that same entry with its boxed captures.
   if (ts.isMethodDeclaration(node) && node.body === undefined) L.unsupported("SC1090", node, "body-less generic methods");
   // Captures: every identifier of the body that resolves to a local of an ENCLOSING frame, threaded through a scratch
   // lifted context so resolveLocal records (and boxes) exactly what a closure would.

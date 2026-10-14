@@ -102,6 +102,8 @@ export function objectLiteralRecordType(
   expr: ts.ObjectLiteralExpression,
   loc: SrcLoc,
 ): { lowered: IrExpr } | { tsType: ts.Type; mapped: IrType | null } {
+    const fresh = lowerer.freshObjectLiteralTypes.get(expr);
+    if (fresh) return { tsType: lowerer.typeOf(expr), mapped: fresh };
     let tsType = lowerer.checker.getContextualType(expr) ?? lowerer.typeOf(expr);
     // `lit satisfies T` is TYPE-LEVEL only: the expression's checker type —
     // and therefore the shape every downstream consumer sees — is the
