@@ -9,6 +9,7 @@ import ts5 from "typescript5";
 import { expect, test as vitestTest } from "vitest";
 import { nodeOracleExecutable, nodeTransformTypesArgs } from "../../../tests/harness/oracle-environment.js";
 import { parseShardSpec } from "../../../tests/harness/shard.js";
+import { runToExit, type ProcessOutcome } from "../../../tests/harness/run-to-exit.js";
 import { compile } from "../src/index.js";
 import { compileRust } from "../src/backend/rust/compile.js";
 import { emitRustModule } from "../src/backend/rust/emitter.js";
@@ -20,40 +21,6 @@ const executablePath = (directory: string, name: string): string =>
   join(directory, `${name}${process.platform === "win32" ? ".exe" : ""}`);
 const rustShard = parseShardSpec();
 const test = rustShard === undefined || rustShard.index === 1 ? vitestTest : vitestTest.skip;
-
-interface ProcessOutcome {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-function runToExit(
-  file: string,
-  args: string[],
-  env: NodeJS.ProcessEnv = process.env,
-  stdin = "",
-): Promise<ProcessOutcome> {
-  return new Promise((resolveRun, rejectRun) => {
-    const child = execFile(file, args, { encoding: "utf8", env }, (error, stdout, stderr) => {
-      if (error && typeof error.code !== "number") {
-        rejectRun(error);
-        return;
-      }
-      resolveRun({
-        stdout,
-        stderr,
-        exitCode: error && typeof error.code === "number" ? error.code : 0,
-      });
-    });
-    child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
-      // A short-lived oracle may exit before the empty input pipe closes.
-      // Its completed process result remains authoritative; only an actual
-      // writer failure while the child is live should fail the harness.
-      if (error.code !== "EPIPE") rejectRun(error);
-    });
-    child.stdin?.end(stdin);
-  });
-}
 
 async function nodeCorpusArgs(entryPath: string): Promise<string[]> {
   const source = await readFile(entryPath, "utf8");
@@ -954,13 +921,17 @@ console.log(boxed);
     outPath: executablePath(dir, "dyn-cycle"),
     backend: "rust",
     optimization: "dev",
+    allowEngine: false,
   });
   expect(
     result.ok,
     result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
   ).toBe(true);
   if (!result.ok || result.backend !== "rust") return;
+  expect(result.execution).toEqual({ engine: "none", externalFfi: false });
   const outcome = await runToExit(result.binaryPath);
+  expect(outcome.exitCode).not.toBe(0);
+  if (outcome.exitCode === null) expect(outcome.signal).toBe("SIGABRT");
   expect(outcome.stderr).toContain(
     "cannot convert a circular structure into a checked-dynamic value",
   );

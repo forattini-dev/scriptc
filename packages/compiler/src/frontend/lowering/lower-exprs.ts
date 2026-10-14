@@ -18,7 +18,7 @@ import { lowerDynamicKeyRead, lowerNativeSymbolKeyRead } from "./lower-dynamic-k
 import { resolvedReturnAssertion } from "./lower-return-assertion.js";
 import { lowerNativeValueProperty } from "./lower-native-value-property.js";
 import { isRegexCaptureRead, narrowRegexCaptureReceiver, regexCaptureConditionalType } from "./lower-regex-captures.js";
-import { numericReadObservesAbsence, denseArrayReadObservesAbsence, lowerArrayElementReceiver } from "./lower-dense-array-reads.js"; import { runtimeOptionalFalseIds } from "./lower-runtime-optional-branches.js";
+import { numericReadObservesAbsence, lowerArrayElementReceiver } from "./lower-dense-array-reads.js"; import { runtimeOptionalFalseIds } from "./lower-runtime-optional-branches.js";
 import { regexCaptureArray } from "../../ir/regex-captures.js";
 import { lowerSharedRecordKeyRead, lowerOpenRecordDelete, lowerNativeRecordDynamicEquality, lowerThrowingDynamicValue } from "./lower-open-record.js";
 import { lowerHeterogeneousRecordKeyRead } from "./lower-heterogeneous-record-key.js";
@@ -5765,12 +5765,7 @@ export function fenceClosureProbe(
     // and narrowing. The helper performs one length/proof check and then
     // uses the dense getter for the proven-present path, so this does not
     // change the storage representation or the low-level getter itself.
-    if (arr.type.kind === "array" && lowerer.nativeDenseArrays) {
-      if (denseArrayReadObservesAbsence(lowerer, expr)) {
-        const safe = lowerSafeIndexRead(lowerer, arr as IrExpr & { type: { kind: "array" } }, index, locOf(expr));
-        if (safe) return safe;
-      }
-    } else if (arr.type.kind === "array") {
+    if (arr.type.kind === "array") {
       // A non-null assertion is the explicit proven-present form. Preserve
       // the dense getter's established bounds trap here; turning `xs[i]!`
       // into an optional union would change library ABI checks and the

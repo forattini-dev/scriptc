@@ -12,12 +12,6 @@ import { ParamShape, FnSig } from "./lower-calls.js";
 import { varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf, nodeThrowExpr } from "./lowerer.js";
-import { inferredLambdaRead } from "./lambda-read-result.js";
-
-const ARRAY_CALLBACK_METHODS = new Set([
-  "map", "filter", "forEach", "find", "findIndex", "findLast", "findLastIndex",
-  "some", "every", "flatMap", "reduce", "reduceRight",
-]);
 
 export function runtimeOptionalRootOf(lowerer: Lowerer, local: IrLocal): IrLocal {
   return lowerer.runtimeOptionalRoots.get(local) ?? local;
@@ -230,24 +224,9 @@ export function runtimeOptionalRecordField(lowerer: Lowerer, type: IrType, field
 /** Discover the unchecked-array and JSON-root values that cross static ABI/storage
  * boundaries before any function body or module initializer is emitted.
  * TypeScript's indexed-access and stringify return types are useful source
- * annotations, not runtime proofs. Dense-array mode promotes JSON results
- * and callback parameters, retaining the native array element storage ABI. */
+ * annotations, not runtime proofs. Native arrays retain their element storage
+ * ABI; reads carry absence through the consuming bindings and function ABI. */
 export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FileParts[]): void {
-  const arrayReads = !lowerer.nativeDenseArrays;
-  if (!arrayReads) {
-    let hasPrepassUse = false;
-    for (const { sf } of parts) {
-      ts.walkPreorder(sf, node => {
-        if (hasPrepassUse) return "skip";
-        if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && !node.type) hasPrepassUse = true;
-        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
-          (node.expression.name.text === "stringify" || ARRAY_CALLBACK_METHODS.has(node.expression.name.text))) hasPrepassUse = true;
-        return undefined;
-      });
-      if (hasPrepassUse) break;
-    }
-    if (!hasPrepassUse) return;
-  }
   const optionalSymbols = new Set<ts.Symbol>();
   const optionalReturns = new Set<ts.Symbol>();
   const arithmeticReturns = new Map<ts.Symbol, IrType>();
@@ -315,13 +294,11 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     return false;
   };
   const isArrayRead = (node: ts.Expression): boolean => {
-    if (!arrayReads && inferredLambdaRead(node) === null) return false;
     const e = peel(node);
     if (!ts.isElementAccessExpression(e)) return false;
     return lowerer.mapTypeOf(lowerer.typeOf(e.expression))?.kind === "array";
   };
   const isDynamicObjectEntryRead = (node: ts.Expression): boolean => {
-    if (!arrayReads) return false;
     const read = peel(node);
     if (!ts.isElementAccessExpression(read) || !ts.isIdentifier(read.expression)) return false;
     const source = symbolOf(read.expression);
@@ -347,7 +324,7 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     if (explicitlyNonNull(node)) return false;
     const e = peel(node);
     if (isArrayRead(e)) return true;
-    if (arrayReads && ts.isCallExpression(e) && lowerer.runtimeOptionalReduceTypes.has(e)) return true;
+    if (ts.isCallExpression(e) && lowerer.runtimeOptionalReduceTypes.has(e)) return true;
     if (
       ts.isCallExpression(e) &&
       ts.isPropertyAccessExpression(e.expression) &&
@@ -363,7 +340,7 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
       }
     }
     if (
-      arrayReads && ts.isCallExpression(e) &&
+      ts.isCallExpression(e) &&
       ts.isPropertyAccessExpression(e.expression) &&
       (e.expression.name.text === "pop" || e.expression.name.text === "shift") &&
       lowerer.mapTypeOf(lowerer.typeOf(e))?.kind === "union" &&
@@ -400,7 +377,6 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     return false;
   };
   const optionalStringArithmeticType = (node: ts.Expression): IrType | null => {
-    if (!arrayReads) return null;
     const e = peel(node);
     if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.PlusToken) return null;
     const stringArrayRead = (part: ts.Expression): boolean => {
@@ -469,7 +445,6 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     return set.size !== before;
   };
   const scanPattern = (name: ts.BindingName, init: ts.Expression): boolean => {
-    if (!arrayReads) return false;
     if (!ts.isArrayBindingPattern(name)) return false;
     const sourceType = lowerer.mapTypeOf(lowerer.typeOf(init));
     if (sourceType?.kind !== "array") return false;
@@ -743,7 +718,7 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
           if (symbol && noteFieldSymbol(symbol, node.left.name.text)) changed = true;
         }
       }
-      if ((arrayReads || lowerer.nativeDenseArrays) && ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
         const callbackIndices = hofCallbackIndices(node.expression.name.text, node.arguments.length >= 2);
         const receiverNode = node.expression.expression;
         const receiver = lowerer.mapTypeOf(lowerer.typeOf(receiverNode));
@@ -821,7 +796,7 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
         }
         node.arguments.forEach((arg, i) => {
             const callbackSlot = sig.params[i]?.type;
-            if ((arrayReads || lowerer.nativeDenseArrays) && callbackSlot?.kind === "func" && !ts.isSpreadElement(arg)) {
+            if (callbackSlot?.kind === "func" && !ts.isSpreadElement(arg)) {
               const optionalCallbackParams = callbackSlot.params.flatMap((type, index) =>
                 type.kind === "union" && lowerer.armTag(type.unionId, UNDEFINED_T) >= 0 ? [index] : []);
               if (optionalCallbackParams.length > 0 && promoteHofCallback(arg, optionalCallbackParams)) {
