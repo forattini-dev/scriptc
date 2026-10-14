@@ -3,7 +3,7 @@
  * index-signature helpers; accessors fill the shape %get:/%set: slots; methods and properties lower in source order.
  * The dynamic (JS) and island object literals stay in lower-exprs.ts and lower-island.ts. */
 import { InternalCompilerError } from "../../errors.js";
-import { nativeRecordCheckSupported, nativeRecordShapeSupported } from "../../ir/native-record.js";
+import { nativeRecordShapeSupported, nativeRecordSpreadSupported } from "../../ir/native-record.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import {
@@ -292,7 +292,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       expr.properties.every(prop => {
         if (!ts.isSpreadAssignment(prop)) return ts.isPropertyAssignment(prop) || ts.isShorthandPropertyAssignment(prop);
         const source = lowerer.mapTypeOf(lowerer.typeOf(prop.expression));
-        return source !== null && nativeRecordCheckSupported(source, id => lowerer.shapes.get(id), id => lowerer.unions.get(id));
+        return source !== null && nativeRecordSpreadSupported(source, id => lowerer.shapes.get(id), id => lowerer.unions.get(id));
       })) {
       const properties = new Map<ts.Node, string>();
       for (const prop of expr.properties) {

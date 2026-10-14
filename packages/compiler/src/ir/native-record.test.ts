@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { nativeRecordCheckSupported } from "./native-record.js";
+import { nativeRecordCheckSupported, nativeRecordSpreadSupported } from "./native-record.js";
 import { BOOL, DYN, F64, STRING, VOID, type IrRecordShape, type IrType } from "./ir.js";
 
 const admitted = (member: IrType): boolean => nativeRecordCheckSupported(
@@ -112,4 +112,22 @@ test("indexed record recursion and record arrays retain their admission fences",
   for (const shapeId of ["loop", "array"]) expect(nativeRecordCheckSupported(
     { kind: "record", shapeId }, id => records.get(id), () => undefined,
   )).toBe(false);
+});
+
+test("tagged spread sources need no discriminant, while checking an untyped union still does", () => {
+  const records = new Map<string, IrRecordShape>([
+    ["number", { id: "number", fields: [{ name: "value", type: F64 }] }],
+    ["string", { id: "string", fields: [{ name: "value", type: STRING }] }],
+    ["accessor", { id: "accessor", fields: [{ name: "%get:value", type: { kind: "func", params: [], ret: F64 } }] }],
+  ]);
+  const source: IrType = { kind: "union", unionId: "source" };
+  const getRecord = (id: string) => records.get(id);
+  const getUnion = (id: string) => ({ id, arms: [
+    { kind: "record", shapeId: "number" }, { kind: "record", shapeId: "string" }, { kind: "undefinedT" },
+  ] as IrType[] });
+  expect(nativeRecordSpreadSupported(source, getRecord, getUnion)).toBe(true);
+  expect(nativeRecordCheckSupported(source, getRecord, getUnion)).toBe(false);
+  for (const arm of [{ kind: "record", shapeId: "accessor" }, { kind: "array", elem: F64 }, { kind: "dyn" }] as IrType[]) {
+    expect(nativeRecordSpreadSupported(source, getRecord, id => ({ id, arms: [...getUnion(id).arms, arm] }))).toBe(false);
+  }
 });

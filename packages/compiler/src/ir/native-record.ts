@@ -66,6 +66,22 @@ export function nativeRecordCheckSupported(
   return !!shape && nativeRecordShapeSupported(shape, { get: getUnion }, getRecord);
 }
 
+/** Spreading boxes the already tagged source; it never has to choose a
+ * union arm by checking an untyped object. Each represented record arm may
+ * therefore participate even when the union has no runtime discriminant. */
+export function nativeRecordSpreadSupported(
+  type: IrType,
+  getRecord: (id: string) => IrRecordShape | undefined,
+  getUnion: (id: string) => IrUnionDef | undefined,
+): boolean {
+  if (type.kind === "union") {
+    return getUnion(type.unionId)?.arms.every(arm =>
+      arm.kind === "nullT" || arm.kind === "undefinedT" ||
+      (arm.kind === "record" && nativeRecordCheckSupported(arm, getRecord, getUnion))) ?? false;
+  }
+  return nativeRecordCheckSupported(type, getRecord, getUnion);
+}
+
 /** Heterogeneous scalar tuples can be validated directly from a checked-
  * dynamic array without routing through JSON. This is intentionally
  * narrower than ordinary record checks: it exists for native callback

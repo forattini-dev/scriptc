@@ -81,6 +81,9 @@ import { probeLower } from "./lower-probe.js";
 import { recordKeyResultOk } from "./lower-record-key-types.js";
 import { lowerDynamicRequestInstanceOf } from "./lower-instanceof-island.js";
 import { lowerBuiltinTypeof, lowerBuiltinTypeofTest } from "./lower-typeof.js";
+import { lowerRecordElementCompound } from "./lower-record-compound.js";
+import { isObjectSpreadOperand } from "./object-spread-context.js";
+import { nativeRecordSpreadSupported } from "../../ir/native-record.js";
 import { lowerDynamicGlobalIdentifier } from "../ambient-values.js";
 import { fenceNodeModuleMutation, isNodeModuleValue, lowerNodeModuleIdentifier, lowerNodeModuleProperty, lowerRequireCacheElement, lowerRequireCacheHas, lowerRequireMainProperty } from "./lower-node-module.js";
 import { lowerAbstractEquality } from "./abstract-equality.js";
@@ -2573,6 +2576,15 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       } else {
         thenRaw = lowerTrueArm();
         elseRaw = withRuntimeOptionalNarrowed(lowerer, runtimeOptionalFalseIds(lowerer, expr.condition), () => lowerArm(expr.whenFalse, thenRaw.type));
+      }
+      // Partial objects in a conditional spread keep their actual keys.
+      // Boxing the chosen represented arm avoids completing absent fields
+      // or forcing either source into the final merge's contextual shape.
+      if (lowerer.nativeRecordOwnOrder && isObjectSpreadOperand(expr) &&
+          [thenRaw, elseRaw].every(value => isUnitType(value.type) ||
+            nativeRecordSpreadSupported(value.type, id => lowerer.shapes.get(id), id => lowerer.unions.get(id)))) {
+        return { kind: "ternary", cond, then: lowerer.coerceInto(expr.whenTrue, thenRaw, DYN),
+          else_: lowerer.coerceInto(expr.whenFalse, elseRaw, DYN), type: DYN, loc };
       }
       // The ternary's IR type is normally the checker's own: it collapses
       // same-kind literal unions ("a" | "b" → string) and forms tagged
@@ -5966,7 +5978,7 @@ export function fenceClosureProbe(
   /** ToPropertyKey for represented record keys. Missing array-derived string
    * values remain real undefined values, whose JavaScript property spelling
    * is the string "undefined". */
-  function lowerRecordPropertyKey(lowerer: Lowerer, key: IrExpr, node: ts.Expression): IrExpr {
+  export function lowerRecordPropertyKey(lowerer: Lowerer, key: IrExpr, node: ts.Expression): IrExpr {
     if (
       key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn" ||
       lowerer.runtimeOptionalWidening(key.type, STRING) !== null
@@ -6094,7 +6106,7 @@ export function fenceClosureProbe(
     return Number.isInteger(n) && n >= 0 ? n : null;
   }
 
-/** `a[i] op= rhs` over native arrays and byte views. A compound assignment
+/** `a[i] op= rhs` over native arrays, records and byte views. A compound assignment
  * evaluates the receiver and index, reads the old element, evaluates rhs,
  * then writes. Capture each stage so a call in the index or rhs cannot
  * change the target or the value used by the operator. The expression yields
@@ -6104,6 +6116,10 @@ export function lowerElementCompound(lowerer: Lowerer, expr: ts.BinaryExpression
   fenceNodeModuleMutation(lowerer, target, "assignment");
   const loc = locOf(expr);
   const receiverType = lowerer.mapTypeOf(lowerer.typeOf(target.expression));
+  if (receiverType?.kind === "record") {
+    const record = lowerRecordElementCompound(lowerer, expr, op, receiverType);
+    if (record) return record;
+  }
   if (receiverType?.kind !== "array" && receiverType?.kind !== "bytes") {
     lowerer.unsupported("SC1090", target, "compound assignment to non-array elements");
   }

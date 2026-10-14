@@ -7,6 +7,7 @@ import { IrExpr, IrType, SrcLoc, typeEquals } from "../../ir/ir.js";
 import { isConstAssertionTypeNode } from "../type-mapper.js";
 import { propNameText } from "./lower-exprs.js";
 import { lowerUnionRecordSpreadAppend } from "./lower-object-spread.js";
+import { isObjectSpreadOperand } from "./object-spread-context.js";
 
 /** The union arm an object LITERAL inhabits when its fields must widen
  * PER FIELD into exactly one record arm — the reducer-action pattern
@@ -105,6 +106,18 @@ export function objectLiteralRecordType(
     const fresh = lowerer.freshObjectLiteralTypes.get(expr);
     if (fresh) return { tsType: lowerer.typeOf(expr), mapped: fresh };
     let tsType = lowerer.checker.getContextualType(expr) ?? lowerer.typeOf(expr);
+    // A spread operand contributes only its own keys. Context may flow
+    // from the final object through a conditional to `{ only }` or `{}`;
+    // it must not require either partial source to build the entire target.
+    // Index-signature contexts still type each contributed value, including
+    // never-narrowed branches whose standalone shape erases that value type.
+    if (isObjectSpreadOperand(expr)) {
+      const context = lowerer.mapTypeOf(tsType);
+      if (context?.kind === "record" && lowerer.shapes.get(context.shapeId)?.indexValue === undefined) {
+        const own = lowerer.typeOf(expr);
+        if (lowerer.mapTypeOf(own)?.kind === "record") tsType = own;
+      }
+    }
     // `lit satisfies T` is TYPE-LEVEL only: the expression's checker type —
     // and therefore the shape every downstream consumer sees — is the
     // literal's OWN type (T still contextually types members, so inferred

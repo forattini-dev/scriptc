@@ -5932,7 +5932,7 @@ export class Lowerer {
     );
   }
 
-  private withExpressionOverride<T>(node: ts.Expression, value: IrExpr, lower: () => T): T {
+  withExpressionOverride<T>(node: ts.Expression, value: IrExpr, lower: () => T): T {
     const previous = this.chainRecvByNode.get(node);
     this.chainRecvByNode.set(node, value);
     try {
