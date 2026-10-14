@@ -54,6 +54,7 @@ import {
 } from "../../diagnostics/diagnostic.js";
 import { PoisonError, jsFuncNameOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { lowerNpmStaticSafeIndexRead, lowerSafeIndexRead, strCharsCall, tryLowerNumericIndexRead } from "./lower-containers.js";
+import { lowerStringIndexAccess } from "./lower-string-index.js";
 import { arrayValueRead, arrayValueStore, orderedArrayValueStore } from "./array-values.js";
 import { tryLowerIndexedComparison } from "./indexed-comparison.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
@@ -5613,26 +5614,7 @@ export function fenceClosureProbe(
     if (receiverIr?.kind === "object") { const field = lowerClassLiteralKeyRead(lowerer, expr, receiverIr.className, foldedStringKeyOf(lowerer, expr.argumentExpression)); if (field) return field; }
     if (receiverIr?.kind !== "array") {
       if (receiverIr?.kind === "string") {
-        // `s[i]` with a number index reads a UTF-16 code unit — charAt's
-        // exact job (the UTF-16-exact runtime). Without
-        // noUncheckedIndexedAccess the checker types the read `string`,
-        // and charAt's "" is the only string-typed answer for an
-        // out-of-range or fractional index where JS reads `undefined` —
-        // SEMANTICS.md documents the divergence; in-range integer reads
-        // (the loop pattern) are JS-exact. Under noUncheckedIndexedAccess
-        // the read types `string | undefined`, which charAt cannot honor —
-        // fenced.
-        const index = lowerer.lowerExpr(expr.argumentExpression);
-        if (index.type.kind === "f64" && lowerer.mapTypeOf(lowerer.typeOf(expr))?.kind === "string") {
-          const recv = lowerer.lowerExpr(expr.expression);
-          return { kind: "strIntrinsic", method: "charAt", receiver: recv, args: [index], type: STRING, loc: locOf(expr) };
-        }
-        lowerer.unsupported(
-          "SC1090",
-          expr,
-          "string indexing with this index/result shape (a number index typed 'string' lowers to charAt; " +
-            "use .charAt(i) under noUncheckedIndexedAccess)",
-        );
+        return lowerStringIndexAccess(lowerer, expr);
       }
       lowerer.unsupported("SC1090", expr, "element access on non-array values");
     }
