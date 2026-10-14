@@ -4,26 +4,30 @@ import { numLit, strLit, varRef } from "../../ir/build.js";
 import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
 
-/** An unchecked outer array slot stays optional until both bracket operands
- * have run. Reuse the ordinary typed read with stabilized expression overrides. */
+/** An unchecked outer array slot or optional string binding stays optional
+ * until both bracket operands have run. Reuse the ordinary typed read with
+ * stabilized expression overrides, including the key used by the TypeError. */
 export function lowerArrayElementReceiver(L: Lowerer, expr: ts.ElementAccessExpression): IrExpr | null {
-  if (!L.nativeDenseArrays || L.chainRecvByNode.has(expr.expression)) return null;
+  if (L.chainRecvByNode.has(expr.expression)) return null;
   let origin = expr.expression;
-  while (ts.isParenthesizedExpression(origin)) origin = origin.expression;
-  if (!ts.isElementAccessExpression(origin) || L.mapTypeOf(L.typeOf(origin.expression))?.kind !== "array") return null;
+  while (ts.isParenthesizedExpression(origin) || ts.isAssertionExpression(origin) ||
+    ts.isSatisfiesExpression(origin) || ts.isNonNullExpression(origin)) origin = origin.expression;
   const expected = L.mapTypeOf(L.typeOf(expr.expression));
-  if (!expected || !["array", "record", "bytes"].includes(expected.kind)) return null;
+  if (!expected || !["array", "record", "bytes", "string"].includes(expected.kind)) return null;
+  if (!L.nativeDenseArrays && expected.kind !== "string") return null;
+  const binding = expected.kind === "string" ? L.runtimeOptionalIdentifierValue(origin) : null;
+  if (!binding && (!ts.isElementAccessExpression(origin) || L.mapTypeOf(L.typeOf(origin.expression))?.kind !== "array")) return null;
 
-  const value = L.lowerExpr(expr.expression);
-  const source = L.runtimeOptionalSourceValue(expr.expression, value);
+  const source = binding?.value ?? L.runtimeOptionalSourceValue(origin, L.lowerExpr(expr.expression));
   if (source?.type.kind !== "union") return null;
   const unionId = source.type.unionId;
   const present = L.stripUndefinedArm(source.type);
+  if (expected.kind === "string" && present.kind !== "string") return null;
   const def = L.unions.get(unionId);
   const valueTag = L.armTag(unionId, present);
   const missingTag = L.armTag(unionId, UNDEFINED_T);
   if (!def || valueTag < 0 || missingTag < 0 ||
-    !["array", "record", "bytes"].includes(present.kind) ||
+    !["array", "record", "bytes", "string"].includes(present.kind) ||
     !def.arms.every(arm => typeEquals(arm, present) || isUnitType(arm))) return null;
 
   const key = L.lowerExpr(expr.argumentExpression);
