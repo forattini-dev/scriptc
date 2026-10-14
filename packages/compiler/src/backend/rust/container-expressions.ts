@@ -81,6 +81,22 @@ export class RustContainerExpressionEmitter {
         if (present === null) this.context.unsupported("array pop result union shape", expr.loc);
         return `{ let ${receiver} = ${receiverExpr}; if runtime::array_len(&${receiver}) == 0.0 { ${name}::${this.context.unionVariant(undefinedTag)} } else { ${present} } }`;
       }
+      case "getNumber": {
+        const index = argExprs[0];
+        if (index === undefined) this.context.unsupported("array getNumber without an index", expr.loc);
+        return `runtime::array_get_number(&(${receiverExpr}), ${index})`;
+      }
+      case "indexEq": {
+        const [leftIndexExpr, rightExpr, rightIndexExpr] = argExprs;
+        if (leftIndexExpr === undefined || rightExpr === undefined || rightIndexExpr === undefined) {
+          this.context.unsupported("array indexEq argument shape", expr.loc);
+        }
+        const leftIndex = this.context.nextTemporary();
+        const right = this.context.nextTemporary();
+        const rightIndex = this.context.nextTemporary();
+        const equality = this.context.arrayElementEquality("left", "right", elementType, false, expr.loc);
+        return `{ let ${receiver} = ${receiverExpr}; let ${leftIndex} = ${leftIndexExpr}; let ${right} = ${rightExpr}; let ${rightIndex} = ${rightIndexExpr}; runtime::array_index_equal_by(&${receiver}, ${leftIndex}, &${right}, ${rightIndex}, |left, right| ${equality}) }`;
+      }
       case "nextPresent": {
         const start = argExprs[0];
         if (start === undefined) this.context.unsupported("array nextPresent without a start", expr.loc);
@@ -90,7 +106,7 @@ export class RustContainerExpressionEmitter {
         const first = argExprs[0];
         if (first === undefined) this.context.unsupported("array concatSpread without a source", expr.loc);
         const source = this.context.nextTemporary();
-        return `{ let ${receiver} = ${receiverExpr}; let ${source} = ${first}; runtime::array_extend(&${receiver}, &${source}) }`;
+        return `{ let ${receiver} = ${receiverExpr}; let ${source} = ${first}; runtime::array_concat_from(&${receiver}, &${source}) }`;
       }
       case "withUndefined": {
         const indexExpr = argExprs[0];
@@ -103,6 +119,9 @@ export class RustContainerExpressionEmitter {
         if (needleExpr === undefined) this.context.unsupported(`array ${expr.method} without a needle`, expr.loc);
         const needle = this.context.nextTemporary();
         const equality = this.context.arrayElementEquality("left", "right", expr.receiver.type.elem, expr.method === "includes", expr.loc);
+        if (expr.method === "includes" && expr.receiver.type.elem.kind === "dyn") {
+          return `{ let ${receiver} = ${receiverExpr}; let ${needle} = ${needleExpr}; runtime::array_includes_missing_by(&${receiver}, &${needle}, matches!(&${needle}, ${this.context.dynTypeName()}::Undefined), |left, right| ${equality}) }`;
+        }
         const helper = expr.method === "indexOf" ? "array_index_of_by" : "array_includes_by";
         return `{ let ${receiver} = ${receiverExpr}; let ${needle} = ${needleExpr}; runtime::${helper}(&${receiver}, &${needle}, |left, right| ${equality}) }`;
       }
@@ -116,7 +135,7 @@ export class RustContainerExpressionEmitter {
         const first = argExprs[0];
         if (first === undefined) this.context.unsupported("array pushSpread without a source", expr.loc);
         const source = this.context.nextTemporary();
-        return `{ let ${receiver} = ${receiverExpr}; let ${source} = ${first}; runtime::array_extend(&${receiver}, &${source}) }`;
+        return `{ let ${receiver} = ${receiverExpr}; let ${source} = ${first}; runtime::array_push_from(&${receiver}, &${source}) }`;
       }
       case "unshift": {
         const values = argExprs.map(() => this.context.nextTemporary());

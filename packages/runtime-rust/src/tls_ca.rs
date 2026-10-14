@@ -49,12 +49,10 @@ fn tls_bundled_ca_certificates() -> Vec<String> {
     static CACHE: OnceLock<Vec<String>> = OnceLock::new();
     CACHE
         .get_or_init(|| {
-            tls_read_ca_bundle(&[
-                "/etc/ssl/certs/ca-certificates.crt",
-                "/etc/pki/tls/certs/ca-bundle.crt",
-                "/etc/ssl/ca-bundle.pem",
-                "/etc/ssl/cert.pem",
-            ])
+            tls_split_pem_certificates(include_str!("tls-root-certificates.pem"))
+                .into_iter()
+                .map(|pem| pem.trim_end().to_owned())
+                .collect()
         })
         .clone()
 }
@@ -123,7 +121,14 @@ fn tls_system_ca_array() -> JsArray<JsString> {
     TLS_SYSTEM_CA_CERTIFICATES.with(|cached| {
         cached
             .borrow_mut()
-            .get_or_insert_with(|| tls_ca_array(tls_bundled_ca_certificates()))
+            .get_or_insert_with(|| {
+                tls_ca_array(tls_read_ca_bundle(&[
+                    "/etc/ssl/certs/ca-certificates.crt",
+                    "/etc/pki/tls/certs/ca-bundle.crt",
+                    "/etc/ssl/ca-bundle.pem",
+                    "/etc/ssl/cert.pem",
+                ]))
+            })
             .clone()
     })
 }
@@ -140,7 +145,10 @@ fn tls_extra_ca_array() -> JsArray<JsString> {
 pub fn tls_ca_get(kind: &JsString) -> JsArray<JsString> {
     match kind.to_utf8_lossy() {
         "default" => TLS_DEFAULT_CA_CERTIFICATES.with(|certificates| {
-            certificates.borrow().clone().unwrap_or_else(tls_bundled_ca_array)
+            certificates
+                .borrow()
+                .clone()
+                .unwrap_or_else(tls_bundled_ca_array)
         }),
         "bundled" => tls_bundled_ca_array(),
         "system" => tls_system_ca_array(),
@@ -184,3 +192,7 @@ fn tls_ca_finish() {
     TLS_SYSTEM_CA_CERTIFICATES.with(|stored| *stored.borrow_mut() = None);
     TLS_EXTRA_CA_CERTIFICATES.with(|stored| *stored.borrow_mut() = None);
 }
+
+#[cfg(test)]
+#[path = "tls_ca.test.rs"]
+mod tls_ca_tests;

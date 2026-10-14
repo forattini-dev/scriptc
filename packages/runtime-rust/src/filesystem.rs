@@ -263,7 +263,7 @@ pub fn fs_readdir(path: &JsString) -> JsArray<JsString> {
 
 pub fn fs_realpath(path: &JsString) -> JsString {
     match std::fs::canonicalize(path.to_utf8_lossy()) {
-        Ok(resolved) => JsString::from(resolved.to_string_lossy().as_ref()),
+        Ok(resolved) => fs_realpath_result(&resolved),
         Err(error) => throw_fs_error("lstat", path, error),
     }
 }
@@ -594,7 +594,7 @@ pub fn fs_chmod(path: &JsString, mode: f64) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 pub fn fs_chmod(path: &JsString, _mode: f64) {
     if !fs_exists(path) {
         throw_fs_error(
@@ -605,6 +605,7 @@ pub fn fs_chmod(path: &JsString, _mode: f64) {
     }
 }
 
+#[cfg(not(windows))]
 pub fn fs_chown(path: &JsString, uid: f64, gid: f64) {
     if let Err(error) = std::fs::metadata(path.to_utf8_lossy()) {
         throw_fs_error("chown", path, error);
@@ -650,11 +651,7 @@ pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
     }
 }
 
-#[cfg(not(unix))]
-pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
-    let _ = fs_creation_mode(mode);
-    fs_write_file(path, data);
-}
+
 
 pub fn fs_write_file_exclusive_mode(path: &JsString, data: &JsString, mode: f64) {
     use std::io::Write;
@@ -667,7 +664,7 @@ pub fn fs_write_file_exclusive_mode(path: &JsString, data: &JsString, mode: f64)
         options.mode(mode);
     }
     #[cfg(not(unix))]
-    let _ = mode;
+    fs_set_creation_mode(&mut options, mode);
     let mut file = match options.open(path.to_utf8_lossy()) {
         Ok(file) => file,
         Err(error) => throw_fs_error("open", path, error),
@@ -696,6 +693,7 @@ pub fn fs_mkdir_mode(path: &JsString, _mode: f64, recursive: bool) {
     }
 }
 
+#[cfg(not(windows))]
 pub fn fs_access(path: &JsString, mode: f64) {
     if let Err(error) = std::fs::metadata(path.to_utf8_lossy()) {
         throw_fs_error("access", path, error);
@@ -832,13 +830,7 @@ pub fn file_handle_open(path: &JsString, flags: &JsString, mode: f64) -> JsFileH
     }
     let mode = fs_creation_mode(mode);
     let mut options = fs_open_options(flags);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(mode);
-    }
-    #[cfg(not(unix))]
-    let _ = mode;
+    fs_set_creation_mode(&mut options, mode);
     let file = match options.open(path.to_utf8_lossy()) {
         Ok(file) => file,
         Err(error) => throw_fs_error("open", path, error),
@@ -1092,39 +1084,8 @@ fn validate_write_window(length: usize, offset: f64, count: f64) -> (usize, usiz
     (offset, count as usize)
 }
 
-fn normalized_write_position(position: f64) -> f64 {
-    if position.is_finite()
-        && position.fract() == 0.0
-        && (0.0..=9_007_199_254_740_991.0).contains(&position)
-    {
-        position
-    } else {
-        -1.0
-    }
-}
 
-pub fn fs_write_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, position: f64) -> f64 {
-    let byte_length = bytes.with(|data| data.length);
-    let (offset, length) = validate_write_window(byte_length, offset, length);
-    validate_write_fd(fd);
-    let input = bytes.with(|data| {
-        data.storage.borrow()[data.offset + offset..data.offset + offset + length].to_vec()
-    });
-    let position = normalized_write_position(position);
-    use std::io::Write;
-    with_open_file(fd, "write", |file| {
-        with_preserved_position(file, position, |file| file.write(&input))
-    }) as f64
-}
 
-pub fn fs_write_str_sync(fd: f64, text: &JsString, position: f64, _encoding: &JsString) -> f64 {
-    validate_write_fd(fd);
-    let position = normalized_write_position(position);
-    use std::io::Write;
-    with_open_file(fd, "write", |file| {
-        with_preserved_position(file, position, |file| file.write(text.as_bytes()))
-    }) as f64
-}
 
 pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, position: f64) -> f64 {
     if !offset.is_finite() || offset.fract() != 0.0 {

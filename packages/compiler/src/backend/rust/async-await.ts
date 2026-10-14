@@ -1,7 +1,34 @@
-import type { IrType } from "../../ir/ir.js";
+import type { IrExpr, IrType } from "../../ir/ir.js";
 import { typeKey } from "../../ir/ir.js";
 import type { RustAsyncControlContext } from "./async-control.js";
-import type { IrAwaitExpr } from "./model.js";
+import { isRustAwaitExpr, type IrAwaitExpr } from "./model.js";
+
+export function containsAsyncSuspension(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(containsAsyncSuspension);
+  if (isRustAwaitExpr(value)) return true;
+  const node = value as { kind?: unknown; fn?: unknown; name?: unknown };
+  if (node.kind === "libCall" && node.fn === "async.hop") return true;
+  if (node.kind === "intrinsic" && node.name === "module.await") return true;
+  return Object.values(value).some(containsAsyncSuspension);
+}
+
+export function asyncAwaitedValue(context: RustAsyncControlContext, expr: IrExpr | null): {
+  awaited: IrAwaitExpr; wrap: (value: string) => string;
+} | null {
+  if (isRustAwaitExpr(expr)) {
+    const awaited = expr;
+    return { awaited, wrap: value => awaited.kind === "awaitExpr" && awaited.adopt && awaited.type.kind === "void" ? `{ let _ = ${value}; }` : value };
+  }
+  if (expr?.kind !== "unionWrap") return null;
+  const inner = asyncAwaitedValue(context, expr.value);
+  if (inner === null) return null;
+  const union = context.union(expr.unionId, expr.loc);
+  const arm = union.arms[expr.tag];
+  if (arm === undefined || context.isUnit(arm)) context.unsupported(`awaited union wrapper '${expr.unionId}:${expr.tag}'`, expr.loc);
+  const variant = `${context.unionName(union.id)}::${context.unionVariant(expr.tag)}`;
+  return { awaited: inner.awaited, wrap: value => `${variant}(${inner.wrap(value)})` };
+}
 
 /** Build the promise dependency selected by an await operand. A tagged
  * promise-or-plain value becomes one promise in every match arm, leaving

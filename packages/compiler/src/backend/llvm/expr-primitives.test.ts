@@ -17,7 +17,7 @@ function fixture(): IrModule {
     loc,
   });
   return {
-    irVersion: 12,
+    irVersion: 13,
     sourceFile: loc.file,
     entry: "__main",
     functions: [{ name: "__main", params: [], returnType: VOID, locals: [], body, loc }],

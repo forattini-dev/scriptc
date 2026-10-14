@@ -226,6 +226,7 @@ export class CheckerFacade {
   private readonly arrayLikeAnswer = new WeakMap<Type, boolean>();
   private readonly typeStringOf = new WeakMap<Type, string>();
   private readonly awaitedTypeOf = new WeakMap<Type, Type | undefined>();
+  private readonly assignableTo = new WeakMap<Type, WeakMap<Type, boolean>>();
   /** Signature-keyed memos. */
   private readonly returnTypeOf = new WeakMap<Signature, Type | undefined>();
   private readonly typePredicateOf = new WeakMap<Signature, TypePredicate | undefined>();
@@ -570,6 +571,18 @@ export class CheckerFacade {
     const type = this.raw.getContextualType(node as never);
     this.contextualType.set(node, type);
     return type;
+  }
+
+  /** Ordered, snapshot-local relation: source can enter target, never the
+   * reverse. Keep false answers too; failed server queries are not cached. */
+  isTypeAssignableTo(source: Type, target: Type): boolean {
+    const targets = this.assignableTo.get(source);
+    const cached = targets?.get(target);
+    if (cached !== undefined) return cached;
+    const answer = this.raw.isTypeAssignableTo(source, target);
+    if (targets) targets.set(target, answer);
+    else this.assignableTo.set(source, new WeakMap([[target, answer]]));
+    return answer;
   }
 
   getTypeFromTypeNode(node: Node): Type {

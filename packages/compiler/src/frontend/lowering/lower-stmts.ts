@@ -3728,6 +3728,9 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
     // undefined`) keeps its native union, including inferred package JS and
     // TypeScript fresh-array probes; explicit annotations retain their checks.
     if (type?.kind === "array") type = inferredRegexBindingType(lowerer, decl, type);
+    if (!decl.type && type?.kind === "func" && init.type.kind === "func" &&
+      (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer)) &&
+      lowerer.runtimeOptionalFunctionReturns.has(decl.initializer)) type = { ...type, ret: init.type.ret };
     let runtimeOptional = false;
     if (
       type !== null && init.type.kind === "union" &&

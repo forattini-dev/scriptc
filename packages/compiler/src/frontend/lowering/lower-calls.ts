@@ -1,4 +1,5 @@
 import { completeFunctionValueArgs, functionAbi } from "./function-abi.js";
+import { lowerAssertedProcessIdentityCall } from "./process-identity.js";
 import { lowerNativeGlobalCall } from "./lower-native-global-calls.js";
 import { lowerErrorStackCall } from "./lower-error-stack.js";
 import { lowerBuiltinErrorCall } from "./lower-error-constructor.js";
@@ -17,6 +18,8 @@ import { provesWrittenNullishFilter } from "./nullish-filter-proof.js";
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
 import * as ts from "../ts7/adapter.js";
 import { InternalCompilerError } from "../../errors.js";
+import { checkedArmExtraction } from "./checked-stale-arm.js";
+import { lowerReturnAdoption } from "./lower-return-adoption.js";
 import type { Lowerer } from "./lowerer.js";
 import { trapUseThrowExpr } from "./lowerer.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
@@ -3267,6 +3270,8 @@ export function lowerFfiCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr 
 
 export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
+    const assertedIdentity = lowerAssertedProcessIdentityCall(lowerer, expr);
+    if (assertedIdentity) return assertedIdentity;
     if (ts.isPropertyAccessExpression(expr.expression) && !expr.questionDotToken && !expr.expression.questionDotToken) {
       const stack = lowerErrorStackCall(lowerer, expr, expr.expression);
       if (stack) return stack;
@@ -3349,10 +3354,7 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
       if (resolved) return resolved;
     }
 
-    // `process.getuid?.()` — intercepted BEFORE the optional-chain
-    // machinery (the member always exists on a POSIX target, so the
-    // optional call IS the call; `process.getuid` itself has no value
-    // lowering for the chain to guard).
+    // Target-specific identity capabilities are resolved before chain dispatch.
     const processOptional = lowerer.lowerProcessOptionalMethodCall(expr);
     if (processOptional) return processOptional;
     const reqStreamOptional = lowerCompatReqStreamOptionalCall(lowerer, expr);
@@ -6887,7 +6889,9 @@ function loweredTemplateStrings(
               const value = lowerer.lowerExpr(bodyExpr);
               body = value.kind === "unitLit"
                 ? []
-                : [voidTernaryIfStmtOrExprStmt(value, locOf(node.body!))];
+                : isAsync && value.type.kind === "promise" && lowerer.nativePromiseViews
+                  ? [{ kind: "return", value: { kind: "awaitExpr", value, type: VOID, adopt: true, loc: value.loc }, loc: value.loc }]
+                  : [voidTernaryIfStmtOrExprStmt(value, locOf(node.body!))];
             }
           } else {
             let value = lowerer.lowerExpr(bodyExpr);
@@ -6896,7 +6900,9 @@ function loweredTemplateStrings(
             // thenable into the function's own promise — lowerReturnValue's
             // await-through, applied to the implicit return.
             if (isAsync && value.type.kind === "promise" && bodyReturn.kind !== "promise") {
-              value = { kind: "awaitExpr", value, type: value.type.inner, loc: value.loc };
+              value = lowerer.nativePromiseViews && !lowerer.ctx.generator
+                ? lowerReturnAdoption(lowerer, bodyExpr, value, bodyReturn)
+                : { kind: "awaitExpr", value, type: value.type.inner, loc: value.loc };
             }
             body =
               value.type.kind === "void" && lowerer.wrappedUndefined(bodyReturn, locOf(node.body!))
@@ -7098,6 +7104,10 @@ function loweredTemplateStrings(
     blame: ts.Node,
     loc: SrcLoc,
   ): void {
+    if (lowerer.nativePromiseViews && handlerCall.type.kind === "promise" && resultType.kind !== "promise") {
+      body.push({ kind: "return", value: lowerReturnAdoption(lowerer, blame, handlerCall, resultType), loc });
+      return;
+    }
     if (resultType.kind === "void") {
       body.push({
         kind: "exprStmt",
@@ -7284,7 +7294,9 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
         const prelude: IrStmt[] = [];
         let fulfilledArgs: IrExpr[] = [];
         if (fulfilledParam !== undefined && inner.kind !== "void") {
-          const valueLocal = lowerer.declareHiddenLocal("value", inner);
+          const slotType = lowerer.nativePromiseViews && (inner.kind === "record" || inner.kind === "array")
+            ? lowerer.runtimeOptionalType(inner) : inner;
+          const valueLocal = lowerer.declareHiddenLocal("value", slotType);
           valueLocal.mutable = true;
           const scratch: IrExpr | null =
             inner.kind === "f64"
@@ -7295,7 +7307,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
                   ? { kind: "boolLit", value: false, type: BOOL, loc }
                   : inner.kind === "dyn"
                     ? dynUndefinedExpr(loc)
-                    : lowerer.unassignedSlotInit(inner, loc);
+                    : lowerer.unassignedSlotInit(slotType, loc);
           if (scratch === null) {
             lowerer.unsupported(
               "SC1090",
@@ -7305,8 +7317,8 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
             );
           }
           prelude.push({ kind: "varDecl", localId: valueLocal.id, init: scratch, loc });
-          tryBody.push({ kind: "assign", localId: valueLocal.id, value: awaitExpr, loc });
-          fulfilledArgs = [{ kind: "varRef", localId: valueLocal.id, type: inner, loc }];
+          tryBody.push({ kind: "assign", localId: valueLocal.id, value: lowerer.coerceToExpected(awaitExpr, slotType), loc });
+          fulfilledArgs = [lowerer.coerceToExpected({ kind: "varRef", localId: valueLocal.id, type: slotType, loc }, inner)];
         } else {
           tryBody.push({ kind: "exprStmt", expr: awaitExpr, loc });
         }
@@ -9200,9 +9212,16 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
     // dyn callee). Every other field type falls through to the fences.
     if (info && !found) {
       const fieldType = info.fields.get(access.name.text);
-      if (fieldType && (fieldType.kind === "func" || fieldType.kind === "dyn")) {
+      const functionArms = fieldType?.kind === "union"
+        ? lowerer.unions.get(fieldType.unionId)?.arms.filter(arm => arm.kind === "func") ?? [] : [];
+      const callableType = fieldType?.kind === "func" ? fieldType : functionArms.length === 1 ? functionArms[0]! : null;
+      if (fieldType && (callableType !== null || fieldType.kind === "dyn")) {
         const target = lowerer.fieldTarget(access);
-        const callee = target ? lowerer.fieldGetExpr(target, locOf(access), access) : null;
+        let callee = target ? lowerer.fieldGetExpr(target, locOf(access), access) : null;
+        if (callee?.type.kind === "union" && callableType !== null) {
+          callee = checkedArmExtraction(lowerer, callee, lowerer.armTag(callee.type.unionId, callableType), callableType,
+            () => `${access.getText()} is not a function`) ?? callee;
+        }
         if (callee?.type.kind === "func") {
           const args = completeFunctionValueArgs(lowerer, call, callee.type);
           return { kind: "callValue", callee, args, type: callee.type.ret, loc: locOf(call) };

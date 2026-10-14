@@ -39,7 +39,7 @@ test("recursive records through function results terminate and retain unsupporte
 
 function moduleWithExpr(expr: IrExpr): IrModule {
   return {
-    irVersion: 12,
+    irVersion: 13,
     sourceFile: loc.file,
     functions: [{
       name: "main",

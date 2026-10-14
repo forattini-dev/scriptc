@@ -1,3 +1,4 @@
+import { uninhabitedIntersection } from "./intersection-inhabitation.js";
 import { fixedTupleParameters } from "./fixed-tuple-parameters.js";
 import { builtinErrorIntersection } from "./builtin-error-intersection.js";
 import { mapDnsLookupAddress } from "./dns-lookup-type.js";
@@ -2554,6 +2555,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // completes — the ShapeRegistry knot, mirrored (identity per checker
   // type; context-sensitive frames stay fenced).
   if (widened.isUnionType()) {
+    const parts = ts.constituentTypes(widened).filter(part => !uninhabitedIntersection(part, checker));
     const knownRecursive = unions.recursiveUnionFor(widened);
     if (knownRecursive !== undefined) return { kind: "union", unionId: knownRecursive };
     if (unions.inProgress.has(widened)) {
@@ -2565,9 +2567,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       const byKey = new Map<string, IrType>();
       // `T | undefined` with T bound to a DISCRIMINATED record union: the unit arms join the inner arms and the
       // inner discriminant (a shape-keyed literal field) still tells them apart, so the flattened union keeps it.
-      const soleDataPart = ts.constituentTypes(widened).filter((p) => (p.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Null)) === 0).length === 1;
+      const soleDataPart = parts.filter((p) => (p.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Null)) === 0).length === 1;
       let inheritedDiscriminant: IrUnionDef["discriminant"];
-      for (const part of ts.constituentTypes(widened)) {
+      for (const part of parts) {
         // A `void` PART is inhabited only by undefined (`Promise<void> |
         // void` return types, `string | void`): it becomes the undefinedT
         // unit arm, exactly like an undefined part — the value either
@@ -2595,7 +2597,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         if (mapped?.kind === "jsval") return JSVAL;
         if (!mapped) {
           // Before failing the whole union, let a LATER jsval part absorb.
-          for (const rest of ts.constituentTypes(widened)) {
+          for (const rest of parts) {
             if (mapType(rest, ctx)?.kind === "jsval") return JSVAL;
           }
           return null;
@@ -3274,10 +3276,55 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
         shapeId: shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder),
       };
     }
+    const refined = refinedConstituentShape(widened, inner, ctx);
+    if (refined !== null) return { kind: "record", shapeId: refined };
     return { kind: "record", shapeId: shapes.intern(inner.fields, false, inner.indexValue, inner.declaredOrder) };
   } finally {
     shapes.inProgress.delete(widened);
   }
+}
+
+/** A refinement intersection (`Expr & { kind: "mul" }`, which the checker
+ * reduces to `Mul & { kind: "mul" }`) keeps the shape of the constituent it
+ * refines when the refinement changes no field's representation. Recursive
+ * declarations own distinct shape ids even when their layouts coincide
+ * (`Add` and `Mul` both `{ kind; left; right }`), and the structural key
+ * names only the first of them, so interning the intersection by structure
+ * could select a lookalike: a different arm of the very union the value is
+ * narrowed from. Constituents still being mapped are left alone, so this
+ * never mints a recursive placeholder. */
+function refinedConstituentShape(
+  widened: ts.Type,
+  parts: RecordShapeParts,
+  ctx: TypeMapperCtx,
+): string | null {
+  if (!widened.isIntersectionType()) return null;
+  const { checker, shapes } = ctx;
+  const names = checker.getPropertiesOfType(widened).map((prop) => prop.name);
+  let found: string | null = null;
+  for (const part of ts.constituentTypes(widened)) {
+    if ((part.flags & ts.TypeFlags.Object) === 0 || shapes.inProgress.has(part)) continue;
+    const own = new Set(checker.getPropertiesOfType(part).map((prop) => prop.name));
+    if (own.size !== names.length || !names.every((name) => own.has(name))) continue;
+    const mapped = mapType(part, ctx);
+    if (mapped?.kind !== "record") continue;
+    const shape = shapes.get(mapped.shapeId);
+    if (
+      !shape ||
+      shape.tuple ||
+      shape.fields.length !== parts.fields.length ||
+      !shape.fields.every(
+        (field, i) =>
+          field.name === parts.fields[i]!.name && typeEquals(field.type, parts.fields[i]!.type),
+      ) ||
+      (shape.indexValue === undefined) !== (parts.indexValue === undefined) ||
+      (shape.indexValue !== undefined && !typeEquals(shape.indexValue, parts.indexValue!))
+    )
+      continue;
+    if (found !== null && found !== mapped.shapeId) return null;
+    found = mapped.shapeId;
+  }
+  return found;
 }
 
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {

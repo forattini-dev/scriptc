@@ -21,7 +21,11 @@ Options:
       --emit <kind>  primary output: ir, c, llvm, asm, obj, or exe
                      (default: exe). asm/obj use the matching platform helper
       --print <kind> print machine-readable metadata instead of the output path
-                     (native-link-info implies --emit=obj and never links)
+                     (native-link-info implies --emit=obj and never links;
+                     diagnostics writes a versioned JSON envelope for build/coverage)
+      --fail-on <blockers|divergences>
+                     coverage gate: fail on reached blockers, or also reported
+                     deferred runtime differences; this does not certify parity
       --target <t>   runtime target the binary reproduces: node24 (default),
                      node26, or bun. Selects the ambient type surface
                      (@types/node or @types/bun), the export/imports
@@ -115,6 +119,7 @@ export const CLI_OPTIONS = {
   out: { type: "string", short: "o" },
   emit: { type: "string" },
   print: { type: "string" },
+  "fail-on": { type: "string" },
   backend: { type: "string" },
   target: { type: "string" },
   conditions: { type: "string", multiple: true },

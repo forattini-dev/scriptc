@@ -71,7 +71,7 @@ const files = (await Promise.all(
 for (const file of files) {
   const source = await readFile(file, "utf8");
   const lines = source.length === 0 ? 0 : source.split("\n").length - Number(source.endsWith("\n"));
-  const relative = path.relative(root, file);
+  const relative = path.relative(root, file).split(path.sep).join("/");
   const legacyCeiling = legacyOversizedFiles.get(relative);
   if (lines <= MAX_LINES) {
     if (legacyCeiling !== undefined) {

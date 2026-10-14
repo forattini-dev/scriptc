@@ -47,6 +47,8 @@ function literalUnionArmOf(
    * types only into their own unit; otherwise the widened IR pair must be
    * equal or width-liftable. */
   const fits = (litT: ts.Type, ftT: ts.Type): boolean => {
+    if (litT === ftT) return true;
+    if (litT.isUnionType()) return ts.constituentTypes(litT).every((a) => fits(a, ftT));
     if (ftT.isUnionType()) return ts.constituentTypes(ftT).some((a) => fits(litT, a));
     if (ftT.isStringLiteralType()) return litT.isStringLiteralType() && litT.value === ftT.value;
     if (ftT.isNumberLiteralType()) return litT.isNumberLiteralType() && litT.value === ftT.value;
@@ -223,7 +225,6 @@ export function objectLiteralRecordType(
             mapped = recordArms[0]!;
           }
         } else if (recordArms.length > 1) {
-          const ownShapeId = mapped?.kind === "record" ? mapped.shapeId : null;
           // SEVERAL record arms (the reducer-action / discriminated-message
           // pattern): the literal's own inferred shape re-tags into no arm
           // — its field types widened per field (`parsed: 1` against
@@ -236,10 +237,11 @@ export function objectLiteralRecordType(
           // exactly ONE member fits, build AS that arm — its field types
           // drive every property's coercion, exactly the single-record-arm
           // rule above. Ambiguous literals keep the SC2003 fence.
-          if (ownShapeId === null || !recordArms.some((a) => a.shapeId === ownShapeId)) {
-            const arm = literalUnionArmOf(lowerer, expr, tsType, recordArms);
-            if (arm) mapped = arm;
-          }
+          // Recursive declarations may share a layout while owning distinct
+          // union arms. The literal's structurally interned shape can name a
+          // different declaration, so consult discriminants even on a match.
+          const arm = literalUnionArmOf(lowerer, expr, tsType, recordArms);
+          if (arm) mapped = arm;
         }
       }
     }

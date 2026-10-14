@@ -10,6 +10,7 @@ import { InternalCompilerError } from "../../errors.js";
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { contextualMapConstruction } from "./contextual-map.js";
 import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/ir.js";
 import { MAX_GENERIC_INSTANCES, appendImplicitUndefinedReturn, generatorMeta, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, inferredJsRecordFactoryResult, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, typeKey } from "../type-mapper.js";
@@ -4872,22 +4873,7 @@ export function lowerNew(lowerer: Lowerer, expr: ts.NewExpression): IrExpr {
           seedArg && ts.isArrayLiteralExpression(seedArg) && seedArg.elements.every(isPairLit)
             ? seedArg.elements.filter(isPairLit)
             : null;
-        let tsType = lowerer.typeOf(expr);
-        let mapped = lowerer.mapTypeOf(tsType);
-        // JavaScript's `new Map()` has no type-argument syntax: the no-arg
-        // constructor overload pins Map<any, any> whatever the JSDoc says
-        // (`@type` on the declaration types the VARIABLE, not this
-        // expression). The CONTEXTUAL type carries the annotation — adopt
-        // it when it is a supported map. TS type arguments keep winning:
-        // their expression type already maps.
-        if (mapped?.kind !== "map") {
-          const ctx = lowerer.checker.getContextualType(expr);
-          const ctxMapped = ctx ? lowerer.mapTypeOf(ctx) : null;
-          if (ctx && ctxMapped?.kind === "map") {
-            tsType = ctx;
-            mapped = ctxMapped;
-          }
-        }
+        const { tsType, mapped } = contextualMapConstruction(lowerer, expr);
         if (seedArg && !entriesLit && mapped?.kind === "map") {
           const seeded = lowerMapSeedArrayNew(lowerer, seedArg, mapped);
           if (seeded) return seeded;

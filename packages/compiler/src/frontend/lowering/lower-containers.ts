@@ -1841,7 +1841,7 @@ export function tryLowerNumericIndexRead(lowerer: Lowerer, operand: IrExpr, loc:
       body = [
         { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
         readLen,
-        ...(method === "map" && !lowerer.nativeDenseArrays ? [{ kind: "arraySetLength", arr: varRef("out.0", outT, loc), length: varRef("n.0", F64, loc), loc } satisfies IrStmt] : []),
+        ...(method === "map" ? [{ kind: "arraySetLength", arr: varRef("out.0", outT, loc), length: varRef("n.0", F64, loc), loc } satisfies IrStmt] : []),
         forLoop([
           {
             kind: "if",
@@ -2966,51 +2966,6 @@ export function lowerArrayOfCall(lowerer: Lowerer, call: ts.CallExpression,
 }
 
 export { lowerArrayFromCall } from "./lower-array-from.js";
-
-/** Map an array iterator to a fresh dense array. The source length remains
- * live so mapper mutations affect which later indexes are visited. */
-function buildArrayFromArrayFn(lowerer: Lowerer, name: string, elem: IrType,
-  outElem: IrType, fnRet: IrType, arity: number, loc: SrcLoc): IrFunction {
-  const arrT = arrayOf(elem);
-  const outT = arrayOf(outElem);
-  const fnT = funcOf([arrayValueType(lowerer, elem), F64].slice(0, arity), fnRet);
-  const a = varRef("a.0", arrT, loc);
-  const i = varRef("i.0", F64, loc);
-  const out = varRef("out.0", outT, loc);
-  const mapped: IrExpr = {
-    kind: "callValue",
-    callee: varRef("f.0", fnT, loc),
-    args: [arrayValueRead(lowerer, a, i, elem, loc), i].slice(0, arity),
-    type: fnRet,
-    loc,
-  };
-  return {
-    name,
-    params: [{ localId: "a.0", name: "a", type: arrT }, { localId: "f.0", name: "f", type: fnT }],
-    returnType: outT,
-    locals: [
-      { id: "a.0", name: "a", type: arrT, mutable: true },
-      { id: "f.0", name: "f", type: fnT, mutable: true },
-      { id: "out.0", name: "out", type: outT, mutable: false },
-      { id: "i.0", name: "i", type: F64, mutable: true },
-    ],
-    body: [
-      { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
-      { kind: "varDecl", localId: "i.0", init: numLit(0, loc), loc },
-      {
-        kind: "while",
-        cond: { kind: "bin", op: "<", left: i, right: { kind: "arrIntrinsic", method: "length", receiver: a, args: [], type: F64, loc }, type: BOOL, loc },
-        body: [
-          arrayValueStore(lowerer, out, i, mapped, outElem, loc),
-          { kind: "assign", localId: "i.0", value: { kind: "bin", op: "+", left: i, right: numLit(1, loc), type: F64, loc }, loc },
-        ],
-        loc,
-      },
-      { kind: "return", value: out, loc },
-    ],
-    loc,
-  };
-}
 
 /** `Array.from(s)` / `[...s]` on a STRING: the code-point split into a
    * fresh string[], through one interned helper per module. */

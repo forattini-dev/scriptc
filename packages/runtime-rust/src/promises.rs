@@ -722,13 +722,29 @@ where
     }
 }
 
-pub enum AsyncCompletion<T> {
+/// Resolve an async return via a thenable job, after enclosing finally bodies.
+pub fn promise_adopt_return<T: HeapValue, U: HeapValue, F: FnOnce(T) -> U + 'static>(target: &JsPromise<U>, source: &JsPromise<T>, convert: F) {
+    let target = target.clone();
+    let source = source.clone();
+    timer_queue_microtask(Box::new(move || {
+        let destination = target.clone();
+        promise_then(&source, Box::new(move |outcome| {
+            promise_run_segment(&destination, || match outcome {
+                Ok(value) => { let _ = promise_fulfill(&destination, convert(value)); }
+                Err(reason) => { let _ = promise_reject(&destination, reason); }
+            });
+        }));
+    }));
+}
+
+pub enum AsyncCompletion<T: HeapValue> {
     Fallthrough,
     Suspended,
     Return(T),
+    Adopt(Box<dyn FnOnce(JsPromise<T>)>),
 }
 
-pub fn promise_try_segment<T, F>(segment: F) -> Result<AsyncCompletion<T>, Caught>
+pub fn promise_try_segment<T: HeapValue, F>(segment: F) -> Result<AsyncCompletion<T>, Caught>
 where
     F: FnOnce() -> AsyncCompletion<T>,
 {

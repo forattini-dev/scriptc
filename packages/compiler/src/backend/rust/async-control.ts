@@ -5,7 +5,7 @@ import { emitAsyncProtectedBlockOrFor } from "./async-protected-block-for.js";
 import type { IrFamily } from "../../ir/ir.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import { mangleLocal } from "../mangle.js";
-import { emitAwaitDependency } from "./async-await.js";
+import { asyncAwaitedValue, containsAsyncSuspension, emitAwaitDependency } from "./async-await.js";
 import { asyncTrampolineCall } from "./async-trampoline.js";
 import { isRustAwaitExpr, type IrAwaitExpr } from "./model.js";
 import { rustAsyncExpressionOperands } from "./async-values.js";
@@ -15,13 +15,13 @@ import { emitAsyncProtectedIf, emitAsyncProtectedWhile } from "./async-protected
 
 export interface RustAsyncHandlers {
   readonly fallthrough: () => void;
-  readonly returned: (value: string) => void;
+  readonly returned: (value: string, adopt?: boolean) => void;
   readonly thrown: (reason: string) => void;
 }
 
 type RustAsyncCompletion =
   | { readonly kind: "fallthrough" }
-  | { readonly kind: "return"; readonly value: string }
+  | { readonly kind: "return"; readonly value: string; readonly adopt?: boolean }
   | { readonly kind: "throw"; readonly reason: string };
 
 interface RustAsyncLoopControl {
@@ -112,13 +112,7 @@ export class RustAsyncControlEmitter {
   constructor(readonly context: RustAsyncControlContext) {}
 
   containsAsyncSuspension(value: unknown): boolean {
-    if (value === null || typeof value !== "object") return false;
-    if (Array.isArray(value)) return value.some((item) => this.containsAsyncSuspension(item));
-    if (isRustAwaitExpr(value)) return true;
-    const node = value as { kind?: unknown; fn?: unknown; name?: unknown };
-    if (node.kind === "libCall" && node.fn === "async.hop") return true;
-    if (node.kind === "intrinsic" && node.name === "module.await") return true;
-    return Object.values(value).some((item) => this.containsAsyncSuspension(item));
+    return containsAsyncSuspension(value);
   }
 
   awaitExpression(expr: IrExpr | null): IrAwaitExpr | null {
@@ -142,18 +136,7 @@ export class RustAsyncControlEmitter {
   }
 
   awaitedValue(expr: IrExpr | null): { awaited: IrAwaitExpr; wrap: (value: string) => string } | null {
-    const awaited = this.awaitExpression(expr);
-    if (awaited !== null) return { awaited, wrap: (value) => value };
-    if (expr?.kind !== "unionWrap") return null;
-    const inner = this.awaitedValue(expr.value);
-    if (inner === null) return null;
-    const union = this.context.union(expr.unionId, expr.loc);
-    const arm = union.arms[expr.tag];
-    if (arm === undefined || this.context.isUnit(arm)) {
-      this.context.unsupported(`awaited union wrapper '${expr.unionId}:${expr.tag}'`, expr.loc);
-    }
-    const variant = `${this.context.unionName(union.id)}::${this.context.unionVariant(expr.tag)}`;
-    return { awaited: inner.awaited, wrap: (value) => `${variant}(${inner.wrap(value)})` };
+    return asyncAwaitedValue(this.context, expr);
   }
 
   emitAwaitDependency(expr: IrAwaitExpr): string {
@@ -282,6 +265,13 @@ export class RustAsyncControlEmitter {
         : stmt.kind === "return" ? stmt.value
         : null,
       );
+      if (stmt.kind === "return" && awaited?.awaited.kind === "awaitExpr" && awaited.awaited.adopt) {
+        const source = this.context.nextName("sc_return_promise");
+        this.context.line(`let ${source} = ${this.emitAwaitDependency(awaited.awaited)};`);
+        this.context.line(`runtime::promise_adopt_return(&${result}, &${source}, move |value| ${awaited.wrap("value")});`);
+        this.context.line("return;");
+        return;
+      }
       if (awaited === null) {
         if (nested !== null && ((nested.kind === "bin" || nested.kind === "nullish" || nested.kind === "toString" || nested.kind === "strConcat" ||
           nested.kind === "seqExpr" || nested.kind === "ternary" ||
@@ -364,7 +354,7 @@ export class RustAsyncControlEmitter {
     const resume = this.emitAsyncResumeHelper(remaining, onComplete, outerLocals, stmt.loc, "try_continue");
     this.emitAsyncProtectedSequence(stmt.tryBody, outerLocals, {
       fallthrough: () => this.emitAsyncFinally(stmt, [], outerLocals, { kind: "fallthrough" }, resume),
-      returned: (value) => this.emitAsyncFinally(stmt, [], outerLocals, { kind: "return", value }, resume),
+      returned: (value, adopt = false) => this.emitAsyncFinally(stmt, [], outerLocals, { kind: "return", value, adopt }, resume),
       thrown: (reason) => this.emitAsyncCatch(stmt, [], outerLocals, reason, resume),
     }, stmt.loc);
   }
@@ -713,6 +703,13 @@ export class RustAsyncControlEmitter {
           : current.kind === "return" ? current.value
           : null;
         const awaited = this.awaitedValue(nested);
+        if (current.kind === "return" && awaited?.awaited.kind === "awaitExpr" && awaited.awaited.adopt) {
+          const source = this.context.nextName("sc_return_promise");
+          this.context.line(`let ${source} = ${this.emitAwaitDependency(awaited.awaited)};`);
+          this.context.line(`return runtime::AsyncCompletion::Adopt(Box::new(move |target| runtime::promise_adopt_return(&target, &${source}, move |value| ${awaited.wrap("value")})));`);
+          terminal = "return";
+          break;
+        }
         if (awaited !== null) {
           this.emitAsyncProtectedContinuation(
             this.emitAwaitDependency(awaited.awaited),
@@ -817,6 +814,11 @@ export class RustAsyncControlEmitter {
       this.context.line("},");
       this.context.line("Ok(runtime::AsyncCompletion::Fallthrough) => unreachable!(\"scriptc invariant: invalid async suspension completion\"),");
     }
+    this.context.line("Ok(runtime::AsyncCompletion::Adopt(adopt)) => {");
+    this.context.pushIndent();
+    this.withAsyncLocals(new Set(exitLocals), () => handlers.returned("adopt", true));
+    this.context.popIndent();
+    this.context.line("},");
     this.context.line("Err(reason) => {");
     this.context.pushIndent();
     this.withAsyncLocals(new Set(exitLocals), () => handlers.thrown("reason"));
@@ -1095,7 +1097,7 @@ export class RustAsyncControlEmitter {
     }
     this.emitAsyncProtectedSequence(stmt.catchBody, outerLocals, {
       fallthrough: () => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "fallthrough" }, onComplete),
-      returned: (value) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "return", value }, onComplete),
+      returned: (value, adopt = false) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "return", value, adopt }, onComplete),
       thrown: (catchReason) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "throw", reason: catchReason }, onComplete),
     }, stmt.loc);
   }
@@ -1113,7 +1115,7 @@ export class RustAsyncControlEmitter {
     }
     this.emitAsyncProtectedSequence(stmt.finallyBody, outerLocals, {
       fallthrough: () => this.emitAsyncCompletion(remaining, pending, onComplete),
-      returned: (value) => this.emitAsyncCompletion(remaining, { kind: "return", value }, onComplete),
+      returned: (value, adopt = false) => this.emitAsyncCompletion(remaining, { kind: "return", value, adopt }, onComplete),
       // Resource cleanup throwing over a thrown body completes with a SuppressedError (the sync lane's rule).
       thrown: (reason) => this.emitAsyncCompletion(remaining, { kind: "throw", reason: stmt.suppressFinallyErrors && pending.kind === "throw" ? "runtime::suppressed_error_caught()" : reason }, onComplete),
     }, stmt.loc);
@@ -1129,7 +1131,7 @@ export class RustAsyncControlEmitter {
     if (completion.kind === "fallthrough") {
       this.emitAsyncStatements(remaining, onComplete);
     } else if (completion.kind === "return") {
-      this.context.line(`let _ = runtime::promise_fulfill(&${result}, ${completion.value});`);
+      this.context.line(completion.adopt ? `${completion.value}(${result}.clone());` : `let _ = runtime::promise_fulfill(&${result}, ${completion.value});`);
     } else {
       this.context.line(`let _ = runtime::promise_reject(&${result}, ${completion.reason});`);
     }

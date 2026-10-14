@@ -54,6 +54,7 @@ export function arrayValueRead(lowerer: Lowerer, arr: IrExpr, index: IrExpr, ele
 
 /** Store a stabilized value without changing the array's element ABI. */
 export function arrayValueStore(lowerer: Lowerer, arr: IrExpr, index: IrExpr, value: IrExpr, elem: IrType, loc: SrcLoc): IrStmt {
+  if (value.kind === "unitLit" && value.unit === "undefined") return { kind: "arraySetUndefined", arr, index, loc };
   if (typeEquals(value.type, elem)) return { kind: "arraySet", arr, index, value, loc };
   if (value.type.kind === "union" && lowerer.armTag(value.type.unionId, UNDEFINED_T) >= 0) {
     // The tag test and the VALUE arm extraction both consume the value. Keep
@@ -85,14 +86,16 @@ export function arrayValueStore(lowerer: Lowerer, arr: IrExpr, index: IrExpr, va
 export function orderedArrayValueStore(lowerer: Lowerer, arr: IrExpr, index: IrExpr, value: IrExpr, elem: IrType, loc: SrcLoc): IrStmt {
   const receiver = lowerer.declareHiddenLocal("%arrayStoreReceiver", arr.type);
   const key = lowerer.declareHiddenLocal("%arrayStoreIndex", index.type);
-  const stored = lowerer.declareHiddenLocal("%arrayStoreValue", value.type);
+  // Unit literals have no standalone local ABI and no evaluation effects.
+  // Keep them literal until the store wraps null or marks present undefined.
+  const stored = value.kind === "unitLit" ? null : lowerer.declareHiddenLocal("%arrayStoreValue", value.type);
   return {
     kind: "block",
     body: [
       { kind: "varDecl", localId: receiver.id, init: arr, loc },
       { kind: "varDecl", localId: key.id, init: index, loc },
-      { kind: "varDecl", localId: stored.id, init: value, loc },
-      arrayValueStore(lowerer, varRef(receiver.id, arr.type, loc), varRef(key.id, index.type, loc), varRef(stored.id, value.type, loc), elem, loc),
+      ...(stored === null ? [] : [{ kind: "varDecl", localId: stored.id, init: value, loc } satisfies IrStmt]),
+      arrayValueStore(lowerer, varRef(receiver.id, arr.type, loc), varRef(key.id, index.type, loc), stored === null ? value : varRef(stored.id, value.type, loc), elem, loc),
     ],
     loc,
   };

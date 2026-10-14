@@ -1,7 +1,9 @@
 use crate::{
-    JsArray, JsString, array_get, array_len, array_new, empty_string, path_resolve, string,
+    JsArray, JsString, array_get, array_len, array_new, empty_string, string,
     string_to_well_formed, throw_type_error, throw_type_error_code,
 };
+#[cfg(not(windows))]
+use crate::path_resolve;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -144,6 +146,7 @@ pub fn url_set_pathname(value: &JsUrl, pathname: &JsString) {
     value.value.borrow_mut().set_path(pathname);
 }
 
+#[cfg(not(windows))]
 fn percent_hex(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
@@ -242,7 +245,7 @@ pub fn url_path_to_file_url(path: &JsString) -> JsUrl {
 
 #[cfg(windows)]
 pub fn url_path_to_file_url(path: &JsString) -> JsUrl {
-    let path = std::path::PathBuf::from(path.as_ref());
+    let path = std::path::PathBuf::from(path.to_utf8_lossy());
     let resolved = if path.is_absolute() {
         path
     } else {

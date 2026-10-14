@@ -17,6 +17,8 @@ pub struct ChildData {
     pid: Option<u32>,
     exit_code: Option<f64>,
     killed: bool,
+    #[cfg(windows)]
+    windows_exit_signal: Option<JsString>,
     settled: bool,
     referenced: bool,
     stdin: Option<JsChildWriter>,
@@ -71,6 +73,8 @@ impl ClearEdges for ChildData {
         self.stderr = None;
         self.ipc = None;
         self.pending_exit = None;
+        #[cfg(windows)]
+        { self.windows_exit_signal = None; }
         self.settled = true;
         self.referenced = false;
     }
@@ -148,11 +152,16 @@ fn child_command(
 ) -> std::io::Result<std::process::Command> {
     use std::process::Command;
 
+    child_validate_self_invocation(command, arguments);
+
     #[cfg(unix)]
     if let Some(launcher) = detached.then(detached_launcher).flatten() {
         let program = detached_program(command, cwd)?;
         let mut child_command = Command::new(launcher);
         child_command.arg(program);
+        if is_self_reexec(command, arguments) {
+            child_command.arg(SELF_REEXEC_MARKER);
+        }
         arguments.with(|arguments| {
             child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
         });
@@ -165,6 +174,9 @@ fn child_command(
     }
 
     let mut child_command = Command::new(command.to_utf8_lossy());
+    if is_self_reexec(command, arguments) {
+        child_command.arg(SELF_REEXEC_MARKER);
+    }
     arguments.with(|arguments| {
         child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
     });
@@ -247,6 +259,8 @@ fn child_register(
         pid,
         exit_code: None,
         killed: false,
+        #[cfg(windows)]
+        windows_exit_signal: None,
         settled: false,
         referenced: true,
         stdin,
@@ -318,16 +332,7 @@ pub fn child_spawn_options(
             );
         }
     };
-    if has_env {
-        child_command.env_clear();
-        env_pairs.with(|pairs| {
-            for pair in pairs.elements().as_chunks::<2>().0 {
-                child_command.env(pair[0].to_utf8_lossy(), pair[1].to_utf8_lossy());
-            }
-        });
-    } else {
-        process_env_apply(&mut child_command);
-    }
+    child_configure_environment(&mut child_command, has_env.then_some(env_pairs));
     if !cwd.is_empty() {
         child_command.current_dir(cwd.to_utf8_lossy());
     }
@@ -581,10 +586,26 @@ fn child_signal_number(name: &str) -> Option<i32> {
     })
 }
 
-pub fn child_kill(child: &JsChild, signal: &JsString) -> bool {
-    if child_signal_number(signal).is_none() {
-        throw_type_error(format!("Unknown signal: {signal}"));
+fn child_send_signal(child: &JsChild, signal: &str) -> bool {
+    #[cfg(windows)]
+    {
+        let number = signal.parse::<i32>().ok().or_else(|| child_signal_number(signal));
+        let Some(number @ (0 | 2 | 3 | 9 | 15)) = number else { return false; };
+        child.with_mut(|child| {
+            let Some(process) = child.process.as_mut() else { return false; };
+            if !matches!(process.try_wait(), Ok(None)) { return false; }
+            if number != 0 && process.kill().is_err() { return false; }
+            child.killed = true;
+            if number != 0 {
+                child.windows_exit_signal = Some(string(match number {
+                    2 => "SIGINT", 3 => "SIGQUIT", 9 => "SIGKILL", _ => "SIGTERM",
+                }));
+            }
+            true
+        })
     }
+    #[cfg(not(windows))]
+    {
     let Some(pid) = child.with(|child| child.process.as_ref().map(std::process::Child::id)) else {
         return false;
     };
@@ -593,17 +614,18 @@ pub fn child_kill(child: &JsChild, signal: &JsString) -> bool {
         child.with_mut(|child| child.killed = true);
     }
     sent
+    }
+}
+
+pub fn child_kill(child: &JsChild, signal: &JsString) -> bool {
+    if child_signal_number(signal).is_none() {
+        throw_type_error(format!("Unknown signal: {signal}"));
+    }
+    child_send_signal(child, signal)
 }
 
 pub fn child_kill_num(child: &JsChild, signal: f64) -> bool {
-    let Some(pid) = child.with(|child| child.process.as_ref().map(std::process::Child::id)) else {
-        return false;
-    };
-    let sent = process_signal_send(pid as i32, &(signal as i32).to_string()).is_ok();
-    if sent {
-        child.with_mut(|child| child.killed = true);
-    }
-    sent
+    child_send_signal(child, &(signal as i32).to_string())
 }
 
 fn process_kill_pid(pid: f64) -> i32 {
@@ -703,8 +725,11 @@ fn child_poll(child: &JsChild) -> Option<ChildOutcome> {
             }
         };
         child.process = None;
-        child.exit_code = status.code().map(f64::from);
-        let outcome = (child.exit_code, child_exit_signal(&status));
+        let signal = child_exit_signal(&status);
+        #[cfg(windows)]
+        let signal = child.windows_exit_signal.take().or(signal);
+        child.exit_code = if signal.is_some() { None } else { status.code().map(f64::from) };
+        let outcome = (child.exit_code, signal);
         if child.ipc.as_ref().is_some_and(child_ipc_open) {
             child.pending_exit = Some(outcome);
             None

@@ -20,7 +20,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { globSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
@@ -29,7 +29,9 @@ import { shardSelect, shardSuffix } from "./shard.js";
 import { discardPassedBinary } from "./passed-binary.js";
 import { DRIVER_FIXTURES } from "./driver-fixtures.js";
 import { nodeTransformTypesArgs } from "./oracle-environment.js";
+import { recordRustCorpus } from "./rust-corpus-ledger.js";
 import { oracleExecutableForTarget, primaryOracleExecutable } from "./node-matrix.js";
+import { windowsJobInvocation, type WindowsJobReceipt } from "./windows-job.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -68,6 +70,7 @@ interface RunResult {
   stdout: Buffer;
   stderr: Buffer;
   exitCode: number;
+  guard?: WindowsJobReceipt | undefined;
 }
 
 /** First FOUR lines — @dynamic may sit under a directive stack (the widest
@@ -133,9 +136,11 @@ async function runBinary(cmd: string, args: string[], stdin: string): Promise<Ru
   // worker's fork can hold the freshly-linked binary's write fd open
   // across its own spawn window.
   for (let attempt = 0; ; attempt++) {
-    const pending = execFileAsync(cmd, args, {
+    const invocation = windowsJobInvocation(cmd, args, cacheDir);
+    const pending = execFileAsync(invocation.command, invocation.args, {
       encoding: "buffer",
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      ...(process.env["SCRIPTC_RUST_RUN_TIMEOUT_MS"] ? { timeout: Number(process.env["SCRIPTC_RUST_RUN_TIMEOUT_MS"]) } : {}),
     });
     // A short-lived program may exit before the input pipe closes; only a
     // non-EPIPE writer failure is a harness bug (runToExit's stance).
@@ -147,7 +152,7 @@ async function runBinary(cmd: string, args: string[], stdin: string): Promise<Ru
     try {
       const { stdout, stderr } = await pending;
       if (stdinError !== undefined) throw stdinError;
-      return { stdout, stderr, exitCode: 0 };
+      return { stdout, stderr, exitCode: 0, guard: invocation.verifyExit(0) };
     } catch (err) {
       const e = err as { code?: unknown; stdout?: Buffer; stderr?: Buffer };
       if (e.code === "ETXTBSY" && attempt < 10) {
@@ -157,7 +162,7 @@ async function runBinary(cmd: string, args: string[], stdin: string): Promise<Ru
       if (typeof e.code !== "number" || !Buffer.isBuffer(e.stdout) || !Buffer.isBuffer(e.stderr)) {
         throw err;
       }
-      return { stdout: e.stdout, stderr: e.stderr, exitCode: e.code };
+      return { stdout: e.stdout, stderr: e.stderr, exitCode: e.code, guard: invocation.verifyExit(e.code) };
     }
   }
 }
@@ -199,7 +204,9 @@ function wantsNoDeprecation(file: string): boolean {
 function nodeOracleArgs(file: string, executable: string = oracleExecutable): string[] {
   if (targetOf(file) === "bun") {
     // bun runs TypeScript directly; the shims preload the same globals.
-    return ["run", "--preload", comptimeShim, "--preload", islandShim, file];
+    // Bun's Windows preload resolver requires filesystem paths, unlike
+    // Node's --import, which accepts these file URLs.
+    return ["run", "--preload", fileURLToPath(comptimeShim), "--preload", fileURLToPath(islandShim), file];
   }
   const transform = wantsTransformTypes(file)
     ? nodeTransformTypesArgs(executable, transformTypesHook)
@@ -209,7 +216,7 @@ function nodeOracleArgs(file: string, executable: string = oracleExecutable): st
 }
 
 function programInputs(file: string): string[] {
-  if (!/\/main\.(ts|js|mjs|cjs)$/.test(file)) return [file];
+  if (!/[/\\]main\.(ts|js|mjs|cjs)$/.test(file)) return [file];
   return [
     ...ENTRY_EXTS.flatMap((ext) => globSync(join(file, `../**/*.${ext}`))),
     ...globSync(join(file, "../**/tsconfig.json")),
@@ -238,8 +245,8 @@ async function build(file: string) {
   // paths from tail(process.argv[1]), and this lane's binary can run
   // concurrently with the C/LLVM lanes' binaries for the same fixture
   // (llvm-differential.test.ts documents the observed corruption).
-  return compile(file, {
-    outPath: join(outDir, rustSanitize ? "program-rust-asan" : "program-rust"),
+  const result = await compile(file, {
+    outPath: join(outDir, `${rustSanitize ? "program-rust-asan" : "program-rust"}${process.platform === "win32" ? ".exe" : ""}`),
     outDir,
     backend: "rust",
     optimization: "dev",
@@ -250,6 +257,13 @@ async function build(file: string) {
     target: targetOf(file),
     ...(islandModulesOf(file).length > 0 ? { islandModules: islandModulesOf(file) } : {}),
   });
+  recordRustCorpus({
+    phase: "build", program: file.slice(corpusDir.length + 1).replaceAll("\\", "/"),
+    target: targetOf(file), dynamic: wantsDynamic(file), ok: result.ok,
+    ...(result.ok ? { execution: result.execution, binaryPath: result.binaryPath, runtimeFences: result.runtimeFences ?? [] }
+      : { diagnostics: result.diagnostics }),
+  });
+  return result;
 }
 
 // Parity ledger, summarized after the run. Refusals fail their test, but
@@ -270,7 +284,7 @@ describe.skipIf(sanitize && !rustSanitize)(`rust${rustSanitize ? " ASan" : ""} d
   test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
     "%s",
     { retry: 1 },
-    async ([rel, file], { skip }) => {
+    async ([rel, file], { skip, task }) => {
       const oracle = oracleFor(targetOf(file));
       if ("missing" in oracle) skip(`no oracle for // @target ${targetOf(file)}: ${oracle.missing}`);
       const res = await build(file);
@@ -295,6 +309,22 @@ describe.skipIf(sanitize && !rustSanitize)(`rust${rustSanitize ? " ASan" : ""} d
         runBinary(res.binaryPath, [], stdin),
         runBinary(oracle.executable, nodeOracleArgs(file, oracle.executable), stdin),
       ]);
+      recordRustCorpus({
+        phase: "execution", program: rel.replaceAll("\\", "/"), execution: res.execution,
+        expectedExit: expectedExitCode(file), rustExit: rust.exitCode, nodeExit: node.exitCode,
+        rustGuard: rust.guard, oracleGuard: node.guard,
+        stdoutEqual: rust.stdout.equals(node.stdout), stderrEqual: rust.stderr.equals(node.stderr),
+        rustStdoutSha256: createHash("sha256").update(rust.stdout).digest("hex"),
+        nodeStdoutSha256: createHash("sha256").update(node.stdout).digest("hex"),
+        rustStderrSha256: createHash("sha256").update(rust.stderr).digest("hex"),
+        nodeStderrSha256: createHash("sha256").update(node.stderr).digest("hex"),
+      });
+      for (const [label, receipt] of [["rust", rust.guard], ["oracle", node.guard]] as const) {
+        if (!receipt) continue;
+        expect(receipt.descendantsCleaned, `Windows job resource boundary: ${label} left descendants`).toBe(0);
+        expect(receipt.limitTerminations, `Windows job resource boundary: ${label} exceeded a limit`).toBe(0);
+        expect(receipt.totalProcesses, `Windows job resource boundary: ${label} reached the process budget`).toBeLessThan(receipt.processLimit);
+      }
       if (rustSanitize) {
         // ASan normally exits nonzero, but that can equal a fixture's own
         // expected failure status. Never tolerate its report in that case.
@@ -319,7 +349,11 @@ describe.skipIf(sanitize && !rustSanitize)(`rust${rustSanitize ? " ASan" : ""} d
       }
       expect(rust.exitCode).toBe(expectedExit);
       expect(node.exitCode).toBe(expectedExit);
+      // A body may finish after Vitest already timed out its attempt.
+      // Keep its evidence, but retain failed artifacts and the final verdict.
+      if (task.result?.state === "fail") return;
       claimed.add(rel);
+      recordRustCorpus({ phase: "passed", program: rel.replaceAll("\\", "/"), execution: res.execution });
       discardPassedBinary(cacheDir, res.binaryPath, rel);
     },
   );

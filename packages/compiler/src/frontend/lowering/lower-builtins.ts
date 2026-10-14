@@ -7496,14 +7496,13 @@ function lowerOptionalStringSearchParams(lowerer: Lowerer, init: IrExpr, loc: Sr
       }
       return { kind: "libCall", fn: "process.chdir", args: [dir], type: VOID, loc };
     }
-    // getuid(2): POSIX-only target, so the call always answers a number —
-    // the plain-f64 result is honest here even though @types/node declares
-    // the member optional (that optionality covers Windows). The `?.()`
-    // spelling routes here through lowerProcessOptionalMethodCall.
+    // POSIX identities are absent on Windows. A direct call throws;
+    // the optional spelling is handled before ordinary call dispatch.
     if (member === "getuid" || member === "getgid") {
       if (call.arguments.length !== 0) {
         lowerer.noLowering(`process.${member} with ${call.arguments.length} arguments`, call);
       }
+      if (lowerer.targetPlatform === "win32") return nodeThrowExpr(1, "", `process.${member} is not a function`, F64, loc);
       return { kind: "libCall", fn: member === "getuid" ? "process.getuid" : "process.getgid", args: [], type: F64, loc };
     }
     // process.kill(pid, signal?) — Node's semantics exactly: the signal is
@@ -8717,12 +8716,8 @@ function staticTextDecoderEncoding(label: string): StaticTextDecoderEncoding | n
     );
   }
 
-/** `process.getuid?.()` — the optional call of an optional process
-   * method. On a POSIX target the member always exists, so the `?.` IS the
-   * call (the checker's undefined arm covers Windows, which scriptc does
-   * not target) and the honest result is the plain number. Intercepted
-   * BEFORE the optional-chain machinery: `process.getuid` has no value
-   * lowering for the chain to guard. Null when this isn't that shape. */
+/** Identity methods return numbers on POSIX and are absent on Windows.
+ * Intercept optional calls before the general chain lowers a method value. */
   export function lowerProcessOptionalMethodCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr | null {
     if (!expr.questionDotToken) return null;
     if (!ts.isPropertyAccessExpression(expr.expression)) return null;
@@ -8732,6 +8727,7 @@ function staticTextDecoderEncoding(label: string): StaticTextDecoderEncoding | n
     if (expr.arguments.length !== 0) {
       lowerer.noLowering(`process.${member} with ${expr.arguments.length} arguments`, expr);
     }
+    if (lowerer.targetPlatform === "win32") return lowerer.wrappedUndefined(lowerer.withUndefinedArm(F64), locOf(expr))!;
     return { kind: "libCall", fn: member === "getuid" ? "process.getuid" : "process.getgid", args: [], type: F64, loc: locOf(expr) };
   }
 

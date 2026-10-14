@@ -13,7 +13,7 @@ type AsyncLocalsEmitter = <T>(locals: Set<string>, emit: () => T) => T;
 
 type PendingCompletion =
   | { readonly kind: "fallthrough" }
-  | { readonly kind: "return"; readonly value: string }
+  | { readonly kind: "return"; readonly value: string; readonly adopt?: boolean }
   | { readonly kind: "throw"; readonly reason: string };
 
 /** A suspending try/catch/finally nested inside an async protected segment (`await using` chains, a try inside a
@@ -33,7 +33,7 @@ export function emitAsyncProtectedTry(
   const outerLocals = new Set(context.currentAsyncLocals() ?? []);
   const resume = (pending: PendingCompletion): void => withAsyncLocals(new Set(outerLocals), () => {
     if (pending.kind === "fallthrough") emitSequence(remaining, exitLocals, handlers, loc);
-    else if (pending.kind === "return") handlers.returned(pending.value);
+    else if (pending.kind === "return") handlers.returned(pending.value, pending.adopt);
     else handlers.thrown(pending.reason);
   });
   const runFinally = (pending: PendingCompletion): void => {
@@ -44,7 +44,7 @@ export function emitAsyncProtectedTry(
     }
     withAsyncLocals(new Set(outerLocals), () => emitSequence(finallyBody, exitLocals, {
       fallthrough: () => resume(pending),
-      returned: (value) => resume({ kind: "return", value }),
+      returned: (value, adopt = false) => resume({ kind: "return", value, adopt }),
       thrown: (reason) => resume({
         kind: "throw",
         reason: stmt.suppressFinallyErrors && pending.kind === "throw" ? "runtime::suppressed_error_caught()" : reason,
@@ -67,7 +67,7 @@ export function emitAsyncProtectedTry(
       }
       emitSequence(catchBody, exitLocals, {
         fallthrough: () => runFinally({ kind: "fallthrough" }),
-        returned: (value) => runFinally({ kind: "return", value }),
+        returned: (value, adopt = false) => runFinally({ kind: "return", value, adopt }),
         thrown: (catchReason) => runFinally({ kind: "throw", reason: catchReason }),
       }, stmt.loc);
     });
@@ -79,7 +79,7 @@ export function emitAsyncProtectedTry(
   context.pushIndent();
   withAsyncLocals(new Set(outerLocals), () => emitSequence(stmt.tryBody, exitLocals, {
     fallthrough: () => runFinally({ kind: "fallthrough" }),
-    returned: (value) => runFinally({ kind: "return", value }),
+    returned: (value, adopt = false) => runFinally({ kind: "return", value, adopt }),
     thrown: (reason) => runCatch(reason),
   }, stmt.loc));
   context.popIndent();

@@ -164,10 +164,13 @@ fn tls_cert_is_self_signed(certificate: &[u8]) -> bool {
 
 fn tls_roots(trust: &TlsTrust) -> Result<rustls::RootCertStore, String> {
     let mut roots = rustls::RootCertStore::empty();
-    if trust.use_bundled {
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    }
-    for pem in &trust.pem_certificates {
+    // Enumeration and handshake trust share the pinned Node bundle.
+    let bundled = if trust.use_bundled {
+        tls_bundled_ca_certificates()
+    } else {
+        Vec::new()
+    };
+    for pem in bundled.iter().chain(&trust.pem_certificates) {
         let mut cursor = std::io::Cursor::new(pem.as_bytes());
         let certificates = rustls_pemfile::certs(&mut cursor)
             .collect::<Result<Vec<_>, _>>()
@@ -225,9 +228,7 @@ fn tls_authorization_code(error: &rustls::Error, peer_shape: TlsPeerShape) -> St
                 _ => "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
             }
         }
-        rustls::Error::InvalidCertificate(rustls::CertificateError::Expired) => {
-            "CERT_HAS_EXPIRED"
-        }
+        rustls::Error::InvalidCertificate(rustls::CertificateError::Expired) => "CERT_HAS_EXPIRED",
         rustls::Error::InvalidCertificate(rustls::CertificateError::NotValidYet) => {
             "CERT_NOT_YET_VALID"
         }

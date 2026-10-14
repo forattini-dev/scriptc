@@ -54,12 +54,7 @@ export function lowerBuiltinTypeof(L: Lowerer, expr: ts.TypeOfExpression, loc: S
   ) {
     return { kind: "strLit", value: "undefined", type: STRING, loc };
   }
-  // The POSIX identity methods are linked native capabilities on every
-  // host scriptc supports. Their optional Node declarations exist for
-  // Windows, but the compiled target's direct and optional calls both
-  // already lower to the runtime functions; the matching capability
-  // probe must therefore answer "function" without materializing a
-  // bound method value.
+  // Probe the compiled target's capability without materializing a method.
   if (ts.isPropertyAccessExpression(expr.expression)) {
     const member = expr.expression;
     if (!L.dynamic && !member.questionDotToken && member.name.text === "captureStackTrace" && L.isStdlibGlobal(member.expression, "Error")) {
@@ -67,7 +62,7 @@ export function lowerBuiltinTypeof(L: Lowerer, expr: ts.TypeOfExpression, loc: S
     }
     const processMember = L.stdlibGlobalMember(expr.expression, "process");
     if (processMember === "getuid" || processMember === "getgid") {
-      return { kind: "strLit", value: "function", type: STRING, loc };
+      return { kind: "strLit", value: L.targetPlatform === "win32" ? "undefined" : "function", type: STRING, loc };
     }
   }
   // `typeof queueMicrotask` / `typeof DOMException` on a STDLIB global

@@ -65,7 +65,8 @@ import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
 import { moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleUsesAssert, moduleUsesBigInt, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesLegacyTextDecoder, moduleUsesNet, moduleUsesNodeTest, moduleUsesParseArgs, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesZlib, type IrFfiImport, type IrModule, type SrcLoc } from "./ir/ir.js";
-import { serializeModule } from "./ir/serialize.js";
+import { serializeModuleParts } from "./ir/serialize.js";
+import { writeTextParts } from "./ir/write-text-parts.js";
 import { validateModule } from "./ir/validate.js";
 import { checkPreflight, loadProgram } from "./frontend/program.js";
 import { npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
@@ -196,7 +197,7 @@ export {
   type CompatTargets,
 } from "./compat/profile-schema.js";
 export { LIB_FN_SIGS, validateModule } from "./ir/validate.js";
-export { deserializeModule, IR_VERSION, serializeModule } from "./ir/serialize.js";
+export { deserializeModule, deserializeModuleBytes, IR_VERSION, serializeModule, serializeModuleParts } from "./ir/serialize.js";
 export { resolveLibraryFences, type LibraryFenceDecl, type ResolvedLibraryFence } from "./library/fence-eval.js";
 export {
   loadLibraryProfile,
@@ -1576,7 +1577,7 @@ async function compileTracked(
 
   if (outputKind === "ir") {
     await mkdir(dirname(opts.outPath), { recursive: true });
-    await writeFile(opts.outPath, serializeModule(lowered.module));
+    await writeTextParts(opts.outPath, serializeModuleParts(lowered.module));
     return { ok: true, artifact: { kind: "ir", path: opts.outPath } };
   }
 
@@ -1698,7 +1699,7 @@ async function compileTracked(
     let irPath: string | undefined;
     if (opts.emitIr) {
       irPath = join(opts.outDir, `${stem}.ir.json`);
-      await writeFile(irPath, serializeModule(lowered.module));
+      await writeTextParts(irPath, serializeModuleParts(lowered.module));
     }
     try {
       await compileRust({
@@ -1777,7 +1778,7 @@ async function compileTracked(
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = defaultSourcePaths.ir;
-    await writeFile(irPath, serializeModule(lowered.module));
+    await writeTextParts(irPath, serializeModuleParts(lowered.module));
   }
 
   const nativeFeatures = executableNativeFeatures(
@@ -2097,7 +2098,7 @@ async function emitSemanticLibraryHit(
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = join(opts.outDir, `${stem}.lib.ir.json`);
-    await writeFile(irPath, serializeModule(mod));
+    await writeTextParts(irPath, serializeModuleParts(mod));
   }
   await compileLibraryNative(
     profile,
@@ -2567,7 +2568,7 @@ async function compileLibraryTracked(
     let irPath: string | undefined;
     if (opts.emitIr) {
       irPath = join(opts.outDir, `${stem}.lib.ir.json`);
-      await writeFile(irPath, serializeModule(mod));
+      await writeTextParts(irPath, serializeModuleParts(mod));
     }
     const localizeSymbols = libraryLocalizeSymbols(profile);
     try {
@@ -2632,7 +2633,7 @@ async function compileLibraryTracked(
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = join(opts.outDir, `${stem}.lib.ir.json`);
-    await writeFile(irPath, serializeModule(mod));
+    await writeTextParts(irPath, serializeModuleParts(mod));
   }
 
   const nativeFeatures = libraryNativeFeatures(mod, profile.emission);

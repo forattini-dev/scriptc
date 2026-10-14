@@ -49,18 +49,18 @@ enum ArrayAux<T: ArrayElement> {
 const ARRAY_HOLE: u8 = 0;
 const ARRAY_VALUE: u8 = 1;
 const ARRAY_UNDEFINED: u8 = 2;
-/// A write past the stored elements fills at most this many gap slots; farther
-/// writes (huge sparse arrays) stay refused.
+/// Fill at most this many dense gap slots; farther values use sparse storage.
 const ARRAY_DENSE_LIMIT: usize = 1 << 20;
 
 /// Slot states of an array with holes, present-undefined slots, or a logical
 /// length beyond its stored elements — the C lane's `ScrArr` states. Hole and
 /// undefined slots inside `elements` keep a stale copy of a written value:
 /// every read consults the state first, so that payload is never observed.
-struct ArraySparse {
+struct ArraySparse<T: ArrayElement> {
     length: usize,
     states: Vec<u8>,
     tail_undefined: std::collections::BTreeSet<usize>,
+    tail_values: std::collections::BTreeMap<usize, T>,
 }
 
 pub struct ArrayData<T: ArrayElement> {
@@ -71,7 +71,7 @@ pub struct ArrayData<T: ArrayElement> {
     #[allow(clippy::box_collection)]
     properties: Option<Box<Vec<(JsString, T)>>>,
     view: Option<Rc<dyn ArrayView<T>>>,
-    sparse: Option<Box<ArraySparse>>,
+    sparse: Option<Box<ArraySparse<T>>>,
 }
 
 impl<T: ArrayElement> Trace for ArrayData<T> {
@@ -79,6 +79,7 @@ impl<T: ArrayElement> Trace for ArrayData<T> {
         for element in &self.elements {
             element.trace_element(tracer);
         }
+        if let Some(sparse) = &self.sparse { for value in sparse.tail_values.values() { value.trace_element(tracer); } }
         if let Some(view) = &self.view { view.trace(tracer); }
         if let Some(ArrayAux::Raw(raw)) = self.auxiliary.as_deref() { tracer.edge(raw); }
         if let Some(properties) = &self.properties {
@@ -108,18 +109,19 @@ impl<T: ArrayElement> ArrayData<T> {
             None => ARRAY_HOLE,
             Some(sparse) if index >= sparse.length => ARRAY_HOLE,
             Some(sparse) if index < sparse.states.len() => sparse.states[index],
+            Some(sparse) if sparse.tail_values.contains_key(&index) => ARRAY_VALUE,
             Some(sparse) if sparse.tail_undefined.contains(&index) => ARRAY_UNDEFINED,
             Some(_) => ARRAY_HOLE,
         }
     }
 
-    fn sparse_mut(&mut self) -> &mut ArraySparse {
+    fn sparse_mut(&mut self) -> &mut ArraySparse<T> {
         let length = self.elements.len();
         self.sparse.get_or_insert_with(|| {
             Box::new(ArraySparse {
                 length,
                 states: vec![ARRAY_VALUE; length],
-                tail_undefined: std::collections::BTreeSet::new(),
+                tail_undefined: std::collections::BTreeSet::new(), tail_values: std::collections::BTreeMap::new(),
             })
         })
     }
@@ -129,7 +131,7 @@ impl<T: ArrayElement> ArrayData<T> {
     fn normalize_sparse(&mut self) {
         let dense = self.sparse.as_ref().is_some_and(|sparse| {
             sparse.length == self.elements.len()
-                && sparse.tail_undefined.is_empty()
+                && sparse.tail_undefined.is_empty() && sparse.tail_values.is_empty()
                 && sparse.states.iter().all(|state| *state == ARRAY_VALUE)
         });
         if dense {
@@ -274,28 +276,11 @@ pub fn array_len<T: ArrayElement>(array: &JsArray<T>) -> f64 {
     array.with(|data| data.view.as_ref().map_or(data.logical_len() as f64, |view| view.len()))
 }
 
-/// A dense-typed read. A hole or present-undefined slot has no value of the
-/// element type, so reaching one fails explicitly (reads that observe absence
-/// go through `array_state` first).
-pub fn array_get<T: ArrayElement>(array: &JsArray<T>, index: f64) -> T {
-    let index = array_index(index, false, array_len(array) as usize);
-    array.with(|data| match &data.view {
-        Some(view) => view.get(index as f64),
-        None => {
-            if data.slot_state(index) != ARRAY_VALUE {
-                // Node's own failure for using that undefined as a value is a TypeError.
-                throw_type_error_code(
-                    format!("reading the missing array element {index} as a non-optional value is not supported yet"),
-                    "SC3001",
-                );
-            }
-            data.elements[index].clone()
-        }
-    })
-}
-
 /// An index is present when it holds a value or an explicit undefined.
 pub fn array_has<T: ArrayElement>(array: &JsArray<T>, index: f64) -> bool {
+    if !(0.0..f64::from(u32::MAX)).contains(&index) || index.fract() != 0.0 {
+        return array_property_has(array, &number_to_string(index));
+    }
     if index < 0.0 || index.fract() != 0.0 || index.is_nan() || index >= array_len(array) {
         return false;
     }
@@ -304,31 +289,16 @@ pub fn array_has<T: ArrayElement>(array: &JsArray<T>, index: f64) -> bool {
 
 /// The IR's slot state: 0 hole/missing, 1 value, 2 present undefined.
 pub fn array_state<T: ArrayElement>(array: &JsArray<T>, index: f64) -> f64 {
+    if !(0.0..f64::from(u32::MAX)).contains(&index) || index.fract() != 0.0 {
+        return if array_property_has(array, &number_to_string(index)) { f64::from(ARRAY_VALUE) } else { f64::from(ARRAY_HOLE) };
+    }
     if index < 0.0 || index.fract() != 0.0 || index.is_nan() || index >= array_len(array) {
         return ARRAY_HOLE as f64;
     }
     array.with(|data| if data.view.is_some() { ARRAY_VALUE as f64 } else { data.slot_state(index as usize) as f64 })
 }
 
-pub fn array_next_present<T: ArrayElement>(array: &JsArray<T>, start: f64) -> f64 {
-    let len = array_len(array);
-    if start.is_nan() || start >= len { return len; }
-    let first = if start > 0.0 { start.ceil() } else { 0.0 };
-    array.with(|data| {
-        let Some(sparse) = data.sparse.as_ref().filter(|_| data.view.is_none()) else {
-            return first;
-        };
-        let mut index = first as usize;
-        while index < sparse.length && data.slot_state(index) == ARRAY_HOLE {
-            if index >= sparse.states.len() {
-                // Past the stored elements only explicit undefined slots are present.
-                return sparse.tail_undefined.range(index..).next().map_or(len, |next| *next as f64);
-            }
-            index += 1;
-        }
-        index as f64
-    })
-}
+
 
 /// `array.length = n`: truncation drops elements; growth leaves holes.
 pub fn array_set_length<T: ArrayElement>(array: &JsArray<T>, length: f64) {
@@ -352,6 +322,7 @@ pub fn array_set_length<T: ArrayElement>(array: &JsArray<T>, length: f64) {
         let sparse = data.sparse_mut();
         sparse.states.truncate(length);
         sparse.tail_undefined.retain(|index| *index < length);
+        sparse.tail_values.retain(|index, _| *index < length);
         sparse.length = length;
         data.normalize_sparse();
     });
@@ -366,6 +337,7 @@ pub fn array_set_undefined<T: ArrayElement>(array: &JsArray<T>, index: f64) {
     array.with_mut(|data| {
         let stored = data.elements.len();
         let sparse = data.sparse_mut();
+        sparse.tail_values.remove(&index);
         if index < stored {
             sparse.states[index] = ARRAY_UNDEFINED;
         } else {
@@ -385,6 +357,7 @@ pub fn array_delete<T: ArrayElement>(array: &JsArray<T>, index: f64) {
     array.with_mut(|data| {
         let stored = data.elements.len();
         let sparse = data.sparse_mut();
+        sparse.tail_values.remove(&index);
         if index < stored {
             sparse.states[index] = ARRAY_HOLE;
         } else {
@@ -409,7 +382,7 @@ pub fn array_with_undefined<T: ArrayElement>(array: &JsArray<T>, index: f64) -> 
         let mut sparse = ArraySparse {
             length,
             states: data.sparse.as_ref().map_or_else(|| vec![ARRAY_VALUE; data.elements.len()], |sparse| sparse.states.clone()),
-            tail_undefined: std::collections::BTreeSet::new(),
+            tail_undefined: std::collections::BTreeSet::new(), tail_values: std::collections::BTreeMap::new(),
         };
         for state in sparse.states.iter_mut() {
             if *state == ARRAY_HOLE {
@@ -462,39 +435,7 @@ pub fn array_iterator_next<T: ArrayElement>(
     })
 }
 
-pub fn array_set<T: ArrayElement>(array: &JsArray<T>, index: f64, value: T) {
-    if let Some(view) = array_view(array) { view.set(index, value); return; }
-    let at = array_canonical_index(index);
-    array.with_mut(|data| {
-        let stored = data.elements.len();
-        if data.sparse.is_none() && at <= stored {
-            if at == stored { data.elements.push(value) } else { data.elements[at] = value }
-            return;
-        }
-        if at < stored {
-            data.elements[at] = value;
-            if let Some(sparse) = data.sparse.as_mut() { sparse.states[at] = ARRAY_VALUE; }
-        } else {
-            if at - stored > ARRAY_DENSE_LIMIT {
-                throw_error_code("writing an array element far past its stored elements is not supported yet".to_owned(), "SC3001");
-            }
-            let length = data.logical_len();
-            data.sparse_mut();
-            let sparse = data.sparse.as_mut().expect("scriptc: sparse array bookkeeping");
-            // The gap slots are holes (or keep an explicit undefined) over a stale copy of the written value.
-            for gap in stored..at {
-                data.elements.push(value.clone());
-                let state = if sparse.tail_undefined.remove(&gap) { ARRAY_UNDEFINED } else { ARRAY_HOLE };
-                sparse.states.push(state);
-            }
-            data.elements.push(value);
-            sparse.tail_undefined.remove(&at);
-            sparse.states.push(ARRAY_VALUE);
-            sparse.length = length.max(at + 1);
-        }
-        data.normalize_sparse();
-    });
-}
+
 
 pub fn array_push<T: ArrayElement>(array: &JsArray<T>, value: T) -> f64 {
     if let Some(view) = array_view(array) { return view.push(value); }
@@ -517,6 +458,29 @@ pub fn array_extend<T: ArrayElement>(array: &JsArray<T>, source: &JsArray<T>) ->
         data.elements.extend(snapshot);
         data.elements.len() as f64
     })
+}
+
+/// Push the source's observed values: holes become present undefined. Snapshot
+/// before writing so `array.push(...array)` does not visit appended elements.
+pub fn array_push_from<T: ArrayElement>(array: &JsArray<T>, source: &JsArray<T>) -> f64 {
+    if array.with(|data| data.sparse.is_none()) && source.with(|data| data.sparse.is_none()) {
+        return array_extend(array, source);
+    }
+    let slots = if array_view(source).is_some() {
+        array_values(source).into_iter().map(Some).collect()
+    } else {
+        source.with(array_slots)
+    };
+    if array_view(array).is_some() && slots.iter().any(Option::is_none) {
+        throw_error_code("pushing undefined into an array view is not supported yet".to_owned(), "SC3001");
+    }
+    for slot in slots {
+        match slot {
+            Some(value) => { array_push(array, value); }
+            None => array_set_undefined(array, array_len(array)),
+        }
+    }
+    array_len(array)
 }
 
 pub fn array_unshift<T: ArrayElement>(array: &JsArray<T>, mut values: Vec<T>) -> f64 {
@@ -628,40 +592,7 @@ fn array_delete_count(delete_count: f64, available: usize) -> usize {
     }
 }
 
-pub fn array_slice<T: ArrayElement>(array: &JsArray<T>, start: f64, end: f64) -> JsArray<T> {
-    array.with(|data| {
-        let Some(sparse) = data.sparse.as_ref().filter(|_| data.view.is_none()) else {
-            let elements = data.elements();
-            let start = array_relative_index(start, elements.len());
-            let end = array_relative_index(end, elements.len()).max(start);
-            return array_new(elements[start..end].to_vec());
-        };
-        // A holey slice keeps each slot's state: holes stay holes, explicit undefined stays undefined.
-        let length = sparse.length;
-        let start = array_relative_index(start, length);
-        let end = array_relative_index(end, length).max(start);
-        let stored_end = end.min(data.elements.len());
-        let (elements, states) = if start < stored_end {
-            (data.elements[start..stored_end].to_vec(), sparse.states[start..stored_end].to_vec())
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        let tail_undefined = sparse
-            .tail_undefined
-            .range(start.max(data.elements.len())..end)
-            .map(|index| index - start)
-            .collect();
-        let mut copy = ArrayData {
-            elements,
-            auxiliary: None,
-            properties: None,
-            view: None,
-            sparse: Some(Box::new(ArraySparse { length: end - start, states, tail_undefined })),
-        };
-        copy.normalize_sparse();
-        Gc::new(copy)
-    })
-}
+
 
 pub fn array_splice<T: ArrayElement>(
     array: &JsArray<T>,
@@ -709,7 +640,7 @@ fn array_slots<T: ArrayElement>(data: &ArrayData<T>) -> Vec<Option<T>> {
         throw_error_code("copying a huge sparse array is not supported yet".to_owned(), "SC3001");
     }
     (0..length)
-        .map(|index| (data.slot_state(index) == ARRAY_VALUE).then(|| data.elements[index].clone()))
+        .map(|index| (data.slot_state(index) == ARRAY_VALUE).then(|| data.stored_value(index).expect("scriptc: present array payload").clone()))
         .collect()
 }
 
@@ -722,7 +653,7 @@ fn array_from_slots<T: ArrayElement>(slots: Vec<Option<T>>) -> JsArray<T> {
             auxiliary: None,
             properties: None,
             view: None,
-            sparse: Some(Box::new(ArraySparse { length, states: Vec::new(), tail_undefined: (0..length).collect() })),
+            sparse: Some(Box::new(ArraySparse { length, states: Vec::new(), tail_undefined: (0..length).collect(), tail_values: std::collections::BTreeMap::new() })),
         });
     };
     if slots.iter().all(Option::is_some) {
@@ -736,7 +667,7 @@ fn array_from_slots<T: ArrayElement>(slots: Vec<Option<T>>) -> JsArray<T> {
         auxiliary: None,
         properties: None,
         view: None,
-        sparse: Some(Box::new(ArraySparse { length, states, tail_undefined: std::collections::BTreeSet::new() })),
+        sparse: Some(Box::new(ArraySparse { length, states, tail_undefined: std::collections::BTreeSet::new(), tail_values: std::collections::BTreeMap::new() })),
     })
 }
 
@@ -821,9 +752,11 @@ where
         if data.sparse.is_some() && data.view.is_none() {
             // A typed needle never matches a hole or an explicit undefined slot.
             let start = array_relative_index(from_index, data.logical_len());
-            return (start..data.elements.len())
+            let dense = (start..data.elements.len())
                 .find(|index| data.slot_state(*index) == ARRAY_VALUE && equal(&data.elements[*index], needle))
-                .map_or(-1.0, |index| index as f64);
+                .map(|index| index as f64);
+            return dense.or_else(|| data.sparse.as_ref()?.tail_values.range(start..)
+                .find(|(_, value)| equal(value, needle)).map(|(index, _)| *index as f64)).unwrap_or(-1.0);
         }
         let elements = data.elements();
         let start = array_relative_index(from_index, elements.len());
@@ -842,7 +775,8 @@ where
     array.with(|data| {
         if data.sparse.is_some() && data.view.is_none() {
             return (0..data.elements.len())
-                .any(|index| data.slot_state(index) == ARRAY_VALUE && equal(&data.elements[index], needle));
+                .any(|index| data.slot_state(index) == ARRAY_VALUE && equal(&data.elements[index], needle)) ||
+                data.sparse.as_ref().is_some_and(|sparse| sparse.tail_values.values().any(|value| equal(value, needle)));
         }
         data.elements().iter().any(|element| equal(element, needle))
     })
@@ -861,7 +795,7 @@ fn array_join_holey<T: ArrayElement>(
             output.push_str(separator);
         }
         if data.slot_state(index) == ARRAY_VALUE {
-            append(&data.elements[index], &mut output);
+            append(data.stored_value(index).expect("scriptc: present array payload"), &mut output);
         }
     }
     output.finish()

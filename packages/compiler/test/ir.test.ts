@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { validateModule } from "../src/ir/validate.js";
-import { deserializeModule, serializeModule } from "../src/ir/serialize.js";
+import { deserializeModule, IR_VERSION, serializeModule } from "../src/ir/serialize.js";
 import { fibModule } from "./fixtures/fib-ir.js";
 import { BOOL, F64, type IrModule } from "../src/ir/ir.js";
 
@@ -8,10 +8,12 @@ test("hand-built fib module validates", () => {
   expect(validateModule(fibModule)).toEqual([]);
 });
 
-test("validator rejects Date union arms unsupported by the backends", () => {
+test("validator accepts Date unions and still rejects valueless union arms", () => {
   const bad = structuredClone(fibModule);
   bad.unions = [{ id: "u-date", arms: [{ kind: "date" }, { kind: "undefinedT" }] }];
-  expect(validateModule(bad).map((e) => e.message)).toContain("union u-date: arm 0 is date");
+  expect(validateModule(bad)).toEqual([]);
+  bad.unions = [{ id: "u-void", arms: [{ kind: "void" }, { kind: "undefinedT" }] }];
+  expect(validateModule(bad).map((e) => e.message)).toContain("union u-void: arm 0 is void");
 });
 
 test("fib module JSON round-trips", () => {
@@ -22,7 +24,7 @@ test("fib module JSON round-trips", () => {
 test("validator rejects type mismatches and bad references", () => {
   const loc = { file: "t.ts", start: 0, end: 0 };
   const bad: IrModule = {
-    irVersion: 12,
+    irVersion: 13,
     sourceFile: "t.ts",
     entry: "__main",
     functions: [
@@ -87,7 +89,7 @@ test("serializer round-trips the complete non-finite f64 domain", () => {
 });
 
 test("deserializer rejects the previous IR version", () => {
-  const json = serializeModule(fibModule).replace('"irVersion": 12', '"irVersion": 11');
+  const json = serializeModule(fibModule).replace(`"irVersion": ${IR_VERSION}`, `"irVersion": ${IR_VERSION - 1}`);
   expect(() => deserializeModule(json)).toThrow(/version mismatch/);
 });
 

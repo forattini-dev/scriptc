@@ -8,7 +8,7 @@ import { InternalCompilerError } from "../../errors.js";
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
 import type { CEmitter, Temp } from "./c-emitter.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, CHILDWRITER_T, DYN, ERROR_TOSTRING_DISPATCH_FN, F64, IrExpr, IrLibFn, IrRecordShape, IrType, islandPromisePayloadTag, isClassOwnEnumerableFieldName, isDynTypedRefType, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS, NETSOCKET_T, RUNTIME_ERROR_CLASSES, STRING, typeEquals, typeKey } from "../../ir/ir.js";
+import { arrayOf, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, ERROR_TOSTRING_DISPATCH_FN, F64, IrExpr, IrLibFn, IrRecordShape, IrType, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS, NETSOCKET_T, RUNTIME_ERROR_CLASSES, STRING, typeEquals, typeKey } from "../../ir/ir.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, releaseCallC, retainCallC, vAdapters } from "./types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordClone, mangleRecordNew, mangleRecordStruct, mangleVtStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./shapes.js";
@@ -3681,6 +3681,7 @@ function emitAsyncExpr(
         return emitter.fallibleTemp(e.type, `${helper}(${g.name})`);
       }
       case "awaitExpr": {
+        if (e.adopt) throw new InternalCompilerError("promise return adoption IR requires the Rust backend");
         // Parks the fiber until the promise settles; rejected promises
         // re-throw here (hence the pending check). Promise temp borrowed;
         // refcounted results arrive +1 and join the frame pre-check so an

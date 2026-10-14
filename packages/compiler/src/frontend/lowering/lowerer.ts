@@ -123,6 +123,7 @@ import { lowerUtilModuleCall } from "./lower-inspect.js";
 import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueToIr } from "./lower-comptime.js";
 import { lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, predeclareForwardFnDecl, predeclareForwardVar, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, isParseArgsDynCheckerType, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { FieldTarget, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
+import { NarrowingStability } from "./narrowing-stability.js";
 import { lowerObjectLiteral } from "./lower-object-literal.js";
 import type { ExpandoMember } from "./lower-expando.js";
 import { lowerRecordFieldCall, lowerObjectMethodCall } from "./lower-calls.js"; import { familiesIr, noteFamily } from "./lower-families.js";
@@ -1372,6 +1373,8 @@ export class Lowerer {
    * aliases, so this carries the var/let form the checker cannot.
    * Scoped strictly by narrowingAliases (lowerIf / lowerCondition). */
   readonly aliasNarrowTypes = new Map<ts.Symbol, ts.Type>();
+  /** Check whether intervening code can invalidate a stored-value narrowing. */
+  readonly narrowing = new NarrowingStability(this);
   /** Locals widened beyond the checker's type because an inferred indexed
    * read can be absent at runtime. Bare reads preserve that union until a
    * surrounding JavaScript guard/default consumes it. */
@@ -2621,6 +2624,7 @@ export class Lowerer {
 
   run(): LowerResult {
     const parts = this.splitFiles();
+    this.narrowing.setFiles(parts.map(fp => fp.sf));
     prepareCjsModuleGraph(this, parts);
     // The coverage remainder deliberately visits every body that reachable
     // emit skipped. Those files are already phase-managed, so an ordinary
@@ -2855,7 +2859,7 @@ export class Lowerer {
       this.diags.length > 0
         ? null
         : {
-            irVersion: 12,
+            irVersion: 13,
             sourceFile: this.entry.fileName,
             runtimeTarget: runtimeTargetIr(activeRuntimeTarget()),
             ...(!isNodeEsmFile(this.entry) ? { entryCommonJs: true as const } : {}),
@@ -2987,6 +2991,7 @@ export class Lowerer {
    * themselves. */
   emitReachable(extraRoots?: readonly string[]): { reachable: Set<string>; result: LowerResult } {
     const parts = this.splitFiles();
+    this.narrowing.setFiles(parts.map(fp => fp.sf));
     prepareCjsModuleGraph(this, parts);
     // Direct lowering callers do not necessarily run program preflight.
     // Establish the same managed header/top-level batch here before
@@ -3852,6 +3857,8 @@ export class Lowerer {
     // receiver-kind check downstream sees the narrowed arm.
     const narrowed = this.chainNarrowedType.get(node);
     if (narrowed) return narrowed;
+    const widened = this.narrowing.widenedType(node);
+    if (widened) return widened;
     const t = this.checker.getTypeAtLocation(node);
     // ALIASED-TYPEOF narrowing: inside a branch a `type === 'string'`
     // test proves (type = typeof val, both never reassigned), references

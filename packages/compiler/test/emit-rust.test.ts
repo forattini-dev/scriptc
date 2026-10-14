@@ -16,6 +16,8 @@ import { validateModule } from "../src/ir/validate.js";
 import { fibModule } from "./fixtures/fib-ir.js";
 
 const execFileAsync = promisify(execFile);
+const executablePath = (directory: string, name: string): string =>
+  join(directory, `${name}${process.platform === "win32" ? ".exe" : ""}`);
 const rustShard = parseShardSpec();
 const test = rustShard === undefined || rustShard.index === 1 ? vitestTest : vitestTest.skip;
 
@@ -33,6 +35,10 @@ function runToExit(
 ): Promise<ProcessOutcome> {
   return new Promise((resolveRun, rejectRun) => {
     const child = execFile(file, args, { encoding: "utf8", env }, (error, stdout, stderr) => {
+      if (error && typeof error.code !== "number") {
+        rejectRun(error);
+        return;
+      }
       resolveRun({
         stdout,
         stderr,
@@ -109,7 +115,7 @@ async function expectRustSourceOutcome(
   await writeFile(entryPath, source);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, name),
+    outPath: executablePath(dir, name),
     backend: "rust",
     optimization: "dev",
   });
@@ -129,7 +135,7 @@ test("Rust emitter compiles recursive scalar IR without unsafe or C", async () =
   expect(validateModule(fibModule)).toEqual([]);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-emit-"));
   const sourcePath = join(dir, "fib.rs");
-  const outPath = join(dir, "fib");
+  const outPath = executablePath(dir, "fib");
   const source = emitRustModule(fibModule);
   expect(source).toContain("#![forbid(unsafe_code)]");
   expect(source).not.toMatch(/extern\s+"C"|\.c\b/);
@@ -141,7 +147,7 @@ test("Rust emitter compiles recursive scalar IR without unsafe or C", async () =
 
 test("TypeScript lowers through the Rust backend to a rustc executable", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-pipeline-"));
-  const outPath = join(dir, "hello");
+  const outPath = executablePath(dir, "hello");
   const result = await compile(resolve("tests/corpus/001-hello.ts"), {
     outDir: dir,
     outPath,
@@ -192,7 +198,7 @@ catch { console.log("syntax"); }
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "json-scalars"),
+    outPath: executablePath(dir, "json-scalars"),
     backend: "rust",
     optimization: "dev",
   });
@@ -220,7 +226,7 @@ catch { console.log("syntax"); }
     const corpusPath = resolve("tests/corpus", fixture);
     const corpusResult = await compile(corpusPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -253,7 +259,7 @@ test("Rust UTF-16 string methods, array iteration, record arrays, and tuples mat
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -286,7 +292,7 @@ console.log(value.at(-1));
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "at-out-of-range"),
+    outPath: executablePath(dir, "at-out-of-range"),
     backend: "rust",
     optimization: "dev",
   });
@@ -326,7 +332,7 @@ test("Rust array higher-order methods preserve callbacks, references, reductions
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -398,7 +404,7 @@ console.log(token instanceof Token, token instanceof Other, token.value);
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "instanceof"),
+    outPath: executablePath(dir, "instanceof"),
     backend: "rust",
     optimization: "dev",
   });
@@ -436,7 +442,7 @@ console.log(counter.value--, --counter.value, counter.value);
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "field-incdec"),
+    outPath: executablePath(dir, "field-incdec"),
     backend: "rust",
     optimization: "dev",
   });
@@ -474,7 +480,7 @@ console.log(self.edges.length);
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "cycles"),
+    outPath: executablePath(dir, "cycles"),
     backend: "rust",
     optimization: "dev",
   });
@@ -519,7 +525,7 @@ console.log(positiveZero === negativeZero, sameValue(positiveZero, negativeZero)
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "unions"),
+    outPath: executablePath(dir, "unions"),
     backend: "rust",
     optimization: "dev",
   });
@@ -548,7 +554,7 @@ console.log("cycles released");
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "closure-cycles"),
+    outPath: executablePath(dir, "closure-cycles"),
     backend: "rust",
     optimization: "dev",
   });
@@ -637,7 +643,7 @@ console.log(replaced());
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "completions"),
+    outPath: executablePath(dir, "completions"),
     backend: "rust",
     optimization: "dev",
   });
@@ -708,7 +714,7 @@ test("Rust generated-source shapes hold for representative corpus programs", asy
       .some((line) => /^\/\/ @dynamic\s*$/u.test(line));
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, "program-shape"),
+      outPath: executablePath(dir, "program-shape"),
       backend: "rust",
       dynamic,
       optimization: "dev",
@@ -760,7 +766,7 @@ process.stderr.write("survived\\n");
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "epipe"),
+    outPath: executablePath(dir, "epipe"),
     backend: "rust",
     optimization: "dev",
   });
@@ -787,7 +793,7 @@ test.each([
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, fixture.replace(/\.ts$/, "")),
+    outPath: executablePath(dir, fixture.replace(/\.ts$/, "")),
     backend: "rust",
     optimization: "dev",
   });
@@ -857,7 +863,7 @@ export {};
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "record-clone-async"),
+    outPath: executablePath(dir, "record-clone-async"),
     backend: "rust",
     optimization: "dev",
   });
@@ -911,7 +917,7 @@ console.log((nested as { items: number[] }).items.length);
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "dyn-function-errors"),
+    outPath: executablePath(dir, "dyn-function-errors"),
     backend: "rust",
     optimization: "dev",
   });
@@ -945,7 +951,7 @@ console.log(boxed);
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "dyn-cycle"),
+    outPath: executablePath(dir, "dyn-cycle"),
     backend: "rust",
     optimization: "dev",
   });
@@ -976,7 +982,7 @@ console.log((new Function(
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "source-function"),
+    outPath: executablePath(dir, "source-function"),
     backend: "rust",
     optimization: "dev",
   });
@@ -1008,7 +1014,7 @@ console.log(fn.name, fn.length, fn.extra, fn(2, 3));
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "dyn-properties"),
+    outPath: executablePath(dir, "dyn-properties"),
     backend: "rust",
     optimization: "dev",
   });
@@ -1036,7 +1042,7 @@ test("Rust dynamic calls preserve catchable and uncaught failures", async () => 
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -4)),
+      outPath: executablePath(dir, fixture.slice(0, -4)),
       backend: "rust",
       optimization: "dev",
     });
@@ -1072,7 +1078,7 @@ test("Rust array ranges, removals, copying, and reverse searches match Node byte
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -1106,7 +1112,7 @@ test("Rust Buffer and StringDecoder byte surfaces match Node byte-for-byte", asy
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -1133,7 +1139,7 @@ test("Rust os.networkInterfaces matches Node byte-for-byte", async () => {
   const entryPath = resolve("tests/corpus/1480-os-network-interfaces.ts");
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "network-interfaces"),
+    outPath: executablePath(dir, "network-interfaces"),
     backend: "rust",
     optimization: "dev",
   });
@@ -1168,7 +1174,7 @@ test("Rust class inheritance, dispatch, instanceof, accessors, and cycles match 
     const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-class-hierarchy-"));
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, "class-hierarchy"),
+      outPath: executablePath(dir, "class-hierarchy"),
       backend: "rust",
       optimization: "dev",
     });
@@ -1222,7 +1228,7 @@ for (const shape of shapes) console.log(shape.describe(), shape instanceof Polyg
 `);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "abstract-classes"),
+    outPath: executablePath(dir, "abstract-classes"),
     backend: "rust",
     optimization: "dev",
   });
@@ -1253,7 +1259,7 @@ test("Rust class values, expressions, and generics preserve identity, statics, h
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -1294,7 +1300,7 @@ test("Rust Map and Set containers preserve equality, live iteration, references,
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -1330,7 +1336,7 @@ test("Rust process reads and POSIX path operations match Node", async () => {
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -1364,7 +1370,7 @@ test("Rust synchronous filesystem operations match Node and throw catchably", as
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -1399,7 +1405,7 @@ catch (error) {
 `);
   const realpathResult = await compile(realpathEntry, {
     outDir: dir,
-    outPath: join(dir, "realpath"),
+    outPath: executablePath(dir, "realpath"),
     backend: "rust",
     optimization: "dev",
   });
@@ -1425,7 +1431,7 @@ test("Rust synchronous child processes capture output and throw catchably", asyn
     const fixture = resolve("tests/corpus", fixtureName);
     const fixtureResult = await compile(fixture, {
       outDir: dir,
-      outPath: join(dir, fixtureName.slice(0, -3)),
+      outPath: executablePath(dir, fixtureName.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -1479,7 +1485,7 @@ if (timed.error) {
 `);
   const errorsResult = await compile(errorsEntry, {
     outDir: dir,
-    outPath: join(dir, "exec-errors"),
+    outPath: executablePath(dir, "exec-errors"),
     backend: "rust",
     optimization: "dev",
   });
@@ -1547,7 +1553,7 @@ console.log("sync", value);
 `);
   const result = await compile(entry, {
     outDir: dir,
-    outPath: join(dir, "timers"),
+    outPath: executablePath(dir, "timers"),
     backend: "rust",
     optimization: "dev",
   });
@@ -1582,7 +1588,7 @@ console.log("main");
 `);
   const result = await compile(entry, {
     outDir: dir,
-    outPath: join(dir, "immediate-ref"),
+    outPath: executablePath(dir, "immediate-ref"),
     backend: "rust",
     optimization: "dev",
   });
@@ -1608,7 +1614,7 @@ test("Rust monotonic clocks and Atomics.wait match Node invariants", async () =>
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -1646,7 +1652,7 @@ console.log("timer armed", count("Timeout"));
 `);
   const result = await compile(entry, {
     outDir: dir,
-    outPath: join(dir, "active-resources"),
+    outPath: executablePath(dir, "active-resources"),
     backend: "rust",
     optimization: "dev",
   });
@@ -1672,7 +1678,7 @@ test("Rust process introspection and Number predicates preserve Node invariants"
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -1941,7 +1947,7 @@ export {};
   ] as const) {
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, name),
+      outPath: executablePath(dir, name),
       backend: "rust",
       optimization: "dev",
     });
@@ -1969,7 +1975,7 @@ test("Rust unhandled async rejection matches the official exit-one corpus", asyn
   const entryPath = resolve("tests/corpus/1022-async-exceptions.ts");
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "async-exceptions"),
+    outPath: executablePath(dir, "async-exceptions"),
     backend: "rust",
     optimization: "dev",
   });
@@ -2000,7 +2006,7 @@ test("Rust uncaught Error subclass matches the official exit-one corpus", async 
   const entryPath = resolve("tests/corpus/1304-errors-uncaught.ts");
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "errors-uncaught"),
+    outPath: executablePath(dir, "errors-uncaught"),
     backend: "rust",
     optimization: "dev",
   });
@@ -2040,7 +2046,7 @@ test("Rust typed arrays, byte unions, copies, views, and set match Node", async 
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -2075,7 +2081,7 @@ rmSync(path);
 `);
   const fsResult = await compile(fsEntry, {
     outDir: dir,
-    outPath: join(dir, "bytes-fs"),
+    outPath: executablePath(dir, "bytes-fs"),
     backend: "rust",
     optimization: "dev",
   });
@@ -2127,7 +2133,7 @@ test.each([
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, fixture.slice(0, -3)),
+    outPath: executablePath(dir, fixture.slice(0, -3)),
     backend: "rust",
     optimization: "dev",
   });
@@ -2162,7 +2168,7 @@ test("Rust dynamic prototype dispatch preserves array mutation and string conver
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -2196,7 +2202,7 @@ test("Rust EventEmitter preserves dispatch, meta-events, limits, and identity", 
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -2222,7 +2228,7 @@ test("Rust EventEmitter preserves unhandled errors, CJS identity, and the global
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
+      outPath: executablePath(dir, fixture.slice(0, -3)),
       backend: "rust",
       optimization: "dev",
     });
@@ -2257,7 +2263,7 @@ test.each([
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, fixture.slice(0, -3)),
+    outPath: executablePath(dir, fixture.slice(0, -3)),
     backend: "rust",
     optimization: "dev",
   });
@@ -2288,7 +2294,7 @@ test.each([
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, fixture.slice(0, -3)),
+    outPath: executablePath(dir, fixture.slice(0, -3)),
     backend: "rust",
     optimization: "dev",
   });
@@ -2324,7 +2330,7 @@ test.each([
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, fixture.replace(/\.(?:c?js|ts)$/, "")),
+    outPath: executablePath(dir, fixture.replace(/\.(?:c?js|ts)$/, "")),
     backend: "rust",
     optimization: "dev",
   });
@@ -2370,7 +2376,7 @@ test.each([
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, fixture.replace(/\.(?:c?js|ts)$/, "")),
+    outPath: executablePath(dir, fixture.replace(/\.(?:c?js|ts)$/, "")),
     backend: "rust",
     optimization: "dev",
   });
@@ -2398,7 +2404,7 @@ test.each([
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, fixture.replace(/\.ts$/, "")),
+    outPath: executablePath(dir, fixture.replace(/\.ts$/, "")),
     backend: "rust",
     optimization: "dev",
   });

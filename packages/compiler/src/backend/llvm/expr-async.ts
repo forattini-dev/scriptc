@@ -508,6 +508,7 @@ export function emitAsyncExpr(host: LlvmEmitterContext, e: ExprOf<"yieldExpr" | 
         return out;
       }
       case "awaitExpr": {
+        if (e.adopt) throw new LlvmUnsupportedError("promise return adoption IR requires the Rust backend", e.loc);
         // Parks the fiber until the promise settles; rejected promises
         // re-throw here (hence the pending check). Promise temp borrowed;
         // refcounted results arrive +1 and join the frame pre-check so an

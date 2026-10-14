@@ -47,7 +47,7 @@ export function interpreterVersion(executable: string): string | null {
 
 function miseWhich(version: string): string | null {
   try {
-    return execFileSync("mise", ["which", `node@${version}`], {
+    return execFileSync("mise", ["which", "node", "--tool", `node@${version}`], {
       encoding: "utf8",
       timeout: 30_000,
       stdio: ["ignore", "pipe", "ignore"],
@@ -141,7 +141,15 @@ export function bunOracleExecutable(env: NodeJS.ProcessEnv = process.env): strin
   } catch {
     onPath = null;
   }
-  const candidates = [override, onPath, join(miseData, "installs/bun", BUN_VERSION, "bin/bun")]
+  let mise: string | null = null;
+  try {
+    mise = execFileSync("mise", ["which", "bun", "--tool", `bun@${BUN_VERSION}`], {
+      encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null;
+  } catch {
+    mise = null;
+  }
+  const candidates = [override, onPath, join(miseData, "installs/bun", BUN_VERSION, "bin/bun"), mise]
     .filter((candidate): candidate is string => candidate !== undefined && candidate !== null && candidate !== "");
   const rejected: string[] = [];
   for (const candidate of candidates) {

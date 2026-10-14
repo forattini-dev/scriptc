@@ -100,6 +100,7 @@ pub fn child_exec_sync(
     use std::io::Write;
     use std::process::{Command, Stdio};
 
+    child_validate_self_invocation(command, arguments);
     let mut child_command = Command::new(command.to_utf8_lossy());
     arguments.with(|arguments| {
         child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
@@ -107,16 +108,7 @@ pub fn child_exec_sync(
     if !cwd.is_empty() {
         child_command.current_dir(cwd.to_utf8_lossy());
     }
-    if has_env {
-        child_command.env_clear();
-        env_pairs.with(|pairs| {
-            for pair in pairs.elements().as_chunks::<2>().0 {
-                child_command.env(pair[0].to_utf8_lossy(), pair[1].to_utf8_lossy());
-            }
-        });
-    } else {
-        process_env_apply(&mut child_command);
-    }
+    child_configure_environment(&mut child_command, has_env.then_some(env_pairs));
 
     let stdout_mode = to_int32(stdout_mode);
     let stdin_inherit = stdout_mode & 4 != 0;
@@ -218,6 +210,7 @@ pub fn child_exec_capture(
 ) -> JsSpawnResult {
     use std::process::{Command, Stdio};
 
+    child_validate_self_invocation(command, arguments);
     let mut child_command = Command::new(command.to_utf8_lossy());
     arguments.with(|arguments| {
         child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
@@ -225,16 +218,7 @@ pub fn child_exec_capture(
     if !cwd.is_empty() {
         child_command.current_dir(cwd.to_utf8_lossy());
     }
-    if has_env {
-        child_command.env_clear();
-        env_pairs.with(|pairs| {
-            for pair in pairs.elements().as_chunks::<2>().0 {
-                child_command.env(pair[0].to_utf8_lossy(), pair[1].to_utf8_lossy());
-            }
-        });
-    } else {
-        process_env_apply(&mut child_command);
-    }
+    child_configure_environment(&mut child_command, has_env.then_some(env_pairs));
     child_command.stdin(Stdio::null());
     child_command.stdout(Stdio::piped());
     child_command.stderr(Stdio::piped());
@@ -336,20 +320,12 @@ fn child_spawn_sync_core(
 ) -> JsSpawnResult {
     use std::process::{Command, Stdio};
 
+    child_validate_self_invocation(command, arguments);
     let mut child_command = Command::new(command.to_utf8_lossy());
     if !cwd.is_empty() {
         child_command.current_dir(cwd.to_utf8_lossy());
     }
-    if let Some(pairs) = env_pairs {
-        child_command.env_clear();
-        pairs.with(|pairs| {
-            for pair in pairs.elements().as_chunks::<2>().0 {
-                child_command.env(pair[0].to_utf8_lossy(), pair[1].to_utf8_lossy());
-            }
-        });
-    } else {
-        process_env_apply(&mut child_command);
-    }
+    child_configure_environment(&mut child_command, env_pairs);
     if is_self_reexec(command, arguments) {
         child_command.arg(SELF_REEXEC_MARKER);
     }

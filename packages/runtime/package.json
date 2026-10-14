@@ -17,6 +17,6 @@
     "access": "public"
   },
   "scripts": {
-    "build": "true"
+    "build": "node -e \"process.exit(0)\""
   }
 }

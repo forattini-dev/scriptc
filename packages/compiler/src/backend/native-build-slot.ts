@@ -53,19 +53,26 @@ async function acquireNativeBuildSlot(): Promise<NativeBuildLease> {
 
 async function reclaimDeadLease(path: string): Promise<void> {
   const reaper = `${path}.reaping`;
+  const prepared = `${reaper}.${process.pid}-${randomUUID()}.tmp`;
   try {
     await writeFile(
-      reaper,
+      prepared,
       `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`,
       { flag: "wx", mode: 0o600 },
     );
+    // Publish a complete owner record atomically. A contender must never
+    // treat a live writer's empty/partial record as an abandoned lock.
+    await link(prepared, reaper);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
+    if (process.platform === "win32" && code === "EPERM") return;
     if (code === "EEXIST" || code === "EISDIR") {
       await reclaimAbandonedReaper(reaper);
       return;
     }
     throw error;
+  } finally {
+    await rm(prepared, { force: true });
   }
   try {
     let pid: unknown;
@@ -93,7 +100,7 @@ async function reclaimAbandonedReaper(path: string): Promise<void> {
       return;
     }
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return;
+    if (code === "ENOENT" || (process.platform === "win32" && code === "EPERM")) return;
     if (code !== "EISDIR") throw error;
     // Before reapers carried an owning pid they were directories. Keep a
     // short grace period so a process running the old protocol can finish,

@@ -516,16 +516,7 @@ pub fn child_fork(
                 .map(|argument| argument.to_utf8_lossy()),
         )
     });
-    if has_env {
-        command.env_clear();
-        env_pairs.with(|pairs| {
-            for pair in pairs.elements().as_chunks::<2>().0 {
-                command.env(pair[0].to_utf8_lossy(), pair[1].to_utf8_lossy());
-            }
-        });
-    } else {
-        process_env_apply(&mut command);
-    }
+    child_configure_environment(&mut command, has_env.then_some(env_pairs));
     command.env(FORK_TARGET_ENV, (target as usize).to_string());
     command.env(FORK_IPC_ENV, address.to_string());
     if !cwd.is_empty() {

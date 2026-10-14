@@ -784,7 +784,7 @@ export function isRefCounted(t: IrType): boolean {
 /* ── module ────────────────────────────────────────────────────────────── */ export interface IrFamily { id: string; impls: { name: string; captures: IrParam[] }[]; instances: { key: string; params: IrType[]; ret: IrType; targets: string[] }[] }
 export interface IrModule {
   /** Bumped on any breaking IR change; serialize.ts refuses mismatches. */
-  irVersion: 12;
+  irVersion: 13;
   sourceFile: string;
   /** The runtime target the program was lowered for (--target): the
    * backends configure the runtime's per-runtime semantic switches from
@@ -5078,7 +5078,7 @@ export type IrExpr =
   /** Await a promise: parks the current fiber until it settles; a rejected
    * promise re-throws into the awaiter (may-throw seed). Result is the
    * promise's inner value (+1 for refcounted kinds). Only inside async fns. */
-  | { kind: "awaitExpr"; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "awaitExpr"; value: IrExpr; type: IrType; adopt?: true; loc: SrcLoc }
   /** Await of a promise-or-plain union (`Promise<T> | T`, plus the mapped
    * `Promise<T> | void` / absent form): the promise arm parks and rethrows
    * rejections; every non-promise arm takes exactly one microtask hop. When

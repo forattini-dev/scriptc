@@ -27,6 +27,7 @@ import {
    * static type while their only runtime representation remains jsval.
    * Promise declarations keep their checker-driven await/catch bridge. */
   export function isIslandExpr(lowerer: Lowerer, node: ts.Expression): boolean {
+    if (!lowerer.dynamic) return false;
     if (nativeImportHandleType(lowerer, node)?.kind === "jsval") return true;
     const mapped = lowerer.mapTypeOf(lowerer.typeOf(node));
     if (mapped?.kind === "jsval") return true;

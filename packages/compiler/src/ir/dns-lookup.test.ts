@@ -38,7 +38,7 @@ test.each(["dns.promises.lookup", "dns.lookupAsync"] as const)("%s validates as 
     { kind: "strLit", value: "::1", type: STRING, loc }, { kind: "numLit", value: 0, type: F64, loc },
     { kind: "strLit", value: "family", type: STRING, loc },
   ], type: result, loc };
-  const module: IrModule = { irVersion: 12, sourceFile: loc.file, entry: "main", records: [shape], unions: [union], functions: [{
+  const module: IrModule = { irVersion: 13, sourceFile: loc.file, entry: "main", records: [shape], unions: [union], functions: [{
     name: "main", params: [], locals: [], returnType: VOID, body: [{ kind: "exprStmt", expr: call, loc }], loc,
   }] };
   expect(validateModule(module)).toEqual([]);

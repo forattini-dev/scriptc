@@ -1,8 +1,20 @@
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { withNativeBuildSlot } from "./native-build-slot.js";
+
+const transient = vi.hoisted(() => ({ reaperFailures: 0 }));
+vi.mock("node:fs/promises", async () => {
+  const fs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  return { ...fs, link: async (...args: Parameters<typeof fs.link>) => {
+    if (String(args[1]).endsWith(".reaping") && transient.reaperFailures > 0) {
+      transient.reaperFailures--;
+      throw Object.assign(new Error("Windows lock deletion pending"), { code: "EPERM" });
+    }
+    return fs.link(...args);
+  } };
+});
 
 const originalEnvironment = {
   lockDir: process.env["SCRIPTC_NATIVE_LOCK_DIR"],
@@ -11,6 +23,7 @@ const originalEnvironment = {
 };
 
 afterEach(() => {
+  transient.reaperFailures = 0;
   restoreEnvironment("SCRIPTC_NATIVE_LOCK_DIR", originalEnvironment.lockDir);
   restoreEnvironment("SCRIPTC_NATIVE_HOST_WORKERS", originalEnvironment.hostWorkers);
   restoreEnvironment("SCRIPTC_NATIVE_LOCK_POLL_MS", originalEnvironment.pollMs);
@@ -69,7 +82,7 @@ test("recovers a native build seat left by a dead process", async () => {
   });
   const recovered = await Promise.race([
     build.then(() => true),
-    new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), 1000)),
   ]);
 
   await rm(lockDir, { recursive: true, force: true });
@@ -98,7 +111,7 @@ test("recovers when a dead lease reaper was also abandoned", async () => {
   });
   const recovered = await Promise.race([
     build.then(() => true),
-    new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), 1000)),
   ]);
 
   if (!recovered) {
@@ -128,7 +141,7 @@ test("recovers when a dead lease reaper file was truncated", async () => {
   });
   const recovered = await Promise.race([
     build.then(() => true),
-    new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), 1000)),
   ]);
 
   if (!recovered) await rm(reaper, { force: true });
@@ -136,6 +149,27 @@ test("recovers when a dead lease reaper file was truncated", async () => {
   await rm(lockDir, { recursive: true, force: true });
   expect(recovered).toBe(true);
   expect(ran).toBe(true);
+});
+
+test.skipIf(process.platform !== "win32")("retries a Windows reaper lock with deletion pending", async () => {
+  const lockDir = await mkdtemp(join(tmpdir(), "scriptc-native-slot-eperm-"));
+  process.env["SCRIPTC_NATIVE_LOCK_DIR"] = lockDir;
+  process.env["SCRIPTC_NATIVE_HOST_WORKERS"] = "1";
+  process.env["SCRIPTC_NATIVE_LOCK_POLL_MS"] = "2";
+  try {
+    await writeFile(join(lockDir, "slot-0.json"), JSON.stringify({ pid: 999_999_999 }));
+    transient.reaperFailures = 2;
+    let active = 0, peak = 0, completed = 0;
+    await Promise.all(Array.from({ length: 16 }, () => withNativeBuildSlot(async () => {
+      peak = Math.max(peak, ++active);
+      await new Promise(resolve => setTimeout(resolve, 2));
+      active--;
+      completed++;
+    })));
+    expect(transient.reaperFailures).toBe(0);
+    expect(peak).toBe(1);
+    expect(completed).toBe(16);
+  } finally { await rm(lockDir, { recursive: true, force: true }); }
 });
 
 function restoreEnvironment(name: string, value: string | undefined): void {

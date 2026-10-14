@@ -5,13 +5,19 @@
  * proofs live in lower-runtime-optional-branches.ts and the dense-array reads in lower-dense-array-reads.ts. */
 import * as ts from "../ts7/adapter.js";
 import type { IrExpr, IrGlobal, IrLocal, IrType } from "../../ir/ir.js";
-import { BOOL, DYN, F64, isUnitType, STRING, typeEquals, UNDEFINED_T } from "../../ir/ir.js";
+import { BOOL, DYN, F64, isUnitType, STRING, typeEquals, typeKey, UNDEFINED_T } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import { FileParts, declSymbolOf } from "./lower-modules.js";
 import { ParamShape, FnSig } from "./lower-calls.js";
 import { varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf, nodeThrowExpr } from "./lowerer.js";
+import { inferredLambdaRead } from "./lambda-read-result.js";
+
+const ARRAY_CALLBACK_METHODS = new Set([
+  "map", "filter", "forEach", "find", "findIndex", "findLast", "findLastIndex",
+  "some", "every", "flatMap", "reduce", "reduceRight",
+]);
 
 export function runtimeOptionalRootOf(lowerer: Lowerer, local: IrLocal): IrLocal {
   return lowerer.runtimeOptionalRoots.get(local) ?? local;
@@ -224,21 +230,23 @@ export function runtimeOptionalRecordField(lowerer: Lowerer, type: IrType, field
 /** Discover the unchecked-array and JSON-root values that cross static ABI/storage
  * boundaries before any function body or module initializer is emitted.
  * TypeScript's indexed-access and stringify return types are useful source
- * annotations, not runtime proofs. Dense-array mode only discovers JSON
- * absence; it retains the existing native array ABI. */
+ * annotations, not runtime proofs. Dense-array mode promotes JSON results
+ * and callback parameters, retaining the native array element storage ABI. */
 export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FileParts[]): void {
   const arrayReads = !lowerer.nativeDenseArrays;
   if (!arrayReads) {
-    let hasJsonRoot = false;
+    let hasPrepassUse = false;
     for (const { sf } of parts) {
       ts.walkPreorder(sf, node => {
-        if (hasJsonRoot) return "skip";
-        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "stringify") hasJsonRoot = true;
+        if (hasPrepassUse) return "skip";
+        if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && !node.type) hasPrepassUse = true;
+        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+          (node.expression.name.text === "stringify" || ARRAY_CALLBACK_METHODS.has(node.expression.name.text))) hasPrepassUse = true;
         return undefined;
       });
-      if (hasJsonRoot) break;
+      if (hasPrepassUse) break;
     }
-    if (!hasJsonRoot) return;
+    if (!hasPrepassUse) return;
   }
   const optionalSymbols = new Set<ts.Symbol>();
   const optionalReturns = new Set<ts.Symbol>();
@@ -307,7 +315,7 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     return false;
   };
   const isArrayRead = (node: ts.Expression): boolean => {
-    if (!arrayReads) return false;
+    if (!arrayReads && inferredLambdaRead(node) === null) return false;
     const e = peel(node);
     if (!ts.isElementAccessExpression(e)) return false;
     return lowerer.mapTypeOf(lowerer.typeOf(e.expression))?.kind === "array";
@@ -373,11 +381,12 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     }
     if (ts.isBinaryExpression(e)) {
       const op = e.operatorToken.kind;
-      if (
-        op === ts.SyntaxKind.AmpersandAmpersandToken ||
-        op === ts.SyntaxKind.BarBarToken ||
-        op === ts.SyntaxKind.QuestionQuestionToken
-      ) return mayBeOptional(e.left) || mayBeOptional(e.right);
+      if (op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.BarBarToken) {
+        const right = lowerer.mapTypeOf(lowerer.typeOf(e.right));
+        return mayBeOptional(e.right) || right?.kind === "void" || right?.kind === "dyn" || right?.kind === "jsval" ||
+          (right?.kind === "union" && lowerer.armTag(right.unionId, UNDEFINED_T) >= 0);
+      }
+      if (op === ts.SyntaxKind.AmpersandAmpersandToken) return mayBeOptional(e.left) || mayBeOptional(e.right);
     }
     if (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression)) {
       const fields = optionalFields.get(symbolOf(e.expression) ?? ({} as ts.Symbol));
@@ -403,6 +412,43 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     if (!stringArrayRead(e.left) && !stringArrayRead(e.right)) return null;
     if (!(primitive(e.left) || stringArrayRead(e.left)) || !(primitive(e.right) || stringArrayRead(e.right))) return null;
     return { kind: "union", unionId: lowerer.unions.intern([F64, STRING]) };
+  };
+  const lambdaPrimitiveResult = (node: ts.Expression): IrType | null => {
+    const e = peel(node);
+    if (ts.isCallExpression(e) && ts.isIdentifier(e.expression)) return arithmeticReturns.get(symbolOf(e.expression)!) ?? null;
+    if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && mayBeOptional(e.left)) {
+      const mapped = lowerer.mapTypeOf(lowerer.typeOf(e));
+      if (mapped) {
+        const result = lowerer.runtimeOptionalType(mapped);
+        lowerer.runtimeOptionalArithmeticTypes.set(e, result);
+        return result;
+      }
+    }
+    if (!ts.isBinaryExpression(e) ||
+      (e.operatorToken.kind !== ts.SyntaxKind.QuestionQuestionToken && e.operatorToken.kind !== ts.SyntaxKind.BarBarToken) ||
+      !mayBeOptional(e.left)) return optionalStringArithmeticType(node);
+    const left = lowerer.mapTypeOf(lowerer.typeOf(e.left));
+    const right = lowerer.mapTypeOf(lowerer.typeOf(e.right));
+    const primitive = (t: IrType | null): t is IrType => t?.kind === "f64" || t?.kind === "string" || t?.kind === "bool";
+    if (!primitive(left) || !primitive(right) || typeEquals(left, right)) return null;
+    const arms = [left, right].sort((a, b) => a.kind < b.kind ? -1 : 1);
+    const result: IrType = { kind: "union", unionId: lowerer.unions.intern(arms) };
+    lowerer.runtimeOptionalArithmeticTypes.set(e, result);
+    return result;
+  };
+  const lambdas: (ts.ArrowFunction | ts.FunctionExpression)[] = [];
+  for (const sf of sourceFiles) ts.walkPreorder(sf, node => {
+    if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && !node.type) lambdas.push(node);
+  });
+  const lambdaArithmeticReturn = (fn: ts.ArrowFunction | ts.FunctionExpression): IrType | null => {
+    if (!ts.isBlock(fn.body)) return lambdaPrimitiveResult(fn.body);
+    let result: IrType | null = null;
+    ts.walkPreorder(fn.body, node => {
+      if (node !== fn.body && ts.isFunctionLike(node)) return "skip";
+      if (ts.isReturnStatement(node) && node.expression) result ??= lambdaPrimitiveResult(node.expression);
+      return undefined;
+    });
+    return result;
   };
   const noteField = (decl: ts.VariableDeclaration, name: string): boolean => {
     if (!ts.isIdentifier(decl.name)) return false;
@@ -692,7 +738,7 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
           if (symbol && noteFieldSymbol(symbol, node.left.name.text)) changed = true;
         }
       }
-      if (arrayReads && ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      if ((arrayReads || lowerer.nativeDenseArrays) && ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
         const callbackIndices = hofCallbackIndices(node.expression.name.text, node.arguments.length >= 2);
         const receiverNode = node.expression.expression;
         const receiver = lowerer.mapTypeOf(lowerer.typeOf(receiverNode));
@@ -770,7 +816,7 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
         }
         node.arguments.forEach((arg, i) => {
             const callbackSlot = sig.params[i]?.type;
-            if (arrayReads && callbackSlot?.kind === "func" && !ts.isSpreadElement(arg)) {
+            if ((arrayReads || lowerer.nativeDenseArrays) && callbackSlot?.kind === "func" && !ts.isSpreadElement(arg)) {
               const optionalCallbackParams = callbackSlot.params.flatMap((type, index) =>
                 type.kind === "union" && lowerer.armTag(type.unionId, UNDEFINED_T) >= 0 ? [index] : []);
               if (optionalCallbackParams.length > 0 && promoteHofCallback(arg, optionalCallbackParams)) {
@@ -837,6 +883,40 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     changed = false;
     for (const sf of sourceFiles) if (scanFile(sf)) changed = true;
     for (const [symbol, decl] of functionDeclBySymbol) if (scanReturns(symbol, decl)) changed = true;
+    for (const fn of lambdas) {
+      const mapped = lowerer.mapTypeOf(lowerer.typeOf(fn));
+      if (mapped?.kind !== "func") continue;
+      const previous = lowerer.runtimeOptionalFunctionReturnType(fn, mapped.ret);
+      if (previous.kind === "promise" || previous.kind === "generator" || previous.kind === "void") continue;
+      const arithmetic = lambdaArithmeticReturn(fn);
+      const optional = bodyReturnsOptional(fn);
+      let next = optional ? lowerer.runtimeOptionalType(previous) : previous;
+      if (arithmetic) {
+        const armsOf = (t: IrType): readonly IrType[] => t.kind === "union" ? lowerer.unions.get(t.unionId)!.arms : [t];
+        const arms = [...new Map([...armsOf(next), ...armsOf(arithmetic)].map(arm => [typeKey(arm), arm])).values()];
+        arms.sort((a, b) => typeKey(a) < typeKey(b) ? -1 : 1);
+        next = { kind: "union", unionId: lowerer.unions.intern(arms) };
+      }
+      if (!typeEquals(previous, next)) {
+        lowerer.runtimeOptionalFunctionReturns.set(fn, next);
+        changed = true;
+      }
+      if (optional || arithmetic) lowerer.runtimeOptionalFunctionReturns.set(fn, next);
+      const binding = fn.parent;
+      if (!ts.isVariableDeclaration(binding) || binding.initializer !== fn || binding.type || !ts.isIdentifier(binding.name)) continue;
+      const symbol = symbolOf(binding.name);
+      if (!symbol || !lowerer.runtimeOptionalFunctionReturns.has(fn)) continue;
+      if (next.kind === "union" && lowerer.armTag(next.unionId, UNDEFINED_T) >= 0) {
+        if (!optionalReturns.has(symbol)) { optionalReturns.add(symbol); changed = true; }
+      } else if (arithmetic && !arithmeticReturns.has(symbol)) { arithmeticReturns.set(symbol, next); changed = true; }
+      const known = lowerer.runtimeOptionalBindingTypes.get(symbol) ?? mapped;
+      if (known.kind === "func") {
+        const promoted = { ...known, ret: next };
+        lowerer.runtimeOptionalBindingTypes.set(symbol, promoted);
+        const global = lowerer.globalsBySymbol.get(symbol);
+        if (global) global.type = promoted;
+      }
+    }
   }
   for (const [symbol, sig] of signatureBySymbol) {
     const params = optionalParams.get(symbol);

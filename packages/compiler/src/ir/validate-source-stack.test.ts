@@ -5,7 +5,7 @@ import { validateModule } from "./validate.js";
 
 function moduleWithCoordinates(): IrModule {
   const loc = { file: "source.cjs", start: 0, end: 1 };
-  return { irVersion: 12, sourceFile: loc.file, entry: "main", functions: [{ name: "main", params: [], locals: [], returnType: VOID, body: [], loc }],
+  return { irVersion: 13, sourceFile: loc.file, entry: "main", functions: [{ name: "main", params: [], locals: [], returnType: VOID, body: [], loc }],
     sourceStackFiles: [{ file: loc.file, displayFile: "/original/source.cjs", length: 30, lineStarts: [0, 12], callOffsets: [{ start: 2, end: 10, position: 6 }] }] };
 }
 

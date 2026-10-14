@@ -223,6 +223,7 @@ async function localizeRustLibrary(
 
 interface RustBuildContext {
   runtimeRlib: string;
+  nativeSearchPaths: string[];
   targetDir: string;
   profile: "debug" | "release";
   sanitizer?: RustSanitizer;
@@ -288,6 +289,7 @@ async function prepareRustBuild(
 
   return {
     runtimeRlib: rustRuntimeArtifact(cargo.stdout),
+    nativeSearchPaths: rustNativeSearchPaths(cargo.stdout),
     targetDir,
     profile,
     ...(sanitizer === undefined ? {} : { sanitizer }),
@@ -333,10 +335,27 @@ function rustcBaseArgs(
     "--crate-name", "scriptc_program",
     "--edition", "2024",
     "--extern", `scriptc_runtime=${context.runtimeRlib}`,
+    ...context.nativeSearchPaths.flatMap((searchPath) => ["-L", searchPath]),
     "-L", `dependency=${join(context.targetDir, ...(context.sanitizer === undefined ? [] : [context.sanitizer.target]), context.profile, "deps")}`,
     "-C", optimization === "dev" ? "opt-level=0" : "opt-level=2",
     ...(context.sanitizer === undefined ? ["-C", "debuginfo=0"] : ["--target", context.sanitizer.target, ...context.sanitizer.flags]),
   ];
+}
+
+/** Cargo build scripts also report native libraries owned by dependencies.
+ * Propagate these paths when linking outside Cargo, including fresh builds. */
+export function rustNativeSearchPaths(output: string): string[] {
+  const paths = new Set<string>();
+  for (const line of output.split("\n")) {
+    let message: { reason?: unknown; linked_paths?: unknown };
+    try { message = JSON.parse(line) as typeof message; }
+    catch { continue; }
+    if (message?.reason !== "build-script-executed" || !Array.isArray(message.linked_paths)) continue;
+    for (const searchPath of message.linked_paths) {
+      if (typeof searchPath === "string" && searchPath !== "") paths.add(searchPath);
+    }
+  }
+  return [...paths];
 }
 
 function rustRuntimeArtifact(output: string): string {

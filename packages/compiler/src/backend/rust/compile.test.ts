@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { compileRust, compileRustLibrary, rustRuntimeTargetDir } from "./compile.js";
+import { compileRust, compileRustLibrary, rustNativeSearchPaths, rustRuntimeTargetDir } from "./compile.js";
 
 const commands = vi.hoisted(() => ({ run: vi.fn() }));
 vi.mock("node:child_process", () => {
@@ -18,6 +18,16 @@ afterEach(() => {
 });
 
 describe("Rust runtime cache identity", () => {
+  test("retains dependency native search paths from cold and cached Cargo messages", () => {
+    const output = [
+      "a non-JSON Cargo progress line",
+      JSON.stringify({ reason: "build-script-executed", linked_paths: ["native=C:\\SDK with spaces\\lib", "native=/ring/out"] }),
+      JSON.stringify({ reason: "build-script-executed", linked_paths: ["native=/ring/out", "dependency=/other", null, ""] }),
+      JSON.stringify({ reason: "compiler-artifact", linked_paths: ["native=/ignored"] }),
+      "null",
+    ].join("\n");
+    expect(rustNativeSearchPaths(output)).toEqual(["native=C:\\SDK with spaces\\lib", "native=/ring/out", "dependency=/other"]);
+  });
   test("isolates worktrees and runtime feature sets", () => {
     const plain = rustRuntimeTargetDir("/cache", "/worktree/a/runtime", [], false);
     const island = rustRuntimeTargetDir(

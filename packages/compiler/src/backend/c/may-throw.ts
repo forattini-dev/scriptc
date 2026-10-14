@@ -277,25 +277,35 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
     facts.set(fn.name, f);
   }
 
+  // Propagate each newly throwing function along reverse call edges once.
+  // Repeated full scans take one pass per level of a caller-first chain.
+  const callers = new Map<string, string[]>();
+  const indirectCallers: string[] = [];
   const may = new Set<string>();
-  for (const [name, f] of facts) if (f.throws) may.add(name);
-  let indirect =
-    sawDynFuncAdapter ||
-    [...closureTargets].some((t) => may.has(t) && !asyncFns.has(t) && !genFns.has(t));
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [name, f] of facts) {
-      if (may.has(name)) continue;
-      if ((f.callsValue && indirect) || f.callees.some((c) => may.has(c))) {
-        may.add(name);
-        changed = true;
-      }
+  const pending: string[] = [];
+  const mark = (name: string): void => {
+    if (may.has(name)) return;
+    may.add(name);
+    pending.push(name);
+  };
+  for (const [name, f] of facts) {
+    if (f.throws) mark(name);
+    if (f.callsValue) indirectCallers.push(name);
+    for (const callee of new Set(f.callees)) {
+      let list = callers.get(callee);
+      if (!list) callers.set(callee, (list = []));
+      list.push(name);
     }
-    if (!indirect && [...closureTargets].some((t) => may.has(t) && !asyncFns.has(t) && !genFns.has(t))) {
+  }
+  let indirect = sawDynFuncAdapter;
+  if (indirect) for (const name of indirectCallers) mark(name);
+  for (let i = 0; i < pending.length; i++) {
+    const name = pending[i]!;
+    if (!indirect && closureTargets.has(name) && !asyncFns.has(name) && !genFns.has(name)) {
       indirect = true;
-      changed = true;
+      for (const caller of indirectCallers) mark(caller);
     }
+    for (const caller of callers.get(name) ?? []) mark(caller);
   }
   return { fns: may, indirect };
 }

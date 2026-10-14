@@ -1,3 +1,4 @@
+import { checkedStaleArm } from "./checked-stale-arm.js";
 import { lowerMapEntriesSpread } from "./lower-collection-materialization.js";
 import { nullishConstantKind } from "./nullish-filter-proof.js";
 import { functionAbi } from "./function-abi.js";
@@ -17,7 +18,7 @@ import { lowerDynamicKeyRead, lowerNativeSymbolKeyRead } from "./lower-dynamic-k
 import { resolvedReturnAssertion } from "./lower-return-assertion.js";
 import { lowerNativeValueProperty } from "./lower-native-value-property.js";
 import { isRegexCaptureRead, narrowRegexCaptureReceiver, regexCaptureConditionalType } from "./lower-regex-captures.js";
-import { denseArrayReadObservesAbsence, lowerArrayElementReceiver } from "./lower-dense-array-reads.js"; import { runtimeOptionalFalseIds } from "./lower-runtime-optional-branches.js";
+import { numericReadObservesAbsence, denseArrayReadObservesAbsence, lowerArrayElementReceiver } from "./lower-dense-array-reads.js"; import { runtimeOptionalFalseIds } from "./lower-runtime-optional-branches.js";
 import { regexCaptureArray } from "../../ir/regex-captures.js";
 import { lowerSharedRecordKeyRead, lowerOpenRecordDelete, lowerNativeRecordDynamicEquality, lowerThrowingDynamicValue } from "./lower-open-record.js";
 import { lowerHeterogeneousRecordKeyRead } from "./lower-heterogeneous-record-key.js";
@@ -954,6 +955,12 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       // tests, so only side-effect-free reads compose — and when every arm
       // agrees the whole expression folds to that one string (dropping only
       // the pure read, using the stored union as lowerUnitComparison does).
+      const prelude: IrStmt[] = [];
+      if (operand.type.kind === "union" && !pureReemittable(operand)) {
+        const local = lowerer.declareHiddenLocal("%typeofOperand", operand.type);
+        prelude.push({ kind: "varDecl", localId: local.id, init: operand, loc });
+        operand = varRef(local.id, operand.type, loc);
+      }
       if (operand.type.kind === "union" && pureReemittable(operand)) {
         const def = lowerer.unions.get(operand.type.unionId);
         const answers = def?.arms.map(typeofAnswer);
@@ -969,7 +976,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
             }
             result = { kind: "ternary", cond: test, then: { kind: "strLit", value: answer, type: STRING, loc }, else_: result, type: STRING, loc };
           }
-          return result;
+          return prelude.length > 0 ? { kind: "seqExpr", stmts: prelude, result, type: STRING, loc } : result;
         }
       }
       if (operand.type.kind === "dyn") {
@@ -2826,6 +2833,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       return expr;
     }
     if (expr.type.kind !== "union") return expr;
+    if (numericReadObservesAbsence(node) && lowerer.stripUndefinedArm(expr.type).kind === "f64" && lowerer.armTag(expr.type.unionId, UNDEFINED_T) >= 0) return expr;
     if (isRegexCaptureRead(lowerer, node)) return narrowRegexCaptureReceiver(lowerer, expr, node);
     const narrowedTs = lowerer.typeOf(node);
     const narrowed = lowerer.mapTypeOf(narrowedTs);
@@ -2840,6 +2848,8 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       const arrayTags = lowerer.arrayValueTags(expr.type.unionId);
       if (arrayTags.length === 1) {
         const arm = def!.arms[arrayTags[0]!]!;
+        const checked = checkedStaleArm(lowerer, node, expr, arrayTags[0]!, arm);
+        if (checked) return checked;
         return { kind: "unionNarrow", unionId: expr.type.unionId, tag: arrayTags[0]!, value: expr, type: arm, loc: expr.loc };
       }
     }
@@ -2857,6 +2867,8 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       if (funcTags.length === 1) {
         const tag = funcTags[0]!;
         const arm = def!.arms[tag]!;
+        const checked = checkedStaleArm(lowerer, node, expr, tag, arm);
+        if (checked) return checked;
         return { kind: "unionNarrow", unionId: expr.type.unionId, tag, value: expr, type: arm, loc: expr.loc };
       }
     }
@@ -2870,6 +2882,8 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
     }
     const tag = lowerer.armTag(expr.type.unionId, narrowed);
     if (tag < 0) return expr;
+    const checked = checkedStaleArm(lowerer, node, expr, tag, narrowed);
+    if (checked) return checked;
     return {
       kind: "unionNarrow",
       unionId: expr.type.unionId,
@@ -3368,7 +3382,7 @@ export function pureReemittable(e: IrExpr): boolean {
     const def = lowerer.unions.get(left.type.unionId);
     if (!def) lowerer.badType(expr.left, lowerer.typeOf(expr.left));
     if (!def.arms.some(isUnitType)) return left;
-    const type = lowerer.irTypeOf(expr);
+    const type = lowerer.runtimeOptionalArithmeticTypes.get(expr) ?? lowerer.irTypeOf(expr);
     const rest = def.arms.filter((a) => !isUnitType(a));
     if (typeEquals(type, left.type) || (rest.length === 1 && typeEquals(type, rest[0]!))) {
       const right = lowerer.lowerExprExpecting(expr.right, type);
@@ -3781,7 +3795,7 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
     let type = lowerer.irTypeOf(expr);
     const hiddenOptionalResult =
       (type.kind !== "union" || lowerer.armTag(type.unionId, UNDEFINED_T) < 0) &&
-      receiver.type.kind === "union" && lowerer.armTag(receiver.type.unionId, UNDEFINED_T) >= 0 &&
+      receiver.type.kind === "union" && (lowerer.unions.get(receiver.type.unionId)?.arms.some(isUnitType) ?? false) &&
       body.type.kind !== "generator" && body.type.kind !== "jsval"
         ? lowerer.withUndefinedArmOf(body.type)
         : null;
@@ -4690,12 +4704,6 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
       // the hole. The state-building path below advances length without
       // writing a value into this slot.
       if (ts.isOmittedExpression(el)) {
-        if (lowerer.nativeDenseArrays) {
-          // Dense native arrays materialize the hole as the undefined arm.
-          const hole = type.elem.kind === "union" ? lowerer.wrappedUndefined(type.elem, locOf(el)) : null;
-          if (hole) return hole;
-          lowerer.unsupported("SC1090", el, "holes in array literals of this element type");
-        }
         needsStateBuild = true;
         holes.add(i);
         return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(el) };
@@ -7339,7 +7347,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         // Everything else (`u && flag`, whose value would need a wider
         // re-tagged union) stays fenced — in CONDITION position those
         // shapes lower through lowerCondition's bool descent instead.
-        const target = lowerer.mapTypeOf(lowerer.typeOf(expr));
+        const target = lowerer.runtimeOptionalArithmeticTypes.get(expr) ?? lowerer.mapTypeOf(lowerer.typeOf(expr));
         if (target?.kind === "union") {
           // `||` whose left does NOT fit the result union: the checker built
           // that result by DROPPING the left's falsy arms (`process.env.X ||
@@ -7482,6 +7490,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     let left = strictEquality || relational ? lowerAbsenceProbe(lowerer, expr.left) ?? lowerer.lowerExpr(expr.left) : lowerer.lowerExpr(expr.left);
     let right = strictEquality || relational ? lowerAbsenceProbe(lowerer, expr.right) ?? lowerer.lowerExpr(expr.right) : lowerer.lowerExpr(expr.right);
     const checkedOperand = (node: ts.Expression, value: IrExpr): IrExpr => {
+      if (value.type.kind === "union" && lowerer.stripUndefinedArm(value.type).kind === "f64" && numericReadObservesAbsence(node)) return value;
       const local = ts.isIdentifier(node) && value.type.kind === "union" ? lowerer.resolveLocal(node) : null;
       return local && lowerer.runtimeOptionalStorageLocals.has(lowerer.runtimeOptionalRootOf(local))
         ? runtimeOptionalReceiverRead(lowerer, node as ts.Identifier, local, undefined, value.loc) : value;
@@ -9069,16 +9078,18 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     // Compile-time-known STRING keys fold — literals, and the same
     // const/enum-literal and template folding computed property keys get
     // (foldedStringKeyOf); runtime-valued keys keep the fence.
-    // NUMERIC literal keys answer on ARRAY receivers: dense arrays hold
-    // exactly the indices [0, length), so `3 in xs` is a length test (and
-    // a negative/fractional literal is a constant miss — the receiver
-    // still evaluates once through its own length read).
+    // NUMERIC literal keys answer on ARRAY receivers. Native arrays track
+    // holes separately from present undefined; their presence test must
+    // consult slot state rather than just the array's length.
     {
       let kNode = expr.left;
       while (ts.isParenthesizedExpression(kNode)) kNode = kNode.expression;
       if (ts.isNumericLiteral(kNode) && lowerer.mapTypeOf(lowerer.typeOf(expr.right))?.kind === "array") {
         const recvArr = lowerer.lowerExpr(expr.right);
         if (recvArr.type.kind === "array") {
+          if (lowerer.nativeDenseArrays) {
+            return { kind: "arrayHas", arr: recvArr, index: { kind: "numLit", value: Number(kNode.text), type: F64, loc }, type: BOOL, loc };
+          }
           const len: IrExpr = { kind: "arrIntrinsic", method: "length", receiver: recvArr, args: [], type: F64, loc };
           const n = Number(kNode.text);
           if (Number.isInteger(n) && n >= 0) {

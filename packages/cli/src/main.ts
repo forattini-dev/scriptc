@@ -1,3 +1,4 @@
+import { diagnosticsOutput } from "./diagnostics-output.js";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -32,8 +33,17 @@ class CliExit extends Error {
   }
 }
 
+const rawArguments = process.argv.slice(2);
+const flagArguments = rawArguments.slice(0, rawArguments.includes("--") ? rawArguments.indexOf("--") : undefined);
+const jsonDiagnostics = flagArguments.some((argument, index) => argument === "--print=diagnostics" || (argument === "--print" && flagArguments[index + 1] === "diagnostics"));
+let diagnosticsWritten = false;
+function writeDiagnostics(options: Parameters<typeof diagnosticsOutput>[0]): void {
+  process.stdout.write(`${JSON.stringify(diagnosticsOutput(options), null, 2)}\n`);
+  diagnosticsWritten = true;
+}
 function fail(msg: string): never {
-  process.stderr.write(msg + "\n");
+  if (jsonDiagnostics) writeDiagnostics({ compilerVersion: version(), command: rawArguments[0] ?? "", success: false, phase: "arguments", diagnostics: [], error: msg });
+  else process.stderr.write(msg + "\n");
   throw new CliExit(1);
 }
 
@@ -69,6 +79,9 @@ async function main(): Promise<number> {
   }
 
   const [command, inputArg] = positionals;
+  const failOn = values["fail-on"];
+  if (failOn !== undefined && failOn !== "blockers" && failOn !== "divergences") fail("--fail-on takes blockers or divergences");
+  if (failOn !== undefined && command !== "coverage") fail("--fail-on is a coverage option");
   const explicitTypes = values["types-mode"] !== undefined || values["types-lock"] !== undefined || values["types-cache"] !== undefined || values["frozen-types-lock"];
   if (explicitTypes && (command === "cache" || values.lib || values["from-c"])) {
     fail("declaration acquisition options apply to TypeScript/JavaScript builds, runs and coverage");
@@ -178,9 +191,10 @@ async function main(): Promise<number> {
   if (command === "coverage" && values.strip) {
     fail(`--strip is a build/run option\n\n${USAGE}`);
   }
-  if (values.print !== undefined && values.print !== "native-link-info") {
-    fail(`unknown print kind "${values.print}" (supported: native-link-info)\n\n${USAGE}`);
+  if (values.print !== undefined && values.print !== "native-link-info" && values.print !== "diagnostics") {
+    fail(`unknown print kind "${values.print}" (supported: native-link-info, diagnostics)\n\n${USAGE}`);
   }
+  if (values.print === "diagnostics" && command !== "build" && command !== "coverage") fail("--print=diagnostics is a build/coverage option");
   const printNativeLinkInfo = values.print === "native-link-info";
   if (printNativeLinkInfo && command !== "build") {
     fail(`--print=native-link-info is a build option\n\n${USAGE}`);
@@ -325,9 +339,11 @@ async function main(): Promise<number> {
       ...(Object.keys(externalTypes).length > 0 ? { externalTypes } : {}),
     });
     const color = process.stdout.isTTY ?? false;
-    process.stdout.write(renderCoverage(coverage, { color, sourceTexts }) + "\n");
+    const coverageFailed = coverage.preflightFailed || ((failOn !== undefined || backend !== undefined || values.engine === false) && coverage.diagnostics.length > 0) || (failOn === "divergences" && (coverage.runtimeFences?.length ?? 0) > 0);
+    if (jsonDiagnostics) writeDiagnostics({ compilerVersion: version(), command, entry: input, backend, target, success: !coverageFailed, phase: coverage.preflightFailed ? "preflight" : "analysis", diagnostics: coverage.diagnostics, ...(coverage.runtimeFences === undefined ? {} : { deferred: coverage.runtimeFences }), stats: coverage.stats });
+    else process.stdout.write(renderCoverage(coverage, { color, sourceTexts }) + "\n");
     if (!coverage.preflightFailed) persistTiers();
-    return coverage.preflightFailed || ((backend !== undefined || values.engine === false) && coverage.diagnostics.length > 0) ? 1 : 0;
+    return coverageFailed ? 1 : 0;
   }
 
   if (output === null || !output.ok) throw new Error("internal output-option state");
@@ -388,9 +404,14 @@ async function main(): Promise<number> {
     });
     if (!result.ok) {
       const color = process.stderr.isTTY ?? false;
-      process.stderr.write(renderDiagnostics(result.diagnostics, result.sourceTexts, { color }) + "\n");
-      const n = result.diagnostics.length;
-      process.stderr.write(`\n${n} error${n === 1 ? "" : "s"}.\n`);
+      if (jsonDiagnostics) {
+        const preflight = result.diagnostics.length > 0 && result.diagnostics.every(d => ["SC0001", "SC0002", "SC0003", "SC0004"].includes(d.code));
+        writeDiagnostics({ compilerVersion: version(), command, entry: input, backend, target, success: false, phase: preflight ? "preflight" : "build", diagnostics: result.diagnostics });
+      } else {
+        process.stderr.write(renderDiagnostics(result.diagnostics, result.sourceTexts, { color }) + "\n");
+        const n = result.diagnostics.length;
+        process.stderr.write(`\n${n} error${n === 1 ? "" : "s"}.\n`);
+      }
       throw new CliExit(1);
     }
     persistTiers();
@@ -433,7 +454,9 @@ async function main(): Promise<number> {
       });
     });
   }
-  if (printNativeLinkInfo) {
+  if (jsonDiagnostics) {
+    writeDiagnostics({ compilerVersion: version(), command, entry: input, backend, target, success: true, phase: "build", diagnostics: [], artifact: binary });
+  } else if (printNativeLinkInfo) {
     if (nativeLinkInfo === undefined) throw new Error("internal native-link-info state");
     // Keep stdout pure JSON for tooling; the ordinary artifact path is in
     // program.object inside the document.
@@ -448,5 +471,8 @@ try {
   process.exitCode = await main();
 } catch (err) {
   if (err instanceof CliExit) process.exitCode = err.code;
-  else throw err;
+  else if (jsonDiagnostics && !diagnosticsWritten) {
+    writeDiagnostics({ compilerVersion: version(), command: rawArguments[0] ?? "", success: false, phase: "toolchain", diagnostics: [], error: err instanceof Error ? err.message : String(err) });
+    process.exitCode = 1;
+  } else throw err;
 }

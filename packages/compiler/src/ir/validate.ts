@@ -1,3 +1,4 @@
+import { validationFields, type ValidationFields } from "./validation-fields.js";
 import { BIGINT_LIB_FN_SIGS } from "./bigint-signatures.js"; import { URL_LIB_FN_SIGS } from "./url-signatures.js"; import { SQLITE_LIB_FN_SIGS } from "./sqlite-signatures.js"; import { EFFECT_CONTEXT_LIB_FN_SIGS } from "./effect-context-signatures.js";
 import { DATE_LIB_FN_SIGS } from "./date-signatures.js"; import { validatePromiseView } from "./promise-view.js";
 import { NUMERIC_COERCION_SIGS } from "./numeric-coercion.js"; import { JSON_REPLACER_SIGS } from "./json-replacer.js";
@@ -26,7 +27,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./ir.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, CHILDWRITER_T, CRYPTOHASH_T, CRYPTOHMAC_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isDynTypedRefType, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, shapeHasAccessorSlots, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./ir.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, CHILDWRITER_T, CRYPTOHASH_T, CRYPTOHMAC_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isDynTypedRefType, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./ir.js";
 import { BIGINT_T, UNDEFINED_T } from "./ir.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
@@ -1376,6 +1377,7 @@ function callSiteReturnType(fn: IrFunction): IrType {
 }
 
 export function validateModule(mod: IrModule): IrValidationError[] {
+  const fieldIndex = validationFields(mod);
   const errors: IrValidationError[] = [];
   validateSourceStack(mod, (message, loc) => errors.push({ message, loc }));
   const functionsByName = new Map<string, IrFunction>();
@@ -1639,6 +1641,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
   }
   const noLoc: SrcLoc = { file: mod.sourceFile, start: 0, end: 0 };
   const recordsById = new Map<string, IrRecordShape>();
+  const recordIds = new Set((mod.records ?? []).map((record) => record.id));
   for (const rec of mod.records ?? []) {
     if (recordsById.has(rec.id)) {
       errors.push({ message: `duplicate record shape "${rec.id}"`, loc: noLoc });
@@ -1660,7 +1663,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       ) {
         errors.push({ message: `record ${rec.id}: field "${f.name}" is ${f.type.kind}`, loc: noLoc });
       }
-      if (f.type.kind === "record" && !new Set((mod.records ?? []).map((r) => r.id)).has(f.type.shapeId)) {
+      if (f.type.kind === "record" && !recordIds.has(f.type.shapeId)) {
         errors.push({
           message: `record ${rec.id}: field "${f.name}" references undeclared shape "${f.type.shapeId}"`,
           loc: noLoc,
@@ -1858,6 +1861,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       recordsById,
       unionsById,
       globalsById,
+      fieldIndex,
       errors,
     );
   }
@@ -1872,9 +1876,11 @@ function validateFunction(
   records: Map<string, IrRecordShape>,
   unions: Map<string, IrUnionDef>,
   globals: Map<string, IrGlobal>,
+  fieldIndex: ValidationFields,
   errors: IrValidationError[],
 ): void {
   const locals = new Map(fn.locals.map((l) => [l.id, l]));
+  const returnAdoptions = new WeakSet<IrExpr>();
   const err = (message: string, loc: SrcLoc) =>
     errors.push({ message: `in ${fn.name}: ${message}`, loc });
 
@@ -2104,7 +2110,7 @@ function validateFunction(
         // dyn field with fieldDyn set (validated numeric read-modify-write).
         checkExpr(e.obj);
         const cls = classes.get(e.className);
-        const field = cls?.fields.find((f) => f.name === e.field);
+        const field = fieldIndex.classes.get(e.className)?.get(e.field);
         if (!cls) err(`fieldIncDec on undeclared class "${e.className}"`, e.loc);
         else if (!field) err(`class ${e.className} has no field "${e.field}"`, e.loc);
         else {
@@ -3125,7 +3131,7 @@ function validateFunction(
       case "fieldGet": {
         checkExpr(e.obj);
         const cls = classes.get(e.className);
-        const field = cls?.fields.find((f) => f.name === e.field);
+        const field = fieldIndex.classes.get(e.className)?.get(e.field);
         if (!cls) err(`fieldGet on undeclared class "${e.className}"`, e.loc);
         else if (!field) err(`class ${e.className} has no field "${e.field}"`, e.loc);
         else {
@@ -3340,7 +3346,7 @@ function validateFunction(
           err(`recordLit of undeclared shape "${e.type.shapeId}"`, e.loc);
           break;
         }
-        const want = new Map(shape.fields.map((f) => [f.name, f.type]));
+        const want = fieldIndex.records.get(shape.id)!.initializationFields;
         const seen = new Set<string>();
         for (const f of e.fields) {
           checkExpr(f.value);
@@ -3390,11 +3396,11 @@ function validateFunction(
           err(`recordClone of undeclared shape "${e.type.shapeId}"`, e.loc);
           break;
         }
-        if (shape.tuple || shape.indexValue || shapeHasAccessorSlots(shape)) {
+        if (shape.tuple || shape.indexValue || fieldIndex.records.get(shape.id)!.hasAccessorSlots) {
           err(`recordClone requires a plain declared-field shape, got ${shape.id}`, e.loc);
         }
         expectType(e.source, e.type, "recordClone source");
-        const want = new Map(shape.fields.map((f) => [f.name, f.type]));
+        const want = fieldIndex.records.get(shape.id)!.initializationFields;
         const seen = new Set<string>();
         for (const f of e.overrides) {
           checkExpr(f.value);
@@ -3409,7 +3415,7 @@ function validateFunction(
       case "recordGet": {
         checkExpr(e.obj);
         const shape = records.get(e.shapeId);
-        const field = shape?.fields.find((f) => f.name === e.field);
+        const field = fieldIndex.records.get(e.shapeId)?.fields.get(e.field);
         if (!shape) err(`recordGet on undeclared shape "${e.shapeId}"`, e.loc);
         else if (!field) err(`shape ${e.shapeId} has no field "${e.field}"`, e.loc);
         else {
@@ -3710,9 +3716,9 @@ function validateFunction(
         def.arms.forEach((arm, i) => { if (isUnitType(arm)) return;
           const fieldType =
             arm.kind === "record"
-              ? records.get(arm.shapeId)?.fields.find((f) => f.name === e.field)?.type
+              ? fieldIndex.records.get(arm.shapeId)?.fields.get(e.field)?.type
               : arm.kind === "object"
-                ? classes.get(arm.className)?.fields.find((f) => f.name === e.field)?.type
+                ? fieldIndex.classes.get(arm.className)?.get(e.field)?.type
                 : undefined;
           if (!fieldType) {
             err(`unionDisc: arm ${i} of ${e.unionId} has no field "${e.field}"`, e.loc);
@@ -3761,14 +3767,14 @@ function validateFunction(
             return;
           }
           const literal = e.key.kind === "strLit" ? e.key.value : null; // class arms: a declared field under a literal key
-          if (arm.kind === "object") { const f = literal === null ? undefined : classes.get(arm.className)?.fields.find((x) => x.name === literal); if (!f || !surfaces(f.type)) err(`unionKeyGet: class arm ${i} of ${e.unionId} has no field surfacing for the key`, e.loc); return; }
+          if (arm.kind === "object") { const f = literal === null ? undefined : fieldIndex.classes.get(arm.className)?.get(literal); if (!f || !surfaces(f.type)) err(`unionKeyGet: class arm ${i} of ${e.unionId} has no field surfacing for the key`, e.loc); return; }
           if (arm.kind !== "record") { err(`unionKeyGet: arm ${i} of ${e.unionId} is ${arm.kind}, not a record`, e.loc); return; }
           const shape = records.get(arm.shapeId);
           if (!shape) {
             err(`unionKeyGet: arm ${i} of unknown shape ${arm.shapeId}`, e.loc);
             return;
           }
-          const declared = literal !== null ? shape.fields.find((f) => f.name === literal)?.type : undefined;
+          const declared = literal !== null ? fieldIndex.records.get(shape.id)?.fields.get(literal)?.type : undefined;
           if (declared) {
             if (!surfaces(declared)) {
               err(`unionKeyGet: arm ${i} field "${literal}" of type ${declared.kind} cannot surface as the result`, e.loc);
@@ -3932,8 +3938,8 @@ function validateFunction(
           const shape = inner?.kind === "record" ? records.get(inner.shapeId) : undefined;
           const countName = e.fn === "fileHandle.read" ? "bytesRead" : "bytesWritten";
           const payload = e.args[1]?.type;
-          const count = shape?.fields.find((f) => f.name === countName);
-          const buffer = shape?.fields.find((f) => f.name === "buffer");
+          const count = shape ? fieldIndex.records.get(shape.id)?.fields.get(countName) : undefined;
+          const buffer = shape ? fieldIndex.records.get(shape.id)?.fields.get("buffer") : undefined;
           const ok =
             shape !== undefined && !shape.tuple && shape.indexValue === undefined && shape.fields.length === 2 &&
             count?.type.kind === "f64" && payload !== undefined && buffer !== undefined &&
@@ -5210,10 +5216,16 @@ function validateFunction(
         break;
       }
       case "awaitExpr": {
+        if (e.adopt !== undefined && (e.adopt !== true || !fn.async || fn.generator !== undefined)) {
+          err("promise return adoption requires an async non-generator function", e.loc);
+        }
+        if (e.adopt === true && !returnAdoptions.has(e)) {
+          err("promise return adoption must be the returned value or a union-wrapped returned value", e.loc);
+        }
         checkExpr(e.value);
         if (e.value.type.kind !== "promise") {
           err(`await of non-promise ${e.value.type.kind}`, e.loc);
-        } else if (!typeEquals(e.type, e.value.type.inner)) {
+        } else if (!typeEquals(e.type, e.value.type.inner) && !(e.adopt === true && e.type.kind === "void")) {
           err(`await type ${e.type.kind} != promise inner ${e.value.type.inner.kind}`, e.loc);
         }
         if (!fn.async) err("await outside an async function", e.loc);
@@ -5285,8 +5297,8 @@ function validateFunction(
           break;
         }
         const rec = records.get(resultT.shapeId);
-        const doneF = rec?.fields.find((f) => f.name === "done");
-        const valueF = rec?.fields.find((f) => f.name === "value");
+        const doneF = rec ? fieldIndex.records.get(rec.id)?.fields.get("done") : undefined;
+        const valueF = rec ? fieldIndex.records.get(rec.id)?.fields.get("value") : undefined;
         if (!rec || rec.fields.length !== 2 || doneF?.type.kind !== "bool" || valueF === undefined) {
           err(`genResume result record ${resultT.shapeId} is not { done: bool, value: V }`, e.loc);
           break;
@@ -5397,7 +5409,7 @@ function validateFunction(
           break;
         }
         const shape = records.get(e.type.shapeId);
-        const fields = new Map(shape?.fields.map((f) => [f.name, f.type]) ?? []);
+        const fields = shape ? fieldIndex.records.get(shape.id)!.initializationFields : new Map<string, IrType>();
         const prom = fields.get("promise");
         const resolve = fields.get("resolve");
         const reject = fields.get("reject");
@@ -5704,7 +5716,7 @@ function validateFunction(
         checkExpr(s.obj);
         checkExpr(s.value);
         const cls = classes.get(s.className);
-        const field = cls?.fields.find((f) => f.name === s.field);
+        const field = fieldIndex.classes.get(s.className)?.get(s.field);
         if (!cls) err(`fieldSet on undeclared class "${s.className}"`, s.loc);
         else if (!field) err(`class ${s.className} has no field "${s.field}"`, s.loc);
         else {
@@ -5717,7 +5729,7 @@ function validateFunction(
         checkExpr(s.obj);
         checkExpr(s.value);
         const shape = records.get(s.shapeId);
-        const field = shape?.fields.find((f) => f.name === s.field);
+        const field = fieldIndex.records.get(s.shapeId)?.fields.get(s.field);
         if (!shape) err(`recordSet on undeclared shape "${s.shapeId}"`, s.loc);
         else if (!field) err(`shape ${s.shapeId} has no field "${s.field}"`, s.loc);
         else {
@@ -5872,6 +5884,9 @@ function validateFunction(
       }
       case "return":
         if (s.value) {
+          let value = s.value;
+          while (value.kind === "unionWrap") value = value.value;
+          if (value.kind === "awaitExpr" && value.adopt === true) returnAdoptions.add(value);
           checkExpr(s.value);
           expectType(s.value, fn.returnType, "return value");
         } else if (!typeEquals(fn.returnType, VOID)) {

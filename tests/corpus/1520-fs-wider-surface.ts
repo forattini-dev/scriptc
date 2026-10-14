@@ -28,9 +28,14 @@ try {
     console.log("ro:", `${(e as NodeJS.ErrnoException).code}`, e.message.includes("access"));
   }
 }
-// ...and mode does NOT re-apply to an existing file (Node never chmods).
+// POSIX creation modes leave existing files unchanged. Windows CREATE_ALWAYS
+// applies the readonly creation attribute even to an existing writable file.
 writeFileSync(join(dir, "a.txt"), "beta", { mode: 0o400 });
-accessSync(join(dir, "a.txt"), constants.W_OK);
+if (process.platform === "win32") {
+  try { accessSync(join(dir, "a.txt"), constants.W_OK); console.log("existing mode unexpectedly writable"); }
+  catch (error) { if (error instanceof Error) console.log("existing readonly:", (error as NodeJS.ErrnoException).code); }
+  chmodSync(join(dir, "a.txt"), 0o600);
+} else { accessSync(join(dir, "a.txt"), constants.W_OK); }
 console.log("existing keeps mode:", readFileSync(join(dir, "a.txt"), "utf-8"));
 
 // chmodSync: flip the write bit off and back on.

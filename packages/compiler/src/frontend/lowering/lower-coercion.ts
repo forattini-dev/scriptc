@@ -3,6 +3,8 @@
  * slots, return values. The specialized engines live beside it (lower-width-coercion.ts, lower-function-adapters.ts,
  * lower-union-retag.ts, lower-jsval-lift.ts) and reach each other through the Lowerer, so interned helpers keep
  * their call order. */
+import { VOID } from "../../ir/ir.js";
+import { lowerReturnAdoption } from "./lower-return-adoption.js";
 import { lowerPromiseView } from "./lower-promise-view.js";
 import { lowerDiscriminatedView } from "./lower-discriminated-view.js";
 import { nativeRecordCheckSupported } from "../../ir/native-record.js";
@@ -24,6 +26,7 @@ import {
 import { rejectNativeImportCopy } from "./lower-native-import-boundary.js";
 import { returnOfConditionalFailingYield, returnOfFailingYield } from "./lower-schema.js";
 import { bindingNeverReassigned } from "./lower-calls.js";
+import { contextualUnionCoercion } from "./contextual-union-coercion.js";
 import { islandFuncValueFence, islandRegexpOf } from "./lower-island.js";
 import { voidTernaryIfStmtOrExprStmt } from "./lower-stmts.js";
 import { lowerDynObjectLiteral } from "./lower-exprs.js";
@@ -496,6 +499,9 @@ import { lowerFiniteFromEntriesExpecting } from "./lower-finite-from-entries.js"
       }
     }
     let e = lowerer.coerceToExpected(source, expected);
+    if (e === source && !typeEquals(e.type, expected)) {
+      e = contextualUnionCoercion(lowerer, node, source, expected) ?? e;
+    }
     // An 'any' value PROVABLY null/undefined (the unit literal itself, or
     // a read of a binding nothing ever assigns a non-unit value) flowing
     // implicitly into a primitive slot: the validated exit refuses units
@@ -774,10 +780,10 @@ import { lowerFiniteFromEntriesExpecting } from "./lower-finite-from-entries.js"
 
   /** The value of a `return` statement. In an async function `return p`
    * where p is a promise flattens (JS: the returned promise's settlement
-   * becomes the async function's result), so it lowers exactly as
-   * `return await p` — the awaitExpr parks the fiber and re-throws
-   * rejections, which IS the flattening. Everything else flows into the
-   * function's return slot through the usual coercion path. */
+   * becomes the async function's result). Rust marks return adoption so
+   * finally runs before settlement and rejection bypasses the enclosing
+   * catch. The fiber backends retain their await lowering. Everything else
+   * flows into the function's return slot through the usual coercion path. */
   /** The value of `return <expr>` against the context's declared return —
    * or NULL for a bare return: `return undefined`/`return null` in a
    * void-returning function (`{ bar() { return undefined } }`, inferred
@@ -789,6 +795,7 @@ import { lowerFiniteFromEntriesExpecting } from "./lower-finite-from-entries.js"
     const e = lowerer.lowerExpr(node);
     if (expected.kind === "void" && e.kind === "unitLit") return null;
     if (lowerer.ctx.isAsync && e.type.kind === "promise" && expected.kind !== "promise") {
+      if (lowerer.nativePromiseViews && !lowerer.ctx.generator) return lowerReturnAdoption(lowerer, node, e, expected);
       const awaited: IrExpr = { kind: "awaitExpr", value: e, type: e.type.inner, loc: e.loc };
       return lowerer.coerceInto(node, awaited, expected);
     }
@@ -807,6 +814,9 @@ import { lowerFiniteFromEntriesExpecting } from "./lower-finite-from-entries.js"
     if (expected.kind === "void") {
       let e = lowerer.lowerExpr(node);
       if (lowerer.ctx.isAsync && e.type.kind === "promise") {
+        if (lowerer.nativePromiseViews && !lowerer.ctx.generator) {
+          return { kind: "return", value: { kind: "awaitExpr", value: e, type: VOID, adopt: true, loc: e.loc }, loc };
+        }
         e = { kind: "awaitExpr", value: e, type: e.type.inner, loc: e.loc };
       }
       if (e.kind === "unitLit") return { kind: "return", value: null, loc };
