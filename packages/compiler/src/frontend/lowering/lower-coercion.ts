@@ -36,10 +36,47 @@ import { jsFuncNameOf } from "./lowerer.js";
 import { lowerFiniteFromEntriesExpecting } from "./lower-finite-from-entries.js";
 import { lowerFreshArrayMapExpecting } from "./lower-fresh-array-map.js";
 
+  /** Pure construction choices can use the destination element layout.
+   * Conditions retain their evaluation; every leaf still allocates a fresh
+   * array. Existing arrays and populated leaf arrays cannot take this path. */
+  export function contextualEmptyArray(expr: IrExpr, expected: IrType & { kind: "array" }): IrExpr | null {
+    if (expr.kind === "arrayLit" && expr.type.kind === "array" && !expr.spreads?.length) {
+      if (expr.elems.length === 0) return { ...expr, type: expected };
+      // [[], []] also has no leaf element layout. Preserve each allocation
+      // and require every nested value to be another fresh construction.
+      if (expected.elem.kind !== "array") return null;
+      const element = expected.elem;
+      const elems = expr.elems.map(value => contextualEmptyArray(value, element));
+      return elems.every((value): value is IrExpr => value !== null)
+        ? { ...expr, elems, type: expected } : null;
+    }
+    if (expr.kind !== "ternary") return null;
+    const then = contextualEmptyArray(expr.then, expected);
+    const else_ = contextualEmptyArray(expr.else_, expected);
+    return then && else_ ? { ...expr, then, else_, type: expected } : null;
+  }
+
   /** Coerce typed slots with checked shared views, canonical union wraps
    * and structural adapters; incompatible pairs keep their shape fences. */
   export function coerceToExpected(lowerer: Lowerer, expr: IrExpr, expected: IrType): IrExpr {
     rejectNativeImportCopy(lowerer, expr, expected);
+    // A fresh empty literal has no elements whose representation must be
+    // converted. Build it directly in its destination array type, including
+    // an unambiguous array arm of a union. Async return contexts can lose
+    // that element type through T | PromiseLike<T> and initially map [] to
+    // number[]. Existing arrays and populated leaf arrays keep their checks.
+    if (expr.type.kind === "array" && (expr.kind === "arrayLit" || expr.kind === "ternary")) {
+      const arms = expected.kind === "array" ? [expected] : expected.kind === "union"
+        ? lowerer.unions.get(expected.unionId)?.arms.filter(arm => arm.kind === "array") ?? [] : [];
+      if (arms.length === 1) {
+        const value = contextualEmptyArray(expr, arms[0]!);
+        if (value) {
+          return expected.kind === "union"
+            ? { kind: "unionWrap", unionId: expected.unionId, tag: lowerer.armTag(expected.unionId, value.type), value, type: expected, loc: expr.loc }
+            : value;
+        }
+      }
+    }
     const promiseView = lowerPromiseView(lowerer, expr, expected);
     if (promiseView) return promiseView;
     const sharedUnion = lowerDiscriminatedView(lowerer, expr, expected);
