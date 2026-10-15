@@ -636,8 +636,7 @@ jobs:
   # The runtime crate's own gate: its unit/integration tests and a
   # warnings-as-errors clippy sweep, on the toolchain pinned by the crate's
   # rust-toolchain.toml (running from the package directory is what makes
-  # the pin apply). pnpm lint rides along — it runs nowhere else in CI and
-  # carries the Rust file-line cap.
+  # the pin apply). pnpm lint rides along — it runs nowhere else in CI.
   runtime_rust:
     name: test (rust runtime crate)
     runs-on: ubuntu-24.04
@@ -672,7 +671,7 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
-      - name: pnpm lint (file-line cap + eslint)
+      - name: pnpm lint
         working-directory: .
         run: |
           pnpm install --frozen-lockfile
