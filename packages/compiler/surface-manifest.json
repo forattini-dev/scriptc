@@ -2958,6 +2958,16 @@
       "note": "Rust native executable search for typed string commands and PATH/cwd options under --target bun; returns string | null; corpus:rust-bun-which"
     },
     {
+      "id": "stdlib.Bun.write",
+      "kind": "stdlib",
+      "name": "Bun.write",
+      "status": "static",
+      "backends": [
+        "rust"
+      ],
+      "note": "Rust native whole-file writes for a typed string path and string or Uint8Array data under --target bun; byte counts, truncation, recursive parent creation and platform-dependent Promise settlement; options and other overloads are unsupported; corpus:rust-bun-write"
+    },
+    {
       "id": "stdlib.abort-controller.abort",
       "kind": "stdlib",
       "name": "AbortController.abort",

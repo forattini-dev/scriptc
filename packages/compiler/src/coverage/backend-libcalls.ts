@@ -113,6 +113,8 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "bun.filePath": ["rust"],
   "bun.fileText": ["rust"],
   "bun.which": ["rust"],
+  "bun.writeBytes": ["rust"],
+  "bun.writeText": ["rust"],
   "bytes.compareChk": ["c", "llvm", "rust"],
   "bytes.equalsChk": ["c", "llvm", "rust"],
   "child.connected": ["rust"],

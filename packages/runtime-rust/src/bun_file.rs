@@ -16,12 +16,29 @@ pub fn bun_file_path(path: &JsString) -> JsString {
 struct BunFileWork {
     id: u64,
     path: String,
+    operation: BunFileOperation,
     done: std::sync::mpsc::Sender<BunFileCompletion>,
+}
+
+enum BunFileOperation {
+    Read,
+    Write(Vec<u8>),
+}
+
+enum BunFileResult {
+    Read(std::io::Result<Vec<u8>>),
+    Write(Result<usize, BunWriteFailure>),
+    Unavailable,
+}
+
+enum BunFilePending {
+    Read(JsString, JsPromise<JsString>),
+    Write(JsString, JsPromise<f64>),
 }
 
 struct BunFileCompletion {
     id: u64,
-    result: std::io::Result<Vec<u8>>,
+    result: BunFileResult,
 }
 
 struct BunFileState {
@@ -29,7 +46,7 @@ struct BunFileState {
     sender: std::sync::mpsc::Sender<BunFileCompletion>,
     receiver: std::sync::mpsc::Receiver<BunFileCompletion>,
     ready: VecDeque<BunFileCompletion>,
-    pending: HashMap<u64, (JsString, JsPromise<JsString>)>,
+    pending: HashMap<u64, BunFilePending>,
 }
 
 impl Default for BunFileState {
@@ -68,12 +85,19 @@ fn bun_file_pool() -> Option<&'static std::sync::mpsc::Sender<BunFileWork>> {
                             .expect("scriptc: poisoned Bun file queue")
                             .recv();
                         let Ok(work) = work else { break };
-                        let result = if std::fs::metadata(&work.path)
-                            .is_ok_and(|metadata| metadata.is_dir())
-                        {
-                            Err(std::io::Error::from(std::io::ErrorKind::IsADirectory))
-                        } else {
-                            std::fs::read(&work.path)
+                        let result = match work.operation {
+                            BunFileOperation::Read => BunFileResult::Read(
+                                if std::fs::metadata(&work.path)
+                                    .is_ok_and(|metadata| metadata.is_dir())
+                                {
+                                    Err(std::io::Error::from(std::io::ErrorKind::IsADirectory))
+                                } else {
+                                    std::fs::read(&work.path)
+                                },
+                            ),
+                            BunFileOperation::Write(bytes) => {
+                                BunFileResult::Write(bun_write_io(&work.path, &bytes, true, false))
+                            }
                         };
                         let _ = work.done.send(BunFileCompletion {
                             id: work.id,
@@ -93,6 +117,15 @@ fn bun_file_pool() -> Option<&'static std::sync::mpsc::Sender<BunFileWork>> {
 
 pub fn bun_file_text(path: &JsString) -> JsPromise<JsString> {
     let promise = promise_new();
+    bun_file_enqueue(
+        path,
+        BunFileOperation::Read,
+        BunFilePending::Read(path.clone(), promise.clone()),
+    );
+    promise
+}
+
+fn bun_file_enqueue(path: &JsString, operation: BunFileOperation, pending: BunFilePending) {
     let work = BUN_FILES.with(|state| {
         let mut state = state.borrow_mut();
         state.next_id = state
@@ -100,10 +133,11 @@ pub fn bun_file_text(path: &JsString) -> JsPromise<JsString> {
             .checked_add(1)
             .expect("scriptc: exhausted Bun file request ids");
         let id = state.next_id;
-        state.pending.insert(id, (path.clone(), promise.clone()));
+        state.pending.insert(id, pending);
         BunFileWork {
             id,
             path: path.to_string(),
+            operation,
             done: state.sender.clone(),
         }
     });
@@ -112,14 +146,10 @@ pub fn bun_file_text(path: &JsString) -> JsPromise<JsString> {
         BUN_FILES.with(|state| {
             state.borrow_mut().ready.push_back(BunFileCompletion {
                 id,
-                result: Err(std::io::Error::new(
-                    std::io::ErrorKind::ResourceBusy,
-                    "could not create Bun file worker",
-                )),
+                result: BunFileResult::Unavailable,
             })
         });
     }
-    promise
 }
 
 fn bun_file_error(path: &JsString, error: std::io::Error) -> JsError {
@@ -156,16 +186,29 @@ fn bun_files_dispatch_one() -> bool {
         let pending = state.pending.remove(&completion.id)?;
         Some((pending, completion.result))
     });
-    let Some(((path, promise), result)) = completed else {
+    let Some((pending, result)) = completed else {
         return false;
     };
-    match result {
-        Ok(bytes) => {
-            let _ = promise_fulfill(&promise, bun_file_decode(&bytes));
+    match pending {
+        BunFilePending::Read(path, promise) => {
+            let result = match result {
+                BunFileResult::Read(result) => result,
+                BunFileResult::Unavailable => Err(std::io::Error::new(
+                    std::io::ErrorKind::ResourceBusy,
+                    "could not create Bun file worker",
+                )),
+                _ => unreachable!("scriptc: Bun file completion type mismatch"),
+            };
+            match result {
+                Ok(bytes) => {
+                    let _ = promise_fulfill(&promise, bun_file_decode(&bytes));
+                }
+                Err(error) => {
+                    let _ = promise_reject(&promise, caught_value(bun_file_error(&path, error)));
+                }
+            }
         }
-        Err(error) => {
-            let _ = promise_reject(&promise, caught_value(bun_file_error(&path, error)));
-        }
+        BunFilePending::Write(path, promise) => bun_write_complete(&path, &promise, result),
     }
     true
 }

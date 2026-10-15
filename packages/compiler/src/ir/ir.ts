@@ -1906,6 +1906,8 @@ export type IrLibFn =
   | "bun.which"
   | "bun.filePath"
   | "bun.fileText"
+  | "bun.writeText"
+  | "bun.writeBytes"
   | IrBigIntLibFn | IrJsonReplacerFn | IrSqliteLibFn | IrEffectContextLibFn
   /** Native local import: queued loader, fresh promise, cached evaluation. */
   | "module.import"
@@ -7571,6 +7573,7 @@ export function moduleLibAsyncSurface(mod: IrModule): { surface: string; loc: Sr
 export const LIB_NONDETERMINISTIC_PREFIXES: readonly [string, string][] = [
   ["bun.which", "executable search (filesystem and environment)"],
   ["bun.fileText", "file contents"],
+  ["bun.write", "file writes"],
   ["math.random", "Math.random"],
   ["crypto.random", "crypto randomness"],
   ["date.", "the live clock (Date)"],
@@ -7643,6 +7646,8 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "bun.which",
   "bun.filePath",
+  "bun.writeText",
+  "bun.writeBytes",
   "process.exit", "process.exitCodeSet", "process.setExitCode",
   ...BIGINT_MAY_THROW, "json.stringifyReplacer",
   "bigint.parse",

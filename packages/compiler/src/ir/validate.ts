@@ -95,6 +95,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "bun.which": BUN_WHICH_SIG,
   "bun.filePath": { argTypes: [STRING], result: STRING },
   "bun.fileText": { argTypes: [STRING], result: { kind: "promise", inner: STRING } },
+  "bun.writeText": { argTypes: [STRING, STRING], result: { kind: "promise", inner: F64 } },
+  "bun.writeBytes": { argTypes: [STRING, BYTES_U8], result: { kind: "promise", inner: F64 } },
   ...NUMERIC_COERCION_SIGS, ...JSON_REPLACER_SIGS,
   ...FS_WRITE_LIB_SIGS,
   "fetch.start": { argTypes: [STRING, DYN], result: { kind: "promise", inner: DYN } },

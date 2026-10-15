@@ -107,6 +107,7 @@ include!("transform.rs");
 include!("strings_and_process.rs");
 include!("bun_which.rs");
 include!("bun_file.rs");
+include!("bun_write.rs");
 include!("string_utf16_ops.rs");
 include!("number_parse.rs");
 include!("target_config.rs");
@@ -178,6 +179,7 @@ mod tests {
     include!("tests/support.rs");
     include!("bun_which.test.rs");
     include!("bun_file.test.rs");
+    include!("bun_write.test.rs");
     include!("tests/target_config.rs");
     include!("tests/generators.rs");
     include!("tests/array_holes.rs");
