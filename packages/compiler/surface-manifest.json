@@ -2938,6 +2938,16 @@
       ]
     },
     {
+      "id": "stdlib.Bun.which",
+      "kind": "stdlib",
+      "name": "Bun.which",
+      "status": "static",
+      "backends": [
+        "rust"
+      ],
+      "note": "Rust native executable search for typed string commands and PATH/cwd options under --target bun; returns string | null; corpus:rust-bun-which"
+    },
+    {
       "id": "stdlib.abort-controller.abort",
       "kind": "stdlib",
       "name": "AbortController.abort",

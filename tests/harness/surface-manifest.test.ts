@@ -848,6 +848,8 @@ describe("determinism attestation ↔ fence parity", () => {
       // identity, so the attestation demotes on them like os.* — the
       // family needs its own declaration here, not just manifest entries.
       { path: "parity[7]", prefix: "node-builtin.tls." },
+      // Bun executable lookup reads filesystem and startup environment state.
+      { path: "parity[8]", prefix: "stdlib.Bun." },
     ]);
     expect(resolved.ok).toBe(true);
     if (!resolved.ok) return;

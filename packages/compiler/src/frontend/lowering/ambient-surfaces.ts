@@ -21,6 +21,10 @@ export interface AmbientSurfaceRow {
 
 export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
   {
+    id: "stdlib.Bun.which", kind: "stdlib", name: "Bun.which", fns: ["bun.which"],
+    note: "Rust native executable search for typed string commands and PATH/cwd options under --target bun; returns string | null; corpus:rust-bun-which",
+  },
+  {
     id: "stdlib.crypto.randomUUID",
     kind: "stdlib",
     name: "crypto.randomUUID",

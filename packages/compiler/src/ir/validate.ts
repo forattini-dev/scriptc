@@ -1,4 +1,5 @@
 import { validationFields, type ValidationFields } from "./validation-fields.js";
+import { BUN_WHICH_SIG, validateBunWhich } from "./bun-which.js";
 import { BIGINT_LIB_FN_SIGS } from "./bigint-signatures.js"; import { URL_LIB_FN_SIGS } from "./url-signatures.js"; import { SQLITE_LIB_FN_SIGS } from "./sqlite-signatures.js"; import { EFFECT_CONTEXT_LIB_FN_SIGS } from "./effect-context-signatures.js";
 import { DATE_LIB_FN_SIGS } from "./date-signatures.js"; import { validatePromiseView } from "./promise-view.js";
 import { NUMERIC_COERCION_SIGS } from "./numeric-coercion.js"; import { JSON_REPLACER_SIGS } from "./json-replacer.js";
@@ -91,6 +92,7 @@ export const REGEX_INTRINSIC_SIGS: Record<
  * surface has no optionals. readFileSync's second argument is the (always-"utf8") encoding: evaluated for JS-exact side-effect
  * order and ignored by the runtime. A `null` slot is program-dependent (a builtin-error receiver) — the libCall case checks it specially, like process.envGet's result. Exported for lib-boundary.ts. */
 export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result: IrType }> = {
+  "bun.which": BUN_WHICH_SIG,
   ...NUMERIC_COERCION_SIGS, ...JSON_REPLACER_SIGS,
   ...FS_WRITE_LIB_SIGS,
   "fetch.start": { argTypes: [STRING, DYN], result: { kind: "promise", inner: DYN } },
@@ -3938,6 +3940,7 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `libCall ${e.fn} arg ${i}`);
         });
+        if (e.fn === "bun.which") { validateBunWhich(e, id => unions.get(id), err); break; }
         if (e.fn === "promise.view") { validatePromiseView(e, err); break; }
         if (e.fn === "fileHandle.read" || e.fn === "fileHandle.writeBytes" || e.fn === "fileHandle.writeStr") {
           const inner = e.type.kind === "promise" ? e.type.inner : undefined;

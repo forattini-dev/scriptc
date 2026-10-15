@@ -110,6 +110,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "buffer.isEncoding": ["c", "llvm", "rust"],
   "buffer.isUtf8": ["c", "llvm", "rust"],
   "buffer.newStringFail": ["c", "llvm", "rust"],
+  "bun.which": ["rust"],
   "bytes.compareChk": ["c", "llvm", "rust"],
   "bytes.equalsChk": ["c", "llvm", "rust"],
   "child.connected": ["rust"],

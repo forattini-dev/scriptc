@@ -10,6 +10,7 @@
  *  - mapKernelIntersection, first inside the intersection branch: brands strip before the package-intersection fence;
  *  - mapKernelServiceKey, just before class-instance mapping: a service key class is the key handle, not a class. */
 import * as ts from "./ts7/adapter.js";
+import { mapBunWhichOptions } from "./bun-which-type.js";
 import { DYN, EFFECT_T, SQLITE_DB_T, SQLITE_STMT_T, type IrType } from "../ir/ir.js";
 import { mapType, type TypeMapperCtx } from "./type-mapper.js";
 import { decoratedSchemaRecord } from "./kernel-types.js";
@@ -34,6 +35,8 @@ const BUN_SQLITE_TYPES: ReadonlyMap<string, IrType> = new Map([
 
 /** The native type of a named kernel or platform type, or undefined when `widened` is not one. */
 export function mapKernelType(widened: ts.Type, ctx: TypeMapperCtx): IrType | undefined {
+  const which = mapBunWhichOptions(widened, ctx);
+  if (which) return which;
   const checker = ctx.checker;
   const symbol = widened.getAliasSymbol() ?? widened.getSymbol();
   const decls = symbol === undefined ? undefined : checker.declarationsOf(symbol);

@@ -3,10 +3,13 @@ import { STRING, type IrExpr } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerUrlStaticCall } from "./lower-url.js";
+import { lowerBunWhichCall } from "./lower-bun-which.js";
 
 /** Native globals must be recognized before generic namespace dispatch,
  * while retaining declaration provenance for shadowed user bindings. */
 export function lowerNativeGlobalCall(lowerer: Lowerer, call: ts.CallExpression, callee: ts.Expression): IrExpr | null {
+  const which = lowerBunWhichCall(lowerer, call, callee);
+  if (which) return which;
   const url = lowerUrlStaticCall(lowerer, call, callee);
   if (url) return url;
   if (!ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined) return null;

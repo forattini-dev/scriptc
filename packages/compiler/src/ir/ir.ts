@@ -1903,6 +1903,7 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
+  | "bun.which"
   | IrBigIntLibFn | IrJsonReplacerFn | IrSqliteLibFn | IrEffectContextLibFn
   /** Native local import: queued loader, fresh promise, cached evaluation. */
   | "module.import"
@@ -7566,6 +7567,7 @@ export function moduleLibAsyncSurface(mod: IrModule): { surface: string; loc: Sr
  * invariant (compiles under full fences ⇒ deterministic) cannot be
  * stated. */
 export const LIB_NONDETERMINISTIC_PREFIXES: readonly [string, string][] = [
+  ["bun.which", "executable search (filesystem and environment)"],
   ["math.random", "Math.random"],
   ["crypto.random", "crypto randomness"],
   ["date.", "the live clock (Date)"],
@@ -7636,6 +7638,7 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
+  "bun.which",
   "process.exit", "process.exitCodeSet", "process.setExitCode",
   ...BIGINT_MAY_THROW, "json.stringifyReplacer",
   "bigint.parse",

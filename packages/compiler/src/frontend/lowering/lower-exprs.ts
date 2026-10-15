@@ -1,4 +1,6 @@
 import { checkedStaleArm } from "./checked-stale-arm.js";
+import { lowerBunWhichValue } from "./lower-bun-which.js";
+import { lowerNullishFunction } from "./lower-nullish-function.js";
 import { lowerMapEntriesSpread } from "./lower-collection-materialization.js";
 import { nullishConstantKind } from "./nullish-filter-proof.js";
 import { functionAbi } from "./function-abi.js";
@@ -1786,6 +1788,8 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
     if (ts.isConditionalExpression(expr)) return lowerTernary(lowerer, expr);
 
     if (ts.isPropertyAccessExpression(expr)) {
+      const which = lowerBunWhichValue(lowerer, expr);
+      if (which) return which;
       const errorStack = lowerErrorStackRead(lowerer, expr);
       if (errorStack) return errorStack;
       const constructorName = lowerInstanceConstructorName(lowerer, expr);
@@ -3414,6 +3418,8 @@ export function pureReemittable(e: IrExpr): boolean {
         return { kind: "nullish", left, right, type, loc };
       }
     }
+    const callable = lowerNullishFunction(lowerer, left, expr.right, type, loc);
+    if (callable) return callable;
     lowerer.unsupported(
       "SC1090",
       expr,

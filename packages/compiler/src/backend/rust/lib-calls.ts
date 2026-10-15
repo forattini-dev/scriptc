@@ -1,4 +1,5 @@
 import { emitRustBigIntCall } from "./bigint.js";
+import { emitRustBunWhich } from "./bun-which.js";
 import { emitRustErrorStackCall } from "./error-stacks.js";
 import { rustJsString } from "./string-literals.js";
 import type { IrFamily } from "../../ir/ir.js";
@@ -92,6 +93,8 @@ export interface RustLibCallContext {
 }
 
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const which = emitRustBunWhich(expr, context);
+  if (which !== null) return which;
   const dns = emitRustDnsCall(expr, context);
   if (dns !== null) return dns;
   const stack = emitRustErrorStackCall(expr, context);
