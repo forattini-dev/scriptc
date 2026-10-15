@@ -5565,6 +5565,10 @@ export type IrExpr =
    * same-type entries share the runtime's copy adapter, arm entries wrap
    * into the result union, sub-union entries re-tag arm-wise. First
    * settle wins; rejections copy raw and count handled on the entry.
+   * promise.allTuple (Rust): fixed promise entries, with a result tuple
+   * whose numeric fields exactly match their inner types. All arguments
+   * evaluate before observers attach; one reaction per input stores its
+   * native value by index. The first rejection wins and all are handled.
    * promise.reject: one %Error-rooted arg (the reason — rejection
    * payloads share the thrown-Error representation), type is the
    * context-named result promise; the backend mints a fresh promise and
@@ -5576,7 +5580,7 @@ export type IrExpr =
    * frontend returns them as-is, the spec's native-promise identity;
    * thenables and promise-armed unions fence); the backend mints a fresh
    * promise and fulfills it immediately per the inner kind. */
-  | { kind: "intrinsic"; name: "console.log" | "console.error" | "promise.race" | "promise.all" | "promise.reject" | "promise.resolve" | "module.await"; args: IrExpr[]; type: IrType; loc: SrcLoc }
+  | { kind: "intrinsic"; name: "console.log" | "console.error" | "promise.race" | "promise.all" | "promise.allTuple" | "promise.reject" | "promise.resolve" | "module.await"; args: IrExpr[]; type: IrType; loc: SrcLoc }
   /** Standard-library call (`process` members, node:fs functions). `fn` is a
    * closed union; arg/result types are fixed per member (validated against
    * LIB_FN_SIGS). Property READS (`process.argv`, `process.platform`) are

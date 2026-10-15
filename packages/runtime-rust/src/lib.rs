@@ -34,6 +34,7 @@ include!("async_local_storage.rs");
 include!("process_signals.rs");
 include!("event_loop.rs");
 include!("promises.rs");
+include!("promise_all_tuple.rs");
 include!("promise_views.rs");
 include!("native_module.rs");
 include!("stdin.rs");
@@ -198,6 +199,7 @@ mod tests {
     include!("tests/language_and_heap.rs");
     include!("promise_views.test.rs");
     include!("promises.test.rs");
+    include!("promise_all_tuple.test.rs");
     include!("dns.test.rs");
     include!("array_views.test.rs");
     include!("array_push.test.rs");

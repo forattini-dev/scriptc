@@ -3844,6 +3844,21 @@ function validateFunction(
           if (e.type.kind !== "void") err("module.await must be void", e.loc);
           break;
         }
+        if (e.name === "promise.allTuple") {
+          const shape = e.type.kind === "promise" && e.type.inner.kind === "record"
+            ? records.get(e.type.inner.shapeId) : undefined;
+          if (!shape?.tuple || shape.fields.length !== e.args.length || e.args.length === 0) {
+            err("promise.allTuple requires a nonempty result tuple matching its entries", e.loc);
+          }
+          e.args.forEach((entry, index) => {
+            checkExpr(entry);
+            const field = shape?.fields.find(field => field.name === String(index));
+            if (entry.type.kind !== "promise" || !field || !typeEquals(entry.type.inner, field.type)) {
+              err(`promise.allTuple entry ${index} must be a promise of its tuple field type`, entry.loc);
+            }
+          });
+          break;
+        }
         if (e.name === "promise.all") {
           // ONE argument: an array of promises whose inner type is the
           // result's array element (or void, collapsing to promise<void>).

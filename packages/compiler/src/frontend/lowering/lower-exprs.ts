@@ -9836,15 +9836,9 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     return { kind: "intrinsic", name: "promise.reject", args: [reason], type: resultType, loc };
   }
 
-/** `Promise.all([...])` where the literal's every entry is the SAME
-   * promise type: the checker's tuple overload types the literal
-   * [Promise<T>, Promise<T>] — a tuple RECORD, which the array path
-   * rejects — but a homogeneous tuple of promises IS a Promise<T>[] in
-   * every observable way, so the entries build the array directly and
-   * the runtime's countdown combinator runs (the certs read-both-files
-   * shape). Result Promise<T[]>; void inners collapse to Promise<void>
-   * exactly like the array path. Null otherwise: heterogeneous literals
-   * and non-literal arguments keep the array path and its fences. */
+/** Fixed literals of promises retain per-position types on Rust. Uniform
+   * entries keep the existing array combinator (void inners collapse to
+   * Promise<void>); other backends and argument shapes keep their fences. */
   export function lowerPromiseAllTupleCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken) return null;
@@ -9858,15 +9852,29 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     ) {
       return null;
     }
-    // The claim test runs on checker types only (no side effects): every
-    // element the same representable promise type.
+    // Probe types without evaluating entries or introducing lowering effects.
     const mapped = argNode.elements.map((el) => lowerer.mapTypeOf(lowerer.typeOf(el)));
     const first = mapped[0];
     if (first?.kind !== "promise") return null;
-    if (!mapped.every((m) => m?.kind === "promise" && typeEquals(m.inner, first.inner))) {
-      return null;
-    }
     const loc = locOf(call);
+    if (!mapped.every((m) => m?.kind === "promise" && typeEquals(m.inner, first.inner))) {
+      // Keep every position's type: the Rust runtime observes all entries
+      // together and builds the checker's tuple only after all fulfill.
+      // No conversion through an engine or a union-valued array is needed.
+      if (!lowerer.nativeDenseArrays || !mapped.every((m) => m?.kind === "promise")) return null;
+      const result = lowerer.mapTypeOf(lowerer.typeOf(call));
+      const shape = result?.kind === "promise" && result.inner.kind === "record"
+        ? lowerer.shapes.get(result.inner.shapeId) : undefined;
+      if (!shape?.tuple || shape.fields.length !== mapped.length ||
+          !mapped.every((m, index) => {
+            const field = shape.fields.find(field => field.name === String(index));
+            return m?.kind === "promise" && field !== undefined && typeEquals(m.inner, field.type);
+          })) return null;
+      return {
+        kind: "intrinsic", name: "promise.allTuple",
+        args: argNode.elements.map((el) => lowerer.lowerExpr(el)), type: result!, loc,
+      };
+    }
     const inner = first.inner;
     const entryT: IrType = { kind: "promise", inner };
     const elems = argNode.elements.map((el) => lowerer.lowerExpr(el));

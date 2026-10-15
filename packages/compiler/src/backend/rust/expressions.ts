@@ -1082,6 +1082,34 @@ export class RustExpressionEmitter {
           }
           return `runtime::promise_resolved(${expr.args[0] === undefined ? "()" : this.emitExpr(expr.args[0])})`;
         }
+        if (expr.name === "promise.allTuple") {
+          if (expr.type.kind !== "promise" || expr.type.inner.kind !== "record") {
+            this.context.unsupported("Promise.all tuple result shape", expr.loc);
+          }
+          const shape = this.context.records.get(expr.type.inner.shapeId);
+          if (!shape?.tuple || shape.fields.length !== expr.args.length) {
+            this.context.unsupported("Promise.all tuple field count", expr.loc);
+          }
+          // Evaluate every argument before installing reactions. In particular,
+          // a later argument may throw or suspend before Promise.all is called.
+          const entries = expr.args.map(arg => {
+            const name = this.context.nextName("sc_all_entry");
+            return { arg, name, binding: `let ${name} = ${this.emitExpr(arg)};` };
+          });
+          const values = this.context.nextName("sc_all_values");
+          const replacements: [IrExpr, string][] = [];
+          const fields = entries.map(({ arg }, index) => {
+            if (arg.type.kind !== "promise") this.context.unsupported("Promise.all tuple entry", arg.loc);
+            const field = shape.fields.find(field => field.name === String(index));
+            if (!field || !typeEquals(field.type, arg.type.inner)) this.context.unsupported("Promise.all tuple entry type", arg.loc);
+            const value: IrExpr = { kind: "unitLit", unit: "undefined", type: field.type, loc: expr.loc };
+            replacements.push([value, `*${values}.next().expect("scriptc: missing Promise.all tuple slot").downcast::<${this.context.rustType(field.type, expr.loc)}>().expect("scriptc: Promise.all tuple slot type mismatch")`]);
+            return { name: field.name, value };
+          });
+          const record: IrExpr = { kind: "recordLit", fields, type: expr.type.inner, loc: expr.loc };
+          const result = this.emitExprWithValues(record, replacements);
+          return `{ ${entries.map(entry => entry.binding).join(" ")} runtime::promise_all_tuple(vec![${entries.map(entry => `runtime::promise_to_handle(&${entry.name})`).join(", ")}], |sc_values| { let mut ${values} = sc_values.into_iter(); ${result} }) }`;
+        }
         if (expr.name === "promise.all") {
           if (expr.type.kind !== "promise") this.context.unsupported("Promise.all result shape", expr.loc);
           const entries = expr.args[0];

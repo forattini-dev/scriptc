@@ -77,6 +77,7 @@ export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | n
       // Resolve each key before its value, and snapshot both before the next
       // suspension. The enclosing dyn.assign has already copied prior spreads.
       return (expr.fields ?? []).flatMap((field) => [field.key, field.value]);
+    case "strIntrinsic":
     case "bytesIntrinsic":
       return [expr.receiver, ...expr.args];
     case "dynFrom":
