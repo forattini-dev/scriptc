@@ -1,5 +1,6 @@
 import { validationFields, type ValidationFields } from "./validation-fields.js";
 import { BUN_WHICH_SIG, validateBunWhich } from "./bun-which.js";
+import { validateBunSpawn } from "./bun-spawn.js";
 import { BIGINT_LIB_FN_SIGS } from "./bigint-signatures.js"; import { URL_LIB_FN_SIGS } from "./url-signatures.js"; import { SQLITE_LIB_FN_SIGS } from "./sqlite-signatures.js"; import { EFFECT_CONTEXT_LIB_FN_SIGS } from "./effect-context-signatures.js";
 import { DATE_LIB_FN_SIGS } from "./date-signatures.js"; import { validatePromiseView } from "./promise-view.js";
 import { NUMERIC_COERCION_SIGS } from "./numeric-coercion.js"; import { JSON_REPLACER_SIGS } from "./json-replacer.js";
@@ -92,6 +93,10 @@ export const REGEX_INTRINSIC_SIGS: Record<
  * surface has no optionals. readFileSync's second argument is the (always-"utf8") encoding: evaluated for JS-exact side-effect
  * order and ignored by the runtime. A `null` slot is program-dependent (a builtin-error receiver) — the libCall case checks it specially, like process.envGet's result. Exported for lib-boundary.ts. */
 export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result: IrType }> = {
+  "bun.spawn": { argTypes: [arrayOf(STRING), F64, F64, F64, BOOL, arrayOf(STRING), STRING], result: CHILD_T },
+  "bun.exited": { argTypes: [CHILD_T], result: { kind: "promise", inner: F64 } },
+  "bun.pid": { argTypes: [CHILD_T], result: F64 },
+  "bun.exitCode": { argTypes: [CHILD_T], result: VOID },
   "bun.which": BUN_WHICH_SIG,
   "bun.filePath": { argTypes: [STRING], result: STRING },
   "bun.fileText": { argTypes: [STRING], result: { kind: "promise", inner: STRING } },
@@ -3957,6 +3962,8 @@ function validateFunction(
           if (want) expectType(a, want, `libCall ${e.fn} arg ${i}`);
         });
         if (e.fn === "bun.which") { validateBunWhich(e, id => unions.get(id), err); break; }
+        if (e.fn === "bun.spawn") validateBunSpawn(e, id => unions.get(id), err);
+        if (e.fn === "bun.exitCode") { validateBunSpawn(e, id => unions.get(id), err); break; }
         if (e.fn === "promise.view") { validatePromiseView(e, err); break; }
         if (e.fn === "fileHandle.read" || e.fn === "fileHandle.writeBytes" || e.fn === "fileHandle.writeStr") {
           const inner = e.type.kind === "promise" ? e.type.inner : undefined;

@@ -16,6 +16,8 @@ pub struct ChildData {
     spawn_errno: Option<i32>,
     pid: Option<u32>,
     exit_code: Option<f64>,
+    bun_exited: Option<JsPromise<f64>>,
+    bun_exit_code: Option<f64>,
     killed: bool,
     #[cfg(windows)]
     windows_exit_signal: Option<JsString>,
@@ -36,6 +38,7 @@ pub struct ChildData {
 
 impl Trace for ChildData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(promise) = &self.bun_exited { tracer.edge(promise); }
         for listener in &self.exit_listeners {
             (listener.trace)(tracer);
         }
@@ -67,6 +70,7 @@ impl ClearEdges for ChildData {
         self.error_listeners.clear();
         self.spawn_error = None;
         self.spawn_errno = None;
+        self.bun_exited = None;
         self.process = None;
         self.stdin = None;
         self.stdout = None;
@@ -258,6 +262,8 @@ fn child_register(
         spawn_errno,
         pid,
         exit_code: None,
+        bun_exited: None,
+        bun_exit_code: None,
         killed: false,
         #[cfg(windows)]
         windows_exit_signal: None,
@@ -725,9 +731,20 @@ fn child_poll(child: &JsChild) -> Option<ChildOutcome> {
             }
         };
         child.process = None;
+        if child.bun_exited.is_some() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+                child.bun_exit_code = status.code().map(f64::from)
+                    .or_else(|| status.signal().map(|signal| f64::from(128 + signal)));
+            }
+            #[cfg(not(unix))]
+            { child.bun_exit_code = status.code().map(f64::from); }
+        }
         let signal = child_exit_signal(&status);
         #[cfg(windows)]
         let signal = child.windows_exit_signal.take().or(signal);
+        if child.bun_exited.is_some() && signal.is_some() { child.killed = true; }
         child.exit_code = if signal.is_some() { None } else { status.code().map(f64::from) };
         let outcome = (child.exit_code, signal);
         if child.ipc.as_ref().is_some_and(child_ipc_open) {
@@ -782,6 +799,13 @@ fn children_dispatch_one() -> bool {
     });
     match outcome {
         ChildOutcome::Exit(code, signal) => {
+            if let Some(promise) = child.with(|child| child.bun_exited.clone()) {
+                if let Some(code) = child.with(|child| child.bun_exit_code) {
+                    let _ = promise_fulfill(&promise, code);
+                } else {
+                    let _ = promise_reject(&promise, caught_value(error_new("Error", string("Failed to wait for subprocess"))));
+                }
+            }
             drop(error_listeners);
             for listener in exit_listeners {
                 (listener.invoke)(code, signal.clone());

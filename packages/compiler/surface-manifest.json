@@ -2948,6 +2948,16 @@
       "note": "Rust native composed text read for one typed string path under --target bun; synchronous path validation, asynchronous UTF-8 read with BOM removal; stored BunFile handles and options are unsupported; corpus:rust-bun-file-text"
     },
     {
+      "id": "stdlib.Bun.spawn",
+      "kind": "stdlib",
+      "name": "Bun.spawn",
+      "status": "static",
+      "backends": [
+        "rust"
+      ],
+      "note": "Rust native argv subprocesses with inline ignore/inherit stdio, env and cwd; exited promise identity, pid and exitCode; Windows custom PATH selecting a different executable requires an absolute command to preserve argv[0]; pipe, callbacks, signals, timeout, object overload and other members are unsupported; corpus:rust-bun-spawn"
+    },
+    {
       "id": "stdlib.Bun.which",
       "kind": "stdlib",
       "name": "Bun.which",

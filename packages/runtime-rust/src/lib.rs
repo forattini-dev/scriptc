@@ -130,6 +130,7 @@ include!("child_stream.rs");
 include!("child_writer.rs");
 include!("child_ipc.rs");
 include!("child_process_async.rs");
+include!("bun_spawn.rs");
 include!("schema.rs");
 include!("json_schema.rs");
 include!("effect.rs");
@@ -180,6 +181,7 @@ mod tests {
     include!("bun_which.test.rs");
     include!("bun_file.test.rs");
     include!("bun_write.test.rs");
+    include!("bun_spawn.test.rs");
     include!("tests/target_config.rs");
     include!("tests/generators.rs");
     include!("tests/array_holes.rs");

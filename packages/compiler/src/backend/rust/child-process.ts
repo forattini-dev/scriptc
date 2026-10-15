@@ -305,6 +305,13 @@ export function emitRustChildProcessCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
+  if (expr.fn === "bun.spawn" && expr.args.length === 7) {
+    const args = expr.args.map(arg => context.emitExpr(arg));
+    return `runtime::bun_spawn(&(${args[0]}), ${args[1]}, ${args[2]}, ${args[3]}, ${args[4]}, &(${args[5]}), &(${args[6]}))`;
+  }
+  if (expr.fn === "bun.exited") return `runtime::bun_subprocess_exited(&(${context.emitExpr(expr.args[0]!)}))`;
+  if (expr.fn === "bun.pid") return `runtime::child_pid(&(${context.emitExpr(expr.args[0]!)})).expect("Bun.spawn returned a running process")`;
+  if (expr.fn === "bun.exitCode") return unionArgument(expr.type, `runtime::bun_subprocess_exit_code(&(${context.emitExpr(expr.args[0]!)}))`, "nullT", context, expr);
   if (expr.fn === "cp.execFile") return emitExecFile(expr, context);
   if (expr.fn === "cp.fork" && expr.args.length === 8) {
     return `runtime::child_fork(${context.emitExpr(expr.args[0]!)}, &(${context.emitExpr(expr.args[1]!)}), ${context.emitExpr(expr.args[2]!)}, ${context.emitExpr(expr.args[3]!)}, ${context.emitExpr(expr.args[4]!)}, ${context.emitExpr(expr.args[5]!)}, &(${context.emitExpr(expr.args[6]!)}), &(${context.emitExpr(expr.args[7]!)}))`;

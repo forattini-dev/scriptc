@@ -6,10 +6,13 @@ import { lowerUrlStaticCall } from "./lower-url.js";
 import { lowerBunWhichCall } from "./lower-bun-which.js";
 import { lowerBunFileTextCall } from "./lower-bun-file.js";
 import { lowerBunWriteCall } from "./lower-bun-write.js";
+import { lowerBunSpawnCall } from "./lower-bun-spawn.js";
 
 /** Native globals must be recognized before generic namespace dispatch,
  * while retaining declaration provenance for shadowed user bindings. */
 export function lowerNativeGlobalCall(lowerer: Lowerer, call: ts.CallExpression, callee: ts.Expression): IrExpr | null {
+  const spawn = lowerBunSpawnCall(lowerer, call, callee);
+  if (spawn) return spawn;
   const write = lowerBunWriteCall(lowerer, call, callee);
   if (write) return write;
   const file = lowerBunFileTextCall(lowerer, call, callee);

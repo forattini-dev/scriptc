@@ -1,5 +1,6 @@
 import { checkedStaleArm } from "./checked-stale-arm.js";
 import { lowerBunWhichValue } from "./lower-bun-which.js";
+import { lowerBunSubprocessProperty } from "./lower-bun-spawn.js";
 import { lowerNullishFunction } from "./lower-nullish-function.js";
 import { lowerMapEntriesSpread } from "./lower-collection-materialization.js";
 import { nullishConstantKind } from "./nullish-filter-proof.js";
@@ -2138,7 +2139,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
         lowerer.lowerErrorCodeProperty(expr) ??
         lowerer.lowerNumberStaticProperty(expr) ??
         lowerer.lowerMathProperty(expr) ??
-        lowerer.lowerIntrinsicProperty(expr) ??
+        lowerBunSubprocessProperty(lowerer, expr) ?? lowerer.lowerIntrinsicProperty(expr) ??
         // The _readableState/_writableState scalar READS (the suite's
         // asserts) — checked before the generic stream property surface:
         // the inner access maps no type of its own.

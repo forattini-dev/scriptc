@@ -11,6 +11,7 @@
  *  - mapKernelServiceKey, just before class-instance mapping: a service key class is the key handle, not a class. */
 import * as ts from "./ts7/adapter.js";
 import { mapBunWhichOptions } from "./bun-which-type.js";
+import { isBunSubprocess } from "./bun-subprocess-type.js";
 import { DYN, EFFECT_T, SQLITE_DB_T, SQLITE_STMT_T, type IrType } from "../ir/ir.js";
 import { mapType, type TypeMapperCtx } from "./type-mapper.js";
 import { decoratedSchemaRecord } from "./kernel-types.js";
@@ -35,6 +36,7 @@ const BUN_SQLITE_TYPES: ReadonlyMap<string, IrType> = new Map([
 
 /** The native type of a named kernel or platform type, or undefined when `widened` is not one. */
 export function mapKernelType(widened: ts.Type, ctx: TypeMapperCtx): IrType | undefined {
+  if (isBunSubprocess(widened, ctx)) return { kind: "child" };
   const which = mapBunWhichOptions(widened, ctx);
   if (which) return which;
   const checker = ctx.checker;
