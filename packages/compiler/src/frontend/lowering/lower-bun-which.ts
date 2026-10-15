@@ -3,27 +3,8 @@ import { BOOL, STRING, UNDEFINED_T, isUnitType, shapeHasAccessorSlots, typeKey, 
 import { varRef } from "../../ir/build.js";
 import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
-import { activeRuntimeTarget } from "../../compat/runtime-target.js";
+import { isBunGlobalMember } from "./bun-global.js";
 import { isSafeToDiscard } from "./expressions/evaluation-safety.js";
-
-function whichMember(L: Lowerer, node: ts.Expression): boolean {
-  while (ts.isParenthesizedExpression(node) || ts.isNonNullExpression(node)) node = node.expression;
-  if (!L.nativeDenseArrays || activeRuntimeTarget().family !== "bun" || !ts.isPropertyAccessExpression(node) ||
-      node.questionDotToken || node.name.text !== "which") return false;
-  if (L.isStdlibGlobal(node.expression, "Bun")) return true;
-  // bun-types' real global is `export import Bun = BunModule`, whose alias
-  // resolves to the ambient "bun" module rather than a namespace named Bun.
-  let receiver = node.expression;
-  while (ts.isParenthesizedExpression(receiver)) receiver = receiver.expression;
-  const name = ts.isIdentifier(receiver) ? receiver : ts.isPropertyAccessExpression(receiver) &&
-    !receiver.questionDotToken && L.isStdlibGlobal(receiver.expression, "globalThis") ? receiver.name : null;
-  if (!name || name.text !== "Bun") return false;
-  const symbol = L.checker.getSymbolAtLocation(name);
-  if (!symbol || !L.isStdlibSymbol(symbol)) return false;
-  const resolved = symbol.flags & ts.SymbolFlags.Alias ? L.checker.getAliasedSymbol(symbol) : symbol;
-  return L.isStdlibSymbol(resolved) && L.checker.declarationsOf(resolved).some(decl =>
-    ts.isModuleDeclaration(decl) && ts.isStringLiteral(decl.name) && decl.name.text === "bun");
-}
 
 /** Project typed options only after the command and complete options expression have evaluated. */
 function whichCall(L: Lowerer, command: IrExpr, options: IrExpr, result: IrType, blame: ts.Node): IrExpr {
@@ -62,7 +43,7 @@ function whichCall(L: Lowerer, command: IrExpr, options: IrExpr, result: IrType,
 }
 
 export function lowerBunWhichCall(L: Lowerer, call: ts.CallExpression, callee: ts.Expression): IrExpr | null {
-  if (!whichMember(L, callee)) return null;
+  if (!isBunGlobalMember(L, callee, "which")) return null;
   if (call.arguments.length < 1 || call.arguments.length > 2 || call.arguments.some(ts.isSpreadElement)) L.noLowering("Bun.which call arguments", call);
   const loc = locOf(call), result = L.irTypeOf(call);
   const commandNode = call.arguments[0];
@@ -82,7 +63,7 @@ export function lowerBunWhichCall(L: Lowerer, call: ts.CallExpression, callee: t
 }
 
 export function lowerBunWhichValue(L: Lowerer, expr: ts.Expression): IrExpr | null {
-  if (!whichMember(L, expr)) return null;
+  if (!isBunGlobalMember(L, expr, "which")) return null;
   const loc: SrcLoc = locOf(expr), type = L.irTypeOf(expr);
   if (type.kind !== "func" || type.params.length !== 2 || type.params[0]?.kind !== "string" || !type.params[1]) L.noLowering("Bun.which function signature", expr);
   const key = `bun.which.value:${typeKey(type)}`;

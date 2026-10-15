@@ -93,6 +93,8 @@ export const REGEX_INTRINSIC_SIGS: Record<
  * order and ignored by the runtime. A `null` slot is program-dependent (a builtin-error receiver) — the libCall case checks it specially, like process.envGet's result. Exported for lib-boundary.ts. */
 export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result: IrType }> = {
   "bun.which": BUN_WHICH_SIG,
+  "bun.filePath": { argTypes: [STRING], result: STRING },
+  "bun.fileText": { argTypes: [STRING], result: { kind: "promise", inner: STRING } },
   ...NUMERIC_COERCION_SIGS, ...JSON_REPLACER_SIGS,
   ...FS_WRITE_LIB_SIGS,
   "fetch.start": { argTypes: [STRING, DYN], result: { kind: "promise", inner: DYN } },

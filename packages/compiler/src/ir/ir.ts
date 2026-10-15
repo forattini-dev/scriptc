@@ -1904,6 +1904,8 @@ export type IrRegexIntrinsicMethod =
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
   | "bun.which"
+  | "bun.filePath"
+  | "bun.fileText"
   | IrBigIntLibFn | IrJsonReplacerFn | IrSqliteLibFn | IrEffectContextLibFn
   /** Native local import: queued loader, fresh promise, cached evaluation. */
   | "module.import"
@@ -7568,6 +7570,7 @@ export function moduleLibAsyncSurface(mod: IrModule): { surface: string; loc: Sr
  * stated. */
 export const LIB_NONDETERMINISTIC_PREFIXES: readonly [string, string][] = [
   ["bun.which", "executable search (filesystem and environment)"],
+  ["bun.fileText", "file contents"],
   ["math.random", "Math.random"],
   ["crypto.random", "crypto randomness"],
   ["date.", "the live clock (Date)"],
@@ -7639,6 +7642,7 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "bun.which",
+  "bun.filePath",
   "process.exit", "process.exitCodeSet", "process.setExitCode",
   ...BIGINT_MAY_THROW, "json.stringifyReplacer",
   "bigint.parse",

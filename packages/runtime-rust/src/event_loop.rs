@@ -13,6 +13,7 @@ pub fn finish() {
     readline_finish();
     stdin_finish();
     fs_renames_finish();
+    bun_files_finish();
     fs_watchers_finish();
     children_finish();
     child_writers_finish();
@@ -566,6 +567,9 @@ fn run_event_loop_with_first_checkpoint(
             }
         }
 
+        if bun_files_dispatch_one() {
+            continue;
+        }
         if fs_renames_dispatch_one() {
             continue;
         }
@@ -597,6 +601,7 @@ fn run_event_loop_with_first_checkpoint(
             .with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
             || IMMEDIATE_TASKS.with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
             || fs_renames_pending()
+            || bun_files_pending()
             || fs_watchers_pending()
             || stdin_pending()
             || children_referenced_pending()
@@ -683,6 +688,13 @@ fn run_event_loop_with_first_checkpoint(
                 .min()
         });
         let next_due = next_due.into_iter().chain(process_signal_deadline()).min();
+        if bun_files_pending() {
+            // Other IO sources retain a chance to dispatch while a file read
+            // runs; timers above have already received their normal turn.
+            let wait = event_loop_wait_timeout(next_due, true).unwrap_or(std::time::Duration::from_millis(1));
+            bun_files_wait(wait);
+            continue;
+        }
         if ffi_foreign_pending() {
             let wait = event_loop_wait_timeout(
                 next_due,

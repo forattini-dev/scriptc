@@ -2938,6 +2938,16 @@
       ]
     },
     {
+      "id": "stdlib.Bun.file.text",
+      "kind": "stdlib",
+      "name": "Bun.file(path).text()",
+      "status": "static",
+      "backends": [
+        "rust"
+      ],
+      "note": "Rust native composed text read for one typed string path under --target bun; synchronous path validation, asynchronous UTF-8 read with BOM removal; stored BunFile handles and options are unsupported; corpus:rust-bun-file-text"
+    },
+    {
       "id": "stdlib.Bun.which",
       "kind": "stdlib",
       "name": "Bun.which",

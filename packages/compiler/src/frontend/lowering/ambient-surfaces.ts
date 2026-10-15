@@ -21,6 +21,10 @@ export interface AmbientSurfaceRow {
 
 export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
   {
+    id: "stdlib.Bun.file.text", kind: "stdlib", name: "Bun.file(path).text()", fns: ["bun.filePath", "bun.fileText"],
+    note: "Rust native composed text read for one typed string path under --target bun; synchronous path validation, asynchronous UTF-8 read with BOM removal; stored BunFile handles and options are unsupported; corpus:rust-bun-file-text",
+  },
+  {
     id: "stdlib.Bun.which", kind: "stdlib", name: "Bun.which", fns: ["bun.which"],
     note: "Rust native executable search for typed string commands and PATH/cwd options under --target bun; returns string | null; corpus:rust-bun-which",
   },
