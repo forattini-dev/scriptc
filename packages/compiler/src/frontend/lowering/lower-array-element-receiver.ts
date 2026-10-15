@@ -3,6 +3,7 @@ import { BOOL, STRING, UNDEFINED_T, isUnitType, typeEquals, type IrExpr } from "
 import { numLit, strLit, varRef } from "../../ir/build.js";
 import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
+import { nativeRecordOverflowRead } from "./lower-native-value-property.js";
 
 /** An unchecked outer array slot or optional string binding stays optional
  * until both bracket operands have run. Reuse the ordinary typed read with
@@ -16,7 +17,8 @@ export function lowerArrayElementReceiver(L: Lowerer, expr: ts.ElementAccessExpr
   if (!expected || !["array", "record", "bytes", "string"].includes(expected.kind)) return null;
   if (!L.nativeDenseArrays && expected.kind !== "string") return null;
   const binding = expected.kind === "string" ? L.runtimeOptionalIdentifierValue(origin) : null;
-  if (!binding && (!ts.isElementAccessExpression(origin) || L.mapTypeOf(L.typeOf(origin.expression))?.kind !== "array")) return null;
+  if (!binding && !nativeRecordOverflowRead(L, origin) &&
+      (!ts.isElementAccessExpression(origin) || L.mapTypeOf(L.typeOf(origin.expression))?.kind !== "array")) return null;
 
   const source = binding?.value ?? L.runtimeOptionalSourceValue(origin, L.lowerExpr(expr.expression));
   if (source?.type.kind !== "union") return null;

@@ -12,6 +12,7 @@ import { ParamShape, FnSig } from "./lower-calls.js";
 import { varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf, nodeThrowExpr } from "./lowerer.js";
+import { nativeRecordOverflowRead } from "./lower-native-value-property.js";
 
 export function runtimeOptionalRootOf(lowerer: Lowerer, local: IrLocal): IrLocal {
   return lowerer.runtimeOptionalRoots.get(local) ?? local;
@@ -66,13 +67,13 @@ export function runtimeOptionalIdentifierValue(lowerer: Lowerer, node: ts.Expres
 
 /** Recover the original optional union when a checked single-arm helper
  * was installed before a strict property consumer could name its member.
- * Recovery is limited to array element reads and storage roots marked by
+ * Recovery is limited to array/scalar dictionary reads and storage roots marked by
  * the optional-read analysis, so ordinary assertions keep their generic
  * checked-narrow behavior. */
 export function runtimeOptionalSourceValue(lowerer: Lowerer, node: ts.Expression, value: IrExpr): IrExpr | null {
   let origin: ts.Expression = node;
   while (ts.isParenthesizedExpression(origin)) origin = origin.expression;
-  let optionalOrigin = ts.isElementAccessExpression(origin);
+  let optionalOrigin = ts.isElementAccessExpression(origin) || nativeRecordOverflowRead(lowerer, origin);
   if (ts.isIdentifier(origin)) {
     const local = lowerer.resolveLocal(origin);
     const root = local ? lowerer.runtimeOptionalRootOf(local) : null;
@@ -323,7 +324,7 @@ export function analyzeRuntimeOptionalArrayReads(lowerer: Lowerer, parts: FilePa
     // function/global ABI to `T | undefined`.
     if (explicitlyNonNull(node)) return false;
     const e = peel(node);
-    if (isArrayRead(e)) return true;
+    if (isArrayRead(e) || nativeRecordOverflowRead(lowerer, e)) return true;
     if (ts.isCallExpression(e) && lowerer.runtimeOptionalReduceTypes.has(e)) return true;
     if (
       ts.isCallExpression(e) &&

@@ -13,6 +13,7 @@ import { lowerDynamicObjectRest } from "./lower-dynamic-object-rest.js";
 import { nativeProxyBindingType } from "./lower-native-proxy.js";
 import { lowerOpenRecordDelete } from "./lower-open-record.js";
 import { lowerArrayClearAssignment } from "./lower-native-containers.js";
+import { isNativeRecordHandle } from "./lower-native-value-property.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Statement lowering: the statement dispatch (lowerStmt), variable
  * declarations including destructuring patterns, scoped blocks, control
@@ -5034,6 +5035,14 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               recvNode = recvNode.expression;
             }
             const recv = probeLower(lowerer, recvNode);
+            if (recv && isNativeRecordHandle(lowerer, recv, recvNode)) {
+              const loc = locOf(expr);
+              const value = lowerer.jsvalIn(lowerer.lowerExpr(expr.right), expr.right);
+              return {
+                kind: "exprStmt",
+                expr: { kind: "jsOp", op: "setProp", name: expr.left.name.text, args: [recv, value], type: VOID, loc }, loc,
+              };
+            }
             if (recv && (recv.type.kind === "dyn" ||
                 (lowerer.nativeDenseArrays && recv.type.kind === "array" && recv.type.elem.kind === "dyn"))) {
               const loc = locOf(expr);

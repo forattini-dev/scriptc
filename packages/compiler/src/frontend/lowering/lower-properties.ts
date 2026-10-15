@@ -1,5 +1,6 @@
 import { lowerTupleLength } from "./lower-native-tuple.js";
 import { lowerOptionalRecordField } from "./lower-optional-record-field.js";
+import { nativeRecordOverflowRead } from "./lower-native-value-property.js";
 import { InternalCompilerError } from "../../errors.js";
 import { DYN, JSVAL, STRING, UNDEFINED_T, VOID, canExitIslandToType, isUnitType, type IrExpr, type IrStmt, type IrType, type SrcLoc, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/ir.js";
 import { locOf } from "../program.js";
@@ -723,7 +724,7 @@ export type FieldTarget =
     // noUncheckedIndexedAccess (mirroring lowerRecordKeyRead).
     if (target.container === "recordOvf") {
       let t: IrType = target.fieldType;
-      if (L.program.getCompilerOptions().noUncheckedIndexedAccess) {
+      if (L.program.getCompilerOptions().noUncheckedIndexedAccess || nativeRecordOverflowRead(L, blame)) {
         const armed = L.withUndefinedArmOf(t);
         if (!armed) L.badType(blame, L.typeOf(blame));
         t = armed;

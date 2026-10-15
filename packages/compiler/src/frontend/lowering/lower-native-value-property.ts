@@ -1,7 +1,29 @@
-import { F64, STRING, type IrExpr } from "../../ir/ir.js";
+import { F64, JSVAL, STRING, type IrExpr } from "../../ir/ir.js";
+import { nativeRecordCheckSupported } from "../../ir/native-record.js";
 import { locOf } from "../program.js";
-import type * as ts from "../ts7/adapter.js";
+import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+
+/** A scalar index signature describes values, but does not prove key presence. */
+export function nativeRecordOverflowRead(L: Lowerer, node: ts.Node): boolean {
+  if (!L.nativeDenseArrays || L.dynamic || !ts.isPropertyAccessExpression(node)) return false;
+  const parent = node.parent;
+  if (parent && (ts.isPostfixUnaryExpression(parent) ||
+      ts.isPrefixUnaryExpression(parent) && (parent.operator === ts.SyntaxKind.PlusPlusToken || parent.operator === ts.SyntaxKind.MinusMinusToken) ||
+      ts.isBinaryExpression(parent) && parent.left === node &&
+        parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment)) return false;
+  const owner = L.mapTypeOf(L.typeOf(node.expression));
+  const shape = owner?.kind === "record" ? L.shapes.get(owner.shapeId) : undefined;
+  return !!shape?.indexValue && ["string", "f64", "bool"].includes(shape.indexValue.kind) &&
+    !shape.fields.some(field => field.name === node.name.text);
+}
+
+/** A native namespace/function can retain a record as a shared handle. */
+export function isNativeRecordHandle(L: Lowerer, receiver: IrExpr, node: ts.Expression): boolean {
+  if (!L.nativeDenseArrays || L.dynamic || receiver.type.kind !== "jsval") return false;
+  const declared = L.mapTypeOf(L.typeOf(node));
+  return declared?.kind === "record" && nativeRecordCheckSupported(declared, id => L.shapes.get(id), id => L.unions.get(id));
+}
 
 /** Read from the native representation when the checker retains a wider
  * spelling. Implicit JS specialization can produce string[] locals from
@@ -12,6 +34,22 @@ export function lowerNativeValueProperty(
 ): IrExpr | null {
   const loc = locOf(expression);
   const name = expression.name.text;
+  if (isNativeRecordHandle(L, receiver, expression.expression)) {
+    const read: IrExpr = { kind: "jsOp", op: "getProp", name, args: [receiver], type: JSVAL, loc };
+    const declared = L.mapTypeOf(L.typeOf(expression));
+    // Scalars can leave by value; nested records retain their shared handle.
+    if (!expression.questionDotToken && declared &&
+        (declared.kind === "string" || declared.kind === "f64" || declared.kind === "bool")) {
+      const owner = L.mapTypeOf(L.typeOf(expression.expression));
+      const shape = owner?.kind === "record" ? L.shapes.get(owner.shapeId) : undefined;
+      // An index signature does not prove that this property exists, even
+      // when noUncheckedIndexedAccess is disabled in the source project.
+      const overflow = shape?.indexValue && !shape.fields.some(field => field.name === name);
+      if (overflow) return { kind: "jsExit", value: read, type: L.withUndefinedArmOf(declared)!, loc };
+      return { kind: "jsExit", value: read, type: declared, loc };
+    }
+    return read;
+  }
   // Per-call factory specialization can refine a checker-any return to
   // a native class value. Preserve evaluation of the computed receiver.
   if (receiver.type.kind === "classval" && name === "name") {

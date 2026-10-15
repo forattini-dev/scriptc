@@ -1,0 +1,9 @@
+export const state = { nested: { count: 1 }, label: "shared" };
+export const numbers: Record<string, number> = { present: 4 };
+export const texts: Record<string, string> = { present: "ok" };
+export const flags: Record<string, boolean> = { present: false };
+export let order = "";
+export function get(): typeof state { order += "receiver,"; return state; }
+export function rhs(): number { order += "rhs,"; return 7; }
+export function throwingRhs(): number { order += "throw,"; throw new Error("rhs failed"); }
+export function reset(): void { order = ""; }

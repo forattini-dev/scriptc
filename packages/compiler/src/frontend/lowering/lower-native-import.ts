@@ -124,7 +124,11 @@ function nativeExportValue(L: Lowerer, name: string, symbol: ts.Symbol, site: ts
     const resultSafe = sig.returnType.kind === "promise"
       ? identitySafe(L, sig.returnType.inner)
       : identitySafe(L, sig.returnType);
-    if (!sig.params.every(p => p.mode === "required" && identitySafe(L, p.type)) || !resultSafe) {
+    // A '?' parameter already carries undefined in its ABI; the native call
+    // thunk supplies it for missing arguments. Defaults need separate arity
+    // metadata (Function.length) and must not enter through this admission.
+    if (!sig.params.every(p => (p.mode === "required" ||
+        p.mode === "omittable" && p.bodyType === undefined && p.callDefault === undefined) && identitySafe(L, p.type)) || !resultSafe) {
       refuse("has a function signature whose argument or result identity requires a native reference view");
     }
     L.noteEdge(sig.name);

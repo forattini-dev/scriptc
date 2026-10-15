@@ -18,7 +18,7 @@ import { lowerNativeRelational, relationalOperator } from "./lower-relational.js
 import { dynamicBindingType } from "./dynamic-binding-type.js";
 import { lowerDynamicKeyRead, lowerNativeSymbolKeyRead } from "./lower-dynamic-key-read.js";
 import { resolvedReturnAssertion } from "./lower-return-assertion.js";
-import { lowerNativeValueProperty } from "./lower-native-value-property.js";
+import { lowerNativeValueProperty, nativeRecordOverflowRead } from "./lower-native-value-property.js";
 import { isRegexCaptureRead, narrowRegexCaptureReceiver, regexCaptureConditionalType } from "./lower-regex-captures.js";
 import { numericReadObservesAbsence, lowerArrayElementReceiver } from "./lower-dense-array-reads.js"; import { runtimeOptionalFalseIds } from "./lower-runtime-optional-branches.js";
 import { regexCaptureArray } from "../../ir/regex-captures.js";
@@ -2850,6 +2850,8 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       return expr;
     }
     if (expr.type.kind !== "union") return expr;
+    // An index signature's scalar checker type is not a key-presence proof.
+    if (nativeRecordOverflowRead(lowerer, node)) return expr;
     if (numericReadObservesAbsence(node) && lowerer.stripUndefinedArm(expr.type).kind === "f64" && lowerer.armTag(expr.type.unionId, UNDEFINED_T) >= 0) return expr;
     if (isRegexCaptureRead(lowerer, node)) return narrowRegexCaptureReceiver(lowerer, expr, node);
     const narrowedTs = lowerer.typeOf(node);

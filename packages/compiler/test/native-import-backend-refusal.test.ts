@@ -63,7 +63,8 @@ test.each(["c", "llvm"] as const)("%s ignores native imports confined to an unre
 test("Rust builds and runs a native import with the engine prohibited", async () => {
   await fixture(async (entry, directory) => {
     const outDir = join(directory, "out");
-    const result = await compile(entry, { backend: "rust", allowEngine: false, optimization: "dev", outDir, outPath: join(outDir, "program") });
+    const outPath = join(outDir, process.platform === "win32" ? "program.exe" : "program");
+    const result = await compile(entry, { backend: "rust", allowEngine: false, optimization: "dev", outDir, outPath });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.backend).toBe("rust");
