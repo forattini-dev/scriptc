@@ -36,6 +36,7 @@ export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordSh
     }
     if (type.kind === "union") { for (const arm of unions.get(type.unionId)?.arms ?? []) mark(arm); }
     if (type.kind === "promise") mark(type.inner);
+    if (type.kind === "array") mark(type.elem);
     if (type.kind === "func") { type.params.forEach(mark); mark(type.ret); }
     if (type.kind !== "record") return;
     const shape = records.get(type.shapeId);

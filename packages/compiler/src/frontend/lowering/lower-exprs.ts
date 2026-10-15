@@ -4662,6 +4662,10 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
           (ts.isConditionalExpression(srcNode)
             ? lowerTernary(lowerer, srcNode, type)
             : lowerer.lowerExpr(el.expression));
+        // Optional storage stays tagged on ordinary reads. A spread is a
+        // consuming operation: honor a current checker guard (and the stale
+        // narrowing check) before requiring its array payload.
+        if (src.type.kind === "union") src = lowerer.maybeNarrow(src, el.expression);
         // `[...someSet]`: a same-element Set drains into a fresh array in
         // insertion order (setIntrinsic toArray); the spread machinery
         // then copies like any array source.

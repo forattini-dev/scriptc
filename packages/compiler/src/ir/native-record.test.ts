@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { nativeRecordCheckSupported, nativeRecordSpreadSupported } from "./native-record.js";
+import { nativeArrayCheckSupported, nativeArrayViewSupported, nativeRecordCheckSupported, nativeRecordSpreadSupported } from "./native-record.js";
 import { BOOL, DYN, F64, STRING, VOID, type IrRecordShape, type IrType } from "./ir.js";
 
 const admitted = (member: IrType): boolean => nativeRecordCheckSupported(
@@ -130,4 +130,23 @@ test("tagged spread sources need no discriminant, while checking an untyped unio
   for (const arm of [{ kind: "record", shapeId: "accessor" }, { kind: "array", elem: F64 }, { kind: "dyn" }] as IrType[]) {
     expect(nativeRecordSpreadSupported(source, getRecord, id => ({ id, arms: [...getUnion(id).arms, arm] }))).toBe(false);
   }
+});
+
+test("open records retain arrays of acyclic shared records, including optional arrays", () => {
+  const row: IrType = { kind: "record", shapeId: "row" };
+  const array: IrType = { kind: "array", elem: row };
+  const records = new Map<string, IrRecordShape>([
+    ["row", { id: "row", fields: [{ name: "label", type: STRING }], indexValue: DYN }],
+    ["config", { id: "config", fields: [{ name: "rows", type: { kind: "union", unionId: "rows" } }], indexValue: DYN }],
+  ]);
+  const getRecord = (id: string) => records.get(id);
+  const getUnion = (id: string) => ({ id, arms: [array, { kind: "undefinedT" }, { kind: "nullT" }] as IrType[] });
+  expect(nativeArrayViewSupported(array, getRecord, getUnion)).toBe(true);
+  expect(nativeArrayCheckSupported(array, getRecord, getUnion)).toBe(true);
+  expect(nativeRecordCheckSupported({ kind: "record", shapeId: "config" }, getRecord, getUnion)).toBe(true);
+  records.set("row", { id: "row", fields: [{ name: "children", type: array }] });
+  expect(nativeArrayViewSupported(array, getRecord, getUnion)).toBe(false);
+  expect(nativeRecordCheckSupported({ kind: "record", shapeId: "config" }, getRecord, getUnion)).toBe(false);
+  records.set("row", { id: "row", fields: [{ name: "%get:label", type: { kind: "func", params: [], ret: STRING } }] });
+  expect(nativeArrayCheckSupported(array, getRecord, getUnion)).toBe(false);
 });

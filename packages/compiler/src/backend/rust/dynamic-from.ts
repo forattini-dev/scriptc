@@ -113,7 +113,7 @@ export class RustDynamicFromEmitter {
         return `${name}::${this.context.dynFunctionVariant(shape)}(${value}, ${rustJsString(functionName, text => this.context.rustString(text))}, runtime::map_new())`;
       }
       case "array": {
-        if (nativeArrayViewSupported(type) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayFrom(type, value, name,
+        if (nativeArrayViewSupported(type, id => this.context.records.get(id), id => this.context.union(id, loc)) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayFrom(type, value, name,
           (element, item) => this.emit(element, item, loc), (element, item) => this.check(element, item, loc));
         const source = this.context.nextTemporary();
         const output = this.context.nextTemporary();

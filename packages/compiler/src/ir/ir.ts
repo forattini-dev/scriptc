@@ -6271,7 +6271,7 @@ export function canDynCheckTo(
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
 ): boolean {
-  if (isJsonSafeType(t, getRecord, getUnion) || nativeArrayCheckSupported(t, getRecord) || nativeRecordCheckSupported(t, getRecord, getUnion) || nativeTupleCheckSupported(t, getRecord)) return true;
+  if (isJsonSafeType(t, getRecord, getUnion) || nativeArrayCheckSupported(t, getRecord, getUnion) || nativeRecordCheckSupported(t, getRecord, getUnion) || nativeTupleCheckSupported(t, getRecord)) return true;
   if ((t.kind === "map" && t.key.kind === "dyn" && t.value.kind === "dyn") ||
       (t.kind === "set" && t.elem.kind === "dyn") || t.kind === "searchParams") return true;
   if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;

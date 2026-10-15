@@ -1091,7 +1091,9 @@ export class RustDynamicEmitter {
         }
         const records = union.arms.flatMap((arm, tag) => arm.kind === "record" ? [{ arm, tag }] : []);
         const shared = records[0];
-        if (records.length === 1 && shared && isSharedRecord(this.context.records.get(shared.arm.shapeId)) &&
+        const sharedRecord = shared && (isSharedRecord(this.context.records.get(shared.arm.shapeId)) ||
+          nativeIndexedRecordValue(shared.arm, id => this.context.records.get(id), id => this.context.union(id, loc)) !== undefined);
+        if (records.length === 1 && shared && sharedRecord &&
             union.arms.every((arm, tag) => tag === shared.tag || this.context.isUnit(arm))) {
           const name = this.context.unionName(union.id);
           const units = union.arms.flatMap((arm, tag) => {
@@ -1121,7 +1123,7 @@ export class RustDynamicEmitter {
       }
       case "array": {
         const name = this.context.dynTypeName();
-        if (nativeArrayCheckSupported(type, id => this.context.records.get(id)) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayCheck(type, value, name,
+        if (nativeArrayCheckSupported(type, id => this.context.records.get(id), id => this.context.union(id, loc)) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayCheck(type, value, name,
           (element, item) => this.emitDynFromValue(element, item, loc), (element, item, itemPath) => this.emitDynCheckValue(element, item, loc, itemPath), path);
         if (type.elem.kind === "dyn" || type.elem.kind === "jsval") {
           return `match ${value} { ${name}::Array(array) => array, value => sc_dyn_check_fail_at("array", &value, ${path}) }`;

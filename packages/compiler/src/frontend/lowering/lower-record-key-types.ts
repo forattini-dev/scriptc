@@ -10,6 +10,7 @@ export function recordKeyResultOk(
 ): boolean {
   const surfaces = (candidate: IrType): boolean =>
     typeEquals(candidate, type) ||
+    (candidate.kind === "union" && (L.unions.get(candidate.unionId)?.arms.every(surfaces) ?? false)) ||
     (type.kind === "union" && L.armTag(type.unionId, candidate) >= 0) ||
     (type.kind === "dyn" && L.dynConvertible(candidate));
   if (!shape.fields.every((field) => surfaces(field.type))) return false;

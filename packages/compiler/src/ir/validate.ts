@@ -5212,7 +5212,7 @@ function validateFunction(
           (e.type.kind === "map" && e.type.key.kind === "dyn" && e.type.value.kind === "dyn") ||
           (e.type.kind === "set" && e.type.elem.kind === "dyn");
         const nativeContainerOk =
-          nativeArrayCheckSupported(e.type, (id) => records.get(id)) ||
+          nativeArrayCheckSupported(e.type, (id) => records.get(id), (id) => unions.get(id)) ||
           nativeRecordCheckSupported(e.type, (id) => records.get(id), (id) => unions.get(id)) ||
           nativeTupleCheckSupported(e.type, (id) => records.get(id));
         // ADAPTABLE function targets unwrap or wrap the checked-dynamic tree's function

@@ -6,7 +6,7 @@ import type { IrRecordShape, IrType, IrUnionDef } from "./ir.js";
  * need no composite copy at the dynamic boundary. Arrays and scalar indexed
  * records have shared views, including optional acyclic nested records.
  * Byte views and BigInt retain their native references. Recursive layouts
- * and record arrays remain fenced. */
+ * remain fenced. Arrays of acyclic shared records retain mapped views. */
 export function nativeRecordShapeSupported(
   shape: IrRecordShape, unions: Pick<ReadonlyMap<string, IrUnionDef>, "get">,
   getRecord: (id: string) => IrRecordShape | undefined = () => undefined,
@@ -23,8 +23,9 @@ export function nativeRecordShapeSupported(
     const optionalArray = (type: IrType): boolean => {
       const arms = type.kind === "union" ? unions.get(type.unionId)?.arms : undefined;
       return arms !== undefined && arms.filter(arm => arm.kind === "array").length === 1 &&
-        arms.every(arm => arm.kind === "undefinedT" || arm.kind === "nullT" || nativeArrayViewSupported(arm));
+        arms.every(arm => arm.kind === "undefinedT" || arm.kind === "nullT" || array(arm));
     };
+    const array = (type: IrType): boolean => nativeArrayViewSupported(type, getRecord, id => unions.get(id), visiting);
     const record = (type: IrType): boolean => {
       const nested = type.kind === "record" ? getRecord(type.shapeId) : undefined;
       return nested !== undefined && nativeRecordShapeSupported(nested, unions, getRecord, visiting);
@@ -38,7 +39,7 @@ export function nativeRecordShapeSupported(
     };
     const methodValue = (type: IrType): boolean => type.kind === "union"
       ? scalar(type) || optionalArray(type) || optionalRecord(type)
-      : record(type) || nativeArrayViewSupported(type) ||
+      : record(type) || array(type) ||
         (type.kind === "bytes" && type.elem === "u8") || ["effect", "date", "bigint", "symbol", "f64", "bool", "string", "dyn"].includes(type.kind);
     const method = (type: IrType): boolean => type.kind === "func" && type.rest !== true &&
       type.params.every(methodValue) && (type.ret.kind === "void" || methodValue(type.ret));
@@ -99,19 +100,27 @@ export function nativeTupleCheckSupported(
   );
 }
 
-/** Arrays of directly checkable heterogeneous tuples retain the dynamic
- * outer storage and validate each tuple lazily through a mapped view. */
+/** Native array views retain their storage and check each element on reads.
+ * Heterogeneous scalar tuples additionally admit direct checked extraction. */
 export function nativeArrayCheckSupported(
   type: IrType,
   getRecord: (id: string) => IrRecordShape | undefined,
+  getUnion: (id: string) => IrUnionDef | undefined = () => undefined,
 ): boolean {
   return type.kind === "array" &&
-    (nativeArrayViewSupported(type) || nativeTupleCheckSupported(type.elem, getRecord));
+    (nativeArrayViewSupported(type, getRecord, getUnion) || nativeTupleCheckSupported(type.elem, getRecord));
 }
 
-/** Native array views can check and box each element without composite copies. */
-export function nativeArrayViewSupported(type: IrType): boolean {
-  return type.kind === "array" && (nativeArrayViewSupported(type.elem) ||
+/** Native array views check and box scalars or acyclic shared records without copies. */
+export function nativeArrayViewSupported(
+  type: IrType,
+  getRecord: (id: string) => IrRecordShape | undefined = () => undefined,
+  getUnion: (id: string) => IrUnionDef | undefined = () => undefined,
+  visiting: Set<string> = new Set(),
+): boolean {
+  const shape = type.kind === "array" && type.elem.kind === "record" ? getRecord(type.elem.shapeId) : undefined;
+  return type.kind === "array" && (nativeArrayViewSupported(type.elem, getRecord, getUnion, visiting) ||
+    (shape !== undefined && !shape.tuple && nativeRecordShapeSupported(shape, { get: getUnion }, getRecord, visiting)) ||
     ["effect", "date", "f64", "bool", "string", "dyn"].includes(type.elem.kind));
 }
 
