@@ -1,4 +1,6 @@
 import type { RustClosureShape } from "./model.js";
+import type { IrFunction, IrModule } from "../../ir/ir.js";
+import { dynamicFunctionLengths } from "./dynamic-function-model.js";
 
 export interface RustDynamicInvokeContext {
   hasEmbeddedModules(): boolean;
@@ -6,6 +8,8 @@ export interface RustDynamicInvokeContext {
   pushIndent(): void;
   popIndent(): void;
   closureName(shape: RustClosureShape): string;
+  closureVariant(target: IrFunction): string;
+  module(): IrModule;
   dynFunctionVariant(shape: RustClosureShape): string;
   dynTypeName(): string;
 }
@@ -351,21 +355,37 @@ class RustDynamicInvokeEmitter {
   }
 
   private emitFunctionCacheHelpers(): void {
+    const lengths = dynamicFunctionLengths(this.context.module());
     this.context.line("std::thread_local! {");
     this.context.pushIndent();
-    this.context.line(`static SC_DYN_FUNCTION_CACHE: std::cell::RefCell<Vec<(usize, ${this.dyn})>> = const { std::cell::RefCell::new(Vec::new()) };`);
+    this.context.line(`static SC_DYN_FUNCTION_CACHE: std::cell::RefCell<Vec<(usize, usize, ${this.dyn})>> = const { std::cell::RefCell::new(Vec::new()) };`);
     this.context.popIndent();
     this.context.line("}");
     for (const shape of this.boxedShapes) {
       const variant = this.context.dynFunctionVariant(shape);
       this.open(`fn sc_dyn_box_function_${shape.index}(value: runtime::Gc<${this.context.closureName(shape)}>, function_name: runtime::JsString) -> ${this.dyn} {`);
       this.context.line("let identity = value.identity();");
-      this.context.line("if let Some(cached) = SC_DYN_FUNCTION_CACHE.with(|cache| cache.borrow().iter().find(|(candidate, _)| *candidate == identity).map(|(_, value)| value.clone())) { return cached; }");
+      this.context.line("if let Some(cached) = SC_DYN_FUNCTION_CACHE.with(|cache| cache.borrow().iter().find(|(candidate, _, _)| *candidate == identity).map(|(_, _, value)| value.clone())) { return cached; }");
+      const lengthCases = shape.targets.filter(target => lengths.has(target.name)).map(target =>
+        `${this.context.closureName(shape)}::${this.context.closureVariant(target)}${target.captures?.length ? " { .. }" : ""} => ${lengths.get(target.name)},`);
+      const length = lengthCases.length === 0 ? String(shape.type.params.length) : "function_length";
+      if (lengthCases.length > 0) this.context.line(`let function_length = value.with(|closure| match closure { ${lengthCases.join(" ")} _ => ${shape.type.params.length}, });`);
       this.context.line(`let boxed = ${this.dyn}::${variant}(value, function_name, runtime::map_new());`);
-      this.context.line("SC_DYN_FUNCTION_CACHE.with(|cache| cache.borrow_mut().push((identity, boxed.clone())));");
+      this.context.line(`SC_DYN_FUNCTION_CACHE.with(|cache| cache.borrow_mut().push((identity, ${length}, boxed.clone())));`);
       this.context.line("boxed");
       this.close("}");
     }
+    this.open(`fn sc_dyn_function_with_length(value: ${this.dyn}, length: usize) -> ${this.dyn} {`);
+    this.open("let identity = match &value {");
+    for (const shape of this.boxedShapes) this.context.line(`${this.dyn}::${this.context.dynFunctionVariant(shape)}(closure, _, _) => closure.identity(),`);
+    this.context.line('_ => unreachable!("scriptc: function length on non-function"),');
+    this.close("};");
+    this.context.line("SC_DYN_FUNCTION_CACHE.with(|cache| { if let Some((_, stored, _)) = cache.borrow_mut().iter_mut().find(|(candidate, _, _)| *candidate == identity) { *stored = length; } });");
+    this.context.line("value");
+    this.close("}");
+    this.open("fn sc_dyn_function_length(identity: usize, fallback: usize) -> usize {");
+    this.context.line("SC_DYN_FUNCTION_CACHE.with(|cache| cache.borrow().iter().find(|(candidate, _, _)| *candidate == identity).map_or(fallback, |(_, length, _)| *length))");
+    this.close("}");
     this.open("fn sc_dyn_function_cache_clear() {");
     this.context.line("SC_DYN_FUNCTION_CACHE.with(|cache| cache.borrow_mut().clear());");
     this.close("}");

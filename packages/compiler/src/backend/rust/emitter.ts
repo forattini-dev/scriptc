@@ -141,6 +141,7 @@ class RustEmitter {
     popIndent: () => { this.indent -= 1; },
     nextTemporary: () => `sc_rt_${this.temporary++}`,
     closureName: (shape) => this.closureName(shape),
+    closureVariant: (target) => this.closureVariant(target),
     closureShapeForType: (type, loc) => this.closureShapeForType(type, loc),
     dynFunctionCheckName: (shape) => this.dynFunctionCheckName(shape),
     dynFunctionVariant: (shape) => this.dynFunctionVariant(shape),
@@ -643,6 +644,7 @@ class RustEmitter {
       }
       if (value === null || typeof value !== "object") return;
       const node = value as Record<string, unknown>;
+      if (node.kind === "dynFrom" && node.fnLength !== undefined) this.usesDynamicInvoke = true;
       // Function types can live only in record fields or nested callback
       // signatures, with no concrete closure expression in the reachable
       // program. Register their empty shape during discovery so Rust can

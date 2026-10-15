@@ -60,7 +60,7 @@ export function nativeModuleBackendDiagnostics(
       for (const child of value) visit(child);
       return;
     }
-    const node = value as { kind?: unknown; fn?: unknown; test?: unknown; value?: { type?: IrType }; loc?: SrcLoc };
+    const node = value as { kind?: unknown; fn?: unknown; fnLength?: unknown; test?: unknown; value?: { type?: IrType }; loc?: SrcLoc };
     if (node.kind === "dynTest" && (node.test === "finite" || node.test === "nan" || node.test === "safeInteger")) {
       feature = "checked-dynamic Number predicates";
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
@@ -72,6 +72,11 @@ export function nativeModuleBackendDiagnostics(
       return;
     }
     if (node.kind === "dynFrom") {
+      if (node.fnLength !== undefined) {
+        feature = "checked-dynamic function arity metadata";
+        loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+        return;
+      }
       if (containsDynamicBrand(node.value?.type)) {
         feature = "checked-dynamic RegExp/URL values";
         loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };

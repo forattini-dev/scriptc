@@ -601,11 +601,13 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::HttpResponse(response) => sc_dyn_http_response_get(response, key),`);
     this.context.line(`${name}::HttpAgent(agent) => sc_dyn_http_agent_get(agent, key),`);
     for (const shape of boxedShapes) {
-      this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, properties) => {`);
+      this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(${this.context.usesDynamicInvoke() ? "closure" : "_"}, function_name, properties) => {`);
       this.context.pushIndent();
       this.context.line("if let Some(property) = runtime::map_get_by(properties, key, |left, right| left.as_ref() == right.as_ref()) { property }");
       this.context.line(`else if key.as_ref() == "name" { ${name}::String(function_name.clone()) }`);
-      this.context.line(`else if key.as_ref() == "length" { ${name}::Number(${shape.type.params.length}.0) }`);
+      const length = this.context.usesDynamicInvoke()
+        ? `sc_dyn_function_length(closure.identity(), ${shape.type.params.length}) as f64` : `${shape.type.params.length}.0`;
+      this.context.line(`else if key.as_ref() == "length" { ${name}::Number(${length}) }`);
       this.context.line(`else { ${name}::Undefined }`);
       this.context.popIndent();
       this.context.line("},");

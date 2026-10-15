@@ -1,5 +1,23 @@
-import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/ir.js";
+import type { IrModule, IrRecordShape, IrType, IrUnionDef } from "../../ir/ir.js";
 import type { IrFuncType } from "./model.js";
+
+/** A known declaration arity applies to every reference to that target,
+ * including static references boxed before the native import evaluates. */
+export function dynamicFunctionLengths(module: IrModule): ReadonlyMap<string, number> {
+  const lengths = new Map<string, number>();
+  const pending: unknown[] = [module];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (value === null || typeof value !== "object") continue;
+    const node = value as Record<string, unknown>;
+    const closure = node.value as { kind?: string; fnName?: string } | undefined;
+    if (node.kind === "dynFrom" && typeof node.fnLength === "number" && closure?.kind === "closure" && closure.fnName !== undefined) {
+      lengths.set(closure.fnName, node.fnLength);
+    }
+    for (const child of Object.values(node)) pending.push(child);
+  }
+  return lengths;
+}
 
 /** Values boxed explicitly, or one lazily boxed item of a native stream. */
 export function dynamicBoxedInputType(node: Record<string, unknown>): IrType | undefined {

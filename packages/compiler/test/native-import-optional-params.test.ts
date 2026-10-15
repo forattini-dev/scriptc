@@ -25,6 +25,12 @@ test.each([true, false])("native imports admit optional parameters with strict=%
     'export function value(input?: { count: number }): number { return input?.count ?? 0; }',
     'export function value(input?: number[]): number { return input?.length ?? 0; }',
     'export function value(input?: string): string[] { return [input ?? ""]; }',
+    'export function value(input: string = "default"): string { return input; }',
+    'export async function value(input = "default"): Promise<string> { return input; }',
+    'export function value(first: string, input = "default"): string { return first + input; }',
+    'export function value(input: { count: number } = { count: 1 }): number { return input.count; }',
+    'export function value(input: number[] = []): number { return input.length; }',
+    'export function value(first = "default", last: string): string { return first + last; }',
   ]) {
     const coverage = coverageOf(dependency, strict);
     expect(coverage.preflightFailed, JSON.stringify(coverage)).toBe(false);
@@ -34,9 +40,6 @@ test.each([true, false])("native imports admit optional parameters with strict=%
 });
 
 test.each([
-  ["defaults and their reflective arity", 'export function value(input: string = "default"): string { return input; }'],
-  ["async defaults", 'export async function value(input = "default"): Promise<string> { return input; }'],
-  ["defaulted optional tails", 'export function value(first: string, input = "default"): string { return first + input; }'],
   ["rest parameters", 'export function value(...inputs: string[]): string { return inputs.join(","); }'],
 ] as const)("native imports retain the boundary for %s", (_name, dependency) => {
   const coverage = coverageOf(dependency, true);

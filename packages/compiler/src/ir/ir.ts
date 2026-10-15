@@ -5239,7 +5239,9 @@ export type IrExpr =
    * must satisfy the param's type or the thunk throws the catchable
    * TypeError), the interned signature key (dynCheck's exact-unwrap fast
    * path), and `fnName` — the best-effort static spelling for inspect
-   * ([Function: name]) and Node-shaped call errors. The operand is
+   * ([Function: name]) and Node-shaped call errors. `fnLength` optionally
+   * preserves JavaScript arity before the first defaulted parameter,
+   * independently of the complete call ABI. The operand is
    * borrowed; the result is owned (+1). Never throws. Program class
    * instances always use a typed capsule so an exact checked cast recovers
    * the original identity. `liveRef` requests the same capsule form for
@@ -5247,7 +5249,7 @@ export type IrExpr =
    * from a union) whose Web API contract exposes the reference again, such
    * as stream chunks and abort reasons; ordinary JSON-shaped values retain
    * the documented deep-copy boundary. */
-  | { kind: "dynFrom"; value: IrExpr; fnName?: string; liveRef?: true; type: IrType; loc: SrcLoc }
+  | { kind: "dynFrom"; value: IrExpr; fnName?: string; fnLength?: number; liveRef?: true; type: IrType; loc: SrcLoc }
   /** Island value → dyn conversion (`type` is always dyn; the operand
    * is always jsval): the jsval→dyn crossing — an 'any'-typed engine
    * value flowing into an 'unknown'/'object'/JS-residue slot wraps BY

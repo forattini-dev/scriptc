@@ -134,15 +134,18 @@ function nativeExportValue(L: Lowerer, name: string, symbol: ts.Symbol, site: ts
     const resultSafe = sig.returnType.kind === "promise"
       ? identitySafe(L, sig.returnType.inner)
       : identitySafe(L, sig.returnType);
-    // A '?' parameter already carries undefined in its ABI; the native call
-    // thunk supplies it for missing arguments. Defaults need separate arity
-    // metadata (Function.length) and must not enter through this admission.
-    if (!sig.params.every(p => (p.mode === "required" ||
-        p.mode === "omittable" && p.bodyType === undefined && p.callDefault === undefined) && identitySafe(L, p.type)) || !resultSafe) {
+    // Optional/defaulted parameters carry undefined in their ABI. The thunk
+    // supplies missing arguments; the existing callee prologue applies defaults.
+    if (!sig.params.every(p => (p.mode === "required" || p.mode === "omittable") &&
+        p.callDefault === undefined && identitySafe(L, p.type)) || !resultSafe) {
       refuse("has a function signature whose argument or result identity requires a native reference view");
     }
     L.noteEdge(sig.name);
-    const declaration = L.checker.declarationsOf(resolved).find(ts.isFunctionDeclaration);
+    const declarations = L.checker.declarationsOf(resolved).filter(ts.isFunctionDeclaration);
+    const declaration = declarations.find(declaration => declaration.body !== undefined) ?? declarations[0];
+    const parameters = declaration?.parameters.filter(p => !(ts.isIdentifier(p.name) && p.name.text === "this"));
+    const firstDefault = parameters?.findIndex(p => p.initializer !== undefined || p.dotDotDotToken !== undefined) ?? -1;
+    const fnLength = firstDefault < 0 ? undefined : firstDefault;
     const closure: IrExpr = { kind: "closure", fnName: sig.name, captures: [], type: { kind: "func", params: sig.params.map(p => p.type), ret: sig.returnType }, loc };
     // Native wrappers call checked-dynamic thunks, whose conversion domain
     // includes shared views and bare nullish results. Engine callback JSON
@@ -164,7 +167,7 @@ function nativeExportValue(L: Lowerer, name: string, symbol: ts.Symbol, site: ts
     setup.push({
       kind: "if", cond: { kind: "varRef", localId: cache.readyId, type: BOOL, loc }, then: [],
       else_: [
-        { kind: "assign", localId: cache.valueId, value: marshal({ kind: "dynFrom", value: closure, fnName: declaration?.name?.text ?? "default", type: DYN, loc }), loc },
+        { kind: "assign", localId: cache.valueId, value: marshal({ kind: "dynFrom", value: closure, fnName: declaration?.name?.text ?? "default", ...(fnLength === undefined ? {} : { fnLength }), type: DYN, loc }), loc },
         { kind: "assign", localId: cache.readyId, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
       ], loc,
     });

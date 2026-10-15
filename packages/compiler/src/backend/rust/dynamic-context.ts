@@ -1,5 +1,5 @@
 import type { IrFamily } from "../../ir/ir.js";
-import type { IrModule, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
+import type { IrFunction, IrModule, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 
 export interface RustDynamicContext {
@@ -16,6 +16,7 @@ export interface RustDynamicContext {
   popIndent(): void;
   nextTemporary(): string;
   closureName(shape: RustClosureShape): string;
+  closureVariant(target: IrFunction): string;
   closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
   classMetaOf(name: string, loc?: SrcLoc): RustClassMeta;
   dynFunctionCheckName(shape: RustClosureShape): string;

@@ -280,12 +280,14 @@ export class RustExpressionEmitter {
         }).join(" ");
         return `{ let ${object}: runtime::JsMap<runtime::JsString, ${this.context.dynTypeName()}> = runtime::map_new(); ${fields} ${this.context.dynTypeName()}::Object(${object}) }`;
       }
-      case "dynFrom":
+      case "dynFrom": {
         if (expr.value.kind === "arrayLit") return emitNativeDynamicArrayLiteral(expr.value, this.context, value => this.emitExpr(value));
         if (expr.value.kind === "libCall" && expr.value.fn === "effect.causeSquash" && expr.value.args[0] !== undefined) {
           return emitEffectCauseDynamic(expr, this.context, this.emitExpr(expr.value.args[0]));
         }
-        return this.context.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc, expr.fnName ?? "", expr.liveRef === true);
+        const boxed = this.context.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc, expr.fnName ?? "", expr.liveRef === true);
+        return expr.fnLength === undefined ? boxed : `sc_dyn_function_with_length(${boxed}, ${expr.fnLength})`;
+      }
       case "dynFromJsval":
         return this.context.hasEmbeddedModules()
           ? `sc_dyn_normalize_island(${this.emitExpr(expr.value)})` : this.emitExpr(expr.value);

@@ -1865,6 +1865,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       }
     }
   }
+  const functionLengths = new Map<string, number>();
   const familiesById = new Map((mod.families ?? []).map((family) => [family.id, family])); for (const fn of mod.functions) {
     validateFunction(fn,
       functionsByName, familiesById,
@@ -1874,6 +1875,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       unionsById,
       globalsById,
       fieldIndex,
+      functionLengths,
       errors,
     );
   }
@@ -1889,6 +1891,7 @@ function validateFunction(
   unions: Map<string, IrUnionDef>,
   globals: Map<string, IrGlobal>,
   fieldIndex: ValidationFields,
+  functionLengths: Map<string, number>,
   errors: IrValidationError[],
 ): void {
   const locals = new Map(fn.locals.map((l) => [l.id, l]));
@@ -3489,6 +3492,15 @@ function validateFunction(
       }
       case "dynFrom": {
         if (e.type.kind !== "dyn") err(`dynFrom must be dyn-typed, got ${e.type.kind}`, e.loc);
+        if (e.fnLength !== undefined && (e.value.type.kind !== "func" ||
+            !Number.isSafeInteger(e.fnLength) || e.fnLength < 0 || e.fnLength > e.value.type.params.length)) {
+          err("dynFrom fnLength must be an integer within the function's parameter count", e.loc);
+        }
+        if (e.fnLength !== undefined && e.value.kind === "closure") {
+          const existing = functionLengths.get(e.value.fnName);
+          if (existing !== undefined && existing !== e.fnLength) err(`conflicting fnLength metadata for ${e.value.fnName}`, e.loc);
+          functionLengths.set(e.value.fnName, e.fnLength);
+        }
         // A bare unit literal is legal exactly here (like unionWrap): the
         // dyn has first-class undefined/null values.
         if (e.value.kind === "unitLit") {
