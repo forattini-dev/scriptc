@@ -66,12 +66,14 @@ test("a computed import still requires an explicit supported runtime path", () =
 
 
 test.each([
-  ["array identity", "export const values = [1, 2];", "identity"],
   ["namespace thenable", "export function then(): void {}", "thenable"],
   ["namespace JSON hook", "export function toJSON(): string { return \"custom\"; }", "coercion"],
   ["namespace coercion hook", "export function toString(): string { return \"custom\"; }", "coercion"],
-  ["async array result", "export async function state() { return [1, 2]; }", "identity"],
-  ["record union result", "export function state(flag: boolean): { count: number } | null { return flag ? { count: 0 } : null; }", "identity"],
+  ["ambiguous array union", "export function state(value: number[] | string[]): void {}", "identity"],
+  ["ambiguous record union", "export function state(value: { count: number } | { label: string }): void {}", "identity"],
+  ["array mixed with record", "export function state(value: number[] | { count: number }): void {}", "identity"],
+  ["callback arity", "export function state(" + Array.from({ length: 17 }, (_, i) => `arg${i}: number`).join(", ") + "): void {}", "callback admission"],
+  ["recursive record array", "type Row = { children: Row[] }; export let values: Row[] = [];", "identity"],
 ] as const)("native import refuses unsupported %s explicitly", (_name, dependency, detail) => {
   const coverage = coverageOf(`async function main(): Promise<void> { await import("./module.ts"); } main();`, dependency);
   expect(coverage.preflightFailed).toBe(false);
@@ -79,6 +81,12 @@ test.each([
 });
 
 test.each([
+  "export const values = [1, 2];",
+  "export function state(input: number[] | null | undefined): number[] | null | undefined { return input; }",
+  "type Choice = { kind: 'a'; count: number } | { kind: 'b'; label: string }; export function state(input: Choice | null): Choice | null { return input; }",
+  "export function empty(): null { return null; }",
+  "export async function state() { return [1, 2]; }",
+  "export function state(flag: boolean): { count: number } | null { return flag ? { count: 0 } : null; }",
   "export const state = { nested: { count: 0 } };",
   "export const state: Record<string, number> = { count: 0 };",
   "export function update(state: Record<string, number>): void { state.count = 1; }",
@@ -91,7 +99,7 @@ test.each([
   "export function state(): Record<string, unknown> { return { count: 0 }; }",
   "export async function update(state: { count: number }): Promise<void> { state.count++; }",
   "export async function state() { return { count: 0 }; }",
-])("native imports admit shared records: %s", dependency => {
+])("native imports admit shared reference views: %s", dependency => {
   const coverage = coverageOf(`async function main(): Promise<void> { await import("./module.ts"); } main();`, dependency);
   expect(coverage.preflightFailed).toBe(false);
   expect(coverage.diagnostics).toEqual([]);

@@ -15,13 +15,16 @@ function coverageOf(dependency: string, strict: boolean, backend: "rust" | "c" |
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-test.each([true, false])("native imports admit optional scalar parameters with strict=%s", strict => {
+test.each([true, false])("native imports admit optional parameters with strict=%s", strict => {
   for (const dependency of [
     'export function value(input?: string): string { return input ?? "missing"; }',
     'export function value(input?: number): number { return input ?? -1; }',
     'export function value(input?: boolean): boolean { return input ?? false; }',
     'export function value(input?: string | null): string { return input ?? "missing"; }',
     'export async function value(input?: string): Promise<string> { return input ?? "missing"; }',
+    'export function value(input?: { count: number }): number { return input?.count ?? 0; }',
+    'export function value(input?: number[]): number { return input?.length ?? 0; }',
+    'export function value(input?: string): string[] { return [input ?? ""]; }',
   ]) {
     const coverage = coverageOf(dependency, strict);
     expect(coverage.preflightFailed, JSON.stringify(coverage)).toBe(false);
@@ -35,9 +38,6 @@ test.each([
   ["async defaults", 'export async function value(input = "default"): Promise<string> { return input; }'],
   ["defaulted optional tails", 'export function value(first: string, input = "default"): string { return first + input; }'],
   ["rest parameters", 'export function value(...inputs: string[]): string { return inputs.join(","); }'],
-  ["optional record identity", 'export function value(input?: { count: number }): number { return input?.count ?? 0; }'],
-  ["optional array identity", 'export function value(input?: number[]): number { return input?.length ?? 0; }'],
-  ["array results", 'export function value(input?: string): string[] { return [input ?? ""]; }'],
 ] as const)("native imports retain the boundary for %s", (_name, dependency) => {
   const coverage = coverageOf(dependency, true);
   expect(coverage.preflightFailed).toBe(false);

@@ -1,11 +1,11 @@
 import * as ts from "../ts7/adapter.js";
 import { locOf } from "../program.js";
-import { BOOL, DYN, JSVAL, STRING, VOID, canMarshalTypedFuncIntoIsland, type IrExpr, type IrStmt, type IrType } from "../../ir/ir.js";
+import { BOOL, DYN, JSVAL, STRING, VOID, MAX_ISLAND_CALLBACK_ARITY, canBoxFuncIntoDyn, type IrExpr, type IrStmt, type IrType } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 import { newFnCtx } from "./scope-env.js";
 import { nativeImportTargetOf } from "./lower-native-import-types.js";
 import { nativeModuleExports } from "./lower-native-import-exports.js";
-import { nativeRecordShapeSupported } from "../../ir/native-record.js";
+import { nativeArrayViewSupported, nativeRecordCheckSupported } from "../../ir/native-record.js";
 
 /** Local ESM imports own a cached evaluation and a live, singleton namespace.
  * JSVAL is the Rust runtime's safe handle here; no embedded engine is used. */
@@ -80,10 +80,20 @@ function nativeNamespaceBuilder(L: Lowerer, dep: ts.SourceFile, site: ts.CallExp
 }
 
 function identitySafe(L: Lowerer, type: IrType): boolean {
-  if (type.kind === "union") return L.unions.get(type.unionId)?.arms.every(arm => arm.kind !== "record" && identitySafe(L, arm)) ?? false;
-  if (type.kind === "record") {
-    const shape = L.shapes.get(type.shapeId);
-    return !!shape && nativeRecordShapeSupported(shape, L.unions, id => L.shapes.get(id));
+  const record = (id: string) => L.shapes.get(id);
+  const union = (id: string) => L.unions.get(id);
+  if (nativeRecordCheckSupported(type, record, union) || nativeArrayViewSupported(type, record, union)) return true;
+  if (type.kind === "union") {
+    const arms = union(type.unionId)?.arms;
+    if (!arms) return false;
+    // Multiple array layouts share one dynamic tag. Admit only a single
+    // array beside nullish arms; record unions need a checked discriminant.
+    if (arms.some(arm => arm.kind === "array" || arm.kind === "record")) {
+      return arms.filter(arm => arm.kind === "array").length === 1 &&
+        arms.every(arm => arm.kind === "nullT" || arm.kind === "undefinedT" ||
+          arm.kind === "array" && nativeArrayViewSupported(arm, record, union));
+    }
+    return arms.every(arm => identitySafe(L, arm));
   }
   return ["f64", "bool", "string", "nullT", "undefinedT", "void", "jsval", "dyn"].includes(type.kind);
 }
@@ -134,7 +144,11 @@ function nativeExportValue(L: Lowerer, name: string, symbol: ts.Symbol, site: ts
     L.noteEdge(sig.name);
     const declaration = L.checker.declarationsOf(resolved).find(ts.isFunctionDeclaration);
     const closure: IrExpr = { kind: "closure", fnName: sig.name, captures: [], type: { kind: "func", params: sig.params.map(p => p.type), ret: sig.returnType }, loc };
-    if (closure.type.kind !== "func" || !canMarshalTypedFuncIntoIsland(closure.type, id => L.shapes.get(id), id => L.unions.get(id))) refuse("has a function signature outside native callback admission");
+    // Native wrappers call checked-dynamic thunks, whose conversion domain
+    // includes shared views and bare nullish results. Engine callback JSON
+    // admission would reject those even though no engine participates here.
+    if (closure.type.kind !== "func" || closure.type.params.length > MAX_ISLAND_CALLBACK_ARITY ||
+        !canBoxFuncIntoDyn(closure.type, id => L.shapes.get(id), id => L.unions.get(id))) refuse("has a function signature outside native callback admission");
     // The dynamic wrapper owns function properties too. Re-marshaling the
     // same closure on each getter would lose those properties, even if its
     // underlying closure identity compared equal. Re-exports share this slot.
