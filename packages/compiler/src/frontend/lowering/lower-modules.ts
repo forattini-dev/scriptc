@@ -6,7 +6,7 @@ import { nativeProxyBindingType } from "./lower-native-proxy.js";
  * globals, reachability seeds and npm/JSON imports; emit per-file %init,
  * %main and IR module artifacts (globals and embedded npm tables). */
 import * as ts from "../ts7/adapter.js";
-import { nativeImportHandleType } from "./lower-native-import-types.js";
+import { nativeImportValueType } from "./lower-native-import-types.js";
 import type { Lowerer } from "./lowerer.js";
 import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
@@ -1686,7 +1686,7 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
             // production — whatever the checker's namespace type mapped to
             // (lowerVarDecl's rule at module scope; the init body assigns
             // it).
-            const handleT = nativeImportHandleType(lowerer, decl.initializer) ?? (
+            const handleT = nativeImportValueType(lowerer, nameNode) ?? (
               lowerer.dynamic && ts.isIdentifier(decl.name) && nameNode === decl.name
                 ? (importCallHandleType(decl.initializer) ??
                   // An unchecked-overload call result stores the handle,

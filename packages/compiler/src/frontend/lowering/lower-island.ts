@@ -4,7 +4,7 @@
  * package boundary fences for node_modules-declared symbols. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { nativeImportHandleType } from "./lower-native-import-types.js";
+import { nativeImportValueType } from "./lower-native-import-types.js";
 import { isKernelModule } from "../builtin-modules.js";
 import { BOOL, BYTES_U8, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canConvertToDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/ir.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, STATIC_MATH_PROPS, boundaryIntoIslandMsg } from "./surfaces.js";
@@ -29,7 +29,7 @@ import {
   export function isIslandExpr(lowerer: Lowerer, node: ts.Expression): boolean {
     // Native import() namespaces share the safe handle operations without
     // requiring an embedded engine. Check their provenance before its gate.
-    if (nativeImportHandleType(lowerer, node)?.kind === "jsval") return true;
+    if (nativeImportValueType(lowerer, node)?.kind === "jsval") return true;
     if (!lowerer.dynamic) return false;
     const mapped = lowerer.mapTypeOf(lowerer.typeOf(node));
     if (mapped?.kind === "jsval") return true;

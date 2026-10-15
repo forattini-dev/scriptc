@@ -13,6 +13,7 @@ import { varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf, nodeThrowExpr } from "./lowerer.js";
 import { nativeRecordOverflowRead } from "./lower-native-value-property.js";
+import { nativeImportValueType } from "./lower-native-import-types.js";
 
 export function runtimeOptionalRootOf(lowerer: Lowerer, local: IrLocal): IrLocal {
   return lowerer.runtimeOptionalRoots.get(local) ?? local;
@@ -23,6 +24,10 @@ export function runtimeOptionalBindingType(lowerer: Lowerer, node: ts.Node, fall
 /** The forwarding form, for the Lowerer's own overloads to delegate through. */
 export function runtimeOptionalBindingType(lowerer: Lowerer, node: ts.Node, fallback?: IrType): IrType | null;
 export function runtimeOptionalBindingType(lowerer: Lowerer, node: ts.Node, fallback?: IrType): IrType | null {
+  // Optional parameter inference can promote a typed function ABI, but a
+  // native import binding stores its cached callable handle throughout.
+  const native = ts.isIdentifier(node) ? nativeImportValueType(lowerer, node) : null;
+  if (native) return native;
   const patternType = lowerer.runtimeOptionalPatternTypes.get(node);
   if (patternType) return patternType;
   const symbol = ts.isIdentifier(node) ? lowerer.resolveValueSymbol(node) : lowerer.checker.getSymbolAtLocation(node);

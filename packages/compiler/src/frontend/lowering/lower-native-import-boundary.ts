@@ -1,7 +1,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { IrExpr, IrType } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
-import { nativeImportHandleType } from "./lower-native-import-types.js";
+import { nativeImportHandleType, nativeImportValueType } from "./lower-native-import-types.js";
 
 /** Keep source provenance through expression lowering, including casts.
  * The Rust handle itself is shared; converting it to a checker record would
@@ -26,8 +26,8 @@ export function rejectNativeImportCopy(L: Lowerer, value: IrExpr, expected: IrTy
   }
 }
 
-/** Type assertions do not replace a module object in JavaScript. Keep the
- * handle here; subsequent typed slots still pass the no-copy boundary. */
+/** Type assertions do not replace a module object or its exported function
+ * in JavaScript. Keep the handle; namespace slots still pass the no-copy boundary. */
 export function lowerNativeImportAssertion(L: Lowerer, node: ts.AsExpression | ts.TypeAssertion): IrExpr | null {
-  return nativeImportHandleType(L, node.expression) ? L.lowerExpr(node.expression) : null;
+  return nativeImportValueType(L, node.expression) ? L.lowerExpr(node.expression) : null;
 }

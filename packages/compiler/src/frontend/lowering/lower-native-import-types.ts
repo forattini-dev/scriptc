@@ -47,7 +47,7 @@ export function nativeImportHandleType(L: Lowerer, expr: ts.Expression | undefin
       if (L.jsvalParamOverrides.has(value)) return JSVAL;
       continue;
     }
-    if (ts.isParenthesizedExpression(value) || ts.isAsExpression(value) || ts.isTypeAssertion(value) || ts.isNonNullExpression(value)) {
+    if (ts.isParenthesizedExpression(value) || ts.isAsExpression(value) || ts.isTypeAssertion(value) || ts.isNonNullExpression(value) || ts.isSatisfiesExpression(value)) {
       pending.push({ node: value.expression, awaited });
       continue;
     }
@@ -70,6 +70,49 @@ export function nativeImportHandleType(L: Lowerer, expr: ts.Expression | undefin
       if (declaration && (ts.isVariableDeclaration(declaration) || ts.isParameter(declaration))) {
         pending.push({ node: declaration, awaited });
       }
+    }
+  }
+  return null;
+}
+
+/** Exported functions retain the namespace getter's cached callable handle.
+ * Trace bindings as well as member reads, without treating exported records
+ * as namespaces or allowing the namespace's no-copy boundary to leak onto
+ * functions. Storage and call dispatch must agree even for signatures the
+ * ordinary typed-function mapper cannot represent. */
+export function nativeImportValueType(L: Lowerer, expr: ts.Expression | undefined): IrType | null {
+  const namespace = nativeImportHandleType(L, expr);
+  if (namespace || L.dynamic) return namespace;
+  // Explicit any/unknown bindings keep checked-dynamic storage and its
+  // existing property/call rules. Only typed callable aliases need this bridge.
+  if (!expr || L.checker.getCallSignatures(L.typeOf(expr)).length === 0) return null;
+  const pending: ts.Node[] = expr ? [expr] : [];
+  const seen = new Set<ts.Node>();
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!node || seen.has(node)) continue;
+    seen.add(node);
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertion(node) || ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node)) {
+      pending.push(node.expression);
+    } else if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      if (L.checker.getCallSignatures(L.typeOf(node)).length > 0 &&
+          nativeImportHandleType(L, node.expression)?.kind === "jsval") return JSVAL;
+    } else if (ts.isVariableDeclaration(node)) {
+      if (ts.isIdentifier(node.name) && node.initializer) pending.push(node.initializer);
+    } else if (ts.isBindingElement(node)) {
+      // Only a direct namespace member is a callable export. Nested records,
+      // rest copies and defaults retain their existing conversion fences.
+      const pattern = node.parent;
+      const declaration = pattern.parent;
+      if (!node.dotDotDotToken && !node.initializer && node.name && ts.isIdentifier(node.name) &&
+          ts.isObjectBindingPattern(pattern) && ts.isVariableDeclaration(declaration) &&
+          L.checker.getCallSignatures(L.typeOf(node.name)).length > 0 &&
+          nativeImportHandleType(L, declaration.initializer)?.kind === "jsval") return JSVAL;
+    } else if (ts.isIdentifier(node)) {
+      let symbol = L.checker.getSymbolAtLocation(node);
+      if (!symbol) continue;
+      if (symbol.flags & ts.SymbolFlags.Alias) symbol = L.checker.getAliasedSymbol(symbol);
+      for (const declaration of L.checker.declarationsOf(symbol)) pending.push(declaration);
     }
   }
   return null;

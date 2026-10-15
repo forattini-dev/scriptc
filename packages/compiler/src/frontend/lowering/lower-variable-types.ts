@@ -2,7 +2,7 @@ import * as ts from "../ts7/adapter.js";
 import { isJsSourceFile } from "../program.js";
 import { DYN, JSVAL, type IrType } from "../../ir/ir.js";
 import { dynFallbackType, importCallHandleType, uncheckedOverloadHandleCall, type Lowerer } from "./lowerer.js";
-import { nativeImportHandleType } from "./lower-native-import-types.js";
+import { nativeImportValueType } from "./lower-native-import-types.js";
 
 /** The `var` symbol's function-scoped binding TYPE — the declared type at
  * the binding name, with the JS-source fallbacks every mutable binding
@@ -11,7 +11,7 @@ import { nativeImportHandleType } from "./lower-native-import-types.js";
  * file rides the dyn fallback). Null when no static type can hold the
  * binding. */
 export function varBindingType(L: Lowerer, nameNode: ts.Identifier): IrType | null {
-  let type = nativeImportHandleType(L, nameNode) ?? L.mapTypeOf(L.typeOf(nameNode));
+  let type = nativeImportValueType(L, nameNode) ?? L.mapTypeOf(L.typeOf(nameNode));
   if (type?.kind === "record" && isJsSourceFile(nameNode.getSourceFile())) {
     const shape = L.shapes.get(type.shapeId);
     if (shape && shape.fields.length === 0 && !shape.indexValue && !shape.tuple) type = DYN;

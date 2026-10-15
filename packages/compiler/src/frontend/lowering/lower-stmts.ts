@@ -25,7 +25,7 @@ import { arrayValueRead, arrayValueStore, arrayValueType } from "./array-values.
 import { lowerForAwaitGenerator, lowerForOfGenerator, lowerYieldStarStatement, type GenType } from "./lower-generators.js";
 import { BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/ir.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
-import { nativeImportHandleType } from "./lower-native-import-types.js";
+import { nativeImportValueType } from "./lower-native-import-types.js";
 import { varBindingType } from "./lower-variable-types.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
@@ -3662,7 +3662,7 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
         : null) ??
       ((init.type.kind === "jsval" ||
         (init.type.kind === "promise" && init.type.inner.kind === "jsval"))
-        ? nativeImportHandleType(lowerer, decl.initializer)
+        ? nativeImportValueType(lowerer, decl.name)
         : null) ??
       (lowerer.dynamic &&
       (init.type.kind === "jsval" ||
