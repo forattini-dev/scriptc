@@ -1,4 +1,4 @@
-/// Bun's non-stream subprocess slice. Spawn failures throw synchronously;
+/// Bun's native subprocess path. Spawn failures throw synchronously;
 /// Node's child_process path continues to report them through its error event.
 pub fn bun_spawn(
     argv: &JsArray<JsString>,
@@ -73,7 +73,7 @@ pub fn bun_spawn(
     // Node does. Omitting SYSTEMROOT can abort programs before user code runs.
     child_configure_environment(&mut process, normalized_env.as_ref());
     if !cwd.is_empty() { process.current_dir(cwd.to_utf8_lossy()); }
-    let stdio = |mode| if mode == 1.0 { Stdio::inherit() } else { Stdio::null() };
+    let stdio = |mode| if mode == 1.0 { Stdio::inherit() } else if mode == 2.0 { Stdio::piped() } else { Stdio::null() };
     process.stdin(stdio(stdin)).stdout(stdio(stdout)).stderr(stdio(stderr));
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
@@ -90,8 +90,12 @@ pub fn bun_spawn(
         };
         throw_value(error_new_code("Error", string(&message), code));
     });
-    let child = child_register(command, Ok(spawned), false, false, false);
+    let child = child_register(command, Ok(spawned), false, stdout == 2.0, stderr == 2.0);
     child.with_mut(|child| child.bun_exited = Some(promise_new()));
+    for stream in [child_stdout(&child), child_stderr(&child)].into_iter().flatten() {
+        stream.with_mut(|s| s.bun_buffered = true);
+        child_stream_start(&stream);
+    }
     child
 }
 

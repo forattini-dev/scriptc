@@ -30,6 +30,7 @@ impl std::io::Read for ChildPipeReader {
 enum ChildPipeEvent {
     Data(Vec<u8>),
     End,
+    Error(String),
 }
 
 pub struct ChildStreamData {
@@ -39,10 +40,16 @@ pub struct ChildStreamData {
     terminal_pending: bool,
     data_listeners: Vec<ChildStreamDataListener>,
     end_listeners: Vec<ChildStreamEndListener>,
+    web_cache: Option<Box<dyn ChildWebCache>>,
+    web_pull: Option<Box<dyn ChildWebPull>>,
+    bun_buffered: bool,
+    read_error: Option<String>,
 }
 
 impl Trace for ChildStreamData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(cache) = &self.web_cache { cache.trace(tracer); }
+        if let Some(pull) = &self.web_pull { pull.trace(tracer); }
         for listener in &self.data_listeners {
             (listener.trace)(tracer);
         }
@@ -60,6 +67,9 @@ impl ClearEdges for ChildStreamData {
         self.terminal_pending = false;
         self.data_listeners.clear();
         self.end_listeners.clear();
+        self.web_cache = None;
+        self.web_pull = None;
+        self.read_error = None;
     }
 }
 
@@ -77,6 +87,10 @@ fn child_stream_new(reader: ChildPipeReader) -> JsChildStream {
         terminal_pending: false,
         data_listeners: Vec::new(),
         end_listeners: Vec::new(),
+        web_cache: None,
+        web_pull: None,
+        bun_buffered: false,
+        read_error: None,
     });
     ASYNC_CHILD_STREAMS.with(|streams| streams.borrow_mut().push(stream.clone()));
     stream
@@ -90,6 +104,10 @@ fn child_stream_husk() -> JsChildStream {
         terminal_pending: false,
         data_listeners: Vec::new(),
         end_listeners: Vec::new(),
+        web_cache: None,
+        web_pull: None,
+        bun_buffered: false,
+        read_error: None,
     })
 }
 
@@ -98,34 +116,52 @@ fn child_stream_start(stream: &JsChildStream) {
     let Some(mut reader) = reader else {
         return;
     };
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let (send, receiver): (Box<dyn Fn(ChildPipeEvent) -> bool + Send>, _) =
+        if stream.with(|s| s.bun_buffered) {
+            // Bun eagerly captures output even before .stdout is read, so
+            // awaiting exited before consuming a large pipe cannot deadlock.
+            let (sender, receiver) = std::sync::mpsc::channel();
+            (Box::new(move |event| sender.send(event).is_ok()), receiver)
+        } else {
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            (Box::new(move |event| sender.send(event).is_ok()), receiver)
+        };
     stream.with_mut(|stream| stream.receiver = Some(receiver));
-    // The bounded channel is the pipe's backpressure boundary: at most one
-    // 64 KiB chunk waits outside the main-thread JavaScript heap.
-    let _ = std::thread::Builder::new()
+    // Node listeners retain their bounded one-chunk backpressure boundary.
+    let worker = std::thread::Builder::new()
         .name("scriptc-child-pipe".to_owned())
         .spawn(move || {
             loop {
                 let mut buffer = vec![0_u8; 65_536];
                 match std::io::Read::read(&mut reader, &mut buffer) {
                     Ok(0) => {
-                        let _ = sender.send(ChildPipeEvent::End);
+                        send(ChildPipeEvent::End);
                         break;
                     }
                     Ok(length) => {
                         buffer.truncate(length);
-                        if sender.send(ChildPipeEvent::Data(buffer)).is_err() {
+                        if !send(ChildPipeEvent::Data(buffer)) {
                             break;
                         }
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => {
-                        let _ = sender.send(ChildPipeEvent::End);
+                    Err(error) => {
+                        send(ChildPipeEvent::Error(error.to_string()));
                         break;
                     }
                 }
             }
         });
+    if let Err(error) = worker {
+        if let Some(pull) = stream.with_mut(|s| s.web_pull.take()) {
+            pull.settle(Err(caught_value(error_new("Error", string(&error.to_string())))));
+        }
+        stream.with_mut(|s| s.read_error = Some(error.to_string()));
+        if stream.with(|s| s.bun_buffered) {
+            stream.with_mut(|s| { s.eof = true; s.receiver = None; });
+            child_stream_remove(stream);
+        }
+    }
 }
 
 pub fn child_stream_on_data(
@@ -173,7 +209,7 @@ fn child_stream_poll(stream: &JsChildStream) -> Option<ChildPipeEvent> {
         if stream.terminal_pending {
             return Some(ChildPipeEvent::End);
         }
-        if stream.data_listeners.is_empty() {
+        if stream.data_listeners.is_empty() && stream.web_pull.is_none() {
             return None;
         }
         let receiver = stream.receiver.as_ref()?;
@@ -190,7 +226,7 @@ fn child_stream_wait(
     timeout: std::time::Duration,
 ) -> Option<ChildPipeEvent> {
     stream.with(|stream| {
-        if stream.eof || stream.data_listeners.is_empty() {
+        if stream.eof || (stream.data_listeners.is_empty() && stream.web_pull.is_none()) {
             return None;
         }
         let receiver = stream.receiver.as_ref()?;
@@ -205,6 +241,10 @@ fn child_stream_wait(
 fn child_stream_dispatch(stream: &JsChildStream, event: ChildPipeEvent) -> bool {
     match event {
         ChildPipeEvent::Data(bytes) => {
+            if let Some(pull) = stream.with_mut(|s| s.web_pull.take()) {
+                pull.settle(Ok(Some(bytes_from_vec(bytes))));
+                return false;
+            }
             let listeners = stream.with_mut(|stream| {
                 let snapshot = stream.data_listeners.clone();
                 stream.data_listeners.retain(|listener| !listener.once);
@@ -217,6 +257,7 @@ fn child_stream_dispatch(stream: &JsChildStream, event: ChildPipeEvent) -> bool 
             false
         }
         ChildPipeEvent::End => {
+            if let Some(pull) = stream.with_mut(|s| s.web_pull.take()) { pull.settle(Ok(None)); }
             let listeners = stream.with_mut(|stream| {
                 stream.eof = true;
                 stream.terminal_pending = false;
@@ -229,6 +270,13 @@ fn child_stream_dispatch(stream: &JsChildStream, event: ChildPipeEvent) -> bool 
                 (listener.invoke)();
             }
             true
+        }
+        ChildPipeEvent::Error(message) => {
+            stream.with_mut(|s| s.read_error = Some(message.clone()));
+            if let Some(pull) = stream.with_mut(|s| s.web_pull.take()) {
+                pull.settle(Err(caught_value(error_new("Error", string(&message)))));
+            }
+            child_stream_dispatch(stream, ChildPipeEvent::End)
         }
     }
 }
@@ -294,7 +342,7 @@ fn child_streams_pending() -> bool {
     ASYNC_CHILD_STREAMS.with(|streams| {
         streams.borrow().iter().any(|stream| {
             stream.with(|stream| {
-                !stream.eof && (stream.terminal_pending || !stream.data_listeners.is_empty())
+                !stream.eof && (stream.terminal_pending || !stream.data_listeners.is_empty() || stream.web_pull.is_some())
             })
         })
     })

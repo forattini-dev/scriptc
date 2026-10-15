@@ -1903,7 +1903,7 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
-  | "bun.spawn" | "bun.exited" | "bun.pid" | "bun.exitCode"
+  | "bun.spawn" | "bun.exited" | "bun.pid" | "bun.exitCode" | "bun.stdout" | "bun.stderr"
   | "bun.which"
   | "bun.filePath"
   | "bun.fileText"
@@ -7578,6 +7578,8 @@ export const LIB_NONDETERMINISTIC_PREFIXES: readonly [string, string][] = [
   ["bun.exited", "process exit status"],
   ["bun.pid", "process identity"],
   ["bun.exitCode", "process exit status"],
+  ["bun.stdout", "process pipe output"],
+  ["bun.stderr", "process pipe output"],
   ["bun.which", "executable search (filesystem and environment)"],
   ["bun.fileText", "file contents"],
   ["bun.write", "file writes"],

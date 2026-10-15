@@ -311,6 +311,10 @@ export function emitRustChildProcessCall(
   }
   if (expr.fn === "bun.exited") return `runtime::bun_subprocess_exited(&(${context.emitExpr(expr.args[0]!)}))`;
   if (expr.fn === "bun.pid") return `runtime::child_pid(&(${context.emitExpr(expr.args[0]!)})).expect("Bun.spawn returned a running process")`;
+  if (expr.fn === "bun.stdout" || expr.fn === "bun.stderr") {
+    const dyn = context.dynTypeName();
+    return `runtime::bun_subprocess_output(&(${context.emitExpr(expr.args[0]!)}), ${expr.fn === "bun.stderr"}, ${dyn}::Bytes, ${dyn}::Undefined).map(${dyn}::WebStream).unwrap_or(${dyn}::Undefined)`;
+  }
   if (expr.fn === "bun.exitCode") return unionArgument(expr.type, `runtime::bun_subprocess_exit_code(&(${context.emitExpr(expr.args[0]!)}))`, "nullT", context, expr);
   if (expr.fn === "cp.execFile") return emitExecFile(expr, context);
   if (expr.fn === "cp.fork" && expr.args.length === 8) {

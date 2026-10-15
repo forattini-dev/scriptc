@@ -7,6 +7,8 @@ pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
         fetch_response: true,
         fetch_body_used: false,
         fetch_body_locked: false,
+        fetch_stream_body: None,
+        fetch_null_body: false,
         socket: None,
         method: empty_string(),
         url: empty_string(),
@@ -28,6 +30,12 @@ pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
         aborted_listeners: Vec::new(),
         close_listeners: Vec::new(),
     })
+}
+
+pub fn fetch_response_new_empty() -> JsHttpRequest {
+    let response = fetch_response_new_text(&empty_string());
+    response.with_mut(|r| r.fetch_null_body = true);
+    response
 }
 
 pub fn fetch_start(
@@ -91,6 +99,8 @@ pub fn fetch_start(
 }
 
 pub fn fetch_response_bytes(response: &JsHttpRequest) -> JsPromise<JsBytes<u8>> {
+    if fetch_body_is_null(response) { return promise_resolved(bytes_from_vec(Vec::new())); }
+    if let Some(body) = response.with(|r| r.fetch_stream_body.clone()) { return body.consume(); }
     if !http_request_claim_fetch_body(response) {
         return promise_rejected(caught_value(error_new(
             "TypeError",
@@ -129,7 +139,11 @@ pub fn fetch_response_bytes(response: &JsHttpRequest) -> JsPromise<JsBytes<u8>> 
 
 pub fn fetch_response_text(response: &JsHttpRequest) -> JsPromise<JsString> {
     let bytes = fetch_response_bytes(response);
-    promise_map(&bytes, |bytes| bytes_to_string(&bytes, &string("utf8")))
+    promise_map(&bytes, |bytes| {
+        let values = bytes_u8_values(&bytes);
+        let values = values.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&values);
+        string(&String::from_utf8_lossy(values))
+    })
 }
 
 pub fn fetch_response_header(response: &JsHttpRequest, name: &JsString) -> Option<JsString> {

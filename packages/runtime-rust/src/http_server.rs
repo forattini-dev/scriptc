@@ -197,6 +197,8 @@ fn http_server_next(connection: &mut HttpServerConnection) -> HttpServerStep {
         fetch_response: false,
         fetch_body_used: false,
         fetch_body_locked: false,
+        fetch_stream_body: None,
+        fetch_null_body: false,
         socket: Some(connection.socket.clone()),
         method: head.method,
         url: head.url,

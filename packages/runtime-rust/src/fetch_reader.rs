@@ -28,7 +28,7 @@ pub fn fetch_body_locked(request: &JsHttpRequest) -> bool {
 }
 
 pub fn fetch_body_is_null(request: &JsHttpRequest) -> bool {
-    request.with(|request| matches!(request.status_code, Some(204.0 | 205.0 | 304.0)))
+    request.with(|request| request.fetch_null_body || matches!(request.status_code, Some(204.0 | 205.0 | 304.0)))
 }
 
 fn fetch_reader_error(message: &str) -> Caught {

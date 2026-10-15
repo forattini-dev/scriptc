@@ -97,6 +97,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "bun.exited": { argTypes: [CHILD_T], result: { kind: "promise", inner: F64 } },
   "bun.pid": { argTypes: [CHILD_T], result: F64 },
   "bun.exitCode": { argTypes: [CHILD_T], result: VOID },
+  "bun.stdout": { argTypes: [CHILD_T], result: DYN },
+  "bun.stderr": { argTypes: [CHILD_T], result: DYN },
   "bun.which": BUN_WHICH_SIG,
   "bun.filePath": { argTypes: [STRING], result: STRING },
   "bun.fileText": { argTypes: [STRING], result: { kind: "promise", inner: STRING } },

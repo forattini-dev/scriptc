@@ -12,14 +12,16 @@ test("Bun subprocess IR rejects unsupported stdio modes and wrong exitCode resul
   };
   const spawn: Extract<IrExpr, { kind: "libCall" }> = { kind: "libCall", fn: "bun.spawn", args: [number, number, number, number], type: { kind: "child" }, loc };
   expect(validate(spawn)).toEqual([]);
-  expect(validate({ ...spawn, args: [number, number, { ...number, value: 3 }, number] })).toEqual(["libCall bun.spawn arg 2 must be a literal ignore/inherit mode"]);
+  expect(validate({ ...spawn, args: [number, number, { ...number, value: 2 }, { ...number, value: 2 }] })).toEqual([]);
+  expect(validate({ ...spawn, args: [number, { ...number, value: 2 }, number, number] })).toHaveLength(1);
+  expect(validate({ ...spawn, args: [number, number, { ...number, value: 3 }, number] })).toEqual(["libCall bun.spawn arg 2 must be a literal ignore/inherit mode or output pipe"]);
   expect(validate({ ...spawn, fn: "bun.exitCode", type: STRING })).toEqual(["libCall bun.exitCode must return number | null"]);
   expect(validate({ ...spawn, fn: "bun.exitCode", type: { kind: "union", unionId: "nullable" } })).toEqual([]);
 });
 
 test("Bun subprocess operations expose ambient authority and synchronous spawn failures to IR analyses", () => {
   expect(MAY_THROW_LIB_FNS.has("bun.spawn")).toBe(true);
-  for (const fn of ["bun.spawn", "bun.exited", "bun.pid", "bun.exitCode"]) {
+  for (const fn of ["bun.spawn", "bun.exited", "bun.pid", "bun.exitCode", "bun.stdout", "bun.stderr"]) {
     expect(LIB_NONDETERMINISTIC_PREFIXES.some(([prefix]) => fn.startsWith(prefix)), fn).toBe(true);
   }
 });

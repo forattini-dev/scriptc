@@ -60,6 +60,8 @@ pub struct HttpRequestData {
     fetch_response: bool,
     fetch_body_used: bool,
     fetch_body_locked: bool,
+    fetch_stream_body: Option<Rc<dyn FetchStreamBody>>,
+    fetch_null_body: bool,
     socket: Option<JsNetSocket>,
     method: JsString,
     url: JsString,
@@ -84,6 +86,7 @@ pub struct HttpRequestData {
 
 impl Trace for HttpRequestData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(body) = &self.fetch_stream_body { body.trace(tracer); }
         if let Some(socket) = &self.socket {
             tracer.edge(socket);
         }
@@ -103,6 +106,7 @@ impl Trace for HttpRequestData {
 
 impl ClearEdges for HttpRequestData {
     fn clear_edges(&mut self) {
+        self.fetch_stream_body = None;
         self.socket = None;
         self.headers.clear();
         self.body.clear();
@@ -441,7 +445,7 @@ pub fn http_request_is_fetch_response(request: &JsHttpRequest) -> bool {
 }
 
 pub fn http_request_fetch_body_used(request: &JsHttpRequest) -> bool {
-    request.with(|request| request.fetch_body_used)
+    request.with(|request| request.fetch_body_used || request.fetch_stream_body.as_ref().is_some_and(|body| body.used()))
 }
 
 pub fn http_request_claim_fetch_body(request: &JsHttpRequest) -> bool {

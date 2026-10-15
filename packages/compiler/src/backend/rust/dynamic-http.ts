@@ -27,7 +27,7 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   line(`"ok" if runtime::http_request_is_fetch_response(request) => { let status = runtime::http_request_status_code(request).unwrap_or(200.0); ${dyn}::Boolean((200.0..300.0).contains(&status)) },`);
   line(`"statusText" if runtime::http_request_is_fetch_response(request) => ${dyn}::String(runtime::http_request_status_message(request).unwrap_or_else(runtime::empty_string)),`);
   line(`"bodyUsed" if runtime::http_request_is_fetch_response(request) => ${dyn}::Boolean(runtime::http_request_fetch_body_used(request)),`);
-  line(`"body" if runtime::http_request_is_fetch_response(request) => if runtime::fetch_body_is_null(request) { ${dyn}::Null } else { ${dyn}::FetchBody(request.clone()) },`);
+  line(`"body" if runtime::http_request_is_fetch_response(request) => if let Some(stream) = runtime::fetch_response_web_body::<${dyn}>(request) { ${dyn}::WebStream(stream) } else if runtime::fetch_body_is_null(request) { ${dyn}::Null } else { ${dyn}::FetchBody(request.clone()) },`);
   line(`"url" => ${dyn}::String(runtime::http_request_url(request)),`);
   line(`"method" => ${dyn}::String(runtime::http_request_method(request)),`);
   line(`"statusCode" => runtime::http_request_status_code(request).map(${dyn}::Number).unwrap_or(${dyn}::Null),`);

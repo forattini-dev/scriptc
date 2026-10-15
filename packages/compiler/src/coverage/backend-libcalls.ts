@@ -116,6 +116,8 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "bun.fileText": ["rust"],
   "bun.pid": ["rust"],
   "bun.spawn": ["rust"],
+  "bun.stderr": ["rust"],
+  "bun.stdout": ["rust"],
   "bun.which": ["rust"],
   "bun.writeBytes": ["rust"],
   "bun.writeText": ["rust"],

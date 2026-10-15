@@ -4,7 +4,7 @@ export function validateBunSpawn(expr: Extract<IrExpr, { kind: "libCall" }>, uni
   if (expr.fn === "bun.spawn") {
     for (const index of [1, 2, 3]) {
       const mode = expr.args[index];
-      if (mode?.kind !== "numLit" || (mode.value !== 0 && mode.value !== 1)) error(`libCall bun.spawn arg ${index} must be a literal ignore/inherit mode`, expr.loc);
+      if (mode?.kind !== "numLit" || (mode.value !== 0 && mode.value !== 1 && !(index !== 1 && mode.value === 2))) error(`libCall bun.spawn arg ${index} must be a literal ignore/inherit mode or output pipe`, expr.loc);
     }
   }
   if (expr.fn === "bun.exitCode") {

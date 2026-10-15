@@ -17,6 +17,8 @@ pub struct WebStreamData<T: HeapValue> {
     close_requested: bool,
     closed: bool,
     error: Option<WebStreamFailure<T>>,
+    disturbed: bool,
+    bun_pipe: bool,
 }
 
 // Keep dynamic rejection values traceable instead of hiding their edges in Any.
@@ -101,7 +103,7 @@ fn web_stream_new_with_prefetch<T: HeapValue>(
 ) -> JsWebStream<T> {
     Gc::new(WebStreamData {
         queue: VecDeque::new(), reader: None, source: Some(source), started: false,
-        pulling: false, prefetch, pull_again: false, close_requested: false, closed: false, error: None,
+        pulling: false, prefetch, pull_again: false, close_requested: false, closed: false, error: None, disturbed: false, bun_pipe: false,
     })
 }
 
@@ -111,6 +113,10 @@ fn web_stream_reader<T: HeapValue>(stream: &JsWebStream<T>) -> Option<JsWebReade
 
 pub fn web_stream_locked<T: HeapValue>(stream: &JsWebStream<T>) -> bool {
     web_stream_reader(stream).is_some()
+}
+
+pub fn web_stream_disturbed<T: HeapValue>(stream: &JsWebStream<T>) -> bool {
+    stream.with(|s| s.disturbed)
 }
 
 pub fn web_stream_desired_size<T: HeapValue>(stream: &JsWebStream<T>) -> Option<f64> {
@@ -226,6 +232,7 @@ pub fn web_reader_read_with<T: HeapValue, U: HeapValue>(
     let Some(stream) = reader.with(|r| r.stream.clone()) else {
         request.settle(Err(web_reader_released())); return promise;
     };
+    stream.with_mut(|s| s.disturbed = true);
     if let Some(error) = stream.with(|s| s.error.as_ref().map(WebStreamFailure::caught)) {
         request.settle(Err(error)); return promise;
     }
@@ -242,6 +249,7 @@ pub fn web_reader_read_with<T: HeapValue, U: HeapValue>(
 }
 
 fn web_stream_cancel_internal<T: HeapValue>(stream: &JsWebStream<T>, reason: T) -> JsPromise<()> {
+    stream.with_mut(|s| s.disturbed = true);
     if let Some(error) = stream.with(|s| s.error.as_ref().map(WebStreamFailure::caught)) { return promise_rejected(error); }
     if stream.with(|s| s.closed) { return promise_resolved(()); }
     let source = stream.with_mut(|s| { s.queue.clear(); s.source.take() });

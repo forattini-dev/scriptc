@@ -207,6 +207,8 @@ fn http_client_feed(
                 fetch_response: false,
                 fetch_body_used: false,
                 fetch_body_locked: false,
+                fetch_stream_body: None,
+                fetch_null_body: false,
                 socket,
                 method: empty_string(),
                 url: empty_string(),

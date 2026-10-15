@@ -234,7 +234,7 @@ export function emitRustHttpCall(
     const body = context.nextTemporary();
     const init = context.nextTemporary();
     const dyn = context.dynTypeName();
-    return `{ let ${body} = ${context.emitExpr(expr.args[0])}; let ${init} = ${context.emitExpr(expr.args[1])}; if !matches!(&${init}, ${dyn}::Undefined) { sc_dyn_arg_type_fail("init", "undefined in the native Response text path", &${init}); } match &${body} { ${dyn}::String(sc_body) => ${dyn}::HttpRequest(runtime::fetch_response_new_text(sc_body)), sc_value => sc_dyn_arg_type_fail("body", "of type string", sc_value), } }`;
+    return `{ let ${body} = ${context.emitExpr(expr.args[0])}; let ${init} = ${context.emitExpr(expr.args[1])}; if !matches!(&${init}, ${dyn}::Undefined) { sc_dyn_arg_type_fail("init", "undefined in the native Response text path", &${init}); } match &${body} { ${dyn}::Undefined | ${dyn}::Null => ${dyn}::HttpRequest(runtime::fetch_response_new_empty()), ${dyn}::String(sc_body) => ${dyn}::HttpRequest(runtime::fetch_response_new_text(sc_body)), ${dyn}::WebStream(sc_body) => ${dyn}::HttpRequest(runtime::fetch_response_new_stream(sc_body, |chunk| match chunk { ${dyn}::Bytes(bytes) | ${dyn}::Buffer(bytes) => runtime::live_dyn_ref_get(bytes.identity()).unwrap_or(bytes), value => sc_dyn_arg_type_fail("chunk", "of type Uint8Array", &value), })), sc_value => sc_dyn_arg_type_fail("body", "of type string or ReadableStream", sc_value), } }`;
   }
   if (expr.fn === "fetch.start" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "string" && expr.args[1]?.type.kind === "dyn" &&
