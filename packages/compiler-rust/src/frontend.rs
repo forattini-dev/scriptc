@@ -15,6 +15,7 @@ use std::{
 };
 mod aggregates;
 mod callbacks;
+mod collections;
 mod declarations;
 mod parameters;
 
@@ -792,6 +793,9 @@ impl<'a> Lowerer<'a> {
                 if expression.kind() == SyntaxKind::BinaryExpression
                     && expression.operator_token().kind() == SyntaxKind::EqualsToken
                 {
+                    if expression.left().kind() == SyntaxKind::ElementAccessExpression {
+                        return Ok(vec![self.dictionary_set(expression)?]);
+                    }
                     if expression.left().kind() == SyntaxKind::PropertyAccessExpression {
                         return Ok(vec![self.record_set(expression)?]);
                     }
@@ -842,6 +846,21 @@ impl<'a> Lowerer<'a> {
         }
         let loc = self.loc(node);
         match node.kind() {
+            SyntaxKind::NewExpression => self.map_new(node),
+            SyntaxKind::ElementAccessExpression => {
+                let obj = self.expression(node.expression())?;
+                if let Type::Array { elem } = obj.ty() {
+                    let index = self.expected_expression(node.argument_expression(), Type::F64)?;
+                    return Ok(Expr::ArrayGet {
+                        arr: Box::new(obj),
+                        index: Box::new(index),
+                        r#type: elem.clone(),
+                        loc: self.loc(node),
+                    });
+                }
+                let key = self.expected_expression(node.argument_expression(), Type::String)?;
+                self.dictionary_get(node, obj, key)
+            }
             SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression => self.closure(node, None),
             SyntaxKind::ObjectLiteralExpression => {
                 let ty = self.ty(node)?;
@@ -987,6 +1006,23 @@ impl<'a> Lowerer<'a> {
             }
             SyntaxKind::CallExpression => {
                 let member = node.expression();
+                if member.kind() == SyntaxKind::PropertyAccessExpression {
+                    let symbol = self.symbol(member.expression());
+                    let receiver_type = self
+                        .bindings
+                        .get(&symbol)
+                        .map(|l| l.r#type.clone())
+                        .or_else(|| self.ty(member.expression()).ok());
+                    if matches!(receiver_type, Some(Type::Map { .. })) {
+                        let receiver = self.expression(member.expression())?;
+                        return self.map_intrinsic(
+                            node,
+                            receiver,
+                            member.name().text(),
+                            node.arguments().into_iter().collect(),
+                        );
+                    }
+                }
                 if member.kind() == SyntaxKind::Identifier {
                     let symbol = self.symbol(member);
                     if self.bindings.contains_key(&symbol)

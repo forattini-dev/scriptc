@@ -85,6 +85,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-js-contracts/contracts.ts",
         "rust-native-parameters/main.ts",
         "rust-native-parameters/function-values.ts",
+        "rust-native-collections/main.ts",
+        "rust-native-collections/scalar-map.ts",
+        "rust-native-collections/runtime-types-only.ts",
     ]
     .into_iter()
     .enumerate()
@@ -185,8 +188,8 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         (
-            "optional-array-param",
-            "function f(n?: number[]) { return 1; } console.log(f());",
+            "optional-function-param",
+            "function f(n?: () => number) { return 1; } console.log(f());",
             "SCN1001",
         ),
         (
@@ -206,13 +209,38 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ),
         ("async", "async function f() { return 1; }", "SCN1001"),
         (
+            "readonly-map-write",
+            "function f(map: ReadonlyMap<string, number>): void { map.set('x', 1); }",
+            "TS2339",
+        ),
+        (
+            "map-key-type",
+            "const map = new Map<boolean, number>();",
+            "SCN1001",
+        ),
+        (
+            "dictionary-function-cycle",
+            "const values: Record<string, () => number> = {}; values.x = () => 1;",
+            "SCN1001",
+        ),
+        (
+            "recursive-dictionary",
+            "interface Node { next: Record<string, Node> } function f(value: Node): void {}",
+            "SCN1001",
+        ),
+        (
+            "dictionary-prototype-write",
+            "const values: Record<string, boolean> = {}; values['__proto__'] = false;",
+            "SCN1001",
+        ),
+        (
             "recursive-record",
             "interface Link { next?: Link }; function f(link: Link): void {}",
             "SCN1001",
         ),
         (
-            "index-record",
-            "function f(record: Record<string, string>): void {}",
+            "mixed-index-record",
+            "function f(record: { fixed: string; [key: string]: string }): void {}",
             "SCN1001",
         ),
         (
@@ -607,6 +635,34 @@ fn declaration_contracts_validate_js_bodies_and_refuse_ambiguous_abis() {
             "export declare function value(n: number): { count: number };",
             "export function value(n) { return { count: 'wrong' }; }",
             "value(2).count",
+            "SCN1001",
+        ),
+        (
+            "map-value-contract",
+            "export declare function value(n: number): ReadonlyMap<string, number>;",
+            "export function value(n) { return new Map([['answer', 'wrong']]); }",
+            "value(2).has('answer')",
+            "SCN1001",
+        ),
+        (
+            "map-key-contract",
+            "export declare function value(n: number): ReadonlyMap<string, number>;",
+            "export function value(n) { return new Map([[7, n]]); }",
+            "value(2).has('answer')",
+            "SCN1001",
+        ),
+        (
+            "array-default-contract",
+            "export declare function value(n?: number[]): number;",
+            "export function value(n = ['wrong']) { return n.length; }",
+            "value()",
+            "SCN1001",
+        ),
+        (
+            "dictionary-array-contract",
+            "export declare function value(n: number): Record<string, string[] | undefined>;",
+            "export function value(n) { return { agents: [n] }; }",
+            "value(2)",
             "SCN1001",
         ),
     ] {

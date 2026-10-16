@@ -1,4 +1,5 @@
 use crate::ir::{Expr, Function, Module, Stmt, Type};
+mod collections;
 
 fn rust_type(ty: Type) -> String {
     match ty {
@@ -17,6 +18,13 @@ fn rust_type(ty: Type) -> String {
         Type::Bool => "bool",
         Type::String => "String",
         Type::Void => "()",
+        Type::Map { key, value } => {
+            return format!(
+                "std::rc::Rc<std::cell::RefCell<Vec<({}, {})>>>",
+                rust_type(*key),
+                rust_type(*value)
+            );
+        }
         Type::Array {
             elem: &Type::String,
         } => "runtime::JsArray<runtime::JsString>",
@@ -48,6 +56,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         "// scriptc native IR v13; engine: none\n#![forbid(unsafe_code)]\n#![allow(unused_parens, unused_mut, unused_variables)]\n",
     );
     output.push_str(include_str!("program_support.rs"));
+    output.push_str(include_str!("collections_support.rs"));
     if uses_runtime(module) {
         output.push_str("\nuse scriptc_runtime as runtime;\n");
     }
@@ -58,6 +67,12 @@ pub fn rust(module: &Module) -> Result<String, String> {
                 "{}: {},\n",
                 field_name(&field.name),
                 rust_type(field.r#type.clone())
+            ));
+        }
+        if let Some(value) = &record.index_value {
+            output.push_str(&format!(
+                "overflow: Vec<(String, {})>,\n",
+                rust_type(value.clone())
             ));
         }
         output.push_str("}\n");
@@ -75,6 +90,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
             .map(|(tag, ty)| {
                 let equality = match ty {
                     Type::Record { .. } => "std::rc::Rc::ptr_eq(&left, &right)",
+                    Type::Array { .. } => "left.ptr_eq(&right)",
                     Type::Null | Type::Undefined => "true",
                     Type::F64 | Type::String | Type::Bool => "left == right",
                     _ => unreachable!("IR validated"),
@@ -153,6 +169,11 @@ pub fn uses_runtime(module: &Module) -> bool {
     fn expr(value: &Expr) -> bool {
         match value {
             Expr::ArrayLit { .. } | Expr::LibCall { .. } => true,
+            Expr::ArrayIntrinsic { .. } => true,
+            Expr::ArrayGet { .. } => true,
+            Expr::MapNew { seed, .. } => seed.iter().any(|p| expr(&p.key) || expr(&p.value)),
+            Expr::MapIntrinsic { receiver, args, .. } => expr(receiver) || args.iter().any(expr),
+            Expr::RecordKeyGet { obj, key, .. } => expr(obj) || expr(key),
             Expr::Bin { left, right, .. }
             | Expr::UnionEq { left, right, .. }
             | Expr::Logical { left, right, .. }
@@ -174,6 +195,9 @@ pub fn uses_runtime(module: &Module) -> bool {
     }
     fn body(stmts: &[Stmt]) -> bool {
         stmts.iter().any(|stmt| match stmt {
+            Stmt::RecordKeySet {
+                obj, key, value, ..
+            } => expr(obj) || expr(key) || expr(value),
             Stmt::RecordSet { obj, value, .. } => expr(obj) || expr(value),
             Stmt::VarDecl { init, .. } => expr(init),
             Stmt::Assign { value, .. } => expr(value),
@@ -189,6 +213,7 @@ pub fn uses_runtime(module: &Module) -> bool {
         match t {
             Type::Array { .. } => true,
             Type::Func { params, ret } => params.iter().any(ty) || ty(ret),
+            Type::Map { key, value } => ty(key) || ty(value),
             _ => false,
         }
     }
@@ -206,7 +231,15 @@ pub fn uses_runtime(module: &Module) -> bool {
 }
 
 fn expr(value: &Expr, function: &Function, module: &Module) -> String {
+    if let Some(code) = collections::expression(value, function, module) {
+        return code;
+    }
     match value {
+        Expr::ArrayGet { .. }
+        | Expr::MapNew { .. }
+        | Expr::MapIntrinsic { .. }
+        | Expr::RecordKeyGet { .. }
+        | Expr::ArrayIntrinsic { .. } => unreachable!("collection expression"),
         Expr::Closure {
             fn_name,
             captures,
@@ -290,6 +323,21 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             r#type: Type::Record { shape_id },
             ..
         } => {
+            if module.records[*shape_id].index_value.is_some() {
+                let entries = fields
+                    .iter()
+                    .map(|f| {
+                        format!(
+                            "{{ let value = {}; js_dict_set(&mut entries, {:?}.into(), value); }}",
+                            expr(&f.value, function, module),
+                            f.name
+                        )
+                    })
+                    .collect::<String>();
+                return format!(
+                    "{{ let mut entries = Vec::new(); {entries} std::rc::Rc::new(std::cell::RefCell::new(R{shape_id} {{ overflow: entries }})) }}"
+                );
+            }
             let fields = fields
                 .iter()
                 .map(|f| {
@@ -405,6 +453,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 r#type,
                 Type::String
                     | Type::Array { .. }
+                    | Type::Map { .. }
                     | Type::Record { .. }
                     | Type::Union { .. }
                     | Type::Func { .. }
@@ -417,10 +466,18 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         Expr::Bin {
             op, left, right, ..
         } => {
-            let record = matches!(left.ty(), Type::Record { .. } | Type::Func { .. });
+            let array = matches!(left.ty(), Type::Array { .. });
+            let record = matches!(
+                left.ty(),
+                Type::Record { .. } | Type::Func { .. } | Type::Map { .. }
+            );
             let left = expr(left, function, module);
             let right = expr(right, function, module);
             match op.as_str() {
+                "===" | "!==" if array => format!(
+                    "{}({left}).ptr_eq(&({right}))",
+                    if op == "!==" { "!" } else { "" }
+                ),
                 "===" | "!==" if record => format!(
                     "{}std::rc::Rc::ptr_eq(&({left}), &({right}))",
                     if op == "!==" { "!" } else { "" }
@@ -459,6 +516,11 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
 fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut String) {
     use std::fmt::Write;
     match stmt {
+        Stmt::RecordKeySet {
+            obj, key, value, ..
+        } => {
+            writeln!(output, "{{ let object = {}; let key = {}; let value = {}; js_dict_set(&mut object.borrow_mut().overflow, key, value); }}", expr(obj, function, module), expr(key, function, module), expr(value, function, module)).unwrap();
+        }
         Stmt::RecordSet {
             obj, field, value, ..
         } => {

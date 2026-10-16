@@ -18,6 +18,10 @@ pub enum Type {
     Array {
         elem: &'static Type,
     },
+    Map {
+        key: Box<Type>,
+        value: Box<Type>,
+    },
     #[serde(rename = "nullT")]
     Null,
     #[serde(rename = "undefinedT")]
@@ -51,6 +55,8 @@ pub struct Record {
     pub id: usize,
     pub fields: Vec<Field>,
     pub declared_order: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_value: Option<Type>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Union {
@@ -59,11 +65,19 @@ pub struct Union {
     pub arms: Vec<Type>,
 }
 #[derive(Debug, Serialize)]
+pub struct MapEntry {
+    pub key: Expr,
+    pub value: Expr,
+}
+
+#[derive(Debug, Serialize)]
 pub struct FieldInit {
     pub name: String,
     pub value: Expr,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub absent: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub overflow: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -122,6 +136,40 @@ pub struct Local {
     rename_all_fields = "camelCase"
 )]
 pub enum Expr {
+    ArrayGet {
+        arr: Box<Expr>,
+        index: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    MapNew {
+        seed: Vec<MapEntry>,
+        r#type: Type,
+        loc: Loc,
+    },
+    MapIntrinsic {
+        method: String,
+        receiver: Box<Expr>,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    RecordKeyGet {
+        obj: Box<Expr>,
+        shape_id: String,
+        key: Box<Expr>,
+        overflow_only: bool,
+        r#type: Type,
+        loc: Loc,
+    },
+    #[serde(rename = "arrIntrinsic")]
+    ArrayIntrinsic {
+        method: String,
+        receiver: Box<Expr>,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     Closure {
         fn_name: String,
         captures: Vec<String>,
@@ -268,7 +316,12 @@ pub enum Expr {
 impl Expr {
     pub fn ty(&self) -> Type {
         match self {
-            Self::UnitLit { r#type, .. }
+            Self::ArrayGet { r#type, .. }
+            | Self::MapNew { r#type, .. }
+            | Self::MapIntrinsic { r#type, .. }
+            | Self::RecordKeyGet { r#type, .. }
+            | Self::ArrayIntrinsic { r#type, .. }
+            | Self::UnitLit { r#type, .. }
             | Self::Closure { r#type, .. }
             | Self::CallValue { r#type, .. }
             | Self::Logical { r#type, .. }
@@ -301,6 +354,14 @@ impl Expr {
     rename_all_fields = "camelCase"
 )]
 pub enum Stmt {
+    RecordKeySet {
+        obj: Expr,
+        shape_id: String,
+        key: Expr,
+        value: Expr,
+        overflow_only: bool,
+        loc: Loc,
+    },
     RecordSet {
         obj: Expr,
         shape_id: String,
@@ -388,6 +449,22 @@ pub fn validate(module: &Module) -> Result<(), String> {
 }
 
 impl Module {
+    fn lookup_result(&self, value: &Type, result: &Type) -> bool {
+        let Type::Union { union_id } = result else {
+            return false;
+        };
+        let Some(result) = self.unions.get(*union_id) else {
+            return false;
+        };
+        let mut arms = match value {
+            Type::Union { union_id } => self.unions[*union_id].arms.clone(),
+            value => vec![value.clone()],
+        };
+        arms.push(Type::Undefined);
+        arms.sort_by_key(|a| format!("{a:?}"));
+        arms.dedup();
+        arms == result.arms
+    }
     pub fn field(&self, ty: Type, name: &str) -> Option<&Field> {
         let Type::Record { shape_id } = ty else {
             return None;
@@ -410,8 +487,18 @@ impl Module {
             }
             Type::Void | Type::Null | Type::Undefined => false,
             Type::Array { elem } => matches!(elem, Type::F64 | Type::String | Type::Bool),
+            Type::Map { key, value } => {
+                matches!(*key, Type::F64 | Type::String)
+                    && !matches!(*value, Type::Func { .. } | Type::Map { .. })
+                    && self.valid_type(*value, active)
+            }
             Type::Record { shape_id } => self.records.get(shape_id).is_some_and(|r| {
                 r.id == shape_id
+                    && r.index_value.as_ref().is_none_or(|v| {
+                        r.fields.is_empty()
+                            && !matches!(v, Type::Func { .. } | Type::Map { .. })
+                            && self.valid_type(v.clone(), active)
+                    })
                     && r.fields.iter().all(|f| {
                         !matches!(f.r#type, Type::Func { .. })
                             && self.valid_type(f.r#type.clone(), active)
@@ -424,7 +511,7 @@ impl Module {
                         matches!(arm, Type::Null | Type::Undefined)
                             || (!matches!(
                                 arm,
-                                Type::Union { .. } | Type::Array { .. } | Type::Func { .. }
+                                Type::Union { .. } | Type::Func { .. } | Type::Map { .. }
                             ) && self.valid_type(arm.clone(), active))
                     })
             }),
@@ -504,6 +591,110 @@ fn validate_function(
         module: &Module,
     ) -> Result<(), String> {
         match e {
+            Expr::ArrayGet {
+                arr, index, r#type, ..
+            } => {
+                expr(arr, locals, initialized, functions, module)?;
+                expr(index, locals, initialized, functions, module)?;
+                if !matches!(arr.ty(), Type::Array { elem } if *elem == *r#type)
+                    || index.ty() != Type::F64
+                {
+                    return Err("invalid array read".into());
+                }
+                Ok(())
+            }
+            Expr::MapNew {
+                seed,
+                r#type: Type::Map { key, value },
+                ..
+            } => {
+                if !module.valid_type(e.ty(), &mut vec![]) {
+                    return Err("invalid Map layout".into());
+                }
+                for pair in seed {
+                    expr(&pair.key, locals, initialized, functions, module)?;
+                    expr(&pair.value, locals, initialized, functions, module)?;
+                    if pair.key.ty() != **key || pair.value.ty() != **value {
+                        return Err("invalid Map seed".into());
+                    }
+                }
+                Ok(())
+            }
+            Expr::MapIntrinsic {
+                receiver,
+                args,
+                method,
+                r#type,
+                ..
+            } => {
+                expr(receiver, locals, initialized, functions, module)?;
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let Type::Map { key, value } = receiver.ty() else {
+                    return Err("non-Map receiver".into());
+                };
+                let valid = match method.as_str() {
+                    "get" => {
+                        args.len() == 1
+                            && args[0].ty() == *key
+                            && module.lookup_result(&value, r#type)
+                    }
+                    "has" | "delete" => {
+                        args.len() == 1 && args[0].ty() == *key && *r#type == Type::Bool
+                    }
+                    "set" => {
+                        args.len() == 2
+                            && args[0].ty() == *key
+                            && args[1].ty() == *value
+                            && *r#type == Type::Void
+                    }
+                    "size" => args.is_empty() && *r#type == Type::F64,
+                    "clear" => args.is_empty() && *r#type == Type::Void,
+                    _ => false,
+                };
+                if !valid {
+                    return Err("invalid Map operation".into());
+                }
+                Ok(())
+            }
+            Expr::RecordKeyGet {
+                obj,
+                key,
+                shape_id,
+                overflow_only: true,
+                r#type,
+                ..
+            } => {
+                expr(obj, locals, initialized, functions, module)?;
+                expr(key, locals, initialized, functions, module)?;
+                let Type::Record { shape_id: id } = obj.ty() else {
+                    return Err("non-record keyed read".into());
+                };
+                let value = module.records[id]
+                    .index_value
+                    .as_ref()
+                    .ok_or("non-indexed keyed read")?;
+                if *shape_id != format!("r{id}")
+                    || key.ty() != Type::String
+                    || !module.lookup_result(value, r#type)
+                {
+                    return Err("invalid keyed read".into());
+                }
+                Ok(())
+            }
+            Expr::ArrayIntrinsic {
+                receiver,
+                args,
+                method,
+                r#type: Type::F64,
+                ..
+            } if method == "length"
+                && args.is_empty()
+                && matches!(receiver.ty(), Type::Array { .. }) =>
+            {
+                expr(receiver, locals, initialized, functions, module)
+            }
             Expr::Closure {
                 fn_name,
                 captures,
@@ -605,11 +796,17 @@ fn validate_function(
             } => {
                 let record = module.records.get(*shape_id).ok_or("unknown record")?;
                 let mut seen = std::collections::HashSet::new();
-                if fields.len() != record.fields.len() {
+                if fields.iter().filter(|f| !f.overflow).count() != record.fields.len() {
                     return Err("incomplete record literal".into());
                 }
                 for f in fields {
                     expr(&f.value, locals, initialized, functions, module)?;
+                    if f.overflow {
+                        if record.index_value.as_ref() != Some(&f.value.ty()) || f.absent {
+                            return Err("invalid overflow initializer".into());
+                        }
+                        continue;
+                    }
                     let field = module
                         .field(
                             Type::Record {
@@ -800,7 +997,12 @@ fn validate_function(
                     left.ty() == right.ty()
                         && matches!(
                             left.ty(),
-                            Type::F64 | Type::Bool | Type::Record { .. } | Type::Func { .. }
+                            Type::F64
+                                | Type::Bool
+                                | Type::Record { .. }
+                                | Type::Func { .. }
+                                | Type::Array { .. }
+                                | Type::Map { .. }
                         )
                 } else {
                     left.ty() == Type::F64 && right.ty() == Type::F64
@@ -873,6 +1075,28 @@ fn validate_function(
     ) -> Result<(), String> {
         for stmt in stmts {
             match stmt {
+                Stmt::RecordKeySet {
+                    obj,
+                    key,
+                    value,
+                    shape_id,
+                    overflow_only: true,
+                    ..
+                } => {
+                    expr(obj, locals, initialized, functions, module)?;
+                    expr(key, locals, initialized, functions, module)?;
+                    expr(value, locals, initialized, functions, module)?;
+                    let Type::Record { shape_id: id } = obj.ty() else {
+                        return Err("non-record keyed write".into());
+                    };
+                    if *shape_id != format!("r{id}")
+                        || key.ty() != Type::String
+                        || module.records[id].index_value.as_ref() != Some(&value.ty())
+                    {
+                        return Err("invalid keyed write".into());
+                    }
+                }
+                Stmt::RecordKeySet { .. } => return Err("mixed keyed writes are not ported".into()),
                 Stmt::RecordSet {
                     obj,
                     shape_id,
@@ -1000,6 +1224,151 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn map_lookups_require_typed_keys_and_an_undefined_arm() {
+        let mut m = callable_module();
+        m.functions.truncate(1);
+        let loc = m.functions[0].loc.clone();
+        m.unions.push(Union {
+            id: 0,
+            arms: vec![Type::F64, Type::Undefined],
+        });
+        let map = || Expr::MapNew {
+            seed: vec![],
+            r#type: Type::Map {
+                key: Box::new(Type::String),
+                value: Box::new(Type::F64),
+            },
+            loc: loc.clone(),
+        };
+        let get = || Expr::MapIntrinsic {
+            method: "get".into(),
+            receiver: Box::new(map()),
+            args: vec![Expr::StrLit {
+                value: "missing".into(),
+                r#type: Type::String,
+                loc: loc.clone(),
+            }],
+            r#type: Type::Union { union_id: 0 },
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: get(),
+            loc: loc.clone(),
+        }];
+        assert!(validate(&m).is_ok());
+        if let Stmt::Expression {
+            expr: Expr::MapIntrinsic { r#type, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = Type::F64;
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid Map operation");
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: get(),
+            loc: loc.clone(),
+        }];
+        if let Stmt::Expression {
+            expr: Expr::MapIntrinsic { args, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            args[0] = Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc: loc.clone(),
+            };
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid Map operation");
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: map(),
+            loc: loc.clone(),
+        }];
+        if let Stmt::Expression {
+            expr: Expr::MapNew { r#type, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = Type::Map {
+                key: Box::new(Type::Bool),
+                value: Box::new(Type::F64),
+            };
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid Map layout");
+    }
+
+    #[test]
+    fn indexed_layouts_reject_cycles_and_incompatible_overflow() {
+        let mut m = callable_module();
+        m.functions.truncate(1);
+        let loc = m.functions[0].loc.clone();
+        m.records.push(Record {
+            id: 0,
+            fields: vec![],
+            declared_order: vec![],
+            index_value: Some(Type::F64),
+        });
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::RecordLit {
+                fields: vec![FieldInit {
+                    name: "key".into(),
+                    value: Expr::BoolLit {
+                        value: true,
+                        r#type: Type::Bool,
+                        loc: loc.clone(),
+                    },
+                    absent: false,
+                    overflow: true,
+                }],
+                r#type: Type::Record { shape_id: 0 },
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert_eq!(validate(&m).unwrap_err(), "invalid overflow initializer");
+        m.records[0].index_value = Some(Type::Bool);
+        assert!(validate(&m).is_ok());
+        m.records[0].index_value = Some(Type::Record { shape_id: 0 });
+        assert_eq!(validate(&m).unwrap_err(), "invalid/recursive record layout");
+        m.records[0].index_value = Some(Type::Func {
+            params: vec![],
+            ret: Box::new(Type::F64),
+        });
+        assert_eq!(validate(&m).unwrap_err(), "invalid/recursive record layout");
+    }
+
+    #[test]
+    fn array_union_payloads_keep_their_element_types() {
+        let mut m = callable_module();
+        m.functions.truncate(1);
+        let loc = m.functions[0].loc.clone();
+        let array = Type::Array {
+            elem: &Type::String,
+        };
+        m.unions.push(Union {
+            id: 0,
+            arms: vec![array.clone(), Type::Undefined],
+        });
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::UnionWrap {
+                union_id: "u0".into(),
+                tag: 0,
+                value: Box::new(Expr::ArrayLit {
+                    elems: vec![],
+                    r#type: array,
+                    loc: loc.clone(),
+                }),
+                r#type: Type::Union { union_id: 0 },
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert!(validate(&m).is_ok());
+        m.unions[0].arms[0] = Type::Array { elem: &Type::F64 };
+        assert!(validate(&m).is_err());
+    }
+
     fn capturing_module() -> Module {
         let mut m = callable_module();
         let loc = m.functions[0].loc.clone();
@@ -1111,6 +1480,7 @@ mod tests {
                 r#type: Type::F64,
             }],
             declared_order: vec!["count".into()],
+            index_value: None,
         });
         let loc = m.functions[0].loc.clone();
         m.functions[0].body = vec![Stmt::Expression {
@@ -1124,6 +1494,7 @@ mod tests {
                         loc: loc.clone(),
                     },
                     absent: false,
+                    overflow: false,
                 }],
                 r#type: Type::Record { shape_id: 0 },
                 loc: loc.clone(),

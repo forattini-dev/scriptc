@@ -22,6 +22,9 @@ impl Lowerer<'_> {
 
     fn aggregate_type_inner(&mut self, id: TypeId) -> Option<Type> {
         let flags = self.checker.ty(id).flags;
+        if let Some(ty) = self.map_type(id) {
+            return Some(ty);
+        }
         if flags.intersects(TypeFlags::OBJECT)
             && !self
                 .checker
@@ -50,7 +53,6 @@ impl Lowerer<'_> {
                 .object_flags()
                 .intersects(ObjectFlags::CLASS)
             || self.checker.is_tuple_type(id)
-            || !self.checker.get_index_infos_of_type(id).is_empty()
             || !self
                 .checker
                 .get_signatures_of_type(id, SignatureKind::CALL)
@@ -63,6 +65,34 @@ impl Lowerer<'_> {
             return None;
         }
         let properties = self.checker.get_properties_of_type(id).to_vec();
+        let indexes = self.checker.get_index_infos_of_type(id).to_vec();
+        let index_value = if indexes.is_empty() {
+            None
+        } else {
+            // Mixed declared/indexed shapes and non-string signatures need
+            // separate projection/prototype handling; don't erase their fields.
+            if indexes.len() != 1 || !properties.is_empty() {
+                return None;
+            }
+            let index = self.checker.index_info(indexes[0]);
+            if !self
+                .checker
+                .ty(index.key_type)
+                .flags
+                .intersects(TypeFlags::STRING)
+            {
+                return None;
+            }
+            let source = index.value_type;
+            let ty = self.type_id(source)?;
+            if matches!(
+                ty,
+                Type::Null | Type::Undefined | Type::Void | Type::Func { .. } | Type::Map { .. }
+            ) {
+                return None;
+            }
+            Some(ty)
+        };
         let mut fields = Vec::new();
         for property in properties {
             let name = self.checker.sym(property).name.to_string();
@@ -98,7 +128,11 @@ impl Lowerer<'_> {
         }
         let declared_order = fields.iter().map(|f| f.name.clone()).collect();
         fields.sort_by(|a, b| a.name.cmp(&b.name));
-        if let Some(record) = self.records.iter().find(|r| r.fields == fields) {
+        if let Some(record) = self
+            .records
+            .iter()
+            .find(|r| r.fields == fields && r.index_value == index_value)
+        {
             return Some(Type::Record {
                 shape_id: record.id,
             });
@@ -108,6 +142,7 @@ impl Lowerer<'_> {
             id: shape_id,
             fields,
             declared_order,
+            index_value,
         });
         Some(Type::Record { shape_id })
     }
@@ -121,7 +156,7 @@ impl Lowerer<'_> {
         if arms.is_empty()
             || arms
                 .iter()
-                .any(|a| matches!(a, Type::Void | Type::Array { .. } | Type::Func { .. }))
+                .any(|a| matches!(a, Type::Void | Type::Map { .. } | Type::Func { .. }))
         {
             return None;
         }
@@ -189,6 +224,43 @@ impl Lowerer<'_> {
 
     pub(super) fn expected_expression(&mut self, node: Node, target: Type) -> Result<Expr, String> {
         match node.kind() {
+            SyntaxKind::NewExpression if matches!(target, Type::Map { .. }) => {
+                self.map_new_expected(node, Some(target))
+            }
+            SyntaxKind::ArrayLiteralExpression => {
+                let array = match &target {
+                    Type::Array { .. } => target.clone(),
+                    Type::Union { union_id } => {
+                        let arrays = self.unions[*union_id]
+                            .arms
+                            .iter()
+                            .filter(|t| matches!(t, Type::Array { .. }))
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        if arrays.len() != 1 {
+                            return Err(
+                                self.refuse(node, "array literal needs one native array arm")
+                            );
+                        }
+                        arrays[0].clone()
+                    }
+                    _ => return Err(self.refuse(node, "array literal needs a native array target")),
+                };
+                let Type::Array { elem } = &array else {
+                    unreachable!()
+                };
+                let elems = node
+                    .elements()
+                    .into_iter()
+                    .map(|n| self.expected_expression(n, (**elem).clone()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let value = Expr::ArrayLit {
+                    elems,
+                    r#type: array,
+                    loc: self.loc(node),
+                };
+                self.coerce(value, target, node)
+            }
             SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression => {
                 self.closure(node, Some(target))
             }
@@ -279,10 +351,10 @@ impl Lowerer<'_> {
             if name == "__proto__" && property.kind() == SyntaxKind::PropertyAssignment {
                 return Err(self.refuse(property, "object prototype setters are not ported"));
             }
-            let field = record
-                .fields
-                .iter()
-                .find(|f| f.name == name)
+            let field = record.fields.iter().find(|f| f.name == name);
+            let target = field
+                .map(|f| f.r#type.clone())
+                .or_else(|| record.index_value.clone())
                 .ok_or_else(|| self.refuse(property, "record width projection is not ported"))?;
             if !seen.insert(name.clone()) {
                 return Err(self.refuse(property, "duplicate record properties are not ported"));
@@ -292,11 +364,12 @@ impl Lowerer<'_> {
             } else {
                 property.initializer()
             };
-            let value = self.expected_expression(source, field.r#type.clone())?;
+            let value = self.expected_expression(source, target)?;
             fields.push(ir::FieldInit {
                 name,
                 value,
                 absent: false,
+                overflow: field.is_none(),
             });
         }
         for field in &record.fields {
@@ -311,6 +384,7 @@ impl Lowerer<'_> {
                     name: field.name.clone(),
                     value,
                     absent: true,
+                    overflow: false,
                 });
             }
         }
@@ -323,12 +397,32 @@ impl Lowerer<'_> {
 
     pub(super) fn record_get(&mut self, node: Node) -> Result<Expr, String> {
         let obj = self.expression(node.expression())?;
+        if matches!(obj.ty(), Type::Map { .. }) && node.name().text() == "size" {
+            return self.map_intrinsic(node, obj, "size", vec![]);
+        }
+        if matches!(obj.ty(), Type::Array { .. }) && node.name().text() == "length" {
+            return Ok(Expr::ArrayIntrinsic {
+                method: "length".into(),
+                receiver: Box::new(obj),
+                args: vec![],
+                r#type: Type::F64,
+                loc: self.loc(node),
+            });
+        }
         let Type::Record { shape_id } = obj.ty() else {
             return Err(self.refuse(
                 node,
                 "property receiver has no closed record representation",
             ));
         };
+        if self.records[shape_id].index_value.is_some() {
+            let key = Expr::StrLit {
+                value: node.name().text().into(),
+                r#type: Type::String,
+                loc: self.loc(node),
+            };
+            return self.dictionary_get(node, obj, key);
+        }
         let field = self.records[shape_id]
             .fields
             .iter()
@@ -350,6 +444,9 @@ impl Lowerer<'_> {
         let Type::Record { shape_id } = obj.ty() else {
             return Err(self.refuse(node, "property assignment requires a closed record"));
         };
+        if self.records[shape_id].index_value.is_some() {
+            return self.dictionary_set_value(node, obj);
+        }
         let field = self.records[shape_id]
             .fields
             .iter()
@@ -405,6 +502,28 @@ impl Lowerer<'_> {
                     loc: self.loc(node),
                 });
             }
+            if (matches!(left, Expr::UnitLit { .. }) || matches!(right, Expr::UnitLit { .. }))
+                && !matches!(left.ty(), Type::Union { .. })
+                && !matches!(right.ty(), Type::Union { .. })
+            {
+                let union = self
+                    .intern_union(vec![left.ty(), right.ty()])
+                    .ok_or_else(|| {
+                        self.refuse(node, "unit comparison has no native representation")
+                    })?;
+                let Type::Union { union_id } = union else {
+                    unreachable!()
+                };
+                return Ok(Expr::UnionEq {
+                    union_id: format!("u{union_id}"),
+                    negated: op == "!==",
+                    same_value: false,
+                    left: Box::new(self.coerce(left, union.clone(), node.left())?),
+                    right: Box::new(self.coerce(right, union, node.right())?),
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                });
+            }
             let union = if matches!(left.ty(), Type::Union { .. }) {
                 left.ty()
             } else {
@@ -437,6 +556,8 @@ impl Lowerer<'_> {
                         | Type::Undefined
                         | Type::Record { .. }
                         | Type::Func { .. }
+                        | Type::Array { .. }
+                        | Type::Map { .. }
                 )
         } else {
             left.ty() == Type::F64 && right.ty() == Type::F64
