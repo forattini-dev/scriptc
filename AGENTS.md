@@ -57,6 +57,7 @@ new tests should follow this convention.
 
 ## Where things live
 
+- `packages/compiler-rust` — the destination native compiler, implemented in Rust: Theo's linked Rust frontend → scriptc IR → Rust source → Cargo/rustc, without an engine or compiler fallback. Native feature work belongs here; see its README for phase ownership and migration gates.
 - `packages/compiler` — the frontend (tsc API to IR), the typed IR with validator and serializer, and the LLVM, C, and Rust backends.
 - `packages/runtime` — the C runtime compiled into every C/LLVM-backed scriptc binary.
 - `packages/runtime-rust` — the memory-safe Rust runtime (`#![forbid(unsafe_code)]`) linked by `--backend rust` binaries; its own gate is `cargo test` + `cargo clippy -- -D warnings` on the toolchain pinned in its `rust-toolchain.toml` (CI job `runtime_rust`).
@@ -65,6 +66,8 @@ new tests should follow this convention.
 - `tests/` — the differential corpus, diagnostics snapshots, and harness.
 - `docs/` — the standalone Next.js App Router + MDX documentation workspace.
 - `scripts/` — repository tooling, including the release version stamp.
+
+During migration, `packages/compiler` and `packages/cli` remain the compatibility/reference pipeline. `pnpm scriptc:native` selects the Rust driver; `pnpm scriptc:legacy` selects the previous CLI; `pnpm scriptc` retains its compatibility behavior until a validated distribution cutover. The Rust compiler never retries through the legacy path. Preserve the shared Rust runtime, existing corpus and IR interoperability oracle while porting contracts. Retire legacy components only after their callers, build paths and replacement evidence have been reconciled.
 
 ## Node.js compatibility
 

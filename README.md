@@ -6,6 +6,12 @@ Static builds include a small native runtime, but no Node or JavaScript engine. 
 
 scriptc is experimental and targets macOS, Linux, Windows, and WebAssembly via WASI Preview 1.
 
+## Native compiler migration
+
+The destination compiler is [packages/compiler-rust](packages/compiler-rust/README.md): a Rust executable linking Theo's Rust parser/binder/checker, producing scriptc IR and Rust binaries without a JavaScript engine or TypeScript/Go compiler fallback. It currently supports a tested subset of TS/JS. Its architecture separates project checking, module initialization, function demand, typed IR validation and code generation.
+
+Use `pnpm build:compiler-rust` and `pnpm scriptc:native --version` for the native driver; these developer launchers select the pinned Rust toolchain through rustup. The native executable itself requires no Node or Go compiler. `pnpm scriptc:legacy` explicitly selects the existing CLI described below, and `pnpm scriptc` retains that compatibility behavior during migration. Selecting `--backend rust` in the compatibility CLI selects its output backend; it does not select the new compiler. The native driver never falls back to that CLI.
+
 ## Installation
 
 The compiler requires Node.js 24 or newer. Default native builds require Cargo and rustc. Source outputs (`--emit=ir|c|rust|llvm`) require only Node. LLVM assembly/object output uses the matching platform helper; LLVM executables additionally need a linker and SDK/sysroot. Explicit C and sanitizer builds require a C compiler. Generated executables do not require Node.

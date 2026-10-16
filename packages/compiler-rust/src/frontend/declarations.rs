@@ -75,16 +75,10 @@ fn edges(checker: &mut Checker, files: &[Node]) -> Vec<Edge> {
     let mut edges = Vec::new();
     for file in files {
         for node in file.statements() {
-            if !matches!(
-                node.kind(),
-                SyntaxKind::ImportDeclaration | SyntaxKind::ExportDeclaration
-            ) || node.is_type_only()
-                || (!node.import_clause().is_nil() && node.import_clause().is_type_only())
-            {
+            let Some(specifier) = modules::runtime_specifier(node) else {
                 continue;
-            }
-            let specifier = node.module_specifier();
-            if specifier.is_nil() || builtins::module(specifier.text()).is_some() {
+            };
+            if builtins::module(specifier.text()).is_some() {
                 continue;
             }
             let symbol = checker.get_symbol_at_location(specifier, false);

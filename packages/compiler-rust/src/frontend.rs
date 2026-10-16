@@ -17,7 +17,10 @@ mod aggregates;
 mod callbacks;
 mod collections;
 mod declarations;
+mod functions;
+mod modules;
 mod parameters;
+mod pipeline;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
 
@@ -32,101 +35,7 @@ pub(crate) fn path_for_frontend(path: &Path) -> String {
     }
 }
 
-pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module, String> {
-    if input.to_str().is_none() {
-        return Err("SCN0001: non-Unicode input paths are not ported".into());
-    }
-    let source = path_for_frontend(input);
-    let (options, checked) = crate::project::load(input, work, project)?;
-    let _checked_scope = goport_core::core::enter_program(Some(checked));
-    program::bind_all();
-    let mut diagnostics = program::get_config_file_parsing_diagnostics();
-    diagnostics.extend(program::get_program_diagnostics());
-    diagnostics.extend(program::get_syntactic_diagnostics(Node::NIL));
-    diagnostics.extend(program::get_semantic_diagnostics(Node::NIL));
-    diagnostics.extend(program::get_global_diagnostics());
-    if !diagnostics.is_empty() {
-        return Err(diagnostics
-            .iter()
-            .map(program::format_diagnostic)
-            .collect::<Vec<_>>()
-            .join("\n"));
-    }
-    let needs_execution = needs_execution_view();
-    let catalog = if needs_execution {
-        Some(declarations::snapshot(&source)?)
-    } else {
-        None
-    };
-    let execution = needs_execution.then(|| crate::project::execution_view(options));
-    let _execution_scope = execution.map(|program| goport_core::core::enter_program(Some(program)));
-    if execution.is_some() {
-        program::bind_all();
-        let syntax = program::get_syntactic_diagnostics(Node::NIL);
-        if !syntax.is_empty() {
-            return Err(syntax
-                .iter()
-                .map(program::format_diagnostic)
-                .collect::<Vec<_>>()
-                .join("\n"));
-        }
-    }
-    let file = program::source_files()
-        .into_iter()
-        .find(|node| source_file_info(*node).file_name == source)
-        .ok_or_else(|| "SCN0002: frontend did not return the input source file".to_string())?;
-    program::with_type_checker_for_file(file, move |checker| {
-        let linked = catalog.map(|catalog| catalog.link(checker));
-        let mut lowerer = Lowerer::new(checker, source.clone());
-        if let Some(linked) = linked {
-            lowerer.records = linked.records;
-            lowerer.unions = linked.unions;
-            lowerer.declarations = linked.hints;
-        }
-        let mut files = Vec::new();
-        lowerer.dependencies(file, &mut HashSet::new(), &mut HashSet::new(), &mut files)?;
-        for file in &files {
-            lowerer.file = source_file_info(*file).file_name.to_string();
-            for node in file.statements() {
-                if node.kind() == SyntaxKind::FunctionDeclaration {
-                    lowerer.register_function(node)?;
-                }
-            }
-        }
-        let mut body = Vec::new();
-        for file in &files {
-            lowerer.file = source_file_info(*file).file_name.to_string();
-            body.extend(lowerer.statements(file.statements())?);
-        }
-        let mut functions = vec![Function {
-            name: "__main".into(),
-            params: vec![],
-            captures: None,
-            return_type: Type::Void,
-            locals: std::mem::take(&mut lowerer.locals),
-            body,
-            loc: Loc {
-                file: source.clone(),
-                start: 0,
-                end: file.end(),
-            },
-        }];
-        let mut declarations = lowerer.functions.values().cloned().collect::<Vec<_>>();
-        declarations.sort_by(|a, b| a.name.cmp(&b.name));
-        for declaration in declarations {
-            functions.push(lowerer.lower_function(declaration)?);
-        }
-        functions.extend(lowerer.lifted);
-        Ok(Module {
-            ir_version: ir::VERSION,
-            source_file: source.clone(),
-            entry: "__main".into(),
-            functions,
-            records: lowerer.records,
-            unions: lowerer.unions,
-        })
-    })
-}
+pub use pipeline::lower;
 
 fn needs_execution_view() -> bool {
     program::source_files().into_iter().any(|file| {
@@ -135,16 +44,10 @@ fn needs_execution_view() -> bool {
         }
         program::with_type_checker_for_file(file, move |checker| {
             file.statements().into_iter().any(|node| {
-                if !matches!(
-                    node.kind(),
-                    SyntaxKind::ImportDeclaration | SyntaxKind::ExportDeclaration
-                ) || node.is_type_only()
-                    || (!node.import_clause().is_nil() && node.import_clause().is_type_only())
-                {
+                let Some(specifier) = modules::runtime_specifier(node) else {
                     return false;
-                }
-                let specifier = node.module_specifier();
-                if specifier.is_nil() || builtins::module(specifier.text()).is_some() {
+                };
+                if builtins::module(specifier.text()).is_some() {
                     return false;
                 }
                 let symbol = checker.get_symbol_at_location(specifier, false);
@@ -152,7 +55,8 @@ fn needs_execution_view() -> bool {
                     return false;
                 }
                 let target = checker.sym(symbol).value_declaration;
-                target.kind() == SyntaxKind::SourceFile
+                !target.is_nil()
+                    && target.kind() == SyntaxKind::SourceFile
                     && is_declaration(&source_file_info(target).file_name)
             })
         })
@@ -163,6 +67,15 @@ fn is_declaration(path: &str) -> bool {
     [".d.ts", ".d.mts", ".d.cts"]
         .iter()
         .any(|suffix| path.ends_with(suffix))
+}
+
+fn refusal(file: &str, node: Node, detail: &str) -> String {
+    format!(
+        "SCN1001: {file}:{}..{}: {detail} ({:?}); native subset only, no fallback",
+        node.pos(),
+        node.end(),
+        node.kind()
+    )
 }
 
 #[derive(Clone)]
@@ -179,7 +92,7 @@ struct Lowerer<'a> {
     file: String,
     locals: Vec<Local>,
     bindings: HashMap<u32, Local>,
-    functions: HashMap<u32, Signature>,
+    functions: functions::FunctionGraph,
     return_type: Option<Type>,
     native_functions: HashMap<u32, (&'static str, String)>,
     native_namespaces: HashMap<u32, &'static str>,
@@ -202,7 +115,7 @@ impl<'a> Lowerer<'a> {
             file,
             locals: Vec::new(),
             bindings: HashMap::new(),
-            functions: HashMap::new(),
+            functions: functions::FunctionGraph::default(),
             return_type: None,
             native_functions: HashMap::new(),
             native_namespaces: HashMap::new(),
@@ -412,96 +325,7 @@ impl<'a> Lowerer<'a> {
         symbol.0
     }
 
-    // Use the frontend's resolved module symbol, never a second path resolver.
-    fn dependencies(
-        &mut self,
-        file: Node,
-        active: &mut HashSet<String>,
-        visited: &mut HashSet<String>,
-        ordered: &mut Vec<Node>,
-    ) -> Result<(), String> {
-        let path = source_file_info(file).file_name.to_string();
-        self.file = path.clone();
-        if visited.contains(&path) {
-            return Ok(());
-        }
-        if !active.insert(path.clone()) {
-            // Re-entering an evaluating ESM module does not execute its body
-            // again. Functions are instantiated in the later prepass; main
-            // bindings only become available after their initialization.
-            return Ok(());
-        }
-        for node in file.statements() {
-            if node.kind() != SyntaxKind::ImportDeclaration
-                && node.kind() != SyntaxKind::ExportDeclaration
-            {
-                continue;
-            }
-            if node.is_type_only()
-                || (!node.import_clause().is_nil() && node.import_clause().is_type_only())
-            {
-                continue;
-            }
-            let specifier = node.module_specifier();
-            if specifier.is_nil() {
-                continue;
-            }
-            if let Some(module) = builtins::module(specifier.text()) {
-                self.native_import(node, module);
-                continue;
-            }
-            // The project resolver also owns paths/package-import aliases.
-            // Only executable source modules proceed to native lowering.
-            let symbol = self.checker.get_symbol_at_location(specifier, false);
-            if symbol.0 == 0 {
-                return Err(self.refuse(
-                    node,
-                    &format!(
-                        "Rust frontend did not resolve runtime module '{}'",
-                        specifier.text()
-                    ),
-                ));
-            }
-            let target = self.checker.sym(symbol).value_declaration;
-            if target.kind() != SyntaxKind::SourceFile {
-                return Err(self.refuse(
-                    node,
-                    &format!(
-                        "import '{}' has no executable source module",
-                        specifier.text()
-                    ),
-                ));
-            }
-            let target_path = &source_file_info(target).file_name;
-            if target_path.ends_with(".json") {
-                self.json_import(node, target_path)?;
-                continue;
-            }
-            if [".d.ts", ".d.mts", ".d.cts"]
-                .iter()
-                .any(|suffix| target_path.ends_with(suffix))
-                || ![".ts", ".mts", ".js", ".mjs"]
-                    .iter()
-                    .any(|suffix| target_path.ends_with(suffix))
-            {
-                return Err(self.refuse(
-                    node,
-                    &format!(
-                        "import '{}' resolves to unsupported runtime source '{target_path}'",
-                        specifier.text()
-                    ),
-                ));
-            }
-            self.dependencies(target, active, visited, ordered)?;
-            self.file = path.clone();
-        }
-        active.remove(&path);
-        visited.insert(path);
-        ordered.push(file);
-        Ok(())
-    }
-
-    fn register_function(&mut self, node: Node) -> Result<(), String> {
+    fn function_signature(&mut self, node: Node, ordinal: usize) -> Result<Signature, String> {
         if node.name().is_nil()
             || node.body().is_nil()
             || !node.type_parameters().is_empty()
@@ -572,18 +396,13 @@ impl<'a> Lowerer<'a> {
         if symbol == 0 {
             return Err(self.refuse(node, "function declaration has no resolved native symbol"));
         }
-        if self.functions.contains_key(&symbol) {
-            return Err(self.refuse(node, "function overloads are not ported"));
-        }
-        let signature = Signature {
+        Ok(Signature {
             node,
             file: self.file.clone(),
-            name: format!("f{}", self.functions.len()),
+            name: format!("f{ordinal}"),
             params,
             return_type,
-        };
-        self.functions.insert(symbol, signature);
-        Ok(())
+        })
     }
 
     fn lower_function(&mut self, signature: Signature) -> Result<Function, String> {
@@ -653,13 +472,7 @@ impl<'a> Lowerer<'a> {
         }
     }
     fn refuse(&self, node: Node, detail: &str) -> String {
-        format!(
-            "SCN1001: {}:{}..{}: {detail} ({:?}); native subset only, no fallback",
-            self.file,
-            node.pos(),
-            node.end(),
-            node.kind()
-        )
+        refusal(&self.file, node, detail)
     }
     fn ty(&mut self, node: Node) -> Result<Type, String> {
         let id = self.checker.get_type_at_location(node);
@@ -705,11 +518,7 @@ impl<'a> Lowerer<'a> {
         let loc = self.loc(node);
         let stmt = match node.kind() {
             SyntaxKind::FunctionDeclaration
-                if self.return_type.is_none()
-                    && self
-                        .functions
-                        .values()
-                        .any(|signature| signature.node == node) =>
+                if self.return_type.is_none() && node.parent().kind() == SyntaxKind::SourceFile =>
             {
                 return Ok(vec![]);
             }
@@ -932,7 +741,9 @@ impl<'a> Lowerer<'a> {
             }),
             SyntaxKind::Identifier => {
                 let symbol = self.symbol(node);
-                if let Some(signature) = self.functions.get(&symbol) {
+                if let Some(signature) =
+                    self.request_function(symbol, node, functions::UseKind::Value)?
+                {
                     return Ok(Expr::Closure {
                         fn_name: signature.name.clone(),
                         captures: vec![],
@@ -1075,7 +886,9 @@ impl<'a> Lowerer<'a> {
                 };
                 if member.kind() == SyntaxKind::Identifier || namespace_call {
                     let symbol = self.symbol(symbol_node);
-                    if let Some(signature) = self.functions.get(&symbol).cloned() {
+                    if let Some(signature) =
+                        self.request_function(symbol, node, functions::UseKind::Call)?
+                    {
                         let types = signature
                             .params
                             .iter()
@@ -1102,7 +915,7 @@ impl<'a> Lowerer<'a> {
                 let symbol = self
                     .checker
                     .get_symbol_at_location(member.expression(), false);
-                if self.bindings.contains_key(&symbol.0) || self.functions.contains_key(&symbol.0) {
+                if self.bindings.contains_key(&symbol.0) || self.functions.contains(symbol.0) {
                     return Err(self.refuse(node, "shadowed console is not ambient"));
                 }
                 let mut args = Vec::new();

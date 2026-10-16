@@ -88,6 +88,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-collections/main.ts",
         "rust-native-collections/scalar-map.ts",
         "rust-native-collections/runtime-types-only.ts",
+        "rust-native-reachability/main.ts",
     ]
     .into_iter()
     .enumerate()
@@ -152,6 +153,83 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
 }
 
 #[test]
+fn function_demand_keeps_type_checks_effects_and_escaping_values() {
+    let temp = tempfile::tempdir().unwrap();
+    for (name, source, expected) in [
+        (
+            "unused-type-error",
+            "function unused(): number { const bad: number = 'wrong'; return bad; } console.log(1);",
+            "TS2322",
+        ),
+        (
+            "reachable-chain",
+            "async function unsupported(): Promise<number> { return 1; } function root(): void { unsupported(); } root();",
+            "call 'unsupported'",
+        ),
+        (
+            "escaping-value",
+            "async function unsupported(): Promise<number> { return 1; } const alias = unsupported;",
+            "function value 'unsupported'",
+        ),
+        (
+            "unused-initializer",
+            "function effect(): number { while (true) { return 1; } } const unused = effect();",
+            "call 'effect'",
+        ),
+        (
+            "callback-escape",
+            "function consume(callback: () => void): void {} function unsupported(): void { while (true) {} } consume(unsupported);",
+            "function value 'unsupported'",
+        ),
+    ] {
+        let input = temp.path().join(format!("{name}.ts"));
+        fs::write(&input, source).unwrap();
+        let target = temp.path().join(format!("{name}.ir.json"));
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!result.status.success(), "{name}");
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(stderr.contains(expected), "{name}: {stderr}");
+        if name != "unused-type-error" {
+            assert!(
+                stderr.contains("native reachability: entry initialization"),
+                "{stderr}"
+            );
+        }
+        assert!(!target.exists(), "{name} published invalid IR");
+    }
+    let input = root().join("tests/corpus/rust-native-reachability/main.ts");
+    let mut outputs = Vec::new();
+    for index in 0..2 {
+        let target = temp.path().join(format!("stable-{index}.ir.json"));
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        success(&result);
+        outputs.push(fs::read(target).unwrap());
+    }
+    assert_eq!(
+        outputs[0], outputs[1],
+        "native planning must be deterministic"
+    );
+    let ir: serde_json::Value = serde_json::from_slice(&outputs[0]).unwrap();
+    assert_eq!(
+        ir["functions"].as_array().unwrap().len(),
+        5,
+        "only entry, initializer and reachable functions belong in IR"
+    );
+}
+
+#[test]
 fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     for (name, source, code) in [
@@ -207,7 +285,7 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "function f(a: number = a) { return a; } console.log(f());",
             "TS2372",
         ),
-        ("async", "async function f() { return 1; }", "SCN1001"),
+        ("async", "async function f() { return 1; } f();", "SCN1001"),
         (
             "readonly-map-write",
             "function f(map: ReadonlyMap<string, number>): void { map.set('x', 1); }",
@@ -225,7 +303,7 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ),
         (
             "recursive-dictionary",
-            "interface Node { next: Record<string, Node> } function f(value: Node): void {}",
+            "interface Node { next: Record<string, Node> } function f(value: Node): void {} f;",
             "SCN1001",
         ),
         (
@@ -235,12 +313,12 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ),
         (
             "recursive-record",
-            "interface Link { next?: Link }; function f(link: Link): void {}",
+            "interface Link { next?: Link }; function f(link: Link): void {} f;",
             "SCN1001",
         ),
         (
             "mixed-index-record",
-            "function f(record: { fixed: string; [key: string]: string }): void {}",
+            "function f(record: { fixed: string; [key: string]: string }): void {} f;",
             "SCN1001",
         ),
         (
@@ -262,7 +340,7 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ("unit-expression", "null;", "SCN1001"),
         (
             "unit-return",
-            "function f(): null { return null; }",
+            "function f(): null { return null; } f();",
             "SCN1001",
         ),
         (

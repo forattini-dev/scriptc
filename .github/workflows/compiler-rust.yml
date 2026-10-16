@@ -49,5 +49,7 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Install test-only IR oracle dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Explicit Rust driver entry point
+        run: pnpm scriptc:native --version
       - name: Existing IR validator and backend accept native compiler output
         run: pnpm test:compiler-rust:ir
