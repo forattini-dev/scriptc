@@ -4,9 +4,13 @@ use std::collections::HashMap;
 
 pub const VERSION: u32 = 13;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Type {
+    Func {
+        params: Vec<Type>,
+        ret: Box<Type>,
+    },
     F64,
     String,
     Bool,
@@ -85,6 +89,8 @@ pub struct Module {
 pub struct Function {
     pub name: String,
     pub params: Vec<Param>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captures: Option<Vec<Param>>,
     pub return_type: Type,
     pub locals: Vec<Local>,
     pub body: Vec<Stmt>,
@@ -105,6 +111,8 @@ pub struct Local {
     pub name: String,
     pub r#type: Type,
     pub mutable: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub boxed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -114,6 +122,18 @@ pub struct Local {
     rename_all_fields = "camelCase"
 )]
 pub enum Expr {
+    Closure {
+        fn_name: String,
+        captures: Vec<String>,
+        r#type: Type,
+        loc: Loc,
+    },
+    CallValue {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     Logical {
         op: String,
         left: Box<Expr>,
@@ -249,6 +269,8 @@ impl Expr {
     pub fn ty(&self) -> Type {
         match self {
             Self::UnitLit { r#type, .. }
+            | Self::Closure { r#type, .. }
+            | Self::CallValue { r#type, .. }
             | Self::Logical { r#type, .. }
             | Self::StrEq { r#type, .. }
             | Self::UnionEq { r#type, .. }
@@ -267,7 +289,7 @@ impl Expr {
             | Self::Call { r#type, .. }
             | Self::ArrayLit { r#type, .. }
             | Self::LibCall { r#type, .. }
-            | Self::Intrinsic { r#type, .. } => *r#type,
+            | Self::Intrinsic { r#type, .. } => r#type.clone(),
         }
     }
 }
@@ -380,20 +402,30 @@ impl Module {
         if active.contains(&ty) {
             return false;
         }
-        active.push(ty);
+        active.push(ty.clone());
         let valid = match ty {
+            Type::Func { params, ret } => {
+                params.iter().all(|p| self.valid_type(p.clone(), active))
+                    && (*ret == Type::Void || self.valid_type(*ret, active))
+            }
             Type::Void | Type::Null | Type::Undefined => false,
             Type::Array { elem } => matches!(elem, Type::F64 | Type::String | Type::Bool),
             Type::Record { shape_id } => self.records.get(shape_id).is_some_and(|r| {
-                r.id == shape_id && r.fields.iter().all(|f| self.valid_type(f.r#type, active))
+                r.id == shape_id
+                    && r.fields.iter().all(|f| {
+                        !matches!(f.r#type, Type::Func { .. })
+                            && self.valid_type(f.r#type.clone(), active)
+                    })
             }),
             Type::Union { union_id } => self.unions.get(union_id).is_some_and(|u| {
                 u.id == union_id
                     && u.arms.len() >= 2
                     && u.arms.iter().all(|arm| {
                         matches!(arm, Type::Null | Type::Undefined)
-                            || (!matches!(arm, Type::Union { .. } | Type::Array { .. })
-                                && self.valid_type(*arm, active))
+                            || (!matches!(
+                                arm,
+                                Type::Union { .. } | Type::Array { .. } | Type::Func { .. }
+                            ) && self.valid_type(arm.clone(), active))
                     })
             }),
             _ => true,
@@ -424,7 +456,7 @@ impl Module {
         for (id, u) in self.unions.iter().enumerate() {
             let mut seen = std::collections::HashSet::new();
             if u.id != id
-                || !u.arms.iter().all(|a| seen.insert(*a))
+                || !u.arms.iter().all(|a| seen.insert(a.clone()))
                 || !self.valid_type(Type::Union { union_id: id }, &mut vec![])
             {
                 return Err("invalid/recursive union layout".into());
@@ -439,24 +471,29 @@ fn validate_function(
     functions: &HashMap<&str, &Function>,
     module: &Module,
 ) -> Result<(), String> {
-    if f.return_type != Type::Void && !module.valid_type(f.return_type, &mut vec![]) {
+    if f.return_type != Type::Void && !module.valid_type(f.return_type.clone(), &mut vec![]) {
         return Err("invalid return layout".into());
     }
     let mut locals = HashMap::new();
     for local in &f.locals {
-        let supported = module.valid_type(local.r#type, &mut vec![]);
+        let supported = module.valid_type(local.r#type.clone(), &mut vec![]);
         if !supported || locals.insert(local.id.as_str(), local).is_some() {
             return Err("duplicate/void local".into());
         }
     }
     let mut parameter_ids = std::collections::HashSet::new();
-    for param in &f.params {
+    for param in f.params.iter().chain(f.captures.iter().flatten()) {
         if !parameter_ids.insert(&param.local_id)
             || !locals
                 .get(param.local_id.as_str())
                 .is_some_and(|local| local.r#type == param.r#type)
         {
             return Err("parameter requires a unique matching local".into());
+        }
+    }
+    for capture in f.captures.iter().flatten() {
+        if !locals[capture.local_id.as_str()].boxed || matches!(capture.r#type, Type::Func { .. }) {
+            return Err("capture requires a non-function boxed local".into());
         }
     }
     fn expr(
@@ -467,6 +504,55 @@ fn validate_function(
         module: &Module,
     ) -> Result<(), String> {
         match e {
+            Expr::Closure {
+                fn_name,
+                captures,
+                r#type,
+                ..
+            } => {
+                let target = functions
+                    .get(fn_name.as_str())
+                    .ok_or("unknown closure function")?;
+                let expected = Type::Func {
+                    params: target.params.iter().map(|p| p.r#type.clone()).collect(),
+                    ret: Box::new(target.return_type.clone()),
+                };
+                let want = target.captures.as_deref().unwrap_or(&[]);
+                if *r#type != expected || captures.len() != want.len() {
+                    return Err("invalid closure signature".into());
+                }
+                for (id, want) in captures.iter().zip(want) {
+                    if !initialized.contains(id)
+                        || !locals
+                            .get(id.as_str())
+                            .is_some_and(|l| l.boxed && l.r#type == want.r#type)
+                    {
+                        return Err("invalid closure capture".into());
+                    }
+                }
+                Ok(())
+            }
+            Expr::CallValue {
+                callee,
+                args,
+                r#type,
+                ..
+            } => {
+                expr(callee, locals, initialized, functions, module)?;
+                let Type::Func { params, ret } = callee.ty() else {
+                    return Err("non-function indirect call".into());
+                };
+                if params.len() != args.len() || *r#type != *ret {
+                    return Err("invalid indirect call signature".into());
+                }
+                for (arg, param) in args.iter().zip(params) {
+                    expr(arg, locals, initialized, functions, module)?;
+                    if arg.ty() != param {
+                        return Err("invalid indirect call argument".into());
+                    }
+                }
+                Ok(())
+            }
             Expr::Logical {
                 op,
                 left,
@@ -556,7 +642,8 @@ fn validate_function(
                     return Err("non-record receiver".into());
                 };
                 if *shape_id != format!("r{id}")
-                    || module.field(obj.ty(), field).map(|f| f.r#type) != Some(*r#type)
+                    || module.field(obj.ty(), field).map(|f| f.r#type.clone())
+                        != Some(r#type.clone())
                 {
                     return Err("invalid record read".into());
                 }
@@ -626,7 +713,7 @@ fn validate_function(
                         != if matches!(e, Expr::UnionIsTag { .. }) {
                             Type::Bool
                         } else {
-                            *arm
+                            arm.clone()
                         }
                 {
                     return Err("invalid union extraction type".into());
@@ -711,7 +798,10 @@ fn validate_function(
                 };
                 let operands = if matches!(op.as_str(), "===" | "!==") {
                     left.ty() == right.ty()
-                        && matches!(left.ty(), Type::F64 | Type::Bool | Type::Record { .. })
+                        && matches!(
+                            left.ty(),
+                            Type::F64 | Type::Bool | Type::Record { .. } | Type::Func { .. }
+                        )
                 } else {
                     left.ty() == Type::F64 && right.ty() == Type::F64
                 };
@@ -756,7 +846,10 @@ fn validate_function(
                 ..
             } => {
                 let target = functions.get(callee.as_str()).ok_or("unknown callee")?;
-                if args.len() != target.params.len() || *r#type != target.return_type {
+                if target.captures.is_some()
+                    || args.len() != target.params.len()
+                    || *r#type != target.return_type
+                {
                     return Err("invalid call signature".into());
                 }
                 for (arg, param) in args.iter().zip(&target.params) {
@@ -793,7 +886,8 @@ fn validate_function(
                         return Err("non-record assignment".into());
                     };
                     if *shape_id != format!("r{id}")
-                        || module.field(obj.ty(), field).map(|f| f.r#type) != Some(value.ty())
+                        || module.field(obj.ty(), field).map(|f| f.r#type.clone())
+                            != Some(value.ty())
                     {
                         return Err("invalid record write".into());
                     }
@@ -844,7 +938,7 @@ fn validate_function(
                         locals,
                         &mut initialized.clone(),
                         functions,
-                        return_type,
+                        return_type.clone(),
                         module,
                     )?;
                     if let Some(other) = else_ {
@@ -853,7 +947,7 @@ fn validate_function(
                             locals,
                             &mut initialized.clone(),
                             functions,
-                            return_type,
+                            return_type.clone(),
                             module,
                         )?;
                     }
@@ -863,7 +957,7 @@ fn validate_function(
                     locals,
                     &mut initialized.clone(),
                     functions,
-                    return_type,
+                    return_type.clone(),
                     module,
                 )?,
             }
@@ -873,13 +967,18 @@ fn validate_function(
     if f.return_type != Type::Void && !always_returns(&f.body) {
         return Err("non-void function can fall through".into());
     }
-    let mut initialized = f.params.iter().map(|p| p.local_id.clone()).collect();
+    let mut initialized = f
+        .params
+        .iter()
+        .chain(f.captures.iter().flatten())
+        .map(|p| p.local_id.clone())
+        .collect();
     body(
         &f.body,
         &locals,
         &mut initialized,
         functions,
-        f.return_type,
+        f.return_type.clone(),
         module,
     )
 }
@@ -900,6 +999,107 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn capturing_module() -> Module {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        m.functions[0].locals = vec![Local {
+            id: "v0".into(),
+            name: "count".into(),
+            r#type: Type::F64,
+            mutable: true,
+            boxed: true,
+        }];
+        m.functions[0].body = vec![
+            Stmt::VarDecl {
+                local_id: "v0".into(),
+                init: Expr::NumLit {
+                    value: 1.0,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            },
+            Stmt::Expression {
+                expr: Expr::Closure {
+                    fn_name: "f0".into(),
+                    captures: vec!["v0".into()],
+                    r#type: Type::Func {
+                        params: vec![],
+                        ret: Box::new(Type::F64),
+                    },
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            },
+        ];
+        let target = &mut m.functions[1];
+        target.params.clear();
+        target.captures = Some(vec![Param {
+            local_id: "c0".into(),
+            name: "count".into(),
+            r#type: Type::F64,
+        }]);
+        target.locals = vec![Local {
+            id: "c0".into(),
+            name: "count".into(),
+            r#type: Type::F64,
+            mutable: true,
+            boxed: true,
+        }];
+        target.body = vec![Stmt::Return {
+            value: Some(Expr::VarRef {
+                local_id: "c0".into(),
+                r#type: Type::F64,
+                loc: loc.clone(),
+            }),
+            loc,
+        }];
+        m
+    }
+
+    #[test]
+    fn closures_require_initialized_matching_capture_boxes() {
+        let mut m = capturing_module();
+        assert!(validate(&m).is_ok());
+        m.functions[0].locals[0].boxed = false;
+        assert_eq!(validate(&m).unwrap_err(), "invalid closure capture");
+        let mut m = capturing_module();
+        m.functions[0].body.remove(0);
+        assert_eq!(validate(&m).unwrap_err(), "invalid closure capture");
+        let mut m = capturing_module();
+        m.functions[1].locals[0].boxed = false;
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "capture requires a non-function boxed local"
+        );
+    }
+
+    #[test]
+    fn indirect_calls_validate_the_function_value_signature() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        let callee = Expr::Closure {
+            fn_name: "f0".into(),
+            captures: vec![],
+            r#type: Type::Func {
+                params: vec![Type::F64],
+                ret: Box::new(Type::F64),
+            },
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::CallValue {
+                callee: Box::new(callee),
+                args: vec![],
+                r#type: Type::F64,
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert_eq!(validate(&m).unwrap_err(), "invalid indirect call signature");
+    }
 
     fn record_module() -> Module {
         let mut m = callable_module();
@@ -1049,6 +1249,7 @@ mod tests {
             unions: vec![],
             functions: vec![
                 Function {
+                    captures: None,
                     name: "__main".into(),
                     params: vec![],
                     return_type: Type::Void,
@@ -1070,6 +1271,7 @@ mod tests {
                     }],
                 },
                 Function {
+                    captures: None,
                     name: "f0".into(),
                     params: vec![Param {
                         local_id: "p0".into(),
@@ -1078,6 +1280,7 @@ mod tests {
                     }],
                     return_type: Type::F64,
                     locals: vec![Local {
+                        boxed: false,
                         id: "p0".into(),
                         name: "n".into(),
                         r#type: Type::F64,
@@ -1166,10 +1369,12 @@ mod tests {
             source_file: loc.file.clone(),
             entry: "main".into(),
             functions: vec![Function {
+                captures: None,
                 name: "main".into(),
                 params: vec![],
                 return_type: Type::Void,
                 locals: vec![Local {
+                    boxed: false,
                     id: "v0".into(),
                     name: "x".into(),
                     r#type: Type::F64,

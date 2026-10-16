@@ -12,16 +12,24 @@ impl Lowerer<'_> {
             return Some(Type::Undefined);
         }
         if let Some(cached) = self.types.get(&id) {
-            return *cached;
+            return cached.clone();
         }
         self.types.insert(id, None);
         let result = self.aggregate_type_inner(id);
-        self.types.insert(id, result);
+        self.types.insert(id, result.clone());
         result
     }
 
     fn aggregate_type_inner(&mut self, id: TypeId) -> Option<Type> {
         let flags = self.checker.ty(id).flags;
+        if flags.intersects(TypeFlags::OBJECT)
+            && !self
+                .checker
+                .get_signatures_of_type(id, SignatureKind::CALL)
+                .is_empty()
+        {
+            return self.function_type(id);
+        }
         if flags.intersects(TypeFlags::UNION) {
             let source = self.checker.ty(id).types().to_vec();
             let mut arms = Vec::new();
@@ -83,7 +91,7 @@ impl Lowerer<'_> {
                 arms.push(Type::Undefined);
                 ty = self.intern_union(arms)?;
             }
-            if matches!(ty, Type::Null | Type::Undefined) {
+            if matches!(ty, Type::Null | Type::Undefined | Type::Func { .. }) {
                 return None;
             }
             fields.push(ir::Field { name, r#type: ty });
@@ -108,12 +116,12 @@ impl Lowerer<'_> {
         arms.sort_by_key(|a| format!("{a:?}"));
         arms.dedup();
         if arms.len() == 1 {
-            return Some(arms[0]);
+            return Some(arms[0].clone());
         }
         if arms.is_empty()
             || arms
                 .iter()
-                .any(|a| matches!(a, Type::Void | Type::Array { .. }))
+                .any(|a| matches!(a, Type::Void | Type::Array { .. } | Type::Func { .. }))
         {
             return None;
         }
@@ -176,6 +184,9 @@ impl Lowerer<'_> {
 
     pub(super) fn expected_expression(&mut self, node: Node, target: Type) -> Result<Expr, String> {
         match node.kind() {
+            SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression => {
+                self.closure(node, Some(target))
+            }
             SyntaxKind::ObjectLiteralExpression if matches!(target, Type::Union { .. }) => {
                 let Type::Union { union_id } = target else {
                     unreachable!();
@@ -185,7 +196,7 @@ impl Lowerer<'_> {
                 let candidates = self
                     .types
                     .iter()
-                    .filter_map(|(id, ty)| ty.map(|ty| (*id, ty)))
+                    .filter_map(|(id, ty)| ty.clone().map(|ty| (*id, ty)))
                     .collect::<Vec<_>>();
                 let mut matches = Vec::new();
                 for arm in arms {
@@ -202,7 +213,7 @@ impl Lowerer<'_> {
                         self.refuse(node, "object literal needs one assignable native union arm")
                     );
                 }
-                let value = self.record_literal(node, matches[0])?;
+                let value = self.record_literal(node, matches[0].clone())?;
                 self.coerce(value, target, node)
             }
             SyntaxKind::ObjectLiteralExpression if matches!(target, Type::Record { .. }) => {
@@ -216,8 +227,8 @@ impl Lowerer<'_> {
                 if cond.ty() != Type::Bool {
                     return Err(self.refuse(node, "conditional truthiness is not ported"));
                 }
-                let then = Box::new(self.expected_expression(node.when_true(), target)?);
-                let else_ = Box::new(self.expected_expression(node.when_false(), target)?);
+                let then = Box::new(self.expected_expression(node.when_true(), target.clone())?);
+                let else_ = Box::new(self.expected_expression(node.when_false(), target.clone())?);
                 Ok(Expr::Ternary {
                     cond,
                     then,
@@ -268,7 +279,7 @@ impl Lowerer<'_> {
             } else {
                 property.initializer()
             };
-            let value = self.expected_expression(source, field.r#type)?;
+            let value = self.expected_expression(source, field.r#type.clone())?;
             fields.push(ir::FieldInit {
                 name,
                 value,
@@ -282,7 +293,7 @@ impl Lowerer<'_> {
                     r#type: Type::Undefined,
                     loc: self.loc(node),
                 };
-                let value = self.coerce(value, field.r#type, node)?;
+                let value = self.coerce(value, field.r#type.clone(), node)?;
                 fields.push(ir::FieldInit {
                     name: field.name.clone(),
                     value,
@@ -314,7 +325,7 @@ impl Lowerer<'_> {
             obj: Box::new(obj),
             shape_id: format!("r{shape_id}"),
             field: field.name.clone(),
-            r#type: field.r#type,
+            r#type: field.r#type.clone(),
             loc: self.loc(node),
         };
         self.narrowed(value, node)
@@ -387,7 +398,7 @@ impl Lowerer<'_> {
                 right.ty()
             };
             if let Type::Union { union_id } = union {
-                let left = self.coerce(left, union, node.left())?;
+                let left = self.coerce(left, union.clone(), node.left())?;
                 let right = self.coerce(right, union, node.right())?;
                 return Ok(Expr::UnionEq {
                     union_id: format!("u{union_id}"),
@@ -412,6 +423,7 @@ impl Lowerer<'_> {
                         | Type::Null
                         | Type::Undefined
                         | Type::Record { .. }
+                        | Type::Func { .. }
                 )
         } else {
             left.ty() == Type::F64 && right.ty() == Type::F64

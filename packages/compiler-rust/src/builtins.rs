@@ -5,7 +5,7 @@ pub const STRINGS: Type = Type::Array {
     elem: &Type::String,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Builtin {
     pub module: &'static str,
     pub member: &'static str,
@@ -224,9 +224,9 @@ pub fn get(module: &str, member: &str) -> Option<Builtin> {
     CALLS
         .iter()
         .find(|call| call.module == module && call.member == member)
-        .copied()
+        .cloned()
 }
 
 pub fn by_ir(name: &str) -> Option<Builtin> {
-    CALLS.iter().find(|call| call.ir == name).copied()
+    CALLS.iter().find(|call| call.ir == name).cloned()
 }

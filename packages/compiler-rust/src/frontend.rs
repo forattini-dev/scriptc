@@ -14,6 +14,7 @@ use std::{
     path::Path,
 };
 mod aggregates;
+mod callbacks;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
 
@@ -79,6 +80,10 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             records: Vec::new(),
             unions: Vec::new(),
             types: HashMap::new(),
+            outer: Vec::new(),
+            captures: Vec::new(),
+            lifted: Vec::new(),
+            next_closure: 0,
         };
         let mut files = Vec::new();
         lowerer.dependencies(file, &mut HashSet::new(), &mut HashSet::new(), &mut files)?;
@@ -98,6 +103,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         let mut functions = vec![Function {
             name: "__main".into(),
             params: vec![],
+            captures: None,
             return_type: Type::Void,
             locals: std::mem::take(&mut lowerer.locals),
             body,
@@ -112,6 +118,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         for declaration in declarations {
             functions.push(lowerer.lower_function(declaration)?);
         }
+        functions.extend(lowerer.lifted);
         Ok(Module {
             ir_version: ir::VERSION,
             source_file: source.clone(),
@@ -183,6 +190,10 @@ struct Lowerer<'a> {
     unions: Vec<ir::Union>,
     // None is also the in-progress sentinel: recursive layouts are refused.
     types: HashMap<TypeId, Option<Type>>,
+    outer: Vec<HashMap<u32, Local>>,
+    captures: Vec<(u32, Param)>,
+    lifted: Vec<Function>,
+    next_closure: usize,
 }
 
 impl Lowerer<'_> {
@@ -357,7 +368,7 @@ impl Lowerer<'_> {
         Ok(Expr::LibCall {
             r#fn: builtin.ir.into(),
             args,
-            r#type: builtin.result,
+            r#type: builtin.result.clone(),
             loc: self.loc(node),
         })
     }
@@ -531,7 +542,8 @@ impl Lowerer<'_> {
         self.file = signature.file;
         self.locals.clear();
         self.bindings.clear(); // Captured outer bindings require a later closure/global representation.
-        self.return_type = Some(signature.return_type);
+        self.captures.clear();
+        self.return_type = Some(signature.return_type.clone());
         for (node, param) in signature
             .node
             .parameters()
@@ -542,8 +554,9 @@ impl Lowerer<'_> {
             let local = Local {
                 id: param.local_id.clone(),
                 name: param.name.clone(),
-                r#type: param.r#type,
+                r#type: param.r#type.clone(),
                 mutable: true,
+                boxed: false,
             };
             // IR v13 parameters reference entries in the function's locals table.
             self.bindings.insert(symbol, local.clone());
@@ -559,6 +572,7 @@ impl Lowerer<'_> {
         Ok(Function {
             name: signature.name,
             params: signature.params,
+            captures: None,
             return_type: signature.return_type,
             locals: std::mem::take(&mut self.locals),
             body,
@@ -629,10 +643,7 @@ impl Lowerer<'_> {
     }
     fn binding(&mut self, node: Node) -> Result<Local, String> {
         let symbol = self.symbol(node);
-        self.bindings
-            .get(&symbol)
-            .cloned()
-            .ok_or_else(|| self.refuse(node, "unlowered binding"))
+        self.resolve_binding(symbol, node)
     }
     fn statements(&mut self, nodes: goport_core::prelude::NodeSlice) -> Result<Vec<Stmt>, String> {
         let mut out = Vec::new();
@@ -657,11 +668,12 @@ impl Lowerer<'_> {
             SyntaxKind::ReturnStatement => {
                 let ret = self
                     .return_type
+                    .clone()
                     .ok_or_else(|| self.refuse(node, "return outside a function"))?;
                 let value = if node.expression().is_nil() {
                     None
                 } else {
-                    Some(self.expected_expression(node.expression(), ret)?)
+                    Some(self.expected_expression(node.expression(), ret.clone())?)
                 };
                 if value.as_ref().map_or(Type::Void, Expr::ty) != ret {
                     return Err(self.refuse(node, "return coercion is not ported"));
@@ -691,7 +703,7 @@ impl Lowerer<'_> {
                         ));
                     }
                     let ty = self.storage_type(name)?;
-                    let init = self.expected_expression(declaration.initializer(), ty)?;
+                    let init = self.expected_expression(declaration.initializer(), ty.clone())?;
                     if ty != init.ty() {
                         return Err(self.refuse(declaration, "coercion is not ported"));
                     }
@@ -700,6 +712,7 @@ impl Lowerer<'_> {
                         name: name.text().into(),
                         r#type: ty,
                         mutable: !flags.intersects(NodeFlags::CONST),
+                        boxed: false,
                     };
                     let symbol = self.checker.get_symbol_at_location(name, false);
                     self.bindings.insert(symbol.0, local.clone());
@@ -724,7 +737,8 @@ impl Lowerer<'_> {
                         return Err(self.refuse(expression, "only local assignment is ported"));
                     }
                     let local = self.binding(expression.left())?;
-                    let value = self.expected_expression(expression.right(), local.r#type)?;
+                    let value =
+                        self.expected_expression(expression.right(), local.r#type.clone())?;
                     Stmt::Assign {
                         local_id: local.id,
                         value,
@@ -766,6 +780,7 @@ impl Lowerer<'_> {
         }
         let loc = self.loc(node);
         match node.kind() {
+            SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression => self.closure(node, None),
             SyntaxKind::ObjectLiteralExpression => {
                 let ty = self.ty(node)?;
                 self.record_literal(node, ty)
@@ -836,6 +851,17 @@ impl Lowerer<'_> {
             }),
             SyntaxKind::Identifier => {
                 let symbol = self.symbol(node);
+                if let Some(signature) = self.functions.get(&symbol) {
+                    return Ok(Expr::Closure {
+                        fn_name: signature.name.clone(),
+                        captures: vec![],
+                        r#type: Type::Func {
+                            params: signature.params.iter().map(|p| p.r#type.clone()).collect(),
+                            ret: Box::new(signature.return_type.clone()),
+                        },
+                        loc,
+                    });
+                }
                 if node.text() == "undefined"
                     && symbol != 0
                     && !self.bindings.contains_key(&symbol)
@@ -901,6 +927,22 @@ impl Lowerer<'_> {
                 let member = node.expression();
                 if member.kind() == SyntaxKind::Identifier {
                     let symbol = self.symbol(member);
+                    if self.bindings.contains_key(&symbol)
+                        || self.outer.iter().any(|scope| scope.contains_key(&symbol))
+                    {
+                        return self.call_value(node);
+                    }
+                } else if matches!(
+                    member.kind(),
+                    SyntaxKind::ParenthesizedExpression
+                        | SyntaxKind::CallExpression
+                        | SyntaxKind::ArrowFunction
+                        | SyntaxKind::FunctionExpression
+                ) {
+                    return self.call_value(node);
+                }
+                if member.kind() == SyntaxKind::Identifier {
+                    let symbol = self.symbol(member);
                     if let Some((module, name)) = self.native_functions.get(&symbol).cloned() {
                         return self.native_call(node, module, &name);
                     }
@@ -940,7 +982,7 @@ impl Lowerer<'_> {
                             .arguments()
                             .into_iter()
                             .zip(&signature.params)
-                            .map(|(arg, param)| self.expected_expression(arg, param.r#type))
+                            .map(|(arg, param)| self.expected_expression(arg, param.r#type.clone()))
                             .collect::<Result<Vec<_>, _>>()?;
                         if node.arguments().len() != signature.params.len()
                             || args

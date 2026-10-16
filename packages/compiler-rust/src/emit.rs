@@ -2,6 +2,17 @@ use crate::ir::{Expr, Function, Module, Stmt, Type};
 
 fn rust_type(ty: Type) -> String {
     match ty {
+        Type::Func { params, ret } => {
+            return format!(
+                "std::rc::Rc<dyn Fn({}) -> {}>",
+                params
+                    .into_iter()
+                    .map(rust_type)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                rust_type(*ret)
+            );
+        }
         Type::F64 => "f64",
         Type::Bool => "bool",
         Type::String => "String",
@@ -46,7 +57,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
             output.push_str(&format!(
                 "{}: {},\n",
                 field_name(&field.name),
-                rust_type(field.r#type)
+                rust_type(field.r#type.clone())
             ));
         }
         output.push_str("}\n");
@@ -54,7 +65,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
     for union in &module.unions {
         output.push_str(&format!("\n#[derive(Clone)]\nenum U{} {{\n", union.id));
         for (tag, arm) in union.arms.iter().enumerate() {
-            output.push_str(&format!("V{tag}({}),\n", rust_type(*arm)));
+            output.push_str(&format!("V{tag}({}),\n", rust_type(arm.clone())));
         }
         output.push_str("}\n");
         let cases = union
@@ -81,18 +92,54 @@ pub fn rust(module: &Module) -> Result<String, String> {
         let params = function
             .params
             .iter()
-            .map(|p| format!("mut {}: {}", p.local_id, rust_type(p.r#type)))
+            .map(|p| format!("mut {}: {}", p.local_id, rust_type(p.r#type.clone())))
             .collect::<Vec<_>>()
             .join(", ");
+        let captures = function
+            .captures
+            .iter()
+            .flatten()
+            .map(|p| {
+                format!(
+                    "{}: std::rc::Rc<std::cell::RefCell<{}>>, ",
+                    p.local_id,
+                    rust_type(p.r#type.clone())
+                )
+            })
+            .collect::<String>();
         output.push_str(&format!(
-            "\nfn {}({params}) -> {} {{\n",
+            "\nfn {}({captures}{params}) -> {} {{\n",
             function.name,
-            rust_type(function.return_type)
+            rust_type(function.return_type.clone())
         ));
+        for param in &function.params {
+            if function
+                .locals
+                .iter()
+                .any(|l| l.id == param.local_id && l.boxed)
+            {
+                output.push_str(&format!(
+                    "let {} = std::rc::Rc::new(std::cell::RefCell::new({}));\n",
+                    param.local_id, param.local_id
+                ));
+            }
+        }
         for stmt in &function.body {
-            statement(stmt, function, &mut output);
+            statement(stmt, function, module, &mut output);
         }
         output.push_str("}\n");
+        if function.captures.is_none() {
+            let ty = Type::Func {
+                params: function.params.iter().map(|p| p.r#type.clone()).collect(),
+                ret: Box::new(function.return_type.clone()),
+            };
+            output.push_str(&format!(
+                "thread_local! {{ static FN_{}: {} = std::rc::Rc::new({}); }}\n",
+                function.name,
+                rust_type(ty),
+                function.name
+            ));
+        }
     }
     if uses_runtime(module) {
         output.push_str(&format!("\nfn main() {{ runtime::init(); let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {}())); let error = outcome.err().map(|payload| {{ let caught = runtime::caught_from_panic(payload); runtime::caught_to_string(&caught).to_string() }}); runtime::finish(); if let Some(error) = error {{ eprintln!(\"Uncaught {{error}}\"); std::process::exit(1); }} }}\n", module.entry));
@@ -112,6 +159,8 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Expr::StrEq { left, right, .. } => expr(left) || expr(right),
             Expr::Unary { operand, .. } => expr(operand),
             Expr::Call { args, .. } | Expr::Intrinsic { args, .. } => args.iter().any(expr),
+            Expr::Closure { .. } => false,
+            Expr::CallValue { callee, args, .. } => expr(callee) || args.iter().any(expr),
             Expr::RecordLit { fields, .. } => fields.iter().any(|f| expr(&f.value)),
             Expr::RecordGet { obj: value, .. }
             | Expr::UnionWrap { value, .. }
@@ -136,31 +185,78 @@ pub fn uses_runtime(module: &Module) -> bool {
             } => expr(cond) || body(then) || else_.as_ref().is_some_and(|other| body(other)),
         })
     }
-    module.records.iter().any(|r| {
-        r.fields
-            .iter()
-            .any(|f| matches!(f.r#type, Type::Array { .. }))
-    }) || module
-        .unions
+    fn ty(t: &Type) -> bool {
+        match t {
+            Type::Array { .. } => true,
+            Type::Func { params, ret } => params.iter().any(ty) || ty(ret),
+            _ => false,
+        }
+    }
+    module
+        .records
         .iter()
-        .any(|u| u.arms.iter().any(|a| matches!(a, Type::Array { .. })))
+        .any(|r| r.fields.iter().any(|f| ty(&f.r#type)))
+        || module.unions.iter().any(|u| u.arms.iter().any(ty))
         || module.functions.iter().any(|f| {
-            matches!(f.return_type, Type::Array { .. })
-                || f.params
-                    .iter()
-                    .any(|p| matches!(p.r#type, Type::Array { .. }))
-                || f.locals
-                    .iter()
-                    .any(|local| matches!(local.r#type, Type::Array { .. }))
+            ty(&f.return_type)
+                || f.params.iter().any(|p| ty(&p.r#type))
+                || f.locals.iter().any(|local| ty(&local.r#type))
                 || body(&f.body)
         })
 }
 
-fn expr(value: &Expr) -> String {
+fn expr(value: &Expr, function: &Function, module: &Module) -> String {
     match value {
+        Expr::Closure {
+            fn_name,
+            captures,
+            r#type,
+            ..
+        } => {
+            let target = module
+                .functions
+                .iter()
+                .find(|f| f.name == *fn_name)
+                .expect("IR validated");
+            if target.captures.is_none() {
+                return format!("FN_{fn_name}.with(Clone::clone)");
+            }
+            let saved = captures
+                .iter()
+                .enumerate()
+                .map(|(i, id)| format!("let capture{i} = {id}.clone();"))
+                .collect::<String>();
+            let params = target
+                .params
+                .iter()
+                .map(|p| format!("{}: {}", p.local_id, rust_type(p.r#type.clone())))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let args = (0..captures.len())
+                .map(|i| format!("capture{i}.clone()"))
+                .chain(target.params.iter().map(|p| p.local_id.clone()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "{{ {saved} std::rc::Rc::new(move |{params}| {fn_name}({args})) as {} }}",
+                rust_type(r#type.clone())
+            )
+        }
+        Expr::CallValue { callee, args, .. } => format!(
+            "({})({})",
+            expr(callee, function, module),
+            args.iter()
+                .map(|v| expr(v, function, module))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Expr::Logical {
             op, left, right, ..
-        } => format!("({} {op} {})", expr(left), expr(right)),
+        } => format!(
+            "({} {op} {})",
+            expr(left, function, module),
+            expr(right, function, module)
+        ),
         Expr::StrEq {
             negated,
             left,
@@ -168,9 +264,9 @@ fn expr(value: &Expr) -> String {
             ..
         } => format!(
             "({} {} {})",
-            expr(left),
+            expr(left, function, module),
             if *negated { "!=" } else { "==" },
-            expr(right)
+            expr(right, function, module)
         ),
         Expr::UnionEq {
             left,
@@ -184,8 +280,8 @@ fn expr(value: &Expr) -> String {
             format!(
                 "{}union_eq_{union_id}({}, {})",
                 if *negated { "!" } else { "" },
-                expr(left),
-                expr(right)
+                expr(left, function, module),
+                expr(right, function, module)
             )
         }
         Expr::UnitLit { .. } => "()".into(),
@@ -196,7 +292,13 @@ fn expr(value: &Expr) -> String {
         } => {
             let fields = fields
                 .iter()
-                .map(|f| format!("{}: {}", field_name(&f.name), expr(&f.value)))
+                .map(|f| {
+                    format!(
+                        "{}: {}",
+                        field_name(&f.name),
+                        expr(&f.value, function, module)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("std::rc::Rc::new(std::cell::RefCell::new(R{shape_id} {{ {fields} }}))")
@@ -204,7 +306,7 @@ fn expr(value: &Expr) -> String {
         Expr::RecordLit { .. } => unreachable!("IR validated"),
         Expr::RecordGet { obj, field, .. } => format!(
             "{{ let object = {}; let value = object.borrow().{}.clone(); value }}",
-            expr(obj),
+            expr(obj, function, module),
             field_name(field)
         ),
         Expr::UnionWrap {
@@ -212,7 +314,7 @@ fn expr(value: &Expr) -> String {
             value,
             r#type: Type::Union { union_id },
             ..
-        } => format!("U{union_id}::V{tag}({})", expr(value)),
+        } => format!("U{union_id}::V{tag}({})", expr(value, function, module)),
         Expr::UnionWrap { .. } => unreachable!("IR validated"),
         Expr::UnionNarrow { tag, value, .. } => {
             let Type::Union { union_id } = value.ty() else {
@@ -220,7 +322,7 @@ fn expr(value: &Expr) -> String {
             };
             format!(
                 "match {} {{ U{union_id}::V{tag}(value) => value, _ => panic!(\"invalid narrowed union tag\") }}",
-                expr(value)
+                expr(value, function, module)
             )
         }
         Expr::UnionIsTag {
@@ -235,16 +337,16 @@ fn expr(value: &Expr) -> String {
             format!(
                 "{}matches!({}, U{union_id}::V{tag}(_))",
                 if *negated { "!" } else { "" },
-                expr(value)
+                expr(value, function, module)
             )
         }
         Expr::Ternary {
             cond, then, else_, ..
         } => format!(
             "(if {} {{ {} }} else {{ {} }})",
-            expr(cond),
-            expr(then),
-            expr(else_)
+            expr(cond, function, module),
+            expr(then, function, module),
+            expr(else_, function, module)
         ),
         Expr::ArrayLit {
             elems,
@@ -255,9 +357,9 @@ fn expr(value: &Expr) -> String {
                 .iter()
                 .map(|value| {
                     if **elem == Type::String {
-                        format!("runtime::JsString::from({})", expr(value))
+                        format!("runtime::JsString::from({})", expr(value, function, module))
                     } else {
-                        expr(value)
+                        expr(value, function, module)
                     }
                 })
                 .collect::<Vec<_>>()
@@ -265,7 +367,7 @@ fn expr(value: &Expr) -> String {
             let element = if **elem == Type::String {
                 "runtime::JsString"
             } else {
-                &rust_type(**elem)
+                &rust_type((**elem).clone())
             };
             format!("runtime::array_new::<{element}>(vec![{values}])")
         }
@@ -275,9 +377,11 @@ fn expr(value: &Expr) -> String {
             let args = args
                 .iter()
                 .map(|arg| match arg.ty() {
-                    Type::String => format!("&runtime::JsString::from({})", expr(arg)),
-                    Type::Array { .. } => format!("&({})", expr(arg)),
-                    _ => expr(arg),
+                    Type::String => {
+                        format!("&runtime::JsString::from({})", expr(arg, function, module))
+                    }
+                    Type::Array { .. } => format!("&({})", expr(arg, function, module)),
+                    _ => expr(arg, function, module),
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -294,9 +398,16 @@ fn expr(value: &Expr) -> String {
         Expr::VarRef {
             local_id, r#type, ..
         } => {
+            if function.locals.iter().any(|l| l.id == *local_id && l.boxed) {
+                return format!("{{ let value = {local_id}.borrow().clone(); value }}");
+            }
             if matches!(
                 r#type,
-                Type::String | Type::Array { .. } | Type::Record { .. } | Type::Union { .. }
+                Type::String
+                    | Type::Array { .. }
+                    | Type::Record { .. }
+                    | Type::Union { .. }
+                    | Type::Func { .. }
             ) {
                 format!("{local_id}.clone()")
             } else {
@@ -306,9 +417,9 @@ fn expr(value: &Expr) -> String {
         Expr::Bin {
             op, left, right, ..
         } => {
-            let record = matches!(left.ty(), Type::Record { .. });
-            let left = expr(left);
-            let right = expr(right);
+            let record = matches!(left.ty(), Type::Record { .. } | Type::Func { .. });
+            let left = expr(left, function, module);
+            let right = expr(right, function, module);
             match op.as_str() {
                 "===" | "!==" if record => format!(
                     "{}std::rc::Rc::ptr_eq(&({left}), &({right}))",
@@ -320,18 +431,21 @@ fn expr(value: &Expr) -> String {
                 _ => format!("({left} {op} {right})"),
             }
         }
-        Expr::Unary { op, operand, .. } => format!("({op}({}))", expr(operand)),
+        Expr::Unary { op, operand, .. } => format!("({op}({}))", expr(operand, function, module)),
         Expr::Call { callee, args, .. } => format!(
             "{callee}({})",
-            args.iter().map(expr).collect::<Vec<_>>().join(", ")
+            args.iter()
+                .map(|v| expr(v, function, module))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         Expr::Intrinsic { name, args, .. } => {
             let args = args
                 .iter()
                 .map(|arg| match arg.ty() {
-                    Type::F64 => format!("js_number({})", expr(arg)),
-                    Type::Bool => format!("({}).to_string()", expr(arg)),
-                    Type::String => expr(arg),
+                    Type::F64 => format!("js_number({})", expr(arg, function, module)),
+                    Type::Bool => format!("({}).to_string()", expr(arg, function, module)),
+                    Type::String => expr(arg, function, module),
                     Type::Void => unreachable!("IR validated"),
                     _ => unreachable!("IR validated"),
                 })
@@ -342,7 +456,7 @@ fn expr(value: &Expr) -> String {
     }
 }
 
-fn statement(stmt: &Stmt, function: &Function, output: &mut String) {
+fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut String) {
     use std::fmt::Write;
     match stmt {
         Stmt::RecordSet {
@@ -351,8 +465,8 @@ fn statement(stmt: &Stmt, function: &Function, output: &mut String) {
             writeln!(
                 output,
                 "{{ let object = {}; let value = {}; object.borrow_mut().{} = value; }}",
-                expr(obj),
-                expr(value),
+                expr(obj, function, module),
+                expr(value, function, module),
                 field_name(field)
             )
             .unwrap();
@@ -364,37 +478,58 @@ fn statement(stmt: &Stmt, function: &Function, output: &mut String) {
                 .find(|local| local.id == *local_id)
                 .expect("IR validated");
             let mutable = if local.mutable { "mut " } else { "" };
-            let ty = rust_type(local.r#type);
-            writeln!(output, "let {mutable}{local_id}: {ty} = {};", expr(init)).unwrap();
+            let ty = rust_type(local.r#type.clone());
+            if local.boxed {
+                writeln!(output, "let {local_id}: std::rc::Rc<std::cell::RefCell<{ty}>> = std::rc::Rc::new(std::cell::RefCell::new({}));", expr(init, function, module)).unwrap();
+            } else {
+                writeln!(
+                    output,
+                    "let {mutable}{local_id}: {ty} = {};",
+                    expr(init, function, module)
+                )
+                .unwrap();
+            }
         }
         Stmt::Assign {
             local_id, value, ..
         } => {
-            writeln!(output, "{local_id} = {};", expr(value)).unwrap();
+            if function.locals.iter().any(|l| l.id == *local_id && l.boxed) {
+                writeln!(
+                    output,
+                    "{{ let value = {}; *{local_id}.borrow_mut() = value; }}",
+                    expr(value, function, module)
+                )
+                .unwrap();
+            } else {
+                writeln!(output, "{local_id} = {};", expr(value, function, module)).unwrap();
+            }
         }
         Stmt::Expression { expr: value, .. } => {
-            writeln!(output, "{};", expr(value)).unwrap();
+            writeln!(output, "{};", expr(value, function, module)).unwrap();
         }
         Stmt::Return { value, .. } => {
             writeln!(
                 output,
                 "return {};",
-                value.as_ref().map(expr).unwrap_or_default()
+                value
+                    .as_ref()
+                    .map(|v| expr(v, function, module))
+                    .unwrap_or_default()
             )
             .unwrap();
         }
         Stmt::If {
             cond, then, else_, ..
         } => {
-            writeln!(output, "if {} {{", expr(cond)).unwrap();
+            writeln!(output, "if {} {{", expr(cond, function, module)).unwrap();
             for stmt in then {
-                statement(stmt, function, output);
+                statement(stmt, function, module, output);
             }
             output.push('}');
             if let Some(other) = else_ {
                 output.push_str(" else {\n");
                 for stmt in other {
-                    statement(stmt, function, output);
+                    statement(stmt, function, module, output);
                 }
                 output.push('}');
             }
@@ -403,7 +538,7 @@ fn statement(stmt: &Stmt, function: &Function, output: &mut String) {
         Stmt::Block { body, .. } => {
             output.push_str("{\n");
             for stmt in body {
-                statement(stmt, function, output);
+                statement(stmt, function, module, output);
             }
             output.push_str("}\n");
         }

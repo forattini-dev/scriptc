@@ -80,6 +80,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-cycles/main.ts",
         "rust-native-records/main.ts",
         "rust-native-records/runtime-types-only.ts",
+        "rust-native-callbacks/main.ts",
+        "rust-native-callbacks/runtime-types-only.ts",
     ]
     .into_iter()
     .enumerate()
@@ -170,8 +172,8 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         (
-            "function-value",
-            "function f() { return 1; } const alias = f; console.log(alias());",
+            "function-capture",
+            "const f = () => 1; const g = () => f(); console.log(g());",
             "SCN1001",
         ),
         (
