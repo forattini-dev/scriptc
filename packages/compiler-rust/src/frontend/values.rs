@@ -21,10 +21,8 @@ impl Lowerer<'_> {
             if !matches!(
                 property.kind(),
                 SyntaxKind::PropertyAssignment | SyntaxKind::ShorthandPropertyAssignment
-            ) || !matches!(
-                property.name().kind(),
-                SyntaxKind::Identifier | SyntaxKind::StringLiteral
-            ) || property.name().text() == "__proto__"
+            ) || self.data_property_name(property.name()).is_none()
+                || property.name().text() == "__proto__"
             {
                 return Err(self.refuse(
                     property,
@@ -32,7 +30,7 @@ impl Lowerer<'_> {
                 ));
             }
             let key = Expr::StrLit {
-                value: property.name().text().into(),
+                value: self.data_property_name(property.name()).unwrap(),
                 r#type: Type::String,
                 loc: self.loc(property),
             };

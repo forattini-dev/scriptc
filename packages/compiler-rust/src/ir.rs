@@ -224,6 +224,14 @@ pub enum Expr {
         r#type: Type,
         loc: Loc,
     },
+    DynInvoke {
+        recv: Box<Expr>,
+        method: String,
+        callee_name: String,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     DynCall {
         callee: Box<Expr>,
         callee_name: String,
@@ -473,6 +481,7 @@ impl Expr {
             | Self::DynKeyGet { r#type, .. }
             | Self::DynTest { r#type, .. }
             | Self::DynScalarEq { r#type, .. }
+            | Self::DynInvoke { r#type, .. }
             | Self::DynCall { r#type, .. }
             | Self::RegexLit { r#type, .. }
             | Self::RegexIntrinsic { r#type, .. }
@@ -724,7 +733,7 @@ impl Module {
                 !matches!(*elem, Type::Func { .. }) && self.valid_type(*elem, active)
             }
             Type::Map { key, value } => {
-                matches!(*key, Type::F64 | Type::String)
+                matches!(*key, Type::F64 | Type::String | Type::Dyn)
                     && !matches!(*value, Type::Func { .. } | Type::Map { .. })
                     && self.valid_type(*value, active)
             }
@@ -994,6 +1003,22 @@ fn validate_function(
                     Ok(())
                 } else {
                     Err("invalid native value equality".into())
+                }
+            }
+            Expr::DynInvoke {
+                recv, args, r#type, ..
+            } => {
+                expr(recv, locals, initialized, functions, module)?;
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if recv.ty() == Type::Dyn
+                    && args.iter().all(|a| a.ty() == Type::Dyn)
+                    && *r#type == Type::Dyn
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native method invocation".into())
                 }
             }
             Expr::DynCall {
@@ -2110,6 +2135,89 @@ mod tests {
             loc,
         }];
         assert_eq!(validate(&m).unwrap_err(), "invalid native value call");
+    }
+
+    #[test]
+    fn erased_map_invocation_validates_owned_receiver_and_arguments() {
+        let mut m = error_module();
+        let loc = m.functions[0].loc.clone();
+        let value = || Expr::DynFrom {
+            value: Box::new(Expr::UnitLit {
+                unit: "undefined",
+                r#type: Type::Undefined,
+                loc: loc.clone(),
+            }),
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        let invoke = || Expr::DynInvoke {
+            recv: Box::new(value()),
+            method: "get".into(),
+            callee_name: "map.get".into(),
+            args: vec![value()],
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: invoke(),
+            loc: loc.clone(),
+        }];
+        validate(&m).unwrap();
+        let wire = serde_json::to_value(&m).unwrap();
+        assert_eq!(wire["functions"][0]["body"][0]["expr"]["kind"], "dynInvoke");
+        assert_eq!(
+            wire["functions"][0]["body"][0]["expr"]["calleeName"],
+            "map.get"
+        );
+        for part in ["receiver", "argument", "result"] {
+            let mut invalid = error_module();
+            invalid.functions[0].body = vec![Stmt::Expression {
+                expr: invoke(),
+                loc: loc.clone(),
+            }];
+            let Stmt::Expression {
+                expr: Expr::DynInvoke {
+                    recv, args, r#type, ..
+                },
+                ..
+            } = &mut invalid.functions[0].body[0]
+            else {
+                unreachable!()
+            };
+            match part {
+                "receiver" => {
+                    **recv = Expr::BoolLit {
+                        value: true,
+                        r#type: Type::Bool,
+                        loc: loc.clone(),
+                    }
+                }
+                "argument" => {
+                    args[0] = Expr::BoolLit {
+                        value: true,
+                        r#type: Type::Bool,
+                        loc: loc.clone(),
+                    }
+                }
+                _ => *r#type = Type::Bool,
+            }
+            assert_eq!(
+                validate(&invalid).unwrap_err(),
+                "invalid native method invocation"
+            );
+        }
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::MapNew {
+                seed: vec![],
+                r#type: Type::Map {
+                    key: Box::new(Type::Dyn),
+                    value: Box::new(Type::Dyn),
+                },
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        validate(&m).unwrap();
     }
 
     #[test]

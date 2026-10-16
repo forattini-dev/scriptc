@@ -2,7 +2,9 @@
 use super::*;
 
 fn key_equality(ty: &Type) -> &'static str {
-    if *ty == Type::F64 {
+    if *ty == Type::Dyn {
+        "native_value_same_key(a, b)"
+    } else if *ty == Type::F64 {
         "a == b || (a.is_nan() && b.is_nan())"
     } else {
         "a == b"
@@ -64,7 +66,9 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             r#type: Type::Map { key, .. },
             ..
         } => {
-            let normalize = if **key == Type::F64 {
+            let normalize = if **key == Type::Dyn {
+                "let key = native_map_key(key);"
+            } else if **key == Type::F64 {
                 "let key = if key == 0.0 { 0.0 } else { key };"
             } else {
                 ""
@@ -105,7 +109,9 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                 "delete" => format!("js_map_delete(&map, &arg0, |a, b| {equality})"),
                 "set" => format!(
                     "{{ {} js_map_set(&map, arg0, arg1, |a, b| {equality}) }}",
-                    if *key == Type::F64 {
+                    if *key == Type::Dyn {
+                        "let arg0 = native_map_key(arg0);"
+                    } else if *key == Type::F64 {
                         "let arg0 = if arg0 == 0.0 { 0.0 } else { arg0 };"
                     } else {
                         ""

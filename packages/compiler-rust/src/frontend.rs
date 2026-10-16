@@ -26,6 +26,7 @@ mod helpers;
 mod modules;
 mod parameters;
 mod pipeline;
+mod property_keys;
 mod regex;
 mod storage;
 mod tuples;
@@ -748,7 +749,7 @@ impl<'a> Lowerer<'a> {
                 }
                 let obj = self.expression(node.expression())?;
                 if obj.ty() == Type::Dyn {
-                    let key = self.expected_expression(node.argument_expression(), Type::String)?;
+                    let key = self.property_key_expression(node.argument_expression())?;
                     return Ok(self.dynamic_get(node, obj, key));
                 }
                 if let Type::Array { elem } = obj.ty() {
@@ -765,7 +766,7 @@ impl<'a> Lowerer<'a> {
                 {
                     return self.tuple_get(node, obj);
                 }
-                let key = self.expected_expression(node.argument_expression(), Type::String)?;
+                let key = self.property_key_expression(node.argument_expression())?;
                 self.dictionary_get(node, obj, key)
             }
             SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression => self.closure(node, None),
@@ -1015,6 +1016,32 @@ impl<'a> Lowerer<'a> {
                     } else {
                         !self.module_namespace(receiver)
                     };
+                    if owned && matches!(self.ty(receiver), Ok(Type::Dyn | Type::Map { .. })) {
+                        let recv = self.expression(receiver)?;
+                        if matches!(recv.ty(), Type::Map { .. }) {
+                            return self.map_intrinsic(
+                                node,
+                                recv,
+                                member.name().text(),
+                                node.arguments().into_iter().collect(),
+                            );
+                        }
+                        if recv.ty() == Type::Dyn {
+                            let args = node
+                                .arguments()
+                                .into_iter()
+                                .map(|a| self.expected_expression(a, Type::Dyn))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            return Ok(Expr::DynInvoke {
+                                recv: Box::new(recv),
+                                method: member.name().text().into(),
+                                callee_name: member.name().text().into(),
+                                args,
+                                r#type: Type::Dyn,
+                                loc,
+                            });
+                        }
+                    }
                     if owned && matches!(self.ty(member), Ok(Type::Func { .. } | Type::Dyn)) {
                         return self.call_value(node);
                     }

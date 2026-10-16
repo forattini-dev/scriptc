@@ -150,6 +150,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Expr::DynKeyGet { .. }
             | Expr::DynTest { .. }
             | Expr::DynScalarEq { .. }
+            | Expr::DynInvoke { .. }
             | Expr::DynCall { .. } => true,
             Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => true,
             Expr::ClassRef { .. }
@@ -255,6 +256,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         | Expr::DynKeyGet { .. }
         | Expr::DynTest { .. }
         | Expr::DynScalarEq { .. }
+        | Expr::DynInvoke { .. }
         | Expr::DynCall { .. } => unreachable!("native value expression"),
         Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => unreachable!("regex expression"),
         Expr::ClassRef { .. }

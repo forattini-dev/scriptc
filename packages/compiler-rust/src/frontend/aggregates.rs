@@ -522,13 +522,11 @@ impl Lowerer<'_> {
             if !matches!(
                 property.kind(),
                 SyntaxKind::PropertyAssignment | SyntaxKind::ShorthandPropertyAssignment
-            ) || !matches!(
-                property.name().kind(),
-                SyntaxKind::Identifier | SyntaxKind::StringLiteral
-            ) {
+            ) || self.data_property_name(property.name()).is_none()
+            {
                 return Err(self.refuse(property, "only named data properties are ported"));
             }
-            let name = property.name().text().to_string();
+            let name = self.data_property_name(property.name()).unwrap();
             // __proto__ in colon notation sets a prototype, not an own slot.
             if name == "__proto__" && property.kind() == SyntaxKind::PropertyAssignment {
                 return Err(self.refuse(property, "object prototype setters are not ported"));

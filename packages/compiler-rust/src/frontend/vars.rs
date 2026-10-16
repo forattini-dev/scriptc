@@ -31,6 +31,9 @@ impl Lowerer<'_> {
             return Err(self.refuse(declaration, "var destructuring is not ported"));
         }
         let ty = self.storage_type(name)?;
+        if matches!(&ty, Type::Map { key, value } if **key == Type::Dyn && **value == Type::Dyn) {
+            return Ok(Type::Dyn);
+        }
         if matches!(ty, Type::Map { .. }) {
             return Err(self.refuse(declaration, "hoisted Map var storage is not ported"));
         }
@@ -61,8 +64,12 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn var_call_effects(&mut self) {
-        self.var_defined
-            .retain(|symbol| !matches!(self.var_types.get(symbol), Some(Type::Union { .. })));
+        self.var_defined.retain(|symbol| {
+            !matches!(
+                self.var_types.get(symbol),
+                Some(Type::Union { .. } | Type::Dyn)
+            )
+        });
     }
 
     fn var_undefined(&self, ty: Type, node: Node) -> Result<Expr, String> {

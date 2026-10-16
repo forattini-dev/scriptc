@@ -114,6 +114,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-erased/boundaries.ts",
         "rust-native-erased/generic-endpoint.ts",
         "rust-native-erased/error-values.ts",
+        "rust-native-map-values/contracts.ts",
+        "rust-native-map-values/hoisting.js",
+        "rust-native-map-values/seeds.ts",
+        "rust-native-property-keys/contracts.ts",
     ]
     .into_iter()
     .enumerate()

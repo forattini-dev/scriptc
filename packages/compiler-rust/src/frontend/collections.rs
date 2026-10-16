@@ -27,7 +27,7 @@ impl Lowerer<'_> {
         }
         let key = self.type_id(args[0])?;
         let value = self.type_id(args[1])?;
-        if !matches!(key, Type::String | Type::F64)
+        if !matches!(key, Type::String | Type::F64 | Type::Dyn)
             || matches!(
                 value,
                 Type::Void | Type::Null | Type::Undefined | Type::Func { .. } | Type::Map { .. }
@@ -179,6 +179,28 @@ impl Lowerer<'_> {
         let Type::Record { shape_id } = obj.ty() else {
             return Err(self.refuse(node, "indexed access needs a native dictionary"));
         };
+        if self.records[shape_id].index_value.is_none() {
+            if let Expr::StrLit { value: name, .. } = &key {
+                let field = self.records[shape_id]
+                    .fields
+                    .iter()
+                    .find(|f| f.name == *name)
+                    .cloned()
+                    .ok_or_else(|| self.refuse(node, "unknown native record field"))?;
+                let value = Expr::RecordGet {
+                    obj: Box::new(obj),
+                    shape_id: format!("r{shape_id}"),
+                    field: field.name,
+                    r#type: field.r#type,
+                    loc: self.loc(node),
+                };
+                return self.narrowed(value, node);
+            }
+            return Err(self.refuse(
+                node,
+                "closed record indexed access requires a literal property key",
+            ));
+        }
         let value = self.records[shape_id]
             .index_value
             .clone()
@@ -215,6 +237,30 @@ impl Lowerer<'_> {
                 "enum namespace mutation outside its initializer is not ported",
             ));
         }
+        if self.records[shape_id].index_value.is_none() {
+            let name = self
+                .literal_property_key(member.argument_expression())
+                .ok_or_else(|| {
+                    self.refuse(
+                        member,
+                        "closed record indexed writes require a literal property key",
+                    )
+                })?;
+            let field = self.records[shape_id]
+                .fields
+                .iter()
+                .find(|f| f.name == name)
+                .cloned()
+                .ok_or_else(|| self.refuse(member, "unknown native record field"))?;
+            let value = self.expected_expression(node.right(), field.r#type)?;
+            return Ok(Stmt::RecordSet {
+                obj,
+                shape_id: format!("r{shape_id}"),
+                field: field.name,
+                value,
+                loc: self.loc(node),
+            });
+        }
         let value_type = self.records[shape_id]
             .index_value
             .clone()
@@ -226,7 +272,7 @@ impl Lowerer<'_> {
                 loc: self.loc(member),
             }
         } else {
-            self.expected_expression(member.argument_expression(), Type::String)?
+            self.property_key_expression(member.argument_expression())?
         };
         let value = self.expected_expression(node.right(), value_type)?;
         if matches!(&key, Expr::StrLit { value, .. } if value == "__proto__") {
