@@ -6,7 +6,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
     }
     let source = path_for_frontend(input);
     let (options, checked) = crate::project::load(input, work, project)?;
-    let _checked_scope = goport_core::core::enter_program(Some(checked));
+    let _checked_scope = source_frontend::core::enter_program(Some(checked));
     program::bind_all();
     let mut diagnostics = program::get_config_file_parsing_diagnostics();
     diagnostics.extend(program::get_program_diagnostics());
@@ -27,7 +27,8 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         None
     };
     let execution = needs_execution.then(|| crate::project::execution_view(options));
-    let _execution_scope = execution.map(|program| goport_core::core::enter_program(Some(program)));
+    let _execution_scope =
+        execution.map(|program| source_frontend::core::enter_program(Some(program)));
     if execution.is_some() {
         program::bind_all();
         let syntax = program::get_syntactic_diagnostics(Node::NIL);
@@ -65,6 +66,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             }
         }
         lowerer.inventory(&plan.evaluation_order);
+        lowerer.inventory_storage(&plan.evaluation_order);
         let mut body = Vec::new();
         for file in &plan.evaluation_order {
             lowerer.file = source_file_info(*file).file_name.to_string();
@@ -98,6 +100,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             functions,
             records: lowerer.records,
             unions: lowerer.unions,
+            globals: lowerer.globals,
         })
     })
 }

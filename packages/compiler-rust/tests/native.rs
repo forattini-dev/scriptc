@@ -89,6 +89,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-collections/scalar-map.ts",
         "rust-native-collections/runtime-types-only.ts",
         "rust-native-reachability/main.ts",
+        "rust-native-storage/main.ts",
+        "rust-native-storage/cycle.ts",
+        "rust-native-storage/namespace.ts",
     ]
     .into_iter()
     .enumerate()
@@ -241,7 +244,7 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ("syntax", "const broken: = 1;", "TS1110"),
         (
             "capture",
-            "const outer = 1; function f(): number { return outer; } console.log(f());",
+            "function outer(): number { const value = 1; function f(): number { return value; } return f(); } console.log(outer());",
             "SCN1001",
         ),
         ("loop", "while (true) {}", "SCN1001"),
@@ -257,7 +260,7 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ),
         (
             "function-capture",
-            "const f = () => 1; const g = () => f(); console.log(g());",
+            "function outer(): number { const f = () => 1; const g = () => f(); return g(); } console.log(outer());",
             "SCN1001",
         ),
         (
@@ -389,25 +392,15 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
 }
 
 #[test]
-fn module_tdz_reads_and_dependency_diagnostics_publish_no_artifacts() {
+fn dependency_diagnostics_publish_no_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("main.ts");
     let dependency = temp.path().join("dependency.ts");
     for (source, other, code) in [
         (
-            "import { other } from './dependency.ts'; export const value: number = other; console.log(value);",
-            "import { value } from './main.ts'; export const other: number = value;",
-            "SCN1001",
-        ),
-        (
             "import { value } from './dependency.ts'; console.log(value);",
             "export const value: number = 'invalid';",
             "TS2322",
-        ),
-        (
-            "import { f } from './dependency.ts'; console.log(f());",
-            "const captured = 2; export function f(): number { return captured; }",
-            "SCN1001",
         ),
         (
             "import * as ns from './dependency.ts'; console.log((console.log('receiver effect'), ns).f(1));",
@@ -438,6 +431,85 @@ fn module_tdz_reads_and_dependency_diagnostics_publish_no_artifacts() {
         ] {
             assert!(!artifact.exists());
         }
+    }
+}
+
+#[test]
+fn module_slots_check_tdz_on_reads_writes_defaults_and_cycles() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let dependency = temp.path().join("dependency.ts");
+    let package = temp.path().join("node_modules/tdz-contract");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(
+        package.join("package.json"),
+        r#"{"name":"tdz-contract","type":"module","main":"index.js","types":"index.d.ts"}"#,
+    )
+    .unwrap();
+    fs::write(package.join("index.d.ts"), "export let value: number;").unwrap();
+    fs::write(package.join("index.js"), "value = 2; export let value = 3;").unwrap();
+    for (index, source, other, binding) in [
+        (
+            0,
+            "console.log('before'); read(); let count = 1; function read(): void { console.log(count); }",
+            "",
+            "count",
+        ),
+        (
+            1,
+            "console.log('before'); write(); let count = 1; function write(): void { count = 2; }",
+            "",
+            "count",
+        ),
+        (
+            2,
+            "console.log('before'); read(); let count = 1; function read(value = count): void { console.log(value); }",
+            "",
+            "count",
+        ),
+        (
+            3,
+            "import { other } from './dependency.ts'; export const value: number = other; console.log(value);",
+            "import { value } from './main.ts'; export const other: number = value;",
+            "value",
+        ),
+        (
+            4,
+            "import { value } from 'tdz-contract'; console.log(value);",
+            "",
+            "value",
+        ),
+    ] {
+        fs::write(&input, source).unwrap();
+        fs::write(&dependency, other).unwrap();
+        let target = binary(temp.path(), &format!("tdz-{index}"));
+        let build = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        success(&build);
+        let expected = Command::new(oracle()).arg(&input).output().unwrap();
+        let actual = Command::new(&target)
+            .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+            .output()
+            .unwrap();
+        assert_eq!(actual.status.code(), expected.status.code(), "case {index}");
+        assert_eq!(actual.stdout, expected.stdout, "case {index}");
+        let message = format!("ReferenceError: Cannot access '{binding}' before initialization");
+        assert!(
+            String::from_utf8_lossy(&expected.stderr).contains(&message),
+            "{}",
+            String::from_utf8_lossy(&expected.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&actual.stderr).contains(&message),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&actual.stderr).contains("heap audit"));
     }
 }
 

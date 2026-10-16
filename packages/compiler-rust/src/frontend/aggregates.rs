@@ -1,6 +1,6 @@
 //! Closed structural records and tagged native unions; no dynamic values.
 use super::*;
-use goport_core::prelude::{ObjectFlags, SignatureKind};
+use source_frontend::prelude::{ObjectFlags, SignatureKind};
 
 impl Lowerer<'_> {
     pub(super) fn aggregate_type(&mut self, id: TypeId) -> Option<Type> {
@@ -22,6 +22,19 @@ impl Lowerer<'_> {
 
     fn aggregate_type_inner(&mut self, id: TypeId) -> Option<Type> {
         let flags = self.checker.ty(id).flags;
+        if self.checker.is_array_type(id) {
+            let element = self.checker.get_element_type_of_array_type(id);
+            let elem = self.type_id(element)?;
+            if matches!(
+                elem,
+                Type::Void | Type::Null | Type::Undefined | Type::Func { .. }
+            ) {
+                return None;
+            }
+            return Some(Type::Array {
+                elem: Box::new(elem),
+            });
+        }
         if let Some(ty) = self.map_type(id) {
             return Some(ty);
         }

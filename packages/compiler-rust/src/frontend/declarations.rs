@@ -1,7 +1,7 @@
 //! Portable contracts between the checked declaration graph and JS execution
 //! graph. No checker IDs or AST nodes survive the program-version boundary.
 use super::*;
-use goport_core::prelude::{SignatureKind, SymbolId, get_source_file_of_node};
+use source_frontend::prelude::{SignatureKind, SymbolId, get_source_file_of_node};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct Key {

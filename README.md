@@ -8,7 +8,7 @@ scriptc is experimental and targets macOS, Linux, Windows, and WebAssembly via W
 
 ## Native compiler migration
 
-The destination compiler is [packages/compiler-rust](packages/compiler-rust/README.md): a Rust executable linking Theo's Rust parser/binder/checker, producing scriptc IR and Rust binaries without a JavaScript engine or TypeScript/Go compiler fallback. It currently supports a tested subset of TS/JS. Its architecture separates project checking, module initialization, function demand, typed IR validation and code generation.
+The destination compiler is [packages/compiler-rust](packages/compiler-rust/README.md): a Rust executable linking a linked Rust parser/binder/checker, producing scriptc IR and Rust binaries without a JavaScript engine or TypeScript/Go compiler fallback. It currently supports a tested subset of TS/JS. Its architecture separates project checking, module initialization, function demand, typed IR validation and code generation.
 
 Use `pnpm build:compiler-rust` and `pnpm scriptc:native --version` for the native driver; these developer launchers select the pinned Rust toolchain through rustup. The native executable itself requires no Node or Go compiler. `pnpm scriptc:legacy` explicitly selects the existing CLI described below, and `pnpm scriptc` retains that compatibility behavior during migration. Selecting `--backend rust` in the compatibility CLI selects its output backend; it does not select the new compiler. The native driver never falls back to that CLI.
 

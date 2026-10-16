@@ -1348,7 +1348,8 @@ export type IrStmt =
    * initialized-check; refcounted locals simply stay NULL until the first
    * `assign`. */
   | { kind: "varDecl"; localId: string; init: IrExpr | null; loc: SrcLoc }
-  | { kind: "assign"; localId: string; value: IrExpr; loc: SrcLoc }
+  /** Native producers mark the source declaration that initializes a module slot; ordinary writes must retain TDZ checks. Absent preserves the legacy producer contract. */
+  | { kind: "assign"; localId: string; value: IrExpr; initializesGlobal?: true; loc: SrcLoc }
   | { kind: "exprStmt"; expr: IrExpr; loc: SrcLoc }
   | { kind: "if"; cond: IrExpr; then: IrStmt[]; else_: IrStmt[] | null; loc: SrcLoc }
   /** `labels` (here and on doWhile/for/forOf/switch/block): the JS label

@@ -1,46 +1,52 @@
 // Included in emitted programs. Shared typed collections; no JS evaluator.
-fn js_map_set<K, V>(
-    map: &std::rc::Rc<std::cell::RefCell<Vec<(K, V)>>>,
+fn js_map_set<K: NativeTrace + 'static, V: NativeTrace + 'static>(
+    map: &runtime::Gc<NativeMap<K, V>>,
     key: K,
     value: V,
     equal: impl Fn(&K, &K) -> bool,
 ) {
-    let mut entries = map.borrow_mut();
-    if let Some((_, stored)) = entries.iter_mut().find(|(stored, _)| equal(stored, &key)) {
-        *stored = value;
-    } else {
-        entries.push((key, value));
-    }
+    map.with_mut(|map| {
+        let entries = &mut map.entries;
+        if let Some((_, stored)) = entries.iter_mut().find(|(stored, _)| equal(stored, &key)) {
+            *stored = value;
+        } else {
+            entries.push((key, value));
+        }
+    });
 }
-fn js_map_get<K, V: Clone>(
-    map: &std::rc::Rc<std::cell::RefCell<Vec<(K, V)>>>,
+fn js_map_get<K: NativeTrace + 'static, V: Clone + NativeTrace + 'static>(
+    map: &runtime::Gc<NativeMap<K, V>>,
     key: &K,
     equal: impl Fn(&K, &K) -> bool,
 ) -> Option<V> {
-    map.borrow()
-        .iter()
-        .find(|(stored, _)| equal(stored, key))
-        .map(|(_, value)| value.clone())
+    map.with(|map| {
+        map.entries
+            .iter()
+            .find(|(stored, _)| equal(stored, key))
+            .map(|(_, value)| value.clone())
+    })
 }
-fn js_map_has<K, V>(
-    map: &std::rc::Rc<std::cell::RefCell<Vec<(K, V)>>>,
+fn js_map_has<K: NativeTrace + 'static, V: NativeTrace + 'static>(
+    map: &runtime::Gc<NativeMap<K, V>>,
     key: &K,
     equal: impl Fn(&K, &K) -> bool,
 ) -> bool {
-    map.borrow().iter().any(|(stored, _)| equal(stored, key))
+    map.with(|map| map.entries.iter().any(|(stored, _)| equal(stored, key)))
 }
-fn js_map_delete<K, V>(
-    map: &std::rc::Rc<std::cell::RefCell<Vec<(K, V)>>>,
+fn js_map_delete<K: NativeTrace + 'static, V: NativeTrace + 'static>(
+    map: &runtime::Gc<NativeMap<K, V>>,
     key: &K,
     equal: impl Fn(&K, &K) -> bool,
 ) -> bool {
-    let mut entries = map.borrow_mut();
-    if let Some(index) = entries.iter().position(|(stored, _)| equal(stored, key)) {
-        entries.remove(index);
-        true
-    } else {
-        false
-    }
+    map.with_mut(|map| {
+        let entries = &mut map.entries;
+        if let Some(index) = entries.iter().position(|(stored, _)| equal(stored, key)) {
+            entries.remove(index);
+            true
+        } else {
+            false
+        }
+    })
 }
 fn js_dict_set<V>(entries: &mut Vec<(String, V)>, key: String, value: V) {
     if key == "__proto__" {

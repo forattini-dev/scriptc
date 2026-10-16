@@ -71,7 +71,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                     expr(&pair.key, function, module), expr(&pair.value, function, module), key_equality(key))
             }).collect::<String>();
             format!(
-                "{{ let map: {} = std::rc::Rc::new(std::cell::RefCell::new(Vec::new())); {entries} map }}",
+                "{{ let map: {} = runtime::Gc::new(NativeMap {{ entries: Vec::new() }}); {entries} map }}",
                 rust_type(value.ty())
             )
         }
@@ -108,8 +108,8 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                         ""
                     }
                 ),
-                "clear" => "{ map.borrow_mut().clear(); }".into(),
-                "size" => "{ let size = map.borrow().len() as f64; size }".into(),
+                "clear" => "{ map.with_mut(|map| map.entries.clear()); }".into(),
+                "size" => "{ let size = map.with(|map| map.entries.len() as f64); size }".into(),
                 _ => unreachable!("IR validated"),
             };
             format!(
@@ -125,7 +125,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             };
             let stored = module.records[shape_id].index_value.as_ref().unwrap();
             let result = lookup(
-                "js_dict_get(&object.borrow().overflow, &key)",
+                "object.with(|object| js_dict_get(&object.overflow, &key))",
                 stored,
                 r#type,
                 module,

@@ -1,6 +1,6 @@
 //! Typed maps and string-indexed records. No untyped property bags.
 use super::*;
-use goport_core::prelude::get_source_file_of_node;
+use source_frontend::prelude::get_source_file_of_node;
 
 impl Lowerer<'_> {
     pub(super) fn map_type(&mut self, id: TypeId) -> Option<Type> {
@@ -73,14 +73,14 @@ impl Lowerer<'_> {
         if symbol == 0
             || self
                 .checker
-                .sym(goport_core::prelude::SymbolId(symbol))
+                .sym(source_frontend::prelude::SymbolId(symbol))
                 .name
                 .as_ref()
                 != "Map"
             || self.bindings.contains_key(&symbol)
             || !self
                 .checker
-                .sym(goport_core::prelude::SymbolId(symbol))
+                .sym(source_frontend::prelude::SymbolId(symbol))
                 .declarations
                 .iter()
                 .any(|node| {

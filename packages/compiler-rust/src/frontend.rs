@@ -1,9 +1,9 @@
-//! Theo's Rust parser/binder/checker, directly linked. No compiler subprocess.
+//! Checked source adaptation and lowering into scriptc-owned types and IR.
 use crate::{
     builtins,
     ir::{self, Expr, Function, Loc, Local, Module, Param, Stmt, Type},
 };
-use goport_core::{
+use source_frontend::{
     checker::Checker,
     flags::{ModifierFlags, NodeFlags, SymbolFlags, TypeFlags},
     prelude::{Node, SyntaxKind, TypeId, source_file_info},
@@ -21,6 +21,8 @@ mod functions;
 mod modules;
 mod parameters;
 mod pipeline;
+mod storage;
+mod types;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
 
@@ -92,6 +94,8 @@ struct Lowerer<'a> {
     file: String,
     locals: Vec<Local>,
     bindings: HashMap<u32, Local>,
+    module_bindings: HashMap<u32, Local>,
+    globals: Vec<ir::Global>,
     functions: functions::FunctionGraph,
     return_type: Option<Type>,
     native_functions: HashMap<u32, (&'static str, String)>,
@@ -115,6 +119,8 @@ impl<'a> Lowerer<'a> {
             file,
             locals: Vec::new(),
             bindings: HashMap::new(),
+            module_bindings: HashMap::new(),
+            globals: Vec::new(),
             functions: functions::FunctionGraph::default(),
             return_type: None,
             native_functions: HashMap::new(),
@@ -240,7 +246,7 @@ impl<'a> Lowerer<'a> {
                 }
                 let declaration = self.checker.sym(symbol).value_declaration;
                 if !declaration.is_nil() {
-                    let file = goport_core::ast::get_source_file_of_node(declaration);
+                    let file = source_frontend::ast::get_source_file_of_node(declaration);
                     let path = &source_file_info(file).file_name;
                     if path.contains("/node_modules/@types/node/")
                         || path.contains("/node_modules/bun-types/")
@@ -262,6 +268,28 @@ impl<'a> Lowerer<'a> {
         None
     }
 
+    fn module_namespace(&mut self, node: Node) -> bool {
+        if node.kind() != SyntaxKind::Identifier {
+            return false;
+        }
+        let symbol = self.checker.get_symbol_at_location(node, false);
+        if symbol.0 == 0
+            || !self
+                .checker
+                .sym(symbol)
+                .flags
+                .intersects(SymbolFlags::ALIAS)
+        {
+            return false;
+        }
+        let target = self.checker.get_aliased_symbol(symbol);
+        if target.0 == 0 {
+            return false;
+        }
+        let declaration = self.checker.sym(target).value_declaration;
+        !declaration.is_nil() && declaration.kind() == SyntaxKind::SourceFile
+    }
+
     fn native_call(&mut self, node: Node, module: &str, member: &str) -> Result<Expr, String> {
         let builtin = builtins::get(module, member).ok_or_else(|| {
             self.refuse(
@@ -280,7 +308,7 @@ impl<'a> Lowerer<'a> {
             }
             args = vec![Expr::ArrayLit {
                 elems: args,
-                r#type: builtins::STRINGS,
+                r#type: builtins::strings(),
                 loc: self.loc(node),
             }];
         } else if member == "basename" && args.len() == 1 {
@@ -293,7 +321,7 @@ impl<'a> Lowerer<'a> {
         if args.len() != builtin.args.len()
             || args
                 .iter()
-                .zip(builtin.args)
+                .zip(&builtin.args)
                 .any(|(arg, expected)| arg.ty() != *expected)
         {
             return Err(self.refuse(node, "native library overload is not ported"));
@@ -408,7 +436,7 @@ impl<'a> Lowerer<'a> {
     fn lower_function(&mut self, signature: Signature) -> Result<Function, String> {
         self.file = signature.file;
         self.locals.clear();
-        self.bindings.clear(); // Captured outer bindings require a later closure/global representation.
+        self.bindings.clear();
         self.captures.clear();
         self.return_type = Some(signature.return_type.clone());
         let mut body = Vec::new();
@@ -438,32 +466,6 @@ impl<'a> Lowerer<'a> {
         })
     }
 
-    fn primitive_type(&self, flags: TypeFlags) -> Option<Type> {
-        if flags.intersects(TypeFlags::NUMBER_LIKE) {
-            Some(Type::F64)
-        } else if flags.intersects(TypeFlags::STRING_LIKE) {
-            Some(Type::String)
-        } else if flags.intersects(TypeFlags::BOOLEAN_LIKE) {
-            Some(Type::Bool)
-        } else {
-            None
-        }
-    }
-    fn type_id(&mut self, id: TypeId) -> Option<Type> {
-        if let Some(ty) = self.primitive_type(self.checker.ty(id).flags) {
-            return Some(ty);
-        }
-        if self.checker.is_array_type(id) {
-            let element = self.checker.get_element_type_of_array_type(id);
-            return match self.primitive_type(self.checker.ty(element).flags)? {
-                Type::String => Some(builtins::STRINGS),
-                Type::F64 => Some(Type::Array { elem: &Type::F64 }),
-                Type::Bool => Some(Type::Array { elem: &Type::Bool }),
-                _ => None,
-            };
-        }
-        self.aggregate_type(id)
-    }
     fn loc(&self, node: Node) -> Loc {
         Loc {
             file: self.file.clone(),
@@ -474,40 +476,14 @@ impl<'a> Lowerer<'a> {
     fn refuse(&self, node: Node, detail: &str) -> String {
         refusal(&self.file, node, detail)
     }
-    fn ty(&mut self, node: Node) -> Result<Type, String> {
-        let id = self.checker.get_type_at_location(node);
-        self.type_id(id).ok_or_else(|| {
-            self.refuse(
-                node,
-                "type has no representation in the first native IR subset",
-            )
-        })
-    }
-    fn storage_type(&mut self, node: Node) -> Result<Type, String> {
-        if node.parent().kind() == SyntaxKind::VariableDeclaration
-            && let Some(hint) = self.declared(node.parent())
-        {
-            return hint.function_type().ok_or_else(|| {
-                self.refuse(
-                    node,
-                    "public JavaScript function value has no native signature",
-                )
-            });
-        }
-        let ty = self.ty(node)?;
-        if matches!(ty, Type::Null | Type::Undefined) {
-            return Err(self.refuse(
-                node,
-                "standalone unit storage outside a union is not ported",
-            ));
-        }
-        Ok(ty)
-    }
     fn binding(&mut self, node: Node) -> Result<Local, String> {
         let symbol = self.symbol(node);
         self.resolve_binding(symbol, node)
     }
-    fn statements(&mut self, nodes: goport_core::prelude::NodeSlice) -> Result<Vec<Stmt>, String> {
+    fn statements(
+        &mut self,
+        nodes: source_frontend::prelude::NodeSlice,
+    ) -> Result<Vec<Stmt>, String> {
         let mut out = Vec::new();
         for node in nodes {
             out.extend(self.statement(node)?);
@@ -579,6 +555,23 @@ impl<'a> Lowerer<'a> {
                     if ty != init.ty() {
                         return Err(self.refuse(declaration, "coercion is not ported"));
                     }
+                    if node.parent().kind() == SyntaxKind::SourceFile {
+                        let binding =
+                            self.module_binding(name, ty, !flags.intersects(NodeFlags::CONST));
+                        if binding.r#type != init.ty() {
+                            return Err(self.refuse(
+                                declaration,
+                                "module binding layout differs from its initializer",
+                            ));
+                        }
+                        out.push(Stmt::Assign {
+                            local_id: binding.id,
+                            initializes_global: true,
+                            value: init,
+                            loc: self.loc(declaration),
+                        });
+                        continue;
+                    }
                     let local = Local {
                         id: format!("v{}", self.locals.len()),
                         name: name.text().into(),
@@ -616,6 +609,7 @@ impl<'a> Lowerer<'a> {
                         self.expected_expression(expression.right(), local.r#type.clone())?;
                     Stmt::Assign {
                         local_id: local.id,
+                        initializes_global: false,
                         value,
                         loc,
                     }
@@ -663,7 +657,7 @@ impl<'a> Lowerer<'a> {
                     return Ok(Expr::ArrayGet {
                         arr: Box::new(obj),
                         index: Box::new(index),
-                        r#type: elem.clone(),
+                        r#type: *elem,
                         loc: self.loc(node),
                     });
                 }
@@ -685,16 +679,8 @@ impl<'a> Lowerer<'a> {
                 loc,
             }),
             SyntaxKind::ArrayLiteralExpression => {
-                let r#type = self.ty(node)?;
-                let elems = node
-                    .elements()
-                    .into_iter()
-                    .map(|element| self.expression(element))
-                    .collect::<Result<Vec<_>, _>>()?;
-                if !matches!(r#type, Type::Array { .. }) {
-                    return Err(self.refuse(node, "only primitive array literals are ported"));
-                }
-                Ok(Expr::ArrayLit { elems, r#type, loc })
+                let ty = self.ty(node)?;
+                self.expected_expression(node, ty)
             }
             SyntaxKind::PropertyAccessExpression
                 if node.name().text() == "platform"
@@ -708,10 +694,13 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::ParenthesizedExpression => self.expression(node.expression()),
+            SyntaxKind::PropertyAccessExpression if self.module_namespace(node.expression()) => {
+                self.expression(node.name())
+            }
             SyntaxKind::PropertyAccessExpression => self.record_get(node),
             SyntaxKind::NumericLiteral => {
                 let text = node.text().replace('_', "");
-                let value = goport_core::jsnum::from_string(&text).value();
+                let value = source_frontend::jsnum::from_string(&text).value();
                 let spelling = (text.bytes().all(|b| b.is_ascii_digit())
                     && value.is_finite()
                     && format!("{value:.0}") != text)
@@ -724,7 +713,7 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::StringLiteral | SyntaxKind::NoSubstitutionTemplateLiteral => {
-                let bytes = goport_core::scanner_util::go_string_bytes(node.text());
+                let bytes = source_frontend::scanner_util::go_string_bytes(node.text());
                 let value = std::str::from_utf8(&bytes)
                     .map_err(|_| self.refuse(node, "lone UTF-16 surrogates are not ported"))?
                     .to_string();
@@ -759,7 +748,7 @@ impl<'a> Lowerer<'a> {
                     && !self.bindings.contains_key(&symbol)
                     && self
                         .checker
-                        .sym(goport_core::prelude::SymbolId(symbol))
+                        .sym(source_frontend::prelude::SymbolId(symbol))
                         .value_declaration
                         .is_nil()
                 {
@@ -822,6 +811,8 @@ impl<'a> Lowerer<'a> {
                     let receiver_type = self
                         .bindings
                         .get(&symbol)
+                        .or_else(|| self.module_bindings.get(&symbol))
+                        .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
                         .map(|l| l.r#type.clone())
                         .or_else(|| self.ty(member.expression()).ok());
                     if matches!(receiver_type, Some(Type::Map { .. })) {
@@ -837,6 +828,7 @@ impl<'a> Lowerer<'a> {
                 if member.kind() == SyntaxKind::Identifier {
                     let symbol = self.symbol(member);
                     if self.bindings.contains_key(&symbol)
+                        || self.module_bindings.contains_key(&symbol)
                         || self.outer.iter().any(|scope| scope.contains_key(&symbol))
                     {
                         return self.call_value(node);
@@ -867,25 +859,13 @@ impl<'a> Lowerer<'a> {
                 };
                 // A namespace identifier has no runtime evaluation. Other
                 // receivers can have side effects and cannot be discarded.
-                let namespace_call = if member.kind() == SyntaxKind::PropertyAccessExpression
-                    && member.expression().kind() == SyntaxKind::Identifier
-                {
-                    let base = self
-                        .checker
-                        .get_symbol_at_location(member.expression(), false);
-                    if base.0 != 0 && self.checker.sym(base).flags.intersects(SymbolFlags::ALIAS) {
-                        let target = self.checker.get_aliased_symbol(base);
-                        target.0 != 0
-                            && self.checker.sym(target).value_declaration.kind()
-                                == SyntaxKind::SourceFile
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
+                let namespace_call = member.kind() == SyntaxKind::PropertyAccessExpression
+                    && self.module_namespace(member.expression());
                 if member.kind() == SyntaxKind::Identifier || namespace_call {
                     let symbol = self.symbol(symbol_node);
+                    if namespace_call && self.module_bindings.contains_key(&symbol) {
+                        return self.call_value(node);
+                    }
                     if let Some(signature) =
                         self.request_function(symbol, node, functions::UseKind::Call)?
                     {
@@ -915,7 +895,10 @@ impl<'a> Lowerer<'a> {
                 let symbol = self
                     .checker
                     .get_symbol_at_location(member.expression(), false);
-                if self.bindings.contains_key(&symbol.0) || self.functions.contains(symbol.0) {
+                if self.bindings.contains_key(&symbol.0)
+                    || self.module_bindings.contains_key(&symbol.0)
+                    || self.functions.contains(symbol.0)
+                {
                     return Err(self.refuse(node, "shadowed console is not ambient"));
                 }
                 let mut args = Vec::new();

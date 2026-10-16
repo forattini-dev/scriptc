@@ -1,6 +1,6 @@
 //! First-class synchronous functions and lexical capture boxes.
 use super::*;
-use goport_core::prelude::SignatureKind;
+use source_frontend::prelude::SignatureKind;
 
 impl Lowerer<'_> {
     pub(super) fn function_type(&mut self, id: TypeId) -> Option<Type> {
@@ -44,7 +44,11 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn resolve_binding(&mut self, symbol: u32, node: Node) -> Result<Local, String> {
-        if let Some(local) = self.bindings.get(&symbol) {
+        if let Some(local) = self
+            .bindings
+            .get(&symbol)
+            .or_else(|| self.module_bindings.get(&symbol))
+        {
             return Ok(local.clone());
         }
         let source = self

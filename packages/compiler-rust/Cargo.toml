@@ -10,7 +10,7 @@ name = "scriptc"
 path = "src/main.rs"
 
 [dependencies]
-goport_core = { git = "https://github.com/pingdotgg/ts-rust.git", rev = "780dc512d64f40afebffa6a7028207649fb7ed1c", default-features = false }
+source_frontend = { package = "goport_core", git = "https://github.com/pingdotgg/ts-rust.git", rev = "780dc512d64f40afebffa6a7028207649fb7ed1c", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3.27"

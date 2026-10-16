@@ -16,7 +16,7 @@ pub enum Type {
     Bool,
     Void,
     Array {
-        elem: &'static Type,
+        elem: Box<Type>,
     },
     Map {
         key: Box<Type>,
@@ -96,6 +96,18 @@ pub struct Module {
     pub entry: String,
     pub records: Vec<Record>,
     pub unions: Vec<Union>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub globals: Vec<Global>,
+}
+
+/// Program-lifetime live bindings. Initialization is the first top-level
+/// marked assignment in the entry function; all other assignments are writes.
+#[derive(Clone, Debug, Serialize)]
+pub struct Global {
+    pub id: String,
+    pub name: String,
+    pub r#type: Type,
+    pub mutable: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -381,6 +393,8 @@ pub enum Stmt {
     Assign {
         local_id: String,
         value: Expr,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        initializes_global: bool,
         loc: Loc,
     },
     #[serde(rename = "exprStmt")]
@@ -442,6 +456,16 @@ pub fn validate(module: &Module) -> Result<(), String> {
     if entry.return_type != Type::Void || !entry.params.is_empty() {
         return Err("invalid native entry".into());
     }
+    let mut global_ids = std::collections::HashSet::new();
+    for global in &module.globals {
+        if !global.id.starts_with("%g.")
+            || !global_ids.insert(&global.id)
+            || !module.valid_type(global.r#type.clone(), &mut vec![])
+            || module.initializer(&global.id).is_none()
+        {
+            return Err("invalid global storage/initializer".into());
+        }
+    }
     for function in &module.functions {
         validate_function(function, &functions, module)?;
     }
@@ -449,6 +473,25 @@ pub fn validate(module: &Module) -> Result<(), String> {
 }
 
 impl Module {
+    pub fn global(&self, id: &str) -> Option<&Global> {
+        self.globals.iter().find(|global| global.id == id)
+    }
+
+    pub fn initializer(&self, id: &str) -> Option<&Stmt> {
+        self.functions
+            .iter()
+            .find(|f| f.name == self.entry)?
+            .body
+            .iter()
+            .find(|stmt| matches!(stmt, Stmt::Assign { local_id, initializes_global: true, .. } if local_id == id))
+    }
+
+    pub fn initializes(&self, stmt: &Stmt, function: &Function, id: &str) -> bool {
+        function.name == self.entry
+            && self
+                .initializer(id)
+                .is_some_and(|first| std::ptr::eq(first, stmt))
+    }
     fn lookup_result(&self, value: &Type, result: &Type) -> bool {
         let Type::Union { union_id } = result else {
             return false;
@@ -486,7 +529,9 @@ impl Module {
                     && (*ret == Type::Void || self.valid_type(*ret, active))
             }
             Type::Void | Type::Null | Type::Undefined => false,
-            Type::Array { elem } => matches!(elem, Type::F64 | Type::String | Type::Bool),
+            Type::Array { elem } => {
+                !matches!(*elem, Type::Func { .. }) && self.valid_type(*elem, active)
+            }
             Type::Map { key, value } => {
                 matches!(*key, Type::F64 | Type::String)
                     && !matches!(*value, Type::Func { .. } | Type::Map { .. })
@@ -564,7 +609,10 @@ fn validate_function(
     let mut locals = HashMap::new();
     for local in &f.locals {
         let supported = module.valid_type(local.r#type.clone(), &mut vec![]);
-        if !supported || locals.insert(local.id.as_str(), local).is_some() {
+        if !supported
+            || module.global(&local.id).is_some()
+            || locals.insert(local.id.as_str(), local).is_some()
+        {
             return Err("duplicate/void local".into());
         }
     }
@@ -952,7 +1000,7 @@ fn validate_function(
                 if *r#type != builtin.result || args.len() != builtin.args.len() {
                     return Err("invalid native library signature".into());
                 }
-                for (arg, expected) in args.iter().zip(builtin.args) {
+                for (arg, expected) in args.iter().zip(&builtin.args) {
                     expr(arg, locals, initialized, functions, module)?;
                     if arg.ty() != *expected {
                         return Err("invalid native library argument".into());
@@ -972,10 +1020,11 @@ fn validate_function(
             } => Ok(()),
             Expr::VarRef {
                 local_id, r#type, ..
-            } if initialized.contains(local_id)
-                && locals
-                    .get(local_id.as_str())
-                    .is_some_and(|l| l.r#type == *r#type) =>
+            } if module.global(local_id).is_some_and(|g| g.r#type == *r#type)
+                || (initialized.contains(local_id)
+                    && locals
+                        .get(local_id.as_str())
+                        .is_some_and(|l| l.r#type == *r#type)) =>
             {
                 Ok(())
             }
@@ -1072,6 +1121,7 @@ fn validate_function(
         functions: &HashMap<&str, &Function>,
         return_type: Type,
         module: &Module,
+        function: &Function,
     ) -> Result<(), String> {
         for stmt in stmts {
             match stmt {
@@ -1128,10 +1178,24 @@ fn validate_function(
                     initialized.insert(local_id.clone());
                 }
                 Stmt::Assign {
-                    local_id, value, ..
+                    local_id,
+                    value,
+                    initializes_global,
+                    ..
                 } => {
                     expr(value, locals, initialized, functions, module)?;
-                    if !initialized.contains(local_id)
+                    if let Some(global) = module.global(local_id) {
+                        if global.r#type != value.ty()
+                            || (*initializes_global
+                                && !module.initializes(stmt, function, local_id))
+                            || (!global.mutable && !module.initializes(stmt, function, local_id))
+                        {
+                            return Err("invalid global assignment".into());
+                        }
+                        continue;
+                    }
+                    if *initializes_global
+                        || !initialized.contains(local_id)
                         || !locals
                             .get(local_id.as_str())
                             .is_some_and(|l| l.mutable && l.r#type == value.ty())
@@ -1164,6 +1228,7 @@ fn validate_function(
                         functions,
                         return_type.clone(),
                         module,
+                        function,
                     )?;
                     if let Some(other) = else_ {
                         body(
@@ -1173,6 +1238,7 @@ fn validate_function(
                             functions,
                             return_type.clone(),
                             module,
+                            function,
                         )?;
                     }
                 }
@@ -1183,6 +1249,7 @@ fn validate_function(
                     functions,
                     return_type.clone(),
                     module,
+                    function,
                 )?,
             }
         }
@@ -1204,6 +1271,7 @@ fn validate_function(
         functions,
         f.return_type.clone(),
         module,
+        f,
     )
 }
 
@@ -1223,6 +1291,73 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_container_layouts_validate_edges_and_keep_the_wire_contract() {
+        let mut m = record_module();
+        let array = Type::Array {
+            elem: Box::new(Type::Record { shape_id: 0 }),
+        };
+        assert!(m.valid_type(array.clone(), &mut vec![]));
+        let wire = serde_json::to_value(&array).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({"kind":"array", "elem":{"kind":"record", "shapeId":"r0"}})
+        );
+        m.records[0].fields[0].r#type = array.clone();
+        assert!(
+            !m.valid_type(array, &mut vec![]),
+            "cycles through array elements must be checked"
+        );
+        assert!(!m.valid_type(
+            Type::Array {
+                elem: Box::new(Type::Func {
+                    params: vec![],
+                    ret: Box::new(Type::Void)
+                })
+            },
+            &mut vec![]
+        ));
+    }
+
+    #[test]
+    fn global_storage_requires_unique_layouts_and_an_unconditional_initializer() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        m.globals.push(Global {
+            id: "%g.0".into(),
+            name: "answer".into(),
+            r#type: Type::F64,
+            mutable: false,
+        });
+        assert!(validate(&m).unwrap_err().contains("global storage"));
+        let write = || Stmt::Assign {
+            local_id: "%g.0".into(),
+            initializes_global: true,
+            value: Expr::NumLit {
+                value: 42.0,
+                spelling: None,
+                r#type: Type::F64,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        };
+        m.functions[0].body.insert(0, write());
+        validate(&m).unwrap();
+        m.functions[0].body.push(write());
+        assert_eq!(validate(&m).unwrap_err(), "invalid global assignment");
+        if let Stmt::Assign {
+            initializes_global, ..
+        } = m.functions[0].body.last_mut().unwrap()
+        {
+            *initializes_global = false;
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid global assignment");
+        m.globals[0].mutable = true;
+        validate(&m).unwrap();
+        m.globals.push(m.globals[0].clone());
+        assert!(validate(&m).unwrap_err().contains("global storage"));
+    }
 
     #[test]
     fn map_lookups_require_typed_keys_and_an_undefined_arm() {
@@ -1344,7 +1479,7 @@ mod tests {
         m.functions.truncate(1);
         let loc = m.functions[0].loc.clone();
         let array = Type::Array {
-            elem: &Type::String,
+            elem: Box::new(Type::String),
         };
         m.unions.push(Union {
             id: 0,
@@ -1365,7 +1500,9 @@ mod tests {
             loc,
         }];
         assert!(validate(&m).is_ok());
-        m.unions[0].arms[0] = Type::Array { elem: &Type::F64 };
+        m.unions[0].arms[0] = Type::Array {
+            elem: Box::new(Type::F64),
+        };
         assert!(validate(&m).is_err());
     }
 
@@ -1618,6 +1755,7 @@ mod tests {
             entry: "__main".into(),
             records: vec![],
             unions: vec![],
+            globals: vec![],
             functions: vec![
                 Function {
                     captures: None,
@@ -1736,6 +1874,7 @@ mod tests {
         let m = Module {
             records: vec![],
             unions: vec![],
+            globals: vec![],
             ir_version: VERSION,
             source_file: loc.file.clone(),
             entry: "main".into(),

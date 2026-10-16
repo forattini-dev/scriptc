@@ -1,169 +1,183 @@
 //! Implemented native library calls, sharing the existing IR/runtime ABI.
 use crate::ir::Type;
 
-pub const STRINGS: Type = Type::Array {
-    elem: &Type::String,
-};
+pub fn strings() -> Type {
+    Type::Array {
+        elem: Box::new(Type::String),
+    }
+}
 
 #[derive(Clone)]
 pub struct Builtin {
     pub module: &'static str,
     pub member: &'static str,
     pub ir: &'static str,
-    pub args: &'static [Type],
+    pub args: Vec<Type>,
     pub result: Type,
     pub runtime: &'static str,
 }
 
 macro_rules! call {
     ($module:literal, $member:literal, $ir:literal, [$($arg:expr),*], $result:expr, $runtime:literal) => {
-        Builtin { module: $module, member: $member, ir: $ir, args: &[$($arg),*], result: $result, runtime: $runtime }
+        Builtin { module: $module, member: $member, ir: $ir, args: vec![$($arg),*], result: $result, runtime: $runtime }
     };
 }
 
 use Type::{Bool, String};
-const CALLS: &[Builtin] = &[
-    call!("path", "join", "path.join", [STRINGS], String, "path_join"),
-    call!(
-        "path",
-        "resolve",
-        "path.resolve",
-        [STRINGS],
-        String,
-        "path_resolve"
-    ),
-    call!(
-        "path",
-        "normalize",
-        "path.normalize",
-        [String],
-        String,
-        "path_normalize"
-    ),
-    call!(
-        "path",
-        "dirname",
-        "path.dirname",
-        [String],
-        String,
-        "path_dirname"
-    ),
-    call!(
-        "path",
-        "basename",
-        "path.basename",
-        [String, String],
-        String,
-        "path_basename"
-    ),
-    call!(
-        "path",
-        "extname",
-        "path.extname",
-        [String],
-        String,
-        "path_extname"
-    ),
-    call!(
-        "path",
-        "isAbsolute",
-        "path.isAbsolute",
-        [String],
-        Bool,
-        "path_is_absolute"
-    ),
-    call!(
-        "path",
-        "relative",
-        "path.relative",
-        [String, String],
-        String,
-        "path_relative"
-    ),
-    call!(
-        "path/win32",
-        "join",
-        "path.win32Join",
-        [STRINGS],
-        String,
-        "path_win32_join"
-    ),
-    call!(
-        "path/win32",
-        "resolve",
-        "path.win32Resolve",
-        [STRINGS],
-        String,
-        "path_win32_resolve"
-    ),
-    call!(
-        "path/win32",
-        "normalize",
-        "path.win32Normalize",
-        [String],
-        String,
-        "path_win32_normalize"
-    ),
-    call!(
-        "path/win32",
-        "dirname",
-        "path.win32Dirname",
-        [String],
-        String,
-        "path_win32_dirname"
-    ),
-    call!(
-        "path/win32",
-        "basename",
-        "path.win32Basename",
-        [String, String],
-        String,
-        "path_win32_basename"
-    ),
-    call!(
-        "path/win32",
-        "extname",
-        "path.win32Extname",
-        [String],
-        String,
-        "path_win32_extname"
-    ),
-    call!(
-        "path/win32",
-        "isAbsolute",
-        "path.win32IsAbsolute",
-        [String],
-        Bool,
-        "path_win32_is_absolute"
-    ),
-    call!(
-        "path/win32",
-        "relative",
-        "path.win32Relative",
-        [String, String],
-        String,
-        "path_win32_relative"
-    ),
-    call!(
-        "fs",
-        "existsSync",
-        "fs.existsSync",
-        [String],
-        Bool,
-        "fs_exists"
-    ),
-    call!("os", "homedir", "os.homedir", [], String, "os_homedir"),
-    call!("os", "tmpdir", "os.tmpdir", [], String, "os_tmpdir"),
-    call!(
-        "os",
-        "platform",
-        "process.platform",
-        [],
-        String,
-        "process_platform"
-    ),
-    call!("process", "cwd", "process.cwd", [], String, "process_cwd"),
-];
+fn calls() -> &'static [Builtin] {
+    static CALLS: std::sync::OnceLock<Vec<Builtin>> = std::sync::OnceLock::new();
+    CALLS.get_or_init(|| {
+        vec![
+            call!(
+                "path",
+                "join",
+                "path.join",
+                [strings()],
+                String,
+                "path_join"
+            ),
+            call!(
+                "path",
+                "resolve",
+                "path.resolve",
+                [strings()],
+                String,
+                "path_resolve"
+            ),
+            call!(
+                "path",
+                "normalize",
+                "path.normalize",
+                [String],
+                String,
+                "path_normalize"
+            ),
+            call!(
+                "path",
+                "dirname",
+                "path.dirname",
+                [String],
+                String,
+                "path_dirname"
+            ),
+            call!(
+                "path",
+                "basename",
+                "path.basename",
+                [String, String],
+                String,
+                "path_basename"
+            ),
+            call!(
+                "path",
+                "extname",
+                "path.extname",
+                [String],
+                String,
+                "path_extname"
+            ),
+            call!(
+                "path",
+                "isAbsolute",
+                "path.isAbsolute",
+                [String],
+                Bool,
+                "path_is_absolute"
+            ),
+            call!(
+                "path",
+                "relative",
+                "path.relative",
+                [String, String],
+                String,
+                "path_relative"
+            ),
+            call!(
+                "path/win32",
+                "join",
+                "path.win32Join",
+                [strings()],
+                String,
+                "path_win32_join"
+            ),
+            call!(
+                "path/win32",
+                "resolve",
+                "path.win32Resolve",
+                [strings()],
+                String,
+                "path_win32_resolve"
+            ),
+            call!(
+                "path/win32",
+                "normalize",
+                "path.win32Normalize",
+                [String],
+                String,
+                "path_win32_normalize"
+            ),
+            call!(
+                "path/win32",
+                "dirname",
+                "path.win32Dirname",
+                [String],
+                String,
+                "path_win32_dirname"
+            ),
+            call!(
+                "path/win32",
+                "basename",
+                "path.win32Basename",
+                [String, String],
+                String,
+                "path_win32_basename"
+            ),
+            call!(
+                "path/win32",
+                "extname",
+                "path.win32Extname",
+                [String],
+                String,
+                "path_win32_extname"
+            ),
+            call!(
+                "path/win32",
+                "isAbsolute",
+                "path.win32IsAbsolute",
+                [String],
+                Bool,
+                "path_win32_is_absolute"
+            ),
+            call!(
+                "path/win32",
+                "relative",
+                "path.win32Relative",
+                [String, String],
+                String,
+                "path_win32_relative"
+            ),
+            call!(
+                "fs",
+                "existsSync",
+                "fs.existsSync",
+                [String],
+                Bool,
+                "fs_exists"
+            ),
+            call!("os", "homedir", "os.homedir", [], String, "os_homedir"),
+            call!("os", "tmpdir", "os.tmpdir", [], String, "os_tmpdir"),
+            call!(
+                "os",
+                "platform",
+                "process.platform",
+                [],
+                String,
+                "process_platform"
+            ),
+            call!("process", "cwd", "process.cwd", [], String, "process_cwd"),
+        ]
+    })
+}
 
 pub fn module(name: &str) -> Option<&'static str> {
     let name = name.strip_prefix("node:").unwrap_or(name);
@@ -221,12 +235,12 @@ pub fn module(name: &str) -> Option<&'static str> {
 }
 
 pub fn get(module: &str, member: &str) -> Option<Builtin> {
-    CALLS
+    calls()
         .iter()
         .find(|call| call.module == module && call.member == member)
         .cloned()
 }
 
 pub fn by_ir(name: &str) -> Option<Builtin> {
-    CALLS.iter().find(|call| call.ir == name).cloned()
+    calls().iter().find(|call| call.ir == name).cloned()
 }

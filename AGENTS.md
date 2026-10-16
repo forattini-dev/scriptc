@@ -57,7 +57,7 @@ new tests should follow this convention.
 
 ## Where things live
 
-- `packages/compiler-rust` — the destination native compiler, implemented in Rust: Theo's linked Rust frontend → scriptc IR → Rust source → Cargo/rustc, without an engine or compiler fallback. Native feature work belongs here; see its README for phase ownership and migration gates.
+- `packages/compiler-rust` — the destination native compiler, implemented in Rust: source frontend → scriptc IR → Rust source → Cargo/rustc, without an engine or compiler fallback. Native feature work belongs here; see its README for phase ownership and migration gates.
 - `packages/compiler` — the frontend (tsc API to IR), the typed IR with validator and serializer, and the LLVM, C, and Rust backends.
 - `packages/runtime` — the C runtime compiled into every C/LLVM-backed scriptc binary.
 - `packages/runtime-rust` — the memory-safe Rust runtime (`#![forbid(unsafe_code)]`) linked by `--backend rust` binaries; its own gate is `cargo test` + `cargo clippy -- -D warnings` on the toolchain pinned in its `rust-toolchain.toml` (CI job `runtime_rust`).

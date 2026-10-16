@@ -1,5 +1,7 @@
 use crate::ir::{Expr, Function, Module, Stmt, Type};
 mod collections;
+mod layouts;
+mod storage;
 
 fn rust_type(ty: Type) -> String {
     match ty {
@@ -20,20 +22,24 @@ fn rust_type(ty: Type) -> String {
         Type::Void => "()",
         Type::Map { key, value } => {
             return format!(
-                "std::rc::Rc<std::cell::RefCell<Vec<({}, {})>>>",
+                "runtime::Gc<NativeMap<{}, {}>>",
                 rust_type(*key),
                 rust_type(*value)
             );
         }
-        Type::Array {
-            elem: &Type::String,
-        } => "runtime::JsArray<runtime::JsString>",
-        Type::Array { elem: &Type::F64 } => "runtime::JsArray<f64>",
-        Type::Array { elem: &Type::Bool } => "runtime::JsArray<bool>",
-        Type::Array { .. } => unreachable!("IR validated"),
+        Type::Array { elem } => {
+            return format!(
+                "runtime::JsArray<{}>",
+                if *elem == Type::String {
+                    "runtime::JsString".into()
+                } else {
+                    rust_type(*elem)
+                }
+            );
+        }
         Type::Null | Type::Undefined => "()",
         Type::Record { shape_id } => {
-            return format!("std::rc::Rc<std::cell::RefCell<R{shape_id}>>");
+            return format!("runtime::Gc<R{shape_id}>");
         }
         Type::Union { union_id } => return format!("U{union_id}"),
     }
@@ -56,54 +62,13 @@ pub fn rust(module: &Module) -> Result<String, String> {
         "// scriptc native IR v13; engine: none\n#![forbid(unsafe_code)]\n#![allow(unused_parens, unused_mut, unused_variables)]\n",
     );
     output.push_str(include_str!("program_support.rs"));
-    output.push_str(include_str!("collections_support.rs"));
     if uses_runtime(module) {
         output.push_str("\nuse scriptc_runtime as runtime;\n");
+        output.push_str(include_str!("heap_support.rs"));
+        output.push_str(include_str!("collections_support.rs"));
+        layouts::definitions(module, &mut output);
     }
-    for record in &module.records {
-        output.push_str(&format!("\nstruct R{} {{\n", record.id));
-        for field in &record.fields {
-            output.push_str(&format!(
-                "{}: {},\n",
-                field_name(&field.name),
-                rust_type(field.r#type.clone())
-            ));
-        }
-        if let Some(value) = &record.index_value {
-            output.push_str(&format!(
-                "overflow: Vec<(String, {})>,\n",
-                rust_type(value.clone())
-            ));
-        }
-        output.push_str("}\n");
-    }
-    for union in &module.unions {
-        output.push_str(&format!("\n#[derive(Clone)]\nenum U{} {{\n", union.id));
-        for (tag, arm) in union.arms.iter().enumerate() {
-            output.push_str(&format!("V{tag}({}),\n", rust_type(arm.clone())));
-        }
-        output.push_str("}\n");
-        let cases = union
-            .arms
-            .iter()
-            .enumerate()
-            .map(|(tag, ty)| {
-                let equality = match ty {
-                    Type::Record { .. } => "std::rc::Rc::ptr_eq(&left, &right)",
-                    Type::Array { .. } => "left.ptr_eq(&right)",
-                    Type::Null | Type::Undefined => "true",
-                    Type::F64 | Type::String | Type::Bool => "left == right",
-                    _ => unreachable!("IR validated"),
-                };
-                format!(
-                    "(U{}::V{tag}(left), U{}::V{tag}(right)) => {equality},",
-                    union.id, union.id
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        output.push_str(&format!("fn union_eq_{}(left: U{}, right: U{}) -> bool {{ match (left, right) {{ {cases} _ => false }} }}\n", union.id, union.id, union.id));
-    }
+    storage::definitions(module, &mut output);
     for function in &module.functions {
         let params = function
             .params
@@ -158,7 +123,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         }
     }
     if uses_runtime(module) {
-        output.push_str(&format!("\nfn main() {{ runtime::init(); let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {}())); let error = outcome.err().map(|payload| {{ let caught = runtime::caught_from_panic(payload); runtime::caught_to_string(&caught).to_string() }}); runtime::finish(); if let Some(error) = error {{ eprintln!(\"Uncaught {{error}}\"); std::process::exit(1); }} }}\n", module.entry));
+        output.push_str(&format!("\nfn main() {{ runtime::init(); let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {}())); clear_module_storage(); let error = outcome.err().map(|payload| {{ let caught = runtime::caught_from_panic(payload); runtime::caught_to_string(&caught).to_string() }}); runtime::finish(); if let Some(error) = error {{ eprintln!(\"Uncaught {{error}}\"); std::process::exit(1); }} }}\n", module.entry));
     } else {
         output.push_str(&format!("\nfn main() {{ {}(); }}\n", module.entry));
     }
@@ -211,16 +176,20 @@ pub fn uses_runtime(module: &Module) -> bool {
     }
     fn ty(t: &Type) -> bool {
         match t {
-            Type::Array { .. } => true,
+            Type::Array { .. } | Type::Map { .. } | Type::Record { .. } | Type::Union { .. } => {
+                true
+            }
             Type::Func { params, ret } => params.iter().any(ty) || ty(ret),
-            Type::Map { key, value } => ty(key) || ty(value),
             _ => false,
         }
     }
-    module
-        .records
-        .iter()
-        .any(|r| r.fields.iter().any(|f| ty(&f.r#type)))
+    !module.globals.is_empty()
+        || !module.records.is_empty()
+        || !module.unions.is_empty()
+        || module
+            .records
+            .iter()
+            .any(|r| r.fields.iter().any(|f| ty(&f.r#type)))
         || module.unions.iter().any(|u| u.arms.iter().any(ty))
         || module.functions.iter().any(|f| {
             ty(&f.return_type)
@@ -335,25 +304,25 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     })
                     .collect::<String>();
                 return format!(
-                    "{{ let mut entries = Vec::new(); {entries} std::rc::Rc::new(std::cell::RefCell::new(R{shape_id} {{ overflow: entries }})) }}"
+                    "{{ let mut entries = Vec::new(); {entries} runtime::Gc::new(R{shape_id} {{ overflow: entries }}) }}"
                 );
             }
             let fields = fields
                 .iter()
                 .map(|f| {
                     format!(
-                        "{}: {}",
+                        "{}: Some({})",
                         field_name(&f.name),
                         expr(&f.value, function, module)
                     )
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("std::rc::Rc::new(std::cell::RefCell::new(R{shape_id} {{ {fields} }}))")
+            format!("runtime::Gc::new(R{shape_id} {{ {fields} }})")
         }
         Expr::RecordLit { .. } => unreachable!("IR validated"),
         Expr::RecordGet { obj, field, .. } => format!(
-            "{{ let object = {}; let value = object.borrow().{}.clone(); value }}",
+            "{{ let object = {}; let value = object.with(|object| object.{}.as_ref().expect(\"scriptc: cleared record\").clone()); value }}",
             expr(obj, function, module),
             field_name(field)
         ),
@@ -446,6 +415,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         Expr::VarRef {
             local_id, r#type, ..
         } => {
+            if let Some(global) = module.global(local_id) {
+                return storage::read(module, global);
+            }
             if function.locals.iter().any(|l| l.id == *local_id && l.boxed) {
                 return format!("{{ let value = {local_id}.borrow().clone(); value }}");
             }
@@ -466,11 +438,11 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         Expr::Bin {
             op, left, right, ..
         } => {
-            let array = matches!(left.ty(), Type::Array { .. });
-            let record = matches!(
+            let array = matches!(
                 left.ty(),
-                Type::Record { .. } | Type::Func { .. } | Type::Map { .. }
+                Type::Array { .. } | Type::Record { .. } | Type::Map { .. }
             );
+            let record = matches!(left.ty(), Type::Func { .. });
             let left = expr(left, function, module);
             let right = expr(right, function, module);
             match op.as_str() {
@@ -519,14 +491,14 @@ fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut Str
         Stmt::RecordKeySet {
             obj, key, value, ..
         } => {
-            writeln!(output, "{{ let object = {}; let key = {}; let value = {}; js_dict_set(&mut object.borrow_mut().overflow, key, value); }}", expr(obj, function, module), expr(key, function, module), expr(value, function, module)).unwrap();
+            writeln!(output, "{{ let object = {}; let key = {}; let value = {}; object.with_mut(|object| js_dict_set(&mut object.overflow, key, value)); }}", expr(obj, function, module), expr(key, function, module), expr(value, function, module)).unwrap();
         }
         Stmt::RecordSet {
             obj, field, value, ..
         } => {
             writeln!(
                 output,
-                "{{ let object = {}; let value = {}; object.borrow_mut().{} = value; }}",
+                "{{ let object = {}; let value = {}; object.with_mut(|object| object.{} = Some(value)); }}",
                 expr(obj, function, module),
                 expr(value, function, module),
                 field_name(field)
@@ -555,6 +527,16 @@ fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut Str
         Stmt::Assign {
             local_id, value, ..
         } => {
+            if let Some(global) = module.global(local_id) {
+                output.push_str(&storage::write(
+                    module,
+                    function,
+                    stmt,
+                    global,
+                    expr(value, function, module),
+                ));
+                return;
+            }
             if function.locals.iter().any(|l| l.id == *local_id && l.boxed) {
                 writeln!(
                     output,

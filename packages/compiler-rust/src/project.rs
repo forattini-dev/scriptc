@@ -1,5 +1,5 @@
 //! Project loading uses the pinned Rust tsconfig parser and filesystem host.
-use goport_core::{
+use source_frontend::{
     frontend::{
         bundled,
         compiler::{ProgramOptions, new_cached_fs_compiler_host},
@@ -56,7 +56,7 @@ pub fn load(
     input: &Path,
     work: &Path,
     project: Option<&Path>,
-) -> Result<(ProgramOptions, &'static goport_core::core::GoProgram), String> {
+) -> Result<(ProgramOptions, &'static source_frontend::core::GoProgram), String> {
     let source = path_for_frontend(input);
     let config_path = if let Some(project) = project {
         project.to_path_buf()
@@ -103,7 +103,7 @@ pub fn load(
                 format!(
                     "error TS{}: {}",
                     d.code,
-                    d.localize(&goport_core::locale::DEFAULT)
+                    d.localize(&source_frontend::locale::DEFAULT)
                 )
             })
             .collect::<Vec<_>>()
@@ -141,7 +141,7 @@ pub fn load(
 
 /// The typed program has already passed diagnostics. Resolve package runtime
 /// exports with the same Rust resolver, keeping declarations for checking only.
-pub fn execution_view(mut options: ProgramOptions) -> &'static goport_core::core::GoProgram {
+pub fn execution_view(mut options: ProgramOptions) -> &'static source_frontend::core::GoProgram {
     let mut config = options
         .config
         .with_file_names(options.config.parsed_config.file_names.clone());
@@ -158,9 +158,9 @@ pub fn execution_view(mut options: ProgramOptions) -> &'static goport_core::core
     version(options)
 }
 
-fn version(options: ProgramOptions) -> &'static goport_core::core::GoProgram {
-    let _parse_scope = goport_core::core::enter_program(None);
-    let native = Rc::new(goport_core::frontend::compiler::new_program(options));
+fn version(options: ProgramOptions) -> &'static source_frontend::core::GoProgram {
+    let _parse_scope = source_frontend::core::enter_program(None);
+    let native = Rc::new(source_frontend::frontend::compiler::new_program(options));
     program::new_program_version(&native, None)
 }
 
