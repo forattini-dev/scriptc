@@ -102,6 +102,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-vars/main.ts",
         "rust-native-vars/cycle.ts",
         "rust-native-vars/contracts.ts",
+        "rust-native-class-values/main.ts",
+        "rust-native-class-values/contracts.ts",
     ]
     .into_iter()
     .enumerate()
@@ -295,8 +297,20 @@ fn error_definitions_defer_instance_code_and_refuse_unported_effects() {
             "class Fault extends Error { constructor(public code: number) { super(); } } new Fault(1);",
         ),
         (
-            "class-value",
-            "class Fault extends Error {} const Alias = Fault; new Alias();",
+            "local-class-expression",
+            "function make() { return class extends Error {}; } const Constructor = make(); new Constructor();",
+        ),
+        (
+            "class-expression-effects",
+            "const Constructor = class extends Error { static value = console.log('must not vanish'); };",
+        ),
+        (
+            "constructor-identity-widening",
+            "class Base extends Error {} class Derived extends Base {} const Constructor: typeof Base = Derived; new Constructor();",
+        ),
+        (
+            "possibly-undefined-constructor",
+            "class Fault extends Error {} var Constructor: typeof Fault | undefined; function make(): void { new Constructor!(); } make();",
         ),
     ] {
         fs::write(&input, source).unwrap();
@@ -700,6 +714,18 @@ fn module_slots_check_tdz_on_reads_writes_defaults_and_cycles() {
             "import './dependency.ts'; export class Fault extends Error {}",
             "import { Fault } from './main.ts'; console.log('before'); export class Child extends Fault {}",
             "Fault",
+        ),
+        (
+            8,
+            "console.log('before'); capture(); class Fault extends Error {} function capture(): void { const Alias = Fault; console.log(Alias === Fault); }",
+            "",
+            "Fault",
+        ),
+        (
+            9,
+            "class Fault extends Error {} console.log('before'); make(); const Alias = Fault; function arg(): string { console.log('argument'); return 'late'; } function make(): void { new Alias(arg()); }",
+            "",
+            "Alias",
         ),
     ] {
         fs::write(&input, source).unwrap();

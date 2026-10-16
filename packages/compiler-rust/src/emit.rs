@@ -23,6 +23,7 @@ fn rust_type(ty: Type) -> String {
         Type::Bool => "bool",
         Type::Regex => "runtime::JsRegex",
         Type::Object { .. } => "runtime::Gc<NativeError>",
+        Type::Classval { .. } => "NativeClass",
         Type::String => "String",
         Type::Void => "()",
         Type::Map { key, value } => {
@@ -153,7 +154,9 @@ pub fn uses_runtime(module: &Module) -> bool {
     fn expr(value: &Expr) -> bool {
         match value {
             Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => true,
-            Expr::New { .. }
+            Expr::ClassRef { .. }
+            | Expr::NewValue { .. }
+            | Expr::New { .. }
             | Expr::FieldGet { .. }
             | Expr::Upcast { .. }
             | Expr::Downcast { .. }
@@ -244,7 +247,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
     }
     match value {
         Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => unreachable!("regex expression"),
-        Expr::New { .. }
+        Expr::ClassRef { .. }
+        | Expr::NewValue { .. }
+        | Expr::New { .. }
         | Expr::FieldGet { .. }
         | Expr::Upcast { .. }
         | Expr::Downcast { .. }

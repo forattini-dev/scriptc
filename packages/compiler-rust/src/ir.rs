@@ -21,6 +21,10 @@ pub enum Type {
         #[serde(rename = "className")]
         class_name: String,
     },
+    Classval {
+        #[serde(rename = "className")]
+        class_name: String,
+    },
     Void,
     Array {
         elem: Box<Type>,
@@ -172,6 +176,17 @@ pub struct Local {
     rename_all_fields = "camelCase"
 )]
 pub enum Expr {
+    ClassRef {
+        class_name: String,
+        r#type: Type,
+        loc: Loc,
+    },
+    NewValue {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     RegexLit {
         pattern: String,
         flags: String,
@@ -185,6 +200,8 @@ pub enum Expr {
         r#type: Type,
         loc: Loc,
     },
+    // Retained shared-IR operation, also exercised by validator contract tests.
+    #[allow(dead_code)]
     New {
         class_name: String,
         args: Vec<Expr>,
@@ -401,6 +418,8 @@ impl Expr {
             | Self::Upcast { r#type, .. }
             | Self::Downcast { r#type, .. }
             | Self::InstanceOf { r#type, .. }
+            | Self::ClassRef { r#type, .. }
+            | Self::NewValue { r#type, .. }
             | Self::ArrayGet { r#type, .. }
             | Self::MapNew { r#type, .. }
             | Self::MapIntrinsic { r#type, .. }
@@ -625,6 +644,7 @@ impl Module {
         active.push(ty.clone());
         let valid = match ty {
             Type::Object { class_name } => self.class(&class_name).is_some(),
+            Type::Classval { class_name } => self.class(&class_name).is_some_and(|c| !c.runtime),
             Type::Func { params, ret } => {
                 params.iter().all(|p| self.valid_type(p.clone(), active))
                     && (*ret == Type::Void || self.valid_type(*ret, active))
@@ -862,12 +882,50 @@ fn validate_function(
                     Err("invalid native regex operation".into())
                 }
             }
-            Expr::New {
-                class_name,
-                args,
-                r#type,
-                ..
+            Expr::ClassRef {
+                class_name, r#type, ..
             } => {
+                let ctor = functions.get(format!("%{class_name}.constructor").as_str());
+                if *r#type
+                    != (Type::Classval {
+                        class_name: class_name.clone(),
+                    })
+                    || !module
+                        .class(class_name)
+                        .is_some_and(|c| !c.runtime && !c.js_name.is_empty())
+                    || !ctor.is_some_and(|f| {
+                        f.return_type == Type::Void
+                            && f.captures.is_none()
+                            && f.params.first().map(|p| &p.r#type)
+                                == Some(&Type::Object {
+                                    class_name: class_name.clone(),
+                                })
+                    })
+                {
+                    return Err("invalid native class value".into());
+                }
+                Ok(())
+            }
+            Expr::New { args, r#type, .. } | Expr::NewValue { args, r#type, .. } => {
+                let Type::Object { class_name } = r#type else {
+                    return Err("native construction needs an object result".into());
+                };
+                match e {
+                    Expr::New {
+                        class_name: actual, ..
+                    } if actual == class_name => {}
+                    Expr::NewValue { callee, .. } => {
+                        expr(callee, locals, initialized, functions, module)?;
+                        if callee.ty()
+                            != (Type::Classval {
+                                class_name: class_name.clone(),
+                            })
+                        {
+                            return Err("native constructor value has a different class".into());
+                        }
+                    }
+                    _ => return Err("invalid native construction identity".into()),
+                }
                 let ctor = functions
                     .get(format!("%{class_name}.constructor").as_str())
                     .ok_or("missing native constructor")?;
@@ -1823,6 +1881,89 @@ mod tests {
             ],
         });
         assert_eq!(validate(&m).unwrap_err(), "invalid/recursive union layout");
+    }
+
+    #[test]
+    fn constructor_values_validate_identity_and_completed_abi() {
+        let mut m = error_module();
+        let loc = m.functions[0].loc.clone();
+        let classval = Type::Classval {
+            class_name: "Detail".into(),
+        };
+        let object = Type::Object {
+            class_name: "Detail".into(),
+        };
+        let reference = || Expr::ClassRef {
+            class_name: "Detail".into(),
+            r#type: classval.clone(),
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: reference(),
+            loc: loc.clone(),
+        }];
+        assert_eq!(validate(&m).unwrap_err(), "invalid native class value");
+        m.functions.push(Function {
+            name: "%Detail.constructor".into(),
+            params: vec![Param {
+                local_id: "p0".into(),
+                name: "this".into(),
+                r#type: object.clone(),
+            }],
+            captures: None,
+            return_type: Type::Void,
+            locals: vec![Local {
+                id: "p0".into(),
+                name: "this".into(),
+                r#type: object.clone(),
+                mutable: true,
+                boxed: false,
+            }],
+            body: vec![],
+            loc: loc.clone(),
+        });
+        assert!(validate(&m).is_ok());
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::NewValue {
+                callee: Box::new(reference()),
+                args: vec![],
+                r#type: object,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert!(validate(&m).is_ok());
+        let wire = serde_json::to_value(&m).unwrap();
+        assert_eq!(wire["functions"][0]["body"][0]["expr"]["kind"], "newValue");
+        assert_eq!(
+            wire["functions"][0]["body"][0]["expr"]["callee"]["type"]["kind"],
+            "classval"
+        );
+        assert_eq!(
+            wire["functions"][0]["body"][0]["expr"]["callee"]["className"],
+            "Detail"
+        );
+        if let Stmt::Expression {
+            expr: Expr::NewValue { r#type, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = Type::Object {
+                class_name: "%Error".into(),
+            };
+        }
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "native constructor value has a different class"
+        );
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: reference(),
+            loc,
+        }];
+        let ctor = m.functions.last_mut().unwrap();
+        ctor.params[0].r#type = Type::F64;
+        ctor.locals[0].r#type = Type::F64;
+        assert_eq!(validate(&m).unwrap_err(), "invalid native class value");
     }
 
     #[test]

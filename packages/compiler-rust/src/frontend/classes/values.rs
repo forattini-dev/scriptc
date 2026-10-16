@@ -2,6 +2,107 @@
 use super::*;
 
 impl Lowerer<'_> {
+    fn class_ref(
+        &mut self,
+        index: usize,
+        site: Node,
+        prerequisite: Option<Expr>,
+    ) -> Result<Expr, String> {
+        self.request_constructor(index)?;
+        let class_name = self.classes.definitions[index].name.clone();
+        let ty = Type::Classval {
+            class_name: class_name.clone(),
+        };
+        let value = Expr::ClassRef {
+            class_name: class_name.clone(),
+            r#type: ty.clone(),
+            loc: self.loc(site),
+        };
+        let Some(prerequisite) = prerequisite else {
+            return Ok(value);
+        };
+        let mut helper = helpers::Helper::new(
+            &format!("class_{class_name}"),
+            vec![prerequisite.ty()],
+            ty.clone(),
+            self.loc(site),
+        );
+        helper.function.body.push(Stmt::Return {
+            value: Some(value),
+            loc: self.loc(site),
+        });
+        let callee = self.install_helper(helper.function);
+        Ok(Expr::Call {
+            callee,
+            args: vec![prerequisite],
+            r#type: ty,
+            loc: self.loc(site),
+        })
+    }
+
+    pub(in crate::frontend) fn class_value(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let symbol = self.symbol(node);
+        let Some(index) = self.classes.symbols.get(&symbol).copied() else {
+            return Ok(None);
+        };
+        let Some(token) = self.classes.definitions[index].token.clone() else {
+            return Ok(None);
+        };
+        self.class_ref(index, node, Some(self.read_class_token(&token, node)))
+            .map(Some)
+    }
+
+    pub(in crate::frontend) fn class_expression(&mut self, node: Node) -> Result<Expr, String> {
+        let index = self
+            .classes
+            .definitions
+            .iter()
+            .position(|d| d.node == node)
+            .ok_or_else(|| {
+                self.refuse(
+                    node,
+                    "class expressions require a direct module initializer",
+                )
+            })?;
+        self.resolve_class(index)?;
+        let prerequisite = self.class_heritage_value(node)?;
+        self.class_ref(index, node, prerequisite)
+    }
+
+    pub(super) fn class_heritage_value(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        for clause in node.heritage_clauses().nodes() {
+            if clause.token() != SyntaxKind::ExtendsKeyword {
+                continue;
+            }
+            let expression = clause
+                .types()
+                .nodes()
+                .into_iter()
+                .next()
+                .unwrap()
+                .expression();
+            let index = self
+                .class_symbol(expression)
+                .ok_or_else(|| self.refuse(expression, "unresolved class heritage"))?;
+            if !self.classes.definitions[index].node.is_nil() {
+                // A declaration's heritage only reads its lexical identity;
+                // defining an unused subclass must not demand its base body.
+                let symbol = self.symbol(expression);
+                if self.classes.symbols.get(&symbol).copied() == Some(index)
+                    && let Some(token) = self.classes.definitions[index].token.clone()
+                {
+                    return Ok(Some(self.read_class_token(&token, expression)));
+                }
+                let value = self.expression(expression)?;
+                if !matches!(value.ty(), Type::Classval { .. }) {
+                    return Err(self.refuse(expression, "class heritage may be undefined"));
+                }
+                return Ok(Some(value));
+            }
+        }
+        Ok(None)
+    }
+
     pub(super) fn read_class_token(&self, token: &Local, site: Node) -> Expr {
         Expr::VarRef {
             local_id: token.id.clone(),
@@ -23,6 +124,16 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             }));
         }
+        let callee = self.expression(node.expression())?;
+        let expected = Type::Classval {
+            class_name: self.classes.definitions[index].name.clone(),
+        };
+        if callee.ty() != expected {
+            return Err(self.refuse(
+                node,
+                "constructor value may be undefined or has a different identity",
+            ));
+        }
         let params = self.request_constructor(index)?;
         let types = params
             .into_iter()
@@ -30,41 +141,10 @@ impl Lowerer<'_> {
             .map(|p| p.r#type)
             .collect::<Vec<_>>();
         let args = self.call_arguments(node, &types)?;
-        let token = self.classes.definitions[index].token.clone().unwrap();
         let result = self.classes.object(index);
-        let name = self.classes.definitions[index].name.clone();
-        let mut helper = helpers::Helper::new(
-            &format!("new_{name}"),
-            std::iter::once(Type::F64).chain(types).collect(),
-            result.clone(),
-            self.loc(node),
-        );
-        let values = helper
-            .function
-            .params
-            .iter()
-            .skip(1)
-            .map(|p| Expr::VarRef {
-                local_id: p.local_id.clone(),
-                r#type: p.r#type.clone(),
-                loc: helper.loc(),
-            })
-            .collect();
-        helper.function.body.push(Stmt::Return {
-            value: Some(Expr::New {
-                class_name: name,
-                args: values,
-                r#type: result.clone(),
-                loc: helper.loc(),
-            }),
-            loc: helper.loc(),
-        });
-        let callee = self.install_helper(helper.function);
-        Ok(Some(Expr::Call {
-            callee,
-            args: std::iter::once(self.read_class_token(&token, node))
-                .chain(args)
-                .collect(),
+        Ok(Some(Expr::NewValue {
+            callee: Box::new(callee),
+            args,
             r#type: result,
             loc: self.loc(node),
         }))
@@ -243,10 +323,14 @@ impl Lowerer<'_> {
             .ok_or_else(|| self.refuse(node, "instanceof needs a resolved Error class"))?;
         self.layout_class(index)?;
         let class_name = self.classes.definitions[index].name.clone();
-        if let Some(token) = self.classes.definitions[index].token.clone() {
+        if !self.classes.definitions[index].node.is_nil() {
+            let constructor = self.expression(node.right())?;
+            if !matches!(constructor.ty(), Type::Classval { .. }) {
+                return Err(self.refuse(node.right(), "instanceof constructor may be undefined"));
+            }
             let mut helper = helpers::Helper::new(
                 &format!("instanceof_{class_name}"),
-                vec![value.ty(), Type::F64],
+                vec![value.ty(), constructor.ty()],
                 Type::Bool,
                 self.loc(node),
             );
@@ -262,7 +346,7 @@ impl Lowerer<'_> {
             let callee = self.install_helper(helper.function);
             Ok(Expr::Call {
                 callee,
-                args: vec![value, self.read_class_token(&token, node)],
+                args: vec![value, constructor],
                 r#type: Type::Bool,
                 loc: self.loc(node),
             })

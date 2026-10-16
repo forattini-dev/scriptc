@@ -683,6 +683,7 @@ impl<'a> Lowerer<'a> {
         }
         let loc = self.loc(node);
         match node.kind() {
+            SyntaxKind::ClassExpression => self.class_expression(node),
             SyntaxKind::NewExpression => {
                 if let Some(value) = self.regex_new(node)? {
                     return Ok(value);
@@ -791,6 +792,9 @@ impl<'a> Lowerer<'a> {
             }),
             SyntaxKind::Identifier => {
                 let symbol = self.symbol(node);
+                if let Some(value) = self.class_value(node)? {
+                    return Ok(value);
+                }
                 if let Some(signature) =
                     self.request_function(symbol, node, functions::UseKind::Value)?
                 {

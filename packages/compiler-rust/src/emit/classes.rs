@@ -18,6 +18,9 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
     if module.classes.is_empty() {
         return;
     }
+    // Each supported definition executes once at module scope. Constructor
+    // values cannot be widened across class identities in this ABI.
+    output.push_str("#[derive(Clone, Copy, PartialEq)]\nstruct NativeClass(usize);\nimpl NativeTrace for NativeClass { fn trace_native(&self, _: &mut runtime::Tracer<'_>) {} }\nimpl runtime::ArrayElement for NativeClass {}\n");
     output.push_str("struct NativeError { kind: usize, name: String, message: String, fields: NativeErrorFields }\nenum NativeErrorFields {\n");
     for (index, class) in module.classes.iter().enumerate() {
         writeln!(output, "C{index} {{").unwrap();
@@ -134,10 +137,24 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     let class_index = |name: &str| module.classes.iter().position(|c| c.name == name).unwrap();
     Some(match value {
-        Expr::New {
+        Expr::ClassRef { class_name, .. } => format!("NativeClass({})", class_index(class_name)),
+        Expr::NewValue {
+            args,
+            r#type: Type::Object { class_name },
+            ..
+        }
+        | Expr::New {
             class_name, args, ..
         } => {
             let index = class_index(class_name);
+            let callee = if let Expr::NewValue { callee, .. } = value {
+                format!(
+                    "let class = {}; debug_assert!(class.0 == {index});",
+                    expr(callee, function, module)
+                )
+            } else {
+                String::new()
+            };
             let evaluate = args
                 .iter()
                 .enumerate()
@@ -148,7 +165,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                 .collect::<String>();
             let ctor = function_name(&format!("%{class_name}.constructor"));
             format!(
-                "{{ {evaluate} let object = error_allocate_{index}(); {ctor}(object.clone(){args}); object }}"
+                "{{ {callee} {evaluate} let object = error_allocate_{index}(); {ctor}(object.clone(){args}); object }}"
             )
         }
         Expr::FieldGet {

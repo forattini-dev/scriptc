@@ -49,26 +49,53 @@ impl ClassGraph {
 impl Lowerer<'_> {
     pub(super) fn inventory_classes(&mut self, files: &[Node]) {
         for file in files {
-            for node in file.statements() {
-                if node.kind() != SyntaxKind::ClassDeclaration || node.name().is_nil() {
-                    continue;
+            let mut definitions = Vec::new();
+            for statement in file.statements() {
+                if statement.kind() == SyntaxKind::ClassDeclaration && !statement.name().is_nil() {
+                    definitions.push((statement, statement.name()));
+                } else if statement.kind() == SyntaxKind::VariableStatement {
+                    for declaration in statement.declaration_list().declarations().nodes() {
+                        let expression = declaration.initializer();
+                        if !expression.is_nil()
+                            && expression.kind() == SyntaxKind::ClassExpression
+                            && declaration.name().kind() == SyntaxKind::Identifier
+                        {
+                            definitions.push((expression, declaration.name()));
+                        }
+                    }
                 }
-                let symbol = self.symbol(node.name());
+            }
+            for (node, binding) in definitions {
+                let symbol = self.symbol(binding);
                 let index = self.classes.definitions.len();
                 let token = Local {
                     id: format!("%g.class.{index}"),
-                    name: node.name().text().into(),
+                    name: binding.text().into(),
                     r#type: Type::F64,
                     mutable: false,
                     boxed: false,
                 };
-                self.globals.push(ir::Global {
-                    id: token.id.clone(),
-                    name: token.name.clone(),
-                    r#type: Type::F64,
-                    mutable: false,
-                });
+                let token = (node.kind() == SyntaxKind::ClassDeclaration).then_some(token);
+                if let Some(token) = &token {
+                    self.globals.push(ir::Global {
+                        id: token.id.clone(),
+                        name: token.name.clone(),
+                        r#type: Type::F64,
+                        mutable: false,
+                    });
+                }
                 self.classes.symbols.insert(symbol, index);
+                let ty = self.checker.get_type_at_location(node);
+                let class_symbol = self.checker.ty(ty).symbol().0;
+                if class_symbol != 0 {
+                    self.classes.symbols.insert(class_symbol, index);
+                }
+                if !node.name().is_nil() {
+                    let inner = self.symbol(node.name());
+                    if inner != 0 {
+                        self.classes.symbols.insert(inner, index);
+                    }
+                }
                 self.classes.definitions.push(Definition {
                     node,
                     name: format!("native_error_{index}"),
@@ -77,7 +104,7 @@ impl Lowerer<'_> {
                     resolved: false,
                     resolving: false,
                     signature: None,
-                    token: Some(token),
+                    token,
                 });
                 self.classes.layouts.push(None);
             }
@@ -152,17 +179,19 @@ impl Lowerer<'_> {
     }
 
     fn class_symbol(&mut self, node: Node) -> Option<usize> {
-        if node.kind() != SyntaxKind::Identifier
-            && !(node.kind() == SyntaxKind::PropertyAccessExpression
-                && self.module_namespace(node.expression()))
+        let identity = if node.kind() == SyntaxKind::PropertyAccessExpression
+            && self.module_namespace(node.expression())
         {
-            return None;
-        }
-        let symbol = self.symbol(if node.kind() == SyntaxKind::PropertyAccessExpression {
             node.name()
         } else {
             node
-        });
+        };
+        let symbol = self.symbol(identity);
+        if let Some(index) = self.builtin_class(symbol) {
+            return Some(index);
+        }
+        let ty = self.checker.get_type_at_location(node);
+        let symbol = self.checker.ty(ty).symbol().0;
         self.builtin_class(symbol)
     }
 
@@ -182,8 +211,7 @@ impl Lowerer<'_> {
         }
         self.classes.definitions[index].resolving = true;
         let node = definition.node;
-        if node.name().is_nil()
-            || !node.type_parameters().is_empty()
+        if !node.type_parameters().is_empty()
             || node
                 .modifier_flags()
                 .intersects(ModifierFlags::ABSTRACT | ModifierFlags::AMBIENT)
@@ -195,7 +223,7 @@ impl Lowerer<'_> {
         {
             return Err(self.refuse(
                 node,
-                "only named concrete non-generic undecorated Error classes are ported",
+                "only concrete non-generic undecorated Error classes are ported",
             ));
         }
         let mut base = None;
@@ -255,11 +283,9 @@ impl Lowerer<'_> {
             .ok_or_else(|| self.refuse(node, "class has no native identity"))?;
         self.resolve_class(index)?;
         let mut body = Vec::new();
-        if let Some(base) = self.classes.definitions[index].base
-            && let Some(token) = self.classes.definitions[base].token.clone()
-        {
+        if let Some(value) = self.class_heritage_value(node)? {
             body.push(Stmt::Expression {
-                expr: self.read_class_token(&token, node),
+                expr: value,
                 loc: self.loc(node),
             });
         }
@@ -298,7 +324,11 @@ impl Lowerer<'_> {
         self.layout_class(base)?;
         let mut layout = ir::Class {
             name: definition.name,
-            js_name: definition.node.name().text().into(),
+            js_name: if definition.node.name().is_nil() {
+                definition.node.parent().name().text().into()
+            } else {
+                definition.node.name().text().into()
+            },
             runtime: false,
             base: Some(self.classes.definitions[base].name.clone()),
             fields: self.classes.layouts[base].as_ref().unwrap().fields.clone(),
@@ -353,15 +383,23 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn class_type(&mut self, id: TypeId) -> Option<Type> {
-        if !self
+        let constructor = !self
             .checker
             .get_signatures_of_type(id, SignatureKind::CONSTRUCT)
-            .is_empty()
-        {
-            return None;
-        }
+            .is_empty();
         let symbol = self.checker.ty(id).symbol().0;
         let index = self.builtin_class(symbol)?;
+        if constructor {
+            if self.classes.definitions[index].node.is_nil() {
+                return None;
+            }
+            if !self.classes.layout_active.contains(&index) {
+                self.layout_class(index).ok()?;
+            }
+            return Some(Type::Classval {
+                class_name: self.classes.definitions[index].name.clone(),
+            });
+        }
         if self.classes.layout_active.contains(&index) {
             return Some(self.classes.object(index));
         }

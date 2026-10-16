@@ -579,10 +579,8 @@ impl Lowerer<'_> {
         if matches!(op, "===" | "!==") {
             // Shared IR binary equality is numeric/reference-layout-specific.
             // Regex identity already has a portable union equality contract.
-            if left.ty() == Type::Regex && right.ty() == Type::Regex {
-                let union = self
-                    .intern_union(vec![Type::Regex, Type::Undefined])
-                    .unwrap();
+            if left.ty() == right.ty() && matches!(left.ty(), Type::Regex | Type::Classval { .. }) {
+                let union = self.intern_union(vec![left.ty(), Type::Undefined]).unwrap();
                 let Type::Union { union_id } = union else {
                     unreachable!()
                 };
