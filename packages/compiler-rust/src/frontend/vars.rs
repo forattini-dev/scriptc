@@ -31,11 +31,8 @@ impl Lowerer<'_> {
             return Err(self.refuse(declaration, "var destructuring is not ported"));
         }
         let ty = self.storage_type(name)?;
-        if matches!(ty, Type::Func { .. } | Type::Map { .. }) {
-            return Err(self.refuse(
-                declaration,
-                "hoisted function/Map var storage is not ported",
-            ));
+        if matches!(ty, Type::Map { .. }) {
+            return Err(self.refuse(declaration, "hoisted Map var storage is not ported"));
         }
         Ok(ty)
     }

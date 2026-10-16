@@ -72,7 +72,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             }).collect::<String>();
             format!(
                 "{{ let map: {} = runtime::Gc::new(NativeMap {{ entries: Vec::new() }}); {entries} map }}",
-                rust_type(value.ty())
+                rust_type(value.ty(), module)
             )
         }
         Expr::MapIntrinsic {

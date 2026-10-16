@@ -2,6 +2,14 @@
 trait NativeTrace {
     fn trace_native(&self, tracer: &mut runtime::Tracer<'_>);
 }
+struct NativeCell<T: NativeTrace + Clone + 'static> { value: Option<T> }
+fn native_cell<T: NativeTrace + Clone + 'static>(value: T) -> runtime::Gc<NativeCell<T>> { runtime::Gc::new(NativeCell { value: Some(value) }) }
+impl<T: NativeTrace + Clone + 'static> runtime::Trace for NativeCell<T> {
+    fn trace(&self, tracer: &mut runtime::Tracer<'_>) { if let Some(value) = &self.value { value.trace_native(tracer); } }
+}
+impl<T: NativeTrace + Clone + 'static> runtime::ClearEdges for NativeCell<T> {
+    fn clear_edges(&mut self) { self.value = None; }
+}
 impl NativeTrace for f64 {
     fn trace_native(&self, _: &mut runtime::Tracer<'_>) {}
 }

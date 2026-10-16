@@ -27,6 +27,7 @@ pub(super) struct Hint {
     pub params: Vec<Option<Type>>,
     pub ret: Option<Type>,
     pub reason: Option<String>,
+    pub value_type: Option<Type>,
 }
 
 impl Hint {
@@ -56,11 +57,13 @@ pub(super) struct Catalog {
     exports: Vec<Export>,
     records: Vec<ir::Record>,
     unions: Vec<ir::Union>,
+    callables: HashMap<usize, Type>,
 }
 pub(super) struct Linked {
     pub hints: HashMap<Key, Hint>,
     pub records: Vec<ir::Record>,
     pub unions: Vec<ir::Union>,
+    pub callables: HashMap<usize, Type>,
 }
 
 fn unalias(checker: &mut Checker, symbol: SymbolId) -> SymbolId {
@@ -157,6 +160,7 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                     params: Vec::new(),
                     ret: None,
                     reason: None,
+                    value_type: None,
                 };
                 if signatures.len() != 1 {
                     hint.reason =
@@ -191,6 +195,13 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                             .filter(|ty| !matches!(ty, Type::Null | Type::Undefined))
                     };
                 }
+                if hint.reason.is_none() && !lowerer.checker.get_properties_of_type(ty).is_empty() {
+                    hint.value_type = lowerer.type_id(ty);
+                    if hint.value_type.is_none() {
+                        hint.reason =
+                            Some("public callable properties have no native representation".into());
+                    }
+                }
                 exports.push(Export {
                     file: path.clone(),
                     name,
@@ -203,6 +214,7 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
             exports,
             records: lowerer.records,
             unions: lowerer.unions,
+            callables: lowerer.callables,
         }
     }))
 }
@@ -291,6 +303,7 @@ impl Catalog {
             hints,
             records: self.records,
             unions: self.unions,
+            callables: self.callables,
         }
     }
 }

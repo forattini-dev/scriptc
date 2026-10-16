@@ -1,23 +1,16 @@
 use crate::ir::{Expr, Function, Module, Stmt, Type};
 mod classes;
 mod collections;
+mod functions;
 mod layouts;
 mod regex;
 mod storage;
 
-fn rust_type(ty: Type) -> String {
+fn rust_type(ty: Type, module: &Module) -> String {
     match ty {
         Type::Dyn => unreachable!("reserved Error metadata has no native value representation"),
-        Type::Func { params, ret } => {
-            return format!(
-                "std::rc::Rc<dyn Fn({}) -> {}>",
-                params
-                    .into_iter()
-                    .map(rust_type)
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                rust_type(*ret)
-            );
+        ty @ Type::Func { .. } => {
+            return format!("runtime::Gc<{}>", functions::type_name(&ty, module));
         }
         Type::F64 => "f64",
         Type::Bool => "bool",
@@ -29,8 +22,8 @@ fn rust_type(ty: Type) -> String {
         Type::Map { key, value } => {
             return format!(
                 "runtime::Gc<NativeMap<{}, {}>>",
-                rust_type(*key),
-                rust_type(*value)
+                rust_type(*key, module),
+                rust_type(*value, module)
             );
         }
         Type::Array { elem } => {
@@ -39,7 +32,7 @@ fn rust_type(ty: Type) -> String {
                 if *elem == Type::String {
                     "runtime::JsString".into()
                 } else {
-                    rust_type(*elem)
+                    rust_type(*elem, module)
                 }
             );
         }
@@ -87,13 +80,20 @@ pub fn rust(module: &Module) -> Result<String, String> {
         output.push_str(include_str!("collections_support.rs"));
         layouts::definitions(module, &mut output);
         classes::definitions(module, &mut output);
+        functions::definitions(module, &mut output);
     }
     storage::definitions(module, &mut output);
     for function in &module.functions {
         let params = function
             .params
             .iter()
-            .map(|p| format!("mut {}: {}", p.local_id, rust_type(p.r#type.clone())))
+            .map(|p| {
+                format!(
+                    "mut {}: {}",
+                    p.local_id,
+                    rust_type(p.r#type.clone(), module)
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ");
         let captures = function
@@ -102,16 +102,16 @@ pub fn rust(module: &Module) -> Result<String, String> {
             .flatten()
             .map(|p| {
                 format!(
-                    "{}: std::rc::Rc<std::cell::RefCell<{}>>, ",
+                    "{}: runtime::Gc<NativeCell<{}>>, ",
                     p.local_id,
-                    rust_type(p.r#type.clone())
+                    rust_type(p.r#type.clone(), module)
                 )
             })
             .collect::<String>();
         output.push_str(&format!(
             "\nfn {}({captures}{params}) -> {} {{\n",
             function_name(&function.name),
-            rust_type(function.return_type.clone())
+            rust_type(function.return_type.clone(), module)
         ));
         for param in &function.params {
             if function
@@ -120,7 +120,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
                 .any(|l| l.id == param.local_id && l.boxed)
             {
                 output.push_str(&format!(
-                    "let {} = std::rc::Rc::new(std::cell::RefCell::new({}));\n",
+                    "let {} = native_cell({});\n",
                     param.local_id, param.local_id
                 ));
             }
@@ -129,21 +129,9 @@ pub fn rust(module: &Module) -> Result<String, String> {
             statement(stmt, function, module, &mut output);
         }
         output.push_str("}\n");
-        if function.captures.is_none() {
-            let ty = Type::Func {
-                params: function.params.iter().map(|p| p.r#type.clone()).collect(),
-                ret: Box::new(function.return_type.clone()),
-            };
-            output.push_str(&format!(
-                "thread_local! {{ static FN_{}: {} = std::rc::Rc::new({}); }}\n",
-                function_name(&function.name),
-                rust_type(ty),
-                function_name(&function.name)
-            ));
-        }
     }
     if uses_runtime(module) {
-        output.push_str(&format!("\nfn main() {{ runtime::init(); let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {}())); clear_module_storage(); let error = outcome.err().map(|payload| {{ let caught = runtime::caught_from_panic(payload); runtime::caught_to_string(&caught).to_string() }}); runtime::finish(); if let Some(error) = error {{ eprintln!(\"Uncaught {{error}}\"); std::process::exit(1); }} }}\n", module.entry));
+        output.push_str(&format!("\nfn main() {{ runtime::init(); let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {}())); clear_module_storage(); clear_function_storage(); let error = outcome.err().map(|payload| {{ let caught = runtime::caught_from_panic(payload); runtime::caught_to_string(&caught).to_string() }}); runtime::finish(); if let Some(error) = error {{ eprintln!(\"Uncaught {{error}}\"); std::process::exit(1); }} }}\n", module.entry));
     } else {
         output.push_str(&format!("\nfn main() {{ {}(); }}\n", module.entry));
     }
@@ -218,7 +206,8 @@ pub fn uses_runtime(module: &Module) -> bool {
             _ => false,
         }
     }
-    !module.classes.is_empty()
+    module.functions.len() > 1
+        || !module.classes.is_empty()
         || !module.globals.is_empty()
         || !module.records.is_empty()
         || !module.unions.is_empty()
@@ -264,44 +253,14 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             captures,
             r#type,
             ..
-        } => {
-            let target = module
-                .functions
-                .iter()
-                .find(|f| f.name == *fn_name)
-                .expect("IR validated");
-            if target.captures.is_none() {
-                return format!("FN_{}.with(Clone::clone)", function_name(fn_name));
-            }
-            let saved = captures
-                .iter()
-                .enumerate()
-                .map(|(i, id)| format!("let capture{i} = {id}.clone();"))
-                .collect::<String>();
-            let params = target
-                .params
-                .iter()
-                .map(|p| format!("{}: {}", p.local_id, rust_type(p.r#type.clone())))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let args = (0..captures.len())
-                .map(|i| format!("capture{i}.clone()"))
-                .chain(target.params.iter().map(|p| p.local_id.clone()))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "{{ {saved} std::rc::Rc::new(move |{params}| {}({args})) as {} }}",
-                function_name(fn_name),
-                rust_type(r#type.clone())
-            )
-        }
+        } => functions::closure(fn_name, captures, r#type, module),
         Expr::CallValue { callee, args, .. } => format!(
-            "({})({})",
+            "call_{}({}{})",
+            functions::type_name(&callee.ty(), module),
             expr(callee, function, module),
             args.iter()
-                .map(|v| expr(v, function, module))
-                .collect::<Vec<_>>()
-                .join(", ")
+                .map(|v| format!(", {}", expr(v, function, module)))
+                .collect::<String>()
         ),
         Expr::Logical {
             op, left, right, ..
@@ -435,7 +394,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             let element = if **elem == Type::String {
                 "runtime::JsString"
             } else {
-                &rust_type((**elem).clone())
+                &rust_type((**elem).clone(), module)
             };
             format!("runtime::array_new::<{element}>(vec![{values}])")
         }
@@ -470,7 +429,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 return storage::read(module, global);
             }
             if function.locals.iter().any(|l| l.id == *local_id && l.boxed) {
-                return format!("{{ let value = {local_id}.borrow().clone(); value }}");
+                return format!(
+                    "{local_id}.with(|cell| cell.value.clone().expect(\"scriptc: cleared lexical cell\"))"
+                );
             }
             if matches!(
                 r#type,
@@ -493,9 +454,13 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         } => {
             let array = matches!(
                 left.ty(),
-                Type::Array { .. } | Type::Record { .. } | Type::Map { .. } | Type::Object { .. }
+                Type::Array { .. }
+                    | Type::Record { .. }
+                    | Type::Map { .. }
+                    | Type::Object { .. }
+                    | Type::Func { .. }
             );
-            let record = matches!(left.ty(), Type::Func { .. } | Type::Regex);
+            let record = matches!(left.ty(), Type::Regex);
             let left = expr(left, function, module);
             let right = expr(right, function, module);
             match op.as_str() {
@@ -587,9 +552,14 @@ fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut Str
                 .find(|local| local.id == *local_id)
                 .expect("IR validated");
             let mutable = if local.mutable { "mut " } else { "" };
-            let ty = rust_type(local.r#type.clone());
+            let ty = rust_type(local.r#type.clone(), module);
             if local.boxed {
-                writeln!(output, "let {local_id}: std::rc::Rc<std::cell::RefCell<{ty}>> = std::rc::Rc::new(std::cell::RefCell::new({}));", expr(init, function, module)).unwrap();
+                writeln!(
+                    output,
+                    "let {local_id}: runtime::Gc<NativeCell<{ty}>> = native_cell({});",
+                    expr(init, function, module)
+                )
+                .unwrap();
             } else {
                 writeln!(
                     output,
@@ -615,7 +585,7 @@ fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut Str
             if function.locals.iter().any(|l| l.id == *local_id && l.boxed) {
                 writeln!(
                     output,
-                    "{{ let value = {}; *{local_id}.borrow_mut() = value; }}",
+                    "{{ let value = {}; {local_id}.with_mut(|cell| cell.value = Some(value)); }}",
                     expr(value, function, module)
                 )
                 .unwrap();

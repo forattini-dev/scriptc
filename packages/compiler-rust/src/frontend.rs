@@ -15,10 +15,12 @@ use std::{
 };
 mod aggregates;
 mod arrays;
+mod callables;
 mod callbacks;
 mod classes;
 mod collections;
 mod declarations;
+mod enums;
 mod functions;
 mod helpers;
 mod modules;
@@ -122,6 +124,8 @@ struct Lowerer<'a> {
     module_vars: HashMap<u32, Type>,
     var_types: HashMap<u32, Type>,
     var_defined: HashSet<u32>,
+    enums: enums::EnumGraph,
+    callables: HashMap<usize, Type>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -152,6 +156,8 @@ impl<'a> Lowerer<'a> {
             module_vars: HashMap::new(),
             var_types: HashMap::new(),
             var_defined: HashSet::new(),
+            enums: enums::EnumGraph::default(),
+            callables: HashMap::new(),
         }
     }
     fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
@@ -512,6 +518,9 @@ impl<'a> Lowerer<'a> {
         Ok(out)
     }
     fn statement(&mut self, node: Node) -> Result<Vec<Stmt>, String> {
+        if let Some(body) = self.enum_statement(node)? {
+            return Ok(body);
+        }
         let loc = self.loc(node);
         let stmt = match node.kind() {
             SyntaxKind::ClassDeclaration => return self.class_declaration(node),
@@ -632,6 +641,11 @@ impl<'a> Lowerer<'a> {
                     if expression.left().kind() != SyntaxKind::Identifier {
                         return Err(self.refuse(expression, "only local assignment is ported"));
                     }
+                    if self.enum_type(expression.left()).is_some() {
+                        return Err(
+                            self.refuse(expression, "enum namespace reassignment is not ported")
+                        );
+                    }
                     let local = self.binding(expression.left())?;
                     let symbol = self.symbol(expression.left());
                     let target = self
@@ -696,6 +710,9 @@ impl<'a> Lowerer<'a> {
             SyntaxKind::ThisKeyword => self.this_expression(node),
             SyntaxKind::RegularExpressionLiteral => self.regex_literal(node),
             SyntaxKind::ElementAccessExpression => {
+                if let Some(value) = self.enum_get(node)? {
+                    return Ok(value);
+                }
                 let obj = self.expression(node.expression())?;
                 if let Type::Array { elem } = obj.ty() {
                     let index = self.expected_expression(node.argument_expression(), Type::F64)?;
@@ -752,6 +769,9 @@ impl<'a> Lowerer<'a> {
                 self.expression(node.name())
             }
             SyntaxKind::PropertyAccessExpression => {
+                if let Some(value) = self.enum_get(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.regex_get(node)? {
                     return Ok(value);
                 }
@@ -876,6 +896,12 @@ impl<'a> Lowerer<'a> {
                 self.binary(node, op)
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.function_bind(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.callable_assign(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.regex_call(node)? {
                     return Ok(value);
                 }
@@ -931,6 +957,20 @@ impl<'a> Lowerer<'a> {
                     && let Some(module) = self.native_namespace(member.expression())
                 {
                     return self.native_call(node, module, member.name().text());
+                }
+                if member.kind() == SyntaxKind::PropertyAccessExpression {
+                    let receiver = member.expression();
+                    let owned = if receiver.kind() == SyntaxKind::Identifier {
+                        let symbol = self.symbol(receiver);
+                        self.bindings.contains_key(&symbol)
+                            || self.module_bindings.contains_key(&symbol)
+                            || self.outer.iter().any(|scope| scope.contains_key(&symbol))
+                    } else {
+                        !self.module_namespace(receiver)
+                    };
+                    if owned && matches!(self.ty(member), Ok(Type::Func { .. })) {
+                        return self.call_value(node);
+                    }
                 }
                 let symbol_node = if member.kind() == SyntaxKind::PropertyAccessExpression {
                     member.name()

@@ -638,8 +638,12 @@ impl Module {
             .find(|f| f.name == name)
     }
     fn valid_type(&self, ty: Type, active: &mut Vec<Type>) -> bool {
-        if active.contains(&ty) {
-            return false;
+        if let Some(first) = active.iter().position(|current| *current == ty) {
+            // Callable signatures describe an ABI, rather than an inline
+            // storage edge. Recursive callable results may name their record.
+            return active[first..]
+                .iter()
+                .any(|edge| matches!(edge, Type::Func { .. }));
         }
         active.push(ty.clone());
         let valid = match ty {
@@ -665,10 +669,9 @@ impl Module {
                             && !matches!(v, Type::Func { .. } | Type::Map { .. })
                             && self.valid_type(v.clone(), active)
                     })
-                    && r.fields.iter().all(|f| {
-                        !matches!(f.r#type, Type::Func { .. })
-                            && self.valid_type(f.r#type.clone(), active)
-                    })
+                    && r.fields
+                        .iter()
+                        .all(|f| self.valid_type(f.r#type.clone(), active))
             }),
             Type::Union { union_id } => self.unions.get(union_id).is_some_and(|u| {
                 u.id == union_id
@@ -680,10 +683,8 @@ impl Module {
                         <= 1
                     && u.arms.iter().all(|arm| {
                         matches!(arm, Type::Null | Type::Undefined)
-                            || (!matches!(
-                                arm,
-                                Type::Union { .. } | Type::Func { .. } | Type::Map { .. }
-                            ) && self.valid_type(arm.clone(), active))
+                            || (!matches!(arm, Type::Union { .. } | Type::Map { .. })
+                                && self.valid_type(arm.clone(), active))
                     })
             }),
             _ => true,
@@ -811,8 +812,8 @@ fn validate_function(
         }
     }
     for capture in f.captures.iter().flatten() {
-        if !locals[capture.local_id.as_str()].boxed || matches!(capture.r#type, Type::Func { .. }) {
-            return Err("capture requires a non-function boxed local".into());
+        if !locals[capture.local_id.as_str()].boxed {
+            return Err("capture requires a boxed local".into());
         }
     }
     fn expr(
@@ -2377,6 +2378,18 @@ mod tests {
     }
 
     #[test]
+    fn callable_signature_cycles_are_distinct_from_inline_layout_cycles() {
+        let mut m = record_module();
+        m.records[0].fields[0].r#type = Type::Func {
+            params: vec![],
+            ret: Box::new(Type::Record { shape_id: 0 }),
+        };
+        assert!(m.valid_type(Type::Record { shape_id: 0 }, &mut vec![]));
+        m.records[0].fields[0].r#type = Type::Record { shape_id: 0 };
+        assert!(!m.valid_type(Type::Record { shape_id: 0 }, &mut vec![]));
+    }
+
+    #[test]
     fn closures_require_initialized_matching_capture_boxes() {
         let mut m = capturing_module();
         assert!(validate(&m).is_ok());
@@ -2387,10 +2400,7 @@ mod tests {
         assert_eq!(validate(&m).unwrap_err(), "invalid closure capture");
         let mut m = capturing_module();
         m.functions[1].locals[0].boxed = false;
-        assert_eq!(
-            validate(&m).unwrap_err(),
-            "capture requires a non-function boxed local"
-        );
+        assert_eq!(validate(&m).unwrap_err(), "capture requires a boxed local");
     }
 
     #[test]

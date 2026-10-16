@@ -8,13 +8,13 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             output.push_str(&format!(
                 "{}: Option<{}>,\n",
                 field_name(&field.name),
-                rust_type(field.r#type.clone())
+                rust_type(field.r#type.clone(), module)
             ));
         }
         if let Some(value) = &record.index_value {
             output.push_str(&format!(
                 "overflow: Vec<(String, {})>,\n",
-                rust_type(value.clone())
+                rust_type(value.clone(), module)
             ));
         }
         output.push_str("}\n");
@@ -46,7 +46,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
     for union in &module.unions {
         output.push_str(&format!("\n#[derive(Clone)]\nenum U{} {{\n", union.id));
         for (tag, arm) in union.arms.iter().enumerate() {
-            output.push_str(&format!("V{tag}({}),\n", rust_type(arm.clone())));
+            output.push_str(&format!("V{tag}({}),\n", rust_type(arm.clone(), module)));
         }
         output.push_str("}\n");
         let trace = union
@@ -70,9 +70,10 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             .enumerate()
             .map(|(tag, ty)| {
                 let equality = match ty {
-                    Type::Record { .. } | Type::Array { .. } | Type::Object { .. } => {
-                        "left.ptr_eq(&right)"
-                    }
+                    Type::Record { .. }
+                    | Type::Array { .. }
+                    | Type::Object { .. }
+                    | Type::Func { .. } => "left.ptr_eq(&right)",
                     Type::Null | Type::Undefined => "true",
                     Type::F64 | Type::String | Type::Bool | Type::Classval { .. } => {
                         "left == right"

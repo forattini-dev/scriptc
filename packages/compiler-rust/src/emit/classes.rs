@@ -29,7 +29,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                 output,
                 "{}: Option<{}>,",
                 field_name(&field.name),
-                rust_type(field.r#type.clone())
+                rust_type(field.r#type.clone(), module)
             )
             .unwrap();
         }
@@ -111,7 +111,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             .filter(|field| !matches!(field.name.as_str(), "%code" | "%hasCause" | "%cause"))
         {
             let name = field_name(&field.name);
-            let ty = rust_type(field.r#type.clone());
+            let ty = rust_type(field.r#type.clone(), module);
             if matches!(field.name.as_str(), "name" | "message") {
                 writeln!(output, "fn error_get_{index}_{name}(object: runtime::Gc<NativeError>) -> {ty} {{ object.with(|object| object.{}.clone()) }}\nfn error_set_{index}_{name}(object: runtime::Gc<NativeError>, value: {ty}) {{ object.with_mut(|object| object.{} = value); }}", field.name, field.name).unwrap();
                 continue;

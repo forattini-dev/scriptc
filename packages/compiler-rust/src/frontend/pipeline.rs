@@ -50,6 +50,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         if let Some(linked) = linked {
             lowerer.records = linked.records;
             lowerer.unions = linked.unions;
+            lowerer.callables = linked.callables;
             lowerer.declarations = linked.hints;
         }
         let plan = modules::ModulePlan::link(lowerer.checker, file)?;
@@ -66,6 +67,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             }
         }
         lowerer.inventory(&plan.evaluation_order);
+        lowerer.inventory_enums(&plan.evaluation_order)?;
         lowerer.inventory_classes(&plan.evaluation_order);
         lowerer.inventory_storage(&plan.evaluation_order);
         let mut body = lowerer.hoist_module_vars(&plan.evaluation_order)?;

@@ -209,6 +209,12 @@ impl Lowerer<'_> {
         let Type::Record { shape_id } = obj.ty() else {
             return Err(self.refuse(member, "indexed writes need a native dictionary"));
         };
+        if self.enum_shape(shape_id) {
+            return Err(self.refuse(
+                member,
+                "enum namespace mutation outside its initializer is not ported",
+            ));
+        }
         let value_type = self.records[shape_id]
             .index_value
             .clone()

@@ -41,13 +41,13 @@ impl Lowerer<'_> {
         if let Some(ty) = self.map_type(id) {
             return Some(ty);
         }
-        if flags.intersects(TypeFlags::OBJECT)
+        if flags.intersects(TypeFlags::OBJECT | TypeFlags::INTERSECTION)
             && !self
                 .checker
                 .get_signatures_of_type(id, SignatureKind::CALL)
                 .is_empty()
         {
-            return self.function_type(id);
+            return self.callable_type(id);
         }
         if flags.intersects(TypeFlags::UNION) {
             let source = self.checker.ty(id).types().to_vec();
@@ -62,7 +62,7 @@ impl Lowerer<'_> {
             }
             return self.intern_union(arms);
         }
-        if !flags.intersects(TypeFlags::OBJECT)
+        if !flags.intersects(TypeFlags::OBJECT | TypeFlags::INTERSECTION)
             || self
                 .checker
                 .ty(id)
@@ -136,18 +136,20 @@ impl Lowerer<'_> {
                 arms.push(Type::Undefined);
                 ty = self.intern_union(arms)?;
             }
-            if matches!(ty, Type::Null | Type::Undefined | Type::Func { .. }) {
+            if matches!(ty, Type::Null | Type::Undefined) {
                 return None;
             }
             fields.push(ir::Field { name, r#type: ty });
         }
         let declared_order = fields.iter().map(|f| f.name.clone()).collect();
         fields.sort_by(|a, b| a.name.cmp(&b.name));
-        if let Some(record) = self
-            .records
-            .iter()
-            .find(|r| !r.tuple && r.fields == fields && r.index_value == index_value)
-        {
+        if let Some(record) = self.records.iter().find(|r| {
+            !r.tuple
+                && !self.enum_shape(r.id)
+                && !self.callables.contains_key(&r.id)
+                && r.fields == fields
+                && r.index_value == index_value
+        }) {
             return Some(Type::Record {
                 shape_id: record.id,
             });
@@ -175,7 +177,7 @@ impl Lowerer<'_> {
             || arms.iter().filter(|a| matches!(a, Type::Object { .. })).count() > 1
             || arms
                 .iter()
-                .any(|a| matches!(a, Type::Void | Type::Map { .. } | Type::Func { .. }))
+                .any(|a| matches!(a, Type::Void | Type::Map { .. }))
         {
             return None;
         }
@@ -190,6 +192,17 @@ impl Lowerer<'_> {
     pub(super) fn coerce(&self, value: Expr, target: Type, node: Node) -> Result<Expr, String> {
         if value.ty() == target {
             return Ok(value);
+        }
+        if let Type::Record { shape_id } = value.ty()
+            && self.callables.get(&shape_id) == Some(&target)
+        {
+            return Ok(Expr::RecordGet {
+                obj: Box::new(value),
+                shape_id: format!("r{shape_id}"),
+                field: callables::CALL_FIELD.into(),
+                r#type: target,
+                loc: self.loc(node),
+            });
         }
         if let (Type::Object { class_name: child }, Type::Object { class_name: parent }) =
             (value.ty(), &target)
@@ -348,7 +361,22 @@ impl Lowerer<'_> {
                 self.coerce(value, target, node)
             }
             SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression => {
-                self.closure(node, Some(target))
+                if let Type::Union { union_id } = target {
+                    let functions = self.unions[union_id]
+                        .arms
+                        .iter()
+                        .filter(|a| matches!(a, Type::Func { .. }))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if functions.len() != 1 {
+                        return Err(self
+                            .refuse(node, "callback union needs exactly one function signature"));
+                    }
+                    let value = self.closure(node, Some(functions[0].clone()))?;
+                    self.coerce(value, Type::Union { union_id }, node)
+                } else {
+                    self.closure(node, Some(target))
+                }
             }
             SyntaxKind::ObjectLiteralExpression if matches!(target, Type::Union { .. }) => {
                 let Type::Union { union_id } = target else {
@@ -419,6 +447,12 @@ impl Lowerer<'_> {
         let Type::Record { shape_id } = target else {
             return Err(self.refuse(node, "record literal needs a closed shape"));
         };
+        if self.callables.contains_key(&shape_id) || self.enum_shape(shape_id) {
+            return Err(self.refuse(
+                node,
+                "data literals cannot manufacture callable or enum namespace identities",
+            ));
+        }
         let record = self.records[shape_id].clone();
         if record.tuple {
             return Err(self.refuse(node, "object literals cannot initialize tuple layouts"));
@@ -576,6 +610,13 @@ impl Lowerer<'_> {
     pub(super) fn binary(&mut self, node: Node, op: &str) -> Result<Expr, String> {
         let mut left = self.expression(node.left())?;
         let mut right = self.expression(node.right())?;
+        if matches!(op, "===" | "!==") {
+            if matches!(left.ty(), Type::Func { .. }) {
+                right = self.callable_body(right, node.right())?;
+            } else if matches!(right.ty(), Type::Func { .. }) {
+                left = self.callable_body(left, node.left())?;
+            }
+        }
         if matches!(op, "===" | "!==") {
             // Shared IR binary equality is numeric/reference-layout-specific.
             // Regex identity already has a portable union equality contract.

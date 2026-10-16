@@ -104,6 +104,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-vars/contracts.ts",
         "rust-native-class-values/main.ts",
         "rust-native-class-values/contracts.ts",
+        "rust-native-enums/main.ts",
+        "rust-native-callables/contracts.ts",
+        "rust-native-callables/cycles.ts",
+        "rust-native-callable-contracts/imports.ts",
+        "rust-native-callable-contracts/contracts.ts",
     ]
     .into_iter()
     .enumerate()
@@ -168,6 +173,83 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
 }
 
 #[test]
+fn callable_and_compiled_enum_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "boundary");
+    for (name, source) in [
+        (
+            "escaped-function",
+            "const f = (n: number) => n; const alias = f; const decorated = Object.assign(f, { value: 1 }); console.log(alias === decorated);",
+        ),
+        (
+            "function-length",
+            "const decorated = Object.assign((n: number) => n, { length: 2 });",
+        ),
+        (
+            "function-bind",
+            "const decorated = Object.assign((n: number) => n, { bind: (n: number) => n });",
+        ),
+        (
+            "new-property-after-escape",
+            "const decorated = Object.assign((n: number) => n, { value: 1 }); Object.assign(decorated, { extra: 2 });",
+        ),
+        (
+            "forged-callable",
+            "type F = ((n: number) => number) & { value: number }; const fake = { '\\0scriptc.call': (n: number) => n, value: 1 } as unknown as F; console.log(fake(1));",
+        ),
+        (
+            "enum-extra-effect",
+            "// @ts-nocheck\nvar Flags; (function (Flags) { Flags[Flags['NONE'] = 0] = 'NONE'; console.log('must not vanish'); })(Flags || (Flags = {}));",
+        ),
+        (
+            "unbound-enum",
+            "// @ts-nocheck\n(function (Flags) { Flags[Flags['NONE'] = 0] = 'NONE'; })(Flags || (Flags = {}));",
+        ),
+        (
+            "enum-reassignment",
+            "// @ts-nocheck\nvar Flags; (function (Flags) { Flags[Flags['NONE'] = 0] = 'NONE'; })(Flags || (Flags = {})); Flags = {};",
+        ),
+        (
+            "enum-mutation",
+            "// @ts-nocheck\nvar Flags; (function (Flags) { Flags[Flags['NONE'] = 0] = 'NONE'; })(Flags || (Flags = {})); Flags['NONE'] = 'wrong';",
+        ),
+        (
+            "enum-dynamic-key",
+            "// @ts-nocheck\nvar Flags; (function (Flags) { Flags[Flags['NONE'] = 0] = 'NONE'; })(Flags || (Flags = {})); function key(): string { return 'NONE'; } console.log(Flags[key()]);",
+        ),
+    ] {
+        fs::write(&input, source).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{name}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve", "{name}");
+        }
+    }
+}
+
+#[test]
 fn regex_and_var_boundaries_refuse_without_replacing_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("main.ts");
@@ -176,7 +258,7 @@ fn regex_and_var_boundaries_refuse_without_replacing_artifacts() {
         ("regex-exec", "const pattern = /x/; pattern.exec('x');"),
         ("regex-flags", "const pattern = /x/d;"),
         ("regex-copy", "const pattern = new RegExp(/x/);"),
-        ("var-function", "var callback = () => 1; callback();"),
+        ("var-map", "var map = new Map<string, number>();"),
         ("var-destructure", "var [value] = [1]; console.log(value);"),
         (
             "var-return-contract",
@@ -477,8 +559,8 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         (
-            "function-capture",
-            "function outer(): number { const f = () => 1; const g = () => f(); return g(); } console.log(outer());",
+            "function-forward-capture",
+            "function outer(): number { const g = () => f(); const f = () => 1; return g(); } console.log(outer());",
             "SCN1001",
         ),
         (
@@ -487,8 +569,8 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         (
-            "optional-function-param",
-            "function f(n?: () => number) { return 1; } console.log(f());",
+            "optional-call",
+            "function f(n?: () => number) { return n?.(); } console.log(f());",
             "SCN1001",
         ),
         (

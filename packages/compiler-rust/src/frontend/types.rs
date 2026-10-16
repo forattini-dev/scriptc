@@ -26,6 +26,9 @@ impl Lowerer<'_> {
         self.aggregate_type(id)
     }
     pub(super) fn ty(&mut self, node: Node) -> Result<Type, String> {
+        if let Some(ty) = self.enum_type(node) {
+            return Ok(ty);
+        }
         let id = self.checker.get_type_at_location(node);
         self.type_id(id).ok_or_else(|| {
             self.refuse(
@@ -38,6 +41,11 @@ impl Lowerer<'_> {
         if node.parent().kind() == SyntaxKind::VariableDeclaration
             && let Some(hint) = self.declared(node.parent())
         {
+            if hint.reason.is_none()
+                && let Some(ty) = &hint.value_type
+            {
+                return Ok(ty.clone());
+            }
             return hint.function_type().ok_or_else(|| {
                 self.refuse(
                     node,

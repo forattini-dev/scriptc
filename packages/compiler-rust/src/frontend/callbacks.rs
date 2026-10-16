@@ -10,14 +10,45 @@ impl Lowerer<'_> {
         }
         let signature = signatures[0];
         let sig = self.checker.sig(signature);
-        if !sig.type_parameters.is_empty() || sig.has_rest_parameter() || sig.this_parameter.0 != 0
-        {
+        if !sig.type_parameters.is_empty() || sig.this_parameter.0 != 0 {
             return None;
         }
+        let rest = sig.has_rest_parameter();
         let symbols = sig.parameters.clone();
+        let count = symbols.len();
         let mut params = Vec::new();
-        for symbol in symbols {
+        for (index, symbol) in symbols.into_iter().enumerate() {
             let id = self.checker.get_type_of_symbol(symbol);
+            if rest && index + 1 == count {
+                if !self.checker.is_tuple_type(id) {
+                    return None;
+                }
+                let target = self.checker.ty(id).target();
+                let flags = self.checker.ty(target).as_tuple_type().element_flags();
+                if flags.iter().any(|flag| {
+                    flag.intersects(
+                        source_frontend::flags::ElementFlags::REST
+                            | source_frontend::flags::ElementFlags::VARIADIC,
+                    )
+                }) {
+                    return None;
+                }
+                let elements = self.checker.get_type_arguments(id).to_vec();
+                for (source, flag) in elements.into_iter().zip(flags) {
+                    let mut ty = self.type_id(source)?;
+                    if flag.intersects(source_frontend::flags::ElementFlags::OPTIONAL) {
+                        let mut arms = if let Type::Union { union_id } = ty {
+                            self.unions[union_id].arms.clone()
+                        } else {
+                            vec![ty]
+                        };
+                        arms.push(Type::Undefined);
+                        ty = self.intern_union(arms)?;
+                    }
+                    params.push(ty);
+                }
+                continue;
+            }
             let mut ty = self.type_id(id)?;
             let declaration = self.checker.sym(symbol).value_declaration;
             if !declaration.is_nil() && declaration.kind() == SyntaxKind::Parameter {
@@ -58,12 +89,7 @@ impl Lowerer<'_> {
             .find_map(|scope| scope.get(&symbol))
             .cloned()
             .ok_or_else(|| self.refuse(node, "unlowered binding"))?;
-        // Function slots/containers need cycle collection before they may
-        // participate in mutable closure environments. Other native values
-        // have acyclic layouts, so Rc capture boxes cannot form a cycle.
-        if matches!(source.r#type, Type::Func { .. }) {
-            return Err(self.refuse(node, "capturing function-valued bindings is not ported"));
-        }
+        // Both the lexical cell and its value are traced owning nodes.
         let local = Local {
             id: format!("c{}", self.captures.len()),
             name: source.name,
@@ -205,7 +231,8 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn call_value(&mut self, node: Node) -> Result<Expr, String> {
-        let callee = self.expression(node.expression())?;
+        let value = self.expression(node.expression())?;
+        let callee = self.callable_body(value, node)?;
         let Type::Func { params, ret } = callee.ty() else {
             return Err(self.refuse(node, "callee has no native function representation"));
         };

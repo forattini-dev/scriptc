@@ -14,7 +14,7 @@ fn name(module: &Module, global: &crate::ir::Global) -> String {
 
 pub(super) fn definitions(module: &Module, output: &mut String) {
     for global in &module.globals {
-        output.push_str(&format!("thread_local! {{ static {}: std::cell::RefCell<Option<{}>> = const {{ std::cell::RefCell::new(None) }}; }}\n", name(module, global), rust_type(global.r#type.clone())));
+        output.push_str(&format!("thread_local! {{ static {}: std::cell::RefCell<Option<{}>> = const {{ std::cell::RefCell::new(None) }}; }}\n", name(module, global), rust_type(global.r#type.clone(), module)));
     }
     output.push_str("fn clear_module_storage() {\n");
     for global in module.globals.iter().rev() {
