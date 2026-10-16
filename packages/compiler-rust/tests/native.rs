@@ -109,6 +109,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-callables/cycles.ts",
         "rust-native-callable-contracts/imports.ts",
         "rust-native-callable-contracts/contracts.ts",
+        "rust-native-erased/contracts.ts",
+        "rust-native-erased/classes.ts",
+        "rust-native-erased/boundaries.ts",
+        "rust-native-erased/generic-endpoint.ts",
+        "rust-native-erased/error-values.ts",
     ]
     .into_iter()
     .enumerate()
@@ -193,6 +198,10 @@ fn callable_and_compiled_enum_boundaries_preserve_previous_artifacts() {
         (
             "new-property-after-escape",
             "const decorated = Object.assign((n: number) => n, { value: 1 }); Object.assign(decorated, { extra: 2 });",
+        ),
+        (
+            "erased-callable-properties",
+            "const decorated = Object.assign((n: number) => n, { value: 1 }); const erased: unknown = decorated; console.log(erased === decorated);",
         ),
         (
             "forged-callable",
@@ -363,8 +372,8 @@ fn error_definitions_defer_instance_code_and_refuse_unported_effects() {
         ("generic", "class Fault<T> extends Error {}"),
         ("cause", "new Error('message', { cause: 1 });"),
         (
-            "unknown-field",
-            "class Fault extends Error { context: unknown; constructor(value: unknown) { super(); this.context = value; } } const fault = new Fault(1);",
+            "function-field",
+            "class Fault extends Error { context: () => number; constructor(value: () => number) { super(); this.context = value; } } const fault = new Fault(() => 1);",
         ),
         (
             "constructor-body",
@@ -662,8 +671,8 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "TS2322",
         ),
         (
-            "generic",
-            "function f<T>(n: T) { return n; } console.log(f(1));",
+            "generic-rest",
+            "function f<T>(...n: T[]) { return n[0]; } console.log(f(1));",
             "SCN1001",
         ),
         (
@@ -1069,9 +1078,9 @@ fn declaration_contracts_validate_js_bodies_and_refuse_ambiguous_abis() {
             "SCN1001",
         ),
         (
-            "public-any",
+            "public-any-unsupported-body",
             "export declare function value(n: any): number;",
-            "export function value(n) { return 1; }",
+            "export function value(n) { while (n) {} return 1; }",
             "value(2)",
             "SCN1001",
         ),
@@ -1083,10 +1092,10 @@ fn declaration_contracts_validate_js_bodies_and_refuse_ambiguous_abis() {
             "TS2345",
         ),
         (
-            "overloaded",
-            "export declare function value(n: number): number; export declare function value(n: string): string;",
+            "overloaded-arity",
+            "export declare function value(n: number): number; export declare function value(n: number, extra: number): number;",
             "export function value(n) { return n; }",
-            "value(2)",
+            "value(2, 3)",
             "SCN1001",
         ),
         (

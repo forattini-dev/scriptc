@@ -41,7 +41,19 @@ impl Lowerer<'_> {
                         "constructor rest and parameter properties are not ported",
                     ));
                 }
-                let ty = self.storage_type(node.name())?;
+                let ty = if let Some(hint) = self.class_contract(definition.node) {
+                    if hint.params.len() != ctor.parameters().len() {
+                        return Err(self.refuse(
+                            *ctor,
+                            "public class constructor/implementation arity differs",
+                        ));
+                    }
+                    hint.params[i].clone().ok_or_else(|| {
+                        self.refuse(node, "public class parameter has no native representation")
+                    })?
+                } else {
+                    self.storage_type(node.name())?
+                };
                 params.push(Param {
                     local_id: format!("p{}", i + 1),
                     name: node.name().text().into(),

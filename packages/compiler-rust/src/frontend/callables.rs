@@ -2,11 +2,23 @@
 use super::*;
 use source_frontend::prelude::get_source_file_of_node;
 
+mod contracts;
+
 pub(super) const CALL_FIELD: &str = "\0scriptc.call";
 
 impl Lowerer<'_> {
     pub(super) fn callable_type(&mut self, id: TypeId) -> Option<Type> {
+        let signatures = self
+            .checker
+            .get_signatures_of_type(id, source_frontend::prelude::SignatureKind::CALL);
         let properties = self.checker.get_properties_of_type(id).to_vec();
+        if signatures.len() != 1 || !self.checker.sig(signatures[0]).type_parameters.is_empty() {
+            return if properties.is_empty() {
+                self.erased_function_type(id)
+            } else {
+                self.polymorphic_callable_type(id)
+            };
+        }
         if properties.is_empty() {
             return self.function_type(id);
         }
@@ -187,6 +199,13 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn callable_assign(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        self.callable_assign_expected(node, None)
+    }
+    pub(super) fn callable_assign_expected(
+        &mut self,
+        node: Node,
+        expected: Option<Type>,
+    ) -> Result<Option<Expr>, String> {
         let member = node.expression();
         if member.kind() != SyntaxKind::PropertyAccessExpression
             || member.name().text() != "assign"
@@ -210,7 +229,11 @@ impl Lowerer<'_> {
                         "decorating an escaped bare function requires a shared property identity",
                     ));
                 }
-                let ty = self.ty(node)?;
+                let ty = if let Some(ty) = expected {
+                    ty
+                } else {
+                    self.ty(node)?
+                };
                 let Type::Record { shape_id } = ty else {
                     return Err(self.refuse(
                         node,
@@ -359,16 +382,42 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn function_bind(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        self.function_bind_expected(node, None)
+    }
+    pub(super) fn function_bind_expected(
+        &mut self,
+        node: Node,
+        expected: Option<Type>,
+    ) -> Result<Option<Expr>, String> {
         let member = node.expression();
         if member.kind() != SyntaxKind::PropertyAccessExpression || member.name().text() != "bind" {
             return Ok(None);
         }
-        let value = self.expression(member.expression())?;
+        let arguments = node.arguments().into_iter().collect::<Vec<_>>();
+        let value = if let Some(Type::Func { params, ret }) = expected {
+            let prefix = arguments.len().saturating_sub(1);
+            let mut slots = Vec::new();
+            for argument in arguments.iter().skip(1).take(prefix) {
+                let symbol = self.symbol(*argument);
+                let ty = self
+                    .bindings
+                    .get(&symbol)
+                    .or_else(|| self.module_bindings.get(&symbol))
+                    .map(|l| l.r#type.clone())
+                    .or_else(|| self.ty(*argument).ok())
+                    .unwrap_or(Type::Dyn);
+                slots.push(ty);
+            }
+            slots.extend(params);
+            self.expected_expression(member.expression(), Type::Func { params: slots, ret })?
+        } else {
+            self.expression(member.expression())?
+        };
         let target = self.callable_body(value, node)?;
         let Type::Func { params, ret } = target.ty() else {
             return Err(self.refuse(member, "bind requires a native function"));
         };
-        let arguments = node.arguments().into_iter().collect::<Vec<_>>();
+
         if arguments.is_empty() || arguments.len() - 1 > params.len() {
             return Err(self.refuse(
                 node,

@@ -15,7 +15,7 @@ pub enum Type {
     String,
     Bool,
     Regex,
-    // Reserved Error ABI metadata; never a native value or storage type.
+    // Owned native tagged value; never an embedded engine handle.
     Dyn,
     Object {
         #[serde(rename = "className")]
@@ -79,6 +79,12 @@ pub struct Union {
 }
 #[derive(Debug, Serialize)]
 pub struct MapEntry {
+    pub key: Expr,
+    pub value: Expr,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DynamicField {
     pub key: Expr,
     pub value: Expr,
 }
@@ -176,6 +182,55 @@ pub struct Local {
     rename_all_fields = "camelCase"
 )]
 pub enum Expr {
+    DynFrom {
+        value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    DynCheck {
+        value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    DynObjLit {
+        fields: Vec<DynamicField>,
+        r#type: Type,
+        loc: Loc,
+    },
+    DynArrLit {
+        elems: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    DynKeyGet {
+        value: Box<Expr>,
+        key: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    DynTest {
+        value: Box<Expr>,
+        test: String,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        negated: bool,
+        r#type: Type,
+        loc: Loc,
+    },
+    DynScalarEq {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        negated: bool,
+        r#type: Type,
+        loc: Loc,
+    },
+    DynCall {
+        callee: Box<Expr>,
+        callee_name: String,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     ClassRef {
         class_name: String,
         r#type: Type,
@@ -411,7 +466,15 @@ pub enum Expr {
 impl Expr {
     pub fn ty(&self) -> Type {
         match self {
-            Self::RegexLit { r#type, .. }
+            Self::DynFrom { r#type, .. }
+            | Self::DynCheck { r#type, .. }
+            | Self::DynObjLit { r#type, .. }
+            | Self::DynArrLit { r#type, .. }
+            | Self::DynKeyGet { r#type, .. }
+            | Self::DynTest { r#type, .. }
+            | Self::DynScalarEq { r#type, .. }
+            | Self::DynCall { r#type, .. }
+            | Self::RegexLit { r#type, .. }
             | Self::RegexIntrinsic { r#type, .. }
             | Self::New { r#type, .. }
             | Self::FieldGet { r#type, .. }
@@ -612,6 +675,9 @@ impl Module {
                 .is_some_and(|first| std::ptr::eq(first, stmt))
     }
     fn lookup_result(&self, value: &Type, result: &Type) -> bool {
+        if *value == Type::Dyn {
+            return *result == Type::Dyn;
+        }
         let Type::Union { union_id } = result else {
             return false;
         };
@@ -653,7 +719,7 @@ impl Module {
                 params.iter().all(|p| self.valid_type(p.clone(), active))
                     && (*ret == Type::Void || self.valid_type(*ret, active))
             }
-            Type::Void | Type::Null | Type::Undefined | Type::Dyn => false,
+            Type::Void | Type::Null | Type::Undefined => false,
             Type::Array { elem } => {
                 !matches!(*elem, Type::Func { .. }) && self.valid_type(*elem, active)
             }
@@ -708,7 +774,7 @@ impl Module {
                 || (class.name == "%Error" && class.base.is_some())
                 || (builtin && class.name != "%Error" && class.base.as_deref() != Some("%Error"))
                 || (builtin && class.fields.len() != header.len())
-                || !class.fields.iter().skip(header.len()).all(|field| matches!(&field.r#type, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|u| u.arms.contains(&Type::Undefined)))) {
+                || !class.fields.iter().skip(header.len()).all(|field| field.r#type == Type::Dyn || matches!(&field.r#type, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|u| u.arms.contains(&Type::Undefined)))) {
                 return Err("invalid native Error class/header/slot".into());
             }
             if let Some(base) = &class.base {
@@ -824,6 +890,132 @@ fn validate_function(
         module: &Module,
     ) -> Result<(), String> {
         match e {
+            Expr::DynFrom { value, r#type, .. } => {
+                if let Expr::UnitLit { unit, r#type, .. } = &**value
+                    && !matches!(
+                        (*unit, r#type),
+                        ("undefined", Type::Undefined) | ("null", Type::Null)
+                    )
+                {
+                    return Err("invalid native boxed unit".into());
+                }
+                if !matches!(&**value, Expr::UnitLit { .. }) {
+                    expr(value, locals, initialized, functions, module)?;
+                }
+                if *r#type == Type::Dyn && value.ty() != Type::Void {
+                    Ok(())
+                } else {
+                    Err("invalid native value boxing".into())
+                }
+            }
+            Expr::DynCheck { value, r#type, .. } => {
+                expr(value, locals, initialized, functions, module)?;
+                if value.ty() == Type::Dyn
+                    && *r#type != Type::Dyn
+                    && module.valid_type(r#type.clone(), &mut vec![])
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native value check".into())
+                }
+            }
+            Expr::DynObjLit { fields, r#type, .. } => {
+                for f in fields {
+                    expr(&f.key, locals, initialized, functions, module)?;
+                    expr(&f.value, locals, initialized, functions, module)?;
+                }
+                if *r#type == Type::Dyn
+                    && fields
+                        .iter()
+                        .all(|f| f.key.ty() == Type::String && f.value.ty() == Type::Dyn)
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native object value".into())
+                }
+            }
+            Expr::DynArrLit { elems, r#type, .. } => {
+                for e in elems {
+                    expr(e, locals, initialized, functions, module)?;
+                }
+                if *r#type == Type::Dyn && elems.iter().all(|e| e.ty() == Type::Dyn) {
+                    Ok(())
+                } else {
+                    Err("invalid native array value".into())
+                }
+            }
+            Expr::DynKeyGet {
+                value, key, r#type, ..
+            } => {
+                expr(value, locals, initialized, functions, module)?;
+                expr(key, locals, initialized, functions, module)?;
+                if value.ty() == Type::Dyn && key.ty() == Type::String && *r#type == Type::Dyn {
+                    Ok(())
+                } else {
+                    Err("invalid native value member read".into())
+                }
+            }
+            Expr::DynTest {
+                value,
+                test,
+                r#type,
+                ..
+            } => {
+                expr(value, locals, initialized, functions, module)?;
+                if value.ty() == Type::Dyn
+                    && *r#type == Type::Bool
+                    && matches!(
+                        test.as_str(),
+                        "string"
+                            | "number"
+                            | "boolean"
+                            | "undefined"
+                            | "null"
+                            | "nullish"
+                            | "object"
+                            | "function"
+                            | "truthy"
+                    )
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native value test".into())
+                }
+            }
+            Expr::DynScalarEq {
+                left,
+                right,
+                r#type,
+                ..
+            } => {
+                expr(left, locals, initialized, functions, module)?;
+                expr(right, locals, initialized, functions, module)?;
+                if left.ty() == Type::Dyn && right.ty() == Type::Dyn && *r#type == Type::Bool {
+                    Ok(())
+                } else {
+                    Err("invalid native value equality".into())
+                }
+            }
+            Expr::DynCall {
+                callee,
+                args,
+                r#type,
+                ..
+            } => {
+                expr(callee, locals, initialized, functions, module)?;
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if callee.ty() == Type::Dyn
+                    && args.iter().all(|a| a.ty() == Type::Dyn)
+                    && *r#type == Type::Dyn
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native value call".into())
+                }
+            }
+
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } if r#fn == "regex.new" => {
@@ -1846,6 +2038,81 @@ mod tests {
     }
 
     #[test]
+    fn native_value_operations_validate_payloads_and_keep_the_shared_wire_contract() {
+        let mut m = error_module();
+        let loc = m.functions[0].loc.clone();
+        let boxed = || Expr::DynFrom {
+            value: Box::new(Expr::StrLit {
+                value: "payload".into(),
+                r#type: Type::String,
+                loc: loc.clone(),
+            }),
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::DynKeyGet {
+                value: Box::new(boxed()),
+                key: Box::new(Expr::StrLit {
+                    value: "length".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                }),
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert!(validate(&m).is_ok());
+        let wire = serde_json::to_value(&m).unwrap();
+        assert_eq!(wire["functions"][0]["body"][0]["expr"]["kind"], "dynKeyGet");
+        let Stmt::Expression {
+            expr: Expr::DynKeyGet { key, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        else {
+            unreachable!()
+        };
+        **key = Expr::BoolLit {
+            value: true,
+            r#type: Type::Bool,
+            loc: loc.clone(),
+        };
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native value member read"
+        );
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::DynFrom {
+                value: Box::new(Expr::UnitLit {
+                    unit: "null",
+                    r#type: Type::Undefined,
+                    loc: loc.clone(),
+                }),
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert_eq!(validate(&m).unwrap_err(), "invalid native boxed unit");
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::DynCall {
+                callee: Box::new(boxed()),
+                callee_name: "payload".into(),
+                args: vec![Expr::BoolLit {
+                    value: true,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                }],
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert_eq!(validate(&m).unwrap_err(), "invalid native value call");
+    }
+
+    #[test]
     fn error_layouts_validate_prefixes_roots_and_reserved_metadata() {
         let mut m = error_module();
         assert!(validate(&m).is_ok());
@@ -1862,9 +2129,9 @@ mod tests {
         assert!(validate(&m).is_err());
         m = error_module();
         m.functions[0].locals.push(Local {
-            id: "dynamic".into(),
-            name: "dynamic".into(),
-            r#type: Type::Dyn,
+            id: "void_local".into(),
+            name: "void_local".into(),
+            r#type: Type::Void,
             mutable: false,
             boxed: false,
         });

@@ -166,6 +166,9 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn intern_union(&mut self, mut arms: Vec<Type>) -> Option<Type> {
+        if arms.contains(&Type::Dyn) {
+            return Some(Type::Dyn);
+        }
         arms.sort_by_key(|a| format!("{a:?}"));
         arms.dedup();
         if arms.len() == 1 {
@@ -192,6 +195,25 @@ impl Lowerer<'_> {
     pub(super) fn coerce(&self, value: Expr, target: Type, node: Node) -> Result<Expr, String> {
         if value.ty() == target {
             return Ok(value);
+        }
+        if target == Type::Dyn {
+            if let Type::Record { shape_id } = value.ty()
+                && self.callables.contains_key(&shape_id)
+            {
+                return Err(self.refuse(node, "erasing callable data properties requires a shared native function property view"));
+            }
+            return Ok(Expr::DynFrom {
+                value: Box::new(value),
+                r#type: Type::Dyn,
+                loc: self.loc(node),
+            });
+        }
+        if value.ty() == Type::Dyn && !matches!(target, Type::Null | Type::Undefined | Type::Void) {
+            return Ok(Expr::DynCheck {
+                value: Box::new(value),
+                r#type: target,
+                loc: self.loc(node),
+            });
         }
         if let Type::Record { shape_id } = value.ty()
             && self.callables.get(&shape_id) == Some(&target)
@@ -266,6 +288,22 @@ impl Lowerer<'_> {
             }
             return Ok(value);
         }
+        if value.ty() == Type::Dyn {
+            let target = self.ty(node)?;
+            if matches!(
+                node.kind(),
+                SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression
+            ) && matches!(
+                target,
+                Type::Record { .. } | Type::Array { .. } | Type::Map { .. } | Type::Union { .. }
+            ) {
+                return Ok(value);
+            }
+
+            if !matches!(target, Type::Dyn | Type::Null | Type::Undefined) {
+                return self.coerce(value, target, node);
+            }
+        }
         if !matches!(value.ty(), Type::Union { .. }) {
             return Ok(value);
         }
@@ -309,6 +347,27 @@ impl Lowerer<'_> {
     }
 
     fn expected_expression_inner(&mut self, node: Node, target: Type) -> Result<Expr, String> {
+        if let Some(value) = self.contextual_callable(node, &target)? {
+            return Ok(value);
+        }
+
+        if target == Type::Dyn
+            && matches!(
+                node.kind(),
+                SyntaxKind::ObjectLiteralExpression | SyntaxKind::ArrayLiteralExpression
+            )
+        {
+            return self.dynamic_literal(node);
+        }
+        if target == Type::Dyn
+            && matches!(
+                node.kind(),
+                SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression
+            )
+        {
+            let value = self.closure(node, None)?;
+            return self.coerce(value, target, node);
+        }
         match node.kind() {
             SyntaxKind::CallExpression
                 if matches!(target, Type::Array { .. }) && self.is_array_map(node) =>
@@ -520,6 +579,14 @@ impl Lowerer<'_> {
 
     pub(super) fn record_get(&mut self, node: Node) -> Result<Expr, String> {
         let obj = self.expression(node.expression())?;
+        if obj.ty() == Type::Dyn {
+            let key = Expr::StrLit {
+                value: node.name().text().into(),
+                r#type: Type::String,
+                loc: self.loc(node),
+            };
+            return Ok(self.dynamic_get(node, obj, key));
+        }
         if matches!(obj.ty(), Type::Map { .. }) && node.name().text() == "size" {
             return self.map_intrinsic(node, obj, "size", vec![]);
         }
@@ -608,8 +675,40 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn binary(&mut self, node: Node, op: &str) -> Result<Expr, String> {
+        if matches!(op, "===" | "!==") {
+            for (test, kind) in [(node.left(), node.right()), (node.right(), node.left())] {
+                if test.kind() == SyntaxKind::TypeOfExpression
+                    && kind.kind() == SyntaxKind::StringLiteral
+                {
+                    let value = self.expression(test.expression())?;
+                    if value.ty() == Type::Dyn
+                        && matches!(
+                            kind.text(),
+                            "number" | "string" | "boolean" | "undefined" | "object" | "function"
+                        )
+                    {
+                        return Ok(Expr::DynTest {
+                            value: Box::new(value),
+                            test: kind.text().into(),
+                            negated: op == "!==",
+                            r#type: Type::Bool,
+                            loc: self.loc(node),
+                        });
+                    }
+                }
+            }
+        }
         let mut left = self.expression(node.left())?;
         let mut right = self.expression(node.right())?;
+        if matches!(op, "===" | "!==") && (left.ty() == Type::Dyn || right.ty() == Type::Dyn) {
+            return Ok(Expr::DynScalarEq {
+                left: Box::new(self.coerce(left, Type::Dyn, node.left())?),
+                right: Box::new(self.coerce(right, Type::Dyn, node.right())?),
+                negated: op == "!==",
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            });
+        }
         if matches!(op, "===" | "!==") {
             if matches!(left.ty(), Type::Func { .. }) {
                 right = self.callable_body(right, node.right())?;

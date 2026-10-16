@@ -23,11 +23,18 @@ impl Key {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ClassHint {
+    pub params: Vec<Option<Type>>,
+    pub fields: Vec<(String, Option<Type>)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Hint {
     pub params: Vec<Option<Type>>,
     pub ret: Option<Type>,
     pub reason: Option<String>,
     pub value_type: Option<Type>,
+    pub class: Option<ClassHint>,
 }
 
 impl Hint {
@@ -58,12 +65,14 @@ pub(super) struct Catalog {
     records: Vec<ir::Record>,
     unions: Vec<ir::Union>,
     callables: HashMap<usize, Type>,
+    projections: HashMap<Key, Type>,
 }
 pub(super) struct Linked {
     pub hints: HashMap<Key, Hint>,
     pub records: Vec<ir::Record>,
     pub unions: Vec<ir::Union>,
     pub callables: HashMap<usize, Type>,
+    pub projections: HashMap<Key, Type>,
 }
 
 fn unalias(checker: &mut Checker, symbol: SymbolId) -> SymbolId {
@@ -135,7 +144,8 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
         }
         let mut lowerer = Lowerer::new(checker, source);
         let mut exports = Vec::new();
-        for file in files {
+        for file in &files {
+            let file = *file;
             let path = source_file_info(file).file_name.to_string();
             if !is_declaration(&path) || !reachable.contains(&path) || file.symbol().0 == 0 {
                 continue;
@@ -153,54 +163,101 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                 let signatures = lowerer
                     .checker
                     .get_signatures_of_type(ty, SignatureKind::CALL);
-                if signatures.is_empty() {
-                    continue;
-                }
+                let constructors = lowerer
+                    .checker
+                    .get_signatures_of_type(ty, SignatureKind::CONSTRUCT);
                 let mut hint = Hint {
-                    params: Vec::new(),
+                    params: vec![],
                     ret: None,
                     reason: None,
                     value_type: None,
+                    class: None,
                 };
-                if signatures.len() != 1 {
-                    hint.reason =
-                        Some("overloaded public JavaScript contracts are not ported".into());
-                } else {
-                    let signature = signatures[0];
-                    let sig = lowerer.checker.sig(signature);
-                    let parameters = sig.parameters.clone();
-                    if !sig.type_parameters.is_empty()
-                        || sig.this_parameter.0 != 0
-                        || sig.has_rest_parameter()
+                if constructors.len() == 1 {
+                    let signature = constructors[0];
+                    let parameters = lowerer.checker.sig(signature).parameters.clone();
+                    let params = parameters
+                        .into_iter()
+                        .map(|p| {
+                            let id = lowerer.checker.get_type_of_symbol(p);
+                            lowerer.type_id(id)
+                        })
+                        .collect();
+                    let instance = lowerer.checker.get_return_type_of_signature(signature);
+                    let properties = lowerer.checker.get_properties_of_type(instance).to_vec();
+                    let mut fields = Vec::new();
+                    for property in properties {
+                        let info = lowerer.checker.sym(property);
+                        if info
+                            .flags
+                            .intersects(SymbolFlags::METHOD | SymbolFlags::ACCESSOR)
+                        {
+                            continue;
+                        }
+                        let name = info.name.to_string();
+                        if matches!(name.as_str(), "name" | "message" | "stack" | "cause") {
+                            continue;
+                        }
+                        let id = lowerer.checker.get_type_of_symbol(property);
+                        fields.push((name, lowerer.type_id(id)));
+                    }
+                    hint.class = Some(ClassHint { params, fields });
+                } else if !signatures.is_empty() {
+                    // Polymorphic public signatures use an owned native value ABI.
+                    // This preserves payloads instead of choosing an arbitrary overload.
+                    if signatures.len() != 1
+                        || !lowerer
+                            .checker
+                            .sig(signatures[0])
+                            .type_parameters
+                            .is_empty()
                     {
-                        hint.reason = Some(
-                            "generic/receiver/rest public JavaScript contracts are not ported"
-                                .into(),
-                        );
-                    }
-                    for parameter in parameters {
-                        let id = lowerer.checker.get_type_of_symbol(parameter);
-                        hint.params.push(
-                            lowerer.type_id(id).filter(|ty| {
-                                !matches!(ty, Type::Null | Type::Undefined | Type::Void)
-                            }),
-                        );
-                    }
-                    let id = lowerer.checker.get_return_type_of_signature(signature);
-                    hint.ret = if lowerer.checker.ty(id).flags.intersects(TypeFlags::VOID) {
-                        Some(Type::Void)
+                        hint.value_type = lowerer.type_id(ty);
+                        hint.params = lowerer
+                            .checker
+                            .sig(signatures[0])
+                            .parameters
+                            .iter()
+                            .map(|_| Some(Type::Dyn))
+                            .collect();
+                        hint.ret = Some(Type::Dyn);
                     } else {
-                        lowerer
-                            .type_id(id)
-                            .filter(|ty| !matches!(ty, Type::Null | Type::Undefined))
-                    };
-                }
-                if hint.reason.is_none() && !lowerer.checker.get_properties_of_type(ty).is_empty() {
-                    hint.value_type = lowerer.type_id(ty);
-                    if hint.value_type.is_none() {
-                        hint.reason =
-                            Some("public callable properties have no native representation".into());
+                        let signature = signatures[0];
+                        let sig = lowerer.checker.sig(signature);
+                        let parameters = sig.parameters.clone();
+                        if sig.this_parameter.0 != 0 || sig.has_rest_parameter() {
+                            hint.reason = Some(
+                                "receiver/rest public JavaScript contracts are not ported".into(),
+                            );
+                        }
+                        for parameter in parameters {
+                            let id = lowerer.checker.get_type_of_symbol(parameter);
+                            hint.params.push(lowerer.type_id(id).filter(|t| {
+                                !matches!(t, Type::Null | Type::Undefined | Type::Void)
+                            }));
+                        }
+                        let id = lowerer.checker.get_return_type_of_signature(signature);
+                        hint.ret = if lowerer.checker.ty(id).flags.intersects(TypeFlags::VOID) {
+                            Some(Type::Void)
+                        } else {
+                            lowerer
+                                .type_id(id)
+                                .filter(|t| !matches!(t, Type::Null | Type::Undefined))
+                        };
+                        if hint.reason.is_none()
+                            && !lowerer.checker.get_properties_of_type(ty).is_empty()
+                        {
+                            hint.value_type = lowerer.type_id(ty);
+                            if hint.value_type.is_none() {
+                                hint.reason = Some(
+                                    "public callable properties have no native representation"
+                                        .into(),
+                                );
+                            }
+                        }
                     }
+                } else {
+                    continue;
                 }
                 exports.push(Export {
                     file: path.clone(),
@@ -209,7 +266,75 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                 });
             }
         }
+        // Preserve checked member/call projections in source consumers. JS
+        // implementation inference must not replace a public field with any,
+        // or erase control-flow narrowing of an optional public member.
+        fn project(lowerer: &mut Lowerer<'_>, node: Node, out: &mut HashMap<Key, Type>) {
+            if matches!(
+                node.kind(),
+                SyntaxKind::Identifier
+                    | SyntaxKind::PropertyAccessExpression
+                    | SyntaxKind::ElementAccessExpression
+                    | SyntaxKind::CallExpression
+            ) {
+                let id = lowerer.checker.get_type_at_location(node);
+                if let Some(ty) = lowerer.type_id(id) {
+                    fn portable(
+                        t: &Type,
+                        records: &[ir::Record],
+                        unions: &[ir::Union],
+                        seen: &mut HashSet<Type>,
+                    ) -> bool {
+                        if !seen.insert(t.clone()) {
+                            return true;
+                        }
+                        match t {
+                            Type::Object { .. } | Type::Classval { .. } => false,
+                            Type::Func { params, ret } => {
+                                params.iter().all(|p| portable(p, records, unions, seen))
+                                    && portable(ret, records, unions, seen)
+                            }
+                            Type::Record { shape_id } => {
+                                records[*shape_id]
+                                    .fields
+                                    .iter()
+                                    .all(|f| portable(&f.r#type, records, unions, seen))
+                                    && records[*shape_id]
+                                        .index_value
+                                        .as_ref()
+                                        .is_none_or(|t| portable(t, records, unions, seen))
+                            }
+                            Type::Union { union_id } => unions[*union_id]
+                                .arms
+                                .iter()
+                                .all(|t| portable(t, records, unions, seen)),
+                            Type::Array { elem } => portable(elem, records, unions, seen),
+                            Type::Map { key, value } => {
+                                portable(key, records, unions, seen)
+                                    && portable(value, records, unions, seen)
+                            }
+                            _ => true,
+                        }
+                    }
+                    if portable(&ty, &lowerer.records, &lowerer.unions, &mut HashSet::new()) {
+                        out.insert(Key::of(node), ty);
+                    }
+                }
+            }
+            node.for_each_child(&mut |child| {
+                project(lowerer, child, out);
+                false
+            });
+        }
+        let mut projections = HashMap::new();
+        for file in files {
+            let path = source_file_info(file).file_name.to_string();
+            if !is_declaration(&path) && !is_javascript(&path) {
+                project(&mut lowerer, file, &mut projections);
+            }
+        }
         Catalog {
+            projections,
             edges,
             exports,
             records: lowerer.records,
@@ -276,7 +401,9 @@ impl Catalog {
                 if !node.is_nil()
                     && matches!(
                         node.kind(),
-                        SyntaxKind::FunctionDeclaration | SyntaxKind::VariableDeclaration
+                        SyntaxKind::FunctionDeclaration
+                            | SyntaxKind::VariableDeclaration
+                            | SyntaxKind::ClassDeclaration
                     )
                 {
                     targets.insert((path.clone(), name), Key::of(node));
@@ -300,6 +427,7 @@ impl Catalog {
             }
         }
         Linked {
+            projections: self.projections,
             hints,
             records: self.records,
             unions: self.unions,
@@ -316,7 +444,18 @@ impl Lowerer<'_> {
     pub(super) fn declared(&self, node: Node) -> Option<&Hint> {
         self.declarations.get(&Key::of(node))
     }
+    pub(super) fn class_contract(&self, node: Node) -> Option<&ClassHint> {
+        let binding = if node.kind() == SyntaxKind::ClassExpression {
+            node.parent()
+        } else {
+            node
+        };
+        self.declared(binding).and_then(|h| h.class.as_ref())
+    }
     pub(super) fn checker_any(&mut self, node: Node) -> bool {
+        if self.projections.contains_key(&Key::of(node)) {
+            return false;
+        }
         let id = self.checker.get_type_at_location(node);
         self.checker.ty(id).flags.intersects(TypeFlags::ANY)
     }

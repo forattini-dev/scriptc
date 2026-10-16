@@ -78,6 +78,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                     Type::F64 | Type::String | Type::Bool | Type::Classval { .. } => {
                         "left == right"
                     }
+                    Type::Dyn => "native_value_eq(&left, &right)",
                     Type::Regex => "std::rc::Rc::ptr_eq(&left, &right)",
                     _ => unreachable!("IR validated"),
                 };

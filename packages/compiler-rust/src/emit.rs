@@ -5,10 +5,11 @@ mod functions;
 mod layouts;
 mod regex;
 mod storage;
+mod values;
 
 fn rust_type(ty: Type, module: &Module) -> String {
     match ty {
-        Type::Dyn => unreachable!("reserved Error metadata has no native value representation"),
+        Type::Dyn => "NativeValue",
         ty @ Type::Func { .. } => {
             return format!("runtime::Gc<{}>", functions::type_name(&ty, module));
         }
@@ -81,6 +82,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         layouts::definitions(module, &mut output);
         classes::definitions(module, &mut output);
         functions::definitions(module, &mut output);
+        values::definitions(module, &mut output);
     }
     storage::definitions(module, &mut output);
     for function in &module.functions {
@@ -141,6 +143,14 @@ pub fn rust(module: &Module) -> Result<String, String> {
 pub fn uses_runtime(module: &Module) -> bool {
     fn expr(value: &Expr) -> bool {
         match value {
+            Expr::DynFrom { .. }
+            | Expr::DynCheck { .. }
+            | Expr::DynObjLit { .. }
+            | Expr::DynArrLit { .. }
+            | Expr::DynKeyGet { .. }
+            | Expr::DynTest { .. }
+            | Expr::DynScalarEq { .. }
+            | Expr::DynCall { .. } => true,
             Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => true,
             Expr::ClassRef { .. }
             | Expr::NewValue { .. }
@@ -201,7 +211,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Type::Record { .. }
             | Type::Union { .. }
             | Type::Object { .. } => true,
-            Type::Regex => true,
+            Type::Regex | Type::Dyn => true,
             Type::Func { params, ret } => params.iter().any(ty) || ty(ret),
             _ => false,
         }
@@ -234,7 +244,18 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
     if let Some(code) = collections::expression(value, function, module) {
         return code;
     }
+    if let Some(code) = values::expression(value, function, module) {
+        return code;
+    }
     match value {
+        Expr::DynFrom { .. }
+        | Expr::DynCheck { .. }
+        | Expr::DynObjLit { .. }
+        | Expr::DynArrLit { .. }
+        | Expr::DynKeyGet { .. }
+        | Expr::DynTest { .. }
+        | Expr::DynScalarEq { .. }
+        | Expr::DynCall { .. } => unreachable!("native value expression"),
         Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => unreachable!("regex expression"),
         Expr::ClassRef { .. }
         | Expr::NewValue { .. }
@@ -436,6 +457,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             if matches!(
                 r#type,
                 Type::String
+                    | Type::Dyn
                     | Type::Array { .. }
                     | Type::Map { .. }
                     | Type::Record { .. }

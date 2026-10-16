@@ -14,6 +14,14 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn type_id(&mut self, id: TypeId) -> Option<Type> {
+        if self
+            .checker
+            .ty(id)
+            .flags
+            .intersects(TypeFlags::ANY | TypeFlags::UNKNOWN | TypeFlags::TYPE_PARAMETER)
+        {
+            return Some(Type::Dyn);
+        }
         if let Some(ty) = self.primitive_type(self.checker.ty(id).flags) {
             return Some(ty);
         }
@@ -29,6 +37,9 @@ impl Lowerer<'_> {
         if let Some(ty) = self.enum_type(node) {
             return Ok(ty);
         }
+        if let Some(ty) = self.projections.get(&declarations::Key::of(node)) {
+            return Ok(ty.clone());
+        }
         let id = self.checker.get_type_at_location(node);
         self.type_id(id).ok_or_else(|| {
             self.refuse(
@@ -40,6 +51,7 @@ impl Lowerer<'_> {
     pub(super) fn storage_type(&mut self, node: Node) -> Result<Type, String> {
         if node.parent().kind() == SyntaxKind::VariableDeclaration
             && let Some(hint) = self.declared(node.parent())
+            && hint.class.is_none()
         {
             if hint.reason.is_none()
                 && let Some(ty) = &hint.value_type
@@ -54,6 +66,21 @@ impl Lowerer<'_> {
             });
         }
         let ty = self.ty(node)?;
+        if ty == Type::Dyn
+            && node.parent().kind() == SyntaxKind::VariableDeclaration
+            && (self.file.ends_with(".js") || self.file.ends_with(".mjs"))
+            && node
+                .parent()
+                .parent()
+                .flags()
+                .intersects(NodeFlags::LET | NodeFlags::CONST)
+        {
+            return Err(self.refuse(
+                node,
+                "infer unannotated JavaScript lexical storage from its native initializer",
+            ));
+        }
+
         if matches!(ty, Type::Null | Type::Undefined) {
             return Err(self.refuse(
                 node,

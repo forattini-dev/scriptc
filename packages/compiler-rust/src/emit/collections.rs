@@ -10,6 +10,9 @@ fn key_equality(ty: &Type) -> &'static str {
 }
 
 fn lookup(option: &str, stored: &Type, result: &Type, module: &Module) -> String {
+    if *stored == Type::Dyn && *result == Type::Dyn {
+        return format!("({option}).unwrap_or(NativeValue::Undefined)");
+    }
     let Type::Union { union_id } = result else {
         unreachable!("IR validated")
     };

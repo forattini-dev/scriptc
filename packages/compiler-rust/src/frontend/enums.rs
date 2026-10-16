@@ -373,14 +373,14 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn enum_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
-        let ty = self.ty(node.expression()).ok().or_else(|| {
-            let symbol = self.symbol(node.expression());
-            self.bindings
-                .get(&symbol)
-                .or_else(|| self.module_bindings.get(&symbol))
-                .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
-                .map(|l| l.r#type.clone())
-        });
+        let symbol = self.symbol(node.expression());
+        let ty = self
+            .bindings
+            .get(&symbol)
+            .or_else(|| self.module_bindings.get(&symbol))
+            .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
+            .map(|l| l.r#type.clone())
+            .or_else(|| self.ty(node.expression()).ok());
         let shape_id = match ty {
             Some(Type::Record { shape_id }) => shape_id,
             Some(Type::Union { union_id }) => {

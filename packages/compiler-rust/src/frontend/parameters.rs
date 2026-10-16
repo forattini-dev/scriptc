@@ -45,7 +45,7 @@ impl Lowerer<'_> {
             .map(|(index, ty)| {
                 if let Some(arg) = arguments.get(index) {
                     self.expected_expression(*arg, ty.clone())
-                } else if self.undefined_tag(ty).is_some() {
+                } else if *ty == Type::Dyn || self.undefined_tag(ty).is_some() {
                     self.coerce(
                         Expr::UnitLit {
                             unit: "undefined",
@@ -80,6 +80,32 @@ impl Lowerer<'_> {
         self.locals.push(local.clone());
         let Some(node) = node else { return Ok(vec![]) };
         let symbol = self.symbol(node.name());
+        if param.r#type == Type::Dyn && !node.initializer().is_nil() {
+            let value = self.expected_expression(node.initializer(), Type::Dyn)?;
+            self.bindings.insert(symbol, local.clone());
+            return Ok(vec![Stmt::If {
+                cond: Expr::DynTest {
+                    value: Box::new(Expr::VarRef {
+                        local_id: local.id.clone(),
+                        r#type: Type::Dyn,
+                        loc: self.loc(node),
+                    }),
+                    test: "undefined".into(),
+                    negated: false,
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                },
+                then: vec![Stmt::Assign {
+                    local_id: local.id,
+                    initializes_global: false,
+                    value,
+                    loc: self.loc(node),
+                }],
+                else_: None,
+                loc: self.loc(node),
+            }]);
+        }
+
         let Some((union_id, tag)) = self
             .undefined_tag(&param.r#type)
             .filter(|_| !node.initializer().is_nil())

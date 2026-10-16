@@ -1,0 +1,61 @@
+//! Native erasure for unknown payloads and polymorphic JavaScript boundaries.
+use super::*;
+
+impl Lowerer<'_> {
+    pub(super) fn dynamic_literal(&mut self, node: Node) -> Result<Expr, String> {
+        let loc = self.loc(node);
+        if node.kind() == SyntaxKind::ArrayLiteralExpression {
+            let elems = node
+                .elements()
+                .into_iter()
+                .map(|n| self.expected_expression(n, Type::Dyn))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Expr::DynArrLit {
+                elems,
+                r#type: Type::Dyn,
+                loc,
+            });
+        }
+        let mut fields = Vec::new();
+        for property in node.properties() {
+            if !matches!(
+                property.kind(),
+                SyntaxKind::PropertyAssignment | SyntaxKind::ShorthandPropertyAssignment
+            ) || !matches!(
+                property.name().kind(),
+                SyntaxKind::Identifier | SyntaxKind::StringLiteral
+            ) || property.name().text() == "__proto__"
+            {
+                return Err(self.refuse(
+                    property,
+                    "native value objects require plain named data properties",
+                ));
+            }
+            let key = Expr::StrLit {
+                value: property.name().text().into(),
+                r#type: Type::String,
+                loc: self.loc(property),
+            };
+            let source = if property.kind() == SyntaxKind::ShorthandPropertyAssignment {
+                property.name()
+            } else {
+                property.initializer()
+            };
+            let value = self.expected_expression(source, Type::Dyn)?;
+            fields.push(ir::DynamicField { key, value });
+        }
+        Ok(Expr::DynObjLit {
+            fields,
+            r#type: Type::Dyn,
+            loc,
+        })
+    }
+    pub(super) fn dynamic_get(&self, node: Node, value: Expr, key: Expr) -> Expr {
+        Expr::DynKeyGet {
+            value: Box::new(value),
+            key: Box::new(key),
+            r#type: Type::Dyn,
+            loc: self.loc(node),
+        }
+    }
+}

@@ -158,6 +158,25 @@ pub fn execution_view(mut options: ProgramOptions) -> &'static source_frontend::
     version(options)
 }
 
+/// Discover public contracts imported exclusively by JavaScript implementations.
+/// Resolution still uses the project's exports/conditions, never sibling guessing.
+pub fn contract_view(
+    mut options: ProgramOptions,
+    mut roots: Vec<String>,
+) -> &'static source_frontend::core::GoProgram {
+    roots.extend(options.config.parsed_config.file_names.iter().cloned());
+    roots.sort();
+    roots.dedup();
+    let mut config = options.config.with_file_names(roots);
+    let compiler = Rc::make_mut(&mut config.parsed_config.compiler_options);
+    compiler.no_dts_resolution = Tristate::False;
+    compiler.allow_js = Tristate::True;
+    compiler.check_js = Tristate::False;
+    compiler.max_node_module_js_depth = Some(i64::MAX);
+    options.config = Rc::new(config);
+    version(options)
+}
+
 fn version(options: ProgramOptions) -> &'static source_frontend::core::GoProgram {
     let _parse_scope = source_frontend::core::enter_program(None);
     let native = Rc::new(source_frontend::frontend::compiler::new_program(options));

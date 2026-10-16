@@ -309,7 +309,10 @@ impl Lowerer<'_> {
             return Ok(());
         }
         self.classes.layout_active.insert(index);
+        let saved_file =
+            std::mem::replace(&mut self.file, self.classes.definitions[index].file.clone());
         let result = self.layout_class_inner(index);
+        self.file = saved_file;
         self.classes.layout_active.remove(&index);
         if result.is_err() {
             self.classes.layouts[index] = None;
@@ -338,12 +341,68 @@ impl Lowerer<'_> {
                 end: definition.node.end(),
             },
         };
-        for field in definition.node.members() {
-            if field.kind() != SyntaxKind::PropertyDeclaration {
-                continue;
+        let mut sources = definition
+            .node
+            .members()
+            .into_iter()
+            .filter(|n| n.kind() == SyntaxKind::PropertyDeclaration)
+            .map(|n| (n.name().text().to_string(), n))
+            .collect::<Vec<_>>();
+        // JavaScript fields are introduced by constructor assignments, not by
+        // TS PropertyDeclaration nodes. Allocate slots without moving writes.
+        fn assigned(node: Node, fields: &mut Vec<(String, Node)>) {
+            if matches!(
+                node.kind(),
+                SyntaxKind::FunctionDeclaration
+                    | SyntaxKind::FunctionExpression
+                    | SyntaxKind::ArrowFunction
+                    | SyntaxKind::ClassDeclaration
+                    | SyntaxKind::ClassExpression
+            ) {
+                return;
             }
-            let name = field.name().text().to_string();
-            let ty = self.ty(field.name())?;
+            if node.kind() == SyntaxKind::BinaryExpression
+                && node.operator_token().kind() == SyntaxKind::EqualsToken
+            {
+                let left = node.left();
+                if left.kind() == SyntaxKind::PropertyAccessExpression
+                    && left.expression().kind() == SyntaxKind::ThisKeyword
+                {
+                    let name = left.name().text().to_string();
+                    if !fields.iter().any(|(n, _)| *n == name) {
+                        fields.push((name, left));
+                    }
+                }
+            }
+            node.for_each_child(&mut |child| {
+                assigned(child, fields);
+                false
+            });
+        }
+        for ctor in definition
+            .node
+            .members()
+            .into_iter()
+            .filter(|n| n.kind() == SyntaxKind::Constructor)
+        {
+            assigned(ctor.body(), &mut sources);
+        }
+        let contract = self.class_contract(definition.node).cloned();
+        for (name, field) in sources {
+            let ty = if matches!(name.as_str(), "name" | "message")
+                && field.kind() == SyntaxKind::PropertyAccessExpression
+            {
+                Type::String
+            } else if let Some((_, ty)) = contract
+                .as_ref()
+                .and_then(|c| c.fields.iter().find(|(n, _)| *n == name))
+            {
+                ty.clone().ok_or_else(|| {
+                    self.refuse(field, "public class field has no native representation")
+                })?
+            } else {
+                self.ty(field.name())?
+            };
             let ty = if matches!(name.as_str(), "name" | "message") {
                 ty
             } else {
@@ -366,6 +425,7 @@ impl Lowerer<'_> {
             if let Some(inherited) = layout.fields.iter().find(|f| f.name == name) {
                 if inherited.r#type != ty
                     || (matches!(name.as_str(), "name" | "message")
+                        && field.kind() == SyntaxKind::PropertyDeclaration
                         && field.initializer().is_nil()
                         && !field.modifier_flags().intersects(ModifierFlags::AMBIENT))
                 {

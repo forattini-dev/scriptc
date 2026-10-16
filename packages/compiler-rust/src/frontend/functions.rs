@@ -174,10 +174,34 @@ impl Lowerer<'_> {
         site: Node,
         kind: UseKind,
     ) -> Result<Option<Signature>, String> {
+        self.request_function_context(symbol, site, kind, None, None)
+    }
+
+    pub(super) fn request_function_context(
+        &mut self,
+        symbol: u32,
+        site: Node,
+        kind: UseKind,
+        abi: Option<Type>,
+        result: Option<Type>,
+    ) -> Result<Option<Signature>, String> {
         let Some(definition) = self.functions.demand(symbol, self.loc(site), kind) else {
             return Ok(None);
         };
         if let Some(signature) = self.functions.signature(symbol) {
+            let actual = Type::Func {
+                params: signature.params.iter().map(|p| p.r#type.clone()).collect(),
+                ret: Box::new(signature.return_type.clone()),
+            };
+            if abi.as_ref().is_some_and(|expected| *expected != actual)
+                || result
+                    .as_ref()
+                    .is_some_and(|expected| *expected != signature.return_type)
+            {
+                return Err(
+                    self.refuse(site, "function demanded with incompatible native contracts")
+                );
+            }
             return Ok(Some(signature.clone()));
         }
         if definition.nodes.len() != 1 {
@@ -193,7 +217,45 @@ impl Lowerer<'_> {
         let file = std::mem::replace(&mut self.file, definition.file);
         let signature = self.function_signature(definition.nodes[0], definition.ordinal);
         self.file = file;
-        let signature = signature.map_err(|error| self.functions.explain(symbol, error))?;
+        let mut signature = signature.map_err(|error| self.functions.explain(symbol, error))?;
+        let contextual = (signature.file.ends_with(".js") || signature.file.ends_with(".mjs"))
+            && self.declared(signature.node).is_none();
+        if contextual {
+            let (slots, ret) = if let Some(Type::Func { params, ret }) = abi {
+                (Some(params), Some(*ret))
+            } else {
+                (None, result)
+            };
+            if let Some(slots) = slots {
+                if slots.len() != signature.params.len()
+                    || signature
+                        .params
+                        .iter()
+                        .zip(&slots)
+                        .any(|(p, t)| p.r#type != Type::Dyn && p.r#type != *t)
+                {
+                    return Err(self.refuse(
+                        site,
+                        "JavaScript function parameters conflict with contextual native ABI",
+                    ));
+                }
+                for (param, ty) in signature.params.iter_mut().zip(slots) {
+                    param.r#type = ty;
+                }
+            }
+            if let Some(ret) = ret {
+                if signature.return_type != Type::Dyn
+                    && ret != Type::Dyn
+                    && signature.return_type != ret
+                {
+                    return Err(self.refuse(
+                        site,
+                        "JavaScript function result conflicts with contextual native ABI",
+                    ));
+                }
+                signature.return_type = ret;
+            }
+        }
         self.functions.enqueue(symbol, signature.clone());
         Ok(Some(signature))
     }

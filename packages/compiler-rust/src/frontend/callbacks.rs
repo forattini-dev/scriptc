@@ -10,7 +10,7 @@ impl Lowerer<'_> {
         }
         let signature = signatures[0];
         let sig = self.checker.sig(signature);
-        if !sig.type_parameters.is_empty() || sig.this_parameter.0 != 0 {
+        if sig.this_parameter.0 != 0 {
             return None;
         }
         let rest = sig.has_rest_parameter();
@@ -233,6 +233,20 @@ impl Lowerer<'_> {
     pub(super) fn call_value(&mut self, node: Node) -> Result<Expr, String> {
         let value = self.expression(node.expression())?;
         let callee = self.callable_body(value, node)?;
+        if callee.ty() == Type::Dyn {
+            let args = node
+                .arguments()
+                .into_iter()
+                .map(|n| self.expected_expression(n, Type::Dyn))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Expr::DynCall {
+                callee: Box::new(callee),
+                callee_name: "value".into(),
+                args,
+                r#type: Type::Dyn,
+                loc: self.loc(node),
+            });
+        }
         let Type::Func { params, ret } = callee.ty() else {
             return Err(self.refuse(node, "callee has no native function representation"));
         };

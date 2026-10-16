@@ -3,6 +3,9 @@ use super::*;
 use std::fmt::Write;
 
 fn undefined(module: &Module, ty: &Type) -> String {
+    if *ty == Type::Dyn {
+        return "NativeValue::Undefined".into();
+    }
     let Type::Union { union_id } = ty else {
         unreachable!("validated optional class slot")
     };

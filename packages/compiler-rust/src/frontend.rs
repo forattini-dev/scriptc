@@ -30,6 +30,7 @@ mod regex;
 mod storage;
 mod tuples;
 mod types;
+mod values;
 mod vars;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
@@ -119,6 +120,7 @@ struct Lowerer<'a> {
     next_closure: usize,
     helpers: HashMap<(String, Vec<Type>, Type), String>,
     declarations: HashMap<declarations::Key, declarations::Hint>,
+    projections: HashMap<declarations::Key, Type>,
     classes: classes::ClassGraph,
     constructor_this: Option<Local>,
     module_vars: HashMap<u32, Type>,
@@ -126,6 +128,7 @@ struct Lowerer<'a> {
     var_defined: HashSet<u32>,
     enums: enums::EnumGraph,
     callables: HashMap<usize, Type>,
+    polymorphic_callables: HashMap<u32, usize>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -151,6 +154,7 @@ impl<'a> Lowerer<'a> {
             next_closure: 0,
             helpers: HashMap::new(),
             declarations: HashMap::new(),
+            projections: HashMap::new(),
             classes: classes::ClassGraph::default(),
             constructor_this: None,
             module_vars: HashMap::new(),
@@ -158,6 +162,7 @@ impl<'a> Lowerer<'a> {
             var_defined: HashSet::new(),
             enums: enums::EnumGraph::default(),
             callables: HashMap::new(),
+            polymorphic_callables: HashMap::new(),
         }
     }
     fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
@@ -380,14 +385,10 @@ impl<'a> Lowerer<'a> {
     fn function_signature(&mut self, node: Node, ordinal: usize) -> Result<Signature, String> {
         if node.name().is_nil()
             || node.body().is_nil()
-            || !node.type_parameters().is_empty()
             || !node.asterisk_token().is_nil()
             || node.modifier_flags().intersects(ModifierFlags::ASYNC)
         {
-            return Err(self.refuse(
-                node,
-                "only named synchronous non-generic function bodies are ported",
-            ));
+            return Err(self.refuse(node, "only named synchronous function bodies are ported"));
         }
         let declared = self.declared(node).cloned();
         if let Some(hint) = &declared {
@@ -428,7 +429,12 @@ impl<'a> Lowerer<'a> {
                 r#type: self.parameter_type(param, ty)?,
             });
         }
-        let return_type = if let Some(hint) = declared {
+        let erase_private_result = declared.is_none()
+            && (self.file.ends_with(".js") || self.file.ends_with(".mjs"))
+            && params.iter().any(|p| p.r#type == Type::Dyn);
+        let return_type = if erase_private_result {
+            Type::Dyn
+        } else if let Some(hint) = declared {
             hint.ret.ok_or_else(|| {
                 self.refuse(
                     node,
@@ -680,7 +686,34 @@ impl<'a> Lowerer<'a> {
         Ok(vec![stmt])
     }
     fn expression(&mut self, node: Node) -> Result<Expr, String> {
-        let value = self.expression_inner(node);
+        let value = self.expression_inner(node).and_then(|value| {
+            if value.ty() == Type::Dyn
+                && matches!(
+                    node.kind(),
+                    SyntaxKind::CallExpression
+                        | SyntaxKind::PropertyAccessExpression
+                        | SyntaxKind::ElementAccessExpression
+                )
+                && let Ok(target) = self.ty(node)
+                && !matches!(
+                    target,
+                    Type::Dyn | Type::Null | Type::Undefined | Type::Void
+                )
+                && !(matches!(
+                    node.kind(),
+                    SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression
+                ) && matches!(
+                    target,
+                    Type::Record { .. }
+                        | Type::Array { .. }
+                        | Type::Map { .. }
+                        | Type::Union { .. }
+                ))
+            {
+                return self.coerce(value, target, node);
+            }
+            Ok(value)
+        });
         if matches!(
             node.kind(),
             SyntaxKind::CallExpression | SyntaxKind::NewExpression
@@ -714,6 +747,10 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 let obj = self.expression(node.expression())?;
+                if obj.ty() == Type::Dyn {
+                    let key = self.expected_expression(node.argument_expression(), Type::String)?;
+                    return Ok(self.dynamic_get(node, obj, key));
+                }
                 if let Type::Array { elem } = obj.ty() {
                     let index = self.expected_expression(node.argument_expression(), Type::F64)?;
                     return Ok(Expr::ArrayGet {
@@ -860,7 +897,17 @@ impl<'a> Lowerer<'a> {
                     SyntaxKind::ExclamationToken => "!",
                     _ => return Err(self.refuse(node, "unary operator is not ported")),
                 };
-                let operand = Box::new(self.expression(node.operand())?);
+                let raw = self.expression(node.operand())?;
+                if op == "!" && raw.ty() == Type::Dyn {
+                    return Ok(Expr::DynTest {
+                        value: Box::new(raw),
+                        test: "truthy".into(),
+                        negated: true,
+                        r#type: Type::Bool,
+                        loc,
+                    });
+                }
+                let operand = Box::new(raw);
                 if !matches!((op, operand.ty()), ("-", Type::F64) | ("!", Type::Bool)) {
                     return Err(self.refuse(node, "unary coercions are not ported"));
                 }
@@ -968,7 +1015,7 @@ impl<'a> Lowerer<'a> {
                     } else {
                         !self.module_namespace(receiver)
                     };
-                    if owned && matches!(self.ty(member), Ok(Type::Func { .. })) {
+                    if owned && matches!(self.ty(member), Ok(Type::Func { .. } | Type::Dyn)) {
                         return self.call_value(node);
                     }
                 }

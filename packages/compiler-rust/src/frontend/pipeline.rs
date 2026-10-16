@@ -21,15 +21,10 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             .join("\n"));
     }
     let needs_execution = needs_execution_view();
-    let catalog = if needs_execution {
-        Some(declarations::snapshot(&source)?)
-    } else {
-        None
-    };
-    let execution = needs_execution.then(|| crate::project::execution_view(options));
+    let execution = needs_execution.then(|| crate::project::execution_view(options.clone()));
     let _execution_scope =
         execution.map(|program| source_frontend::core::enter_program(Some(program)));
-    if execution.is_some() {
+    let catalog = if execution.is_some() {
         program::bind_all();
         let syntax = program::get_syntactic_diagnostics(Node::NIL);
         if !syntax.is_empty() {
@@ -39,7 +34,18 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
                 .collect::<Vec<_>>()
                 .join("\n"));
         }
-    }
+        let roots = program::source_files()
+            .into_iter()
+            .map(|f| source_file_info(f).file_name.to_string())
+            .filter(|f| !is_declaration(f))
+            .collect();
+        let contracts = crate::project::contract_view(options, roots);
+        let _contracts_scope = source_frontend::core::enter_program(Some(contracts));
+        program::bind_all();
+        Some(declarations::snapshot(&source)?)
+    } else {
+        None
+    };
     let file = program::source_files()
         .into_iter()
         .find(|node| source_file_info(*node).file_name == source)
@@ -52,6 +58,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             lowerer.unions = linked.unions;
             lowerer.callables = linked.callables;
             lowerer.declarations = linked.hints;
+            lowerer.projections = linked.projections;
         }
         let plan = modules::ModulePlan::link(lowerer.checker, file)?;
         for binding in plan.bindings {
