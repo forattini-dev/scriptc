@@ -13,7 +13,7 @@ use std::{
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
 
-fn path_for_frontend(path: &Path) -> String {
+pub(crate) fn path_for_frontend(path: &Path) -> String {
     let text = path.to_string_lossy();
     if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
         format!("//{}", unc.replace('\\', "/"))
@@ -24,28 +24,12 @@ fn path_for_frontend(path: &Path) -> String {
     }
 }
 
-pub fn lower(input: &Path, work: &Path) -> Result<Module, String> {
+pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module, String> {
     if input.to_str().is_none() {
         return Err("SCN0001: non-Unicode input paths are not ported".into());
     }
     let source = path_for_frontend(input);
-    let prelude = work.join("native-console.d.ts");
-    std::fs::write(&prelude, "declare const console: { log(...values: unknown[]): void; error(...values: unknown[]): void; };\n").map_err(|e| e.to_string())?;
-    let config = work.join("tsconfig.json");
-    let json = serde_json::json!({ "compilerOptions": {
-        "target": "es2022", "lib": ["es2022"], "strict": true, "types": [],
-        "noEmit": true, "allowJs": true, "checkJs": true,
-        "module": "esnext", "moduleResolution": "bundler", "allowImportingTsExtensions": true,
-        "verbatimModuleSyntax": true,
-    }, "files": [source, prelude.to_string_lossy().replace('\\', "/")] });
-    std::fs::write(
-        &config,
-        serde_json::to_vec(&json).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    program::try_load_with(&config.to_string_lossy().replace('\\', "/"), |options| {
-        options.checkers = Some(1);
-    })?;
+    crate::project::load(input, work, project)?;
     program::bind_all();
     let mut diagnostics = program::get_config_file_parsing_diagnostics();
     diagnostics.extend(program::get_program_diagnostics());
@@ -176,9 +160,8 @@ impl Lowerer<'_> {
             if specifier.is_nil() {
                 continue;
             }
-            if !specifier.text().starts_with("./") && !specifier.text().starts_with("../") {
-                return Err(self.refuse(node, "only relative source module imports are ported"));
-            }
+            // The project resolver also owns paths/package-import aliases.
+            // Only executable source modules proceed to native lowering.
             let symbol = self.checker.get_symbol_at_location(specifier, false);
             let target = self.checker.sym(symbol).value_declaration;
             if target.kind() != SyntaxKind::SourceFile {

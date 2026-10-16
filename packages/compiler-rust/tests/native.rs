@@ -71,6 +71,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-frontend/plain.js",
         "rust-native-functions/main.ts",
         "rust-native-modules/main.ts",
+        "rust-native-project/main.ts",
     ]
     .into_iter()
     .enumerate()
@@ -297,4 +298,88 @@ fn emit_modes_and_paths_with_spaces_preserve_sources_and_failed_outputs() {
         .unwrap();
     assert!(!result.status.success());
     assert_eq!(fs::read_to_string(target).unwrap(), "previous artifact");
+}
+
+#[test]
+fn project_config_preserves_ambient_roots_and_excludes_unrelated_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let src = temp.path().join("src");
+    fs::create_dir(&src).unwrap();
+    fs::write(temp.path().join("base.json"), "{ // JSONC base\n \"compilerOptions\": { \"strict\": true, \"target\": \"ES2022\", \"lib\": [\"ES2022\"], \"types\": [], }, }").unwrap();
+    let config = temp.path().join("tsconfig.json");
+    let config_source = "{\"extends\":\"./base.json\",\"include\":[\"src/**/*.ts\"]}";
+    fs::write(&config, config_source).unwrap();
+    fs::write(
+        src.join("globals.d.ts"),
+        "type Score = number; declare const console: { log(value: number): void }; ",
+    )
+    .unwrap();
+    fs::write(
+        src.join("unrelated.ts"),
+        "const broken: number = 'unrelated';",
+    )
+    .unwrap();
+    let input = src.join("main.ts");
+    fs::write(&input, "const score: Score = 42; console.log(score);").unwrap();
+    let target = temp.path().join("project.ir.json");
+    let output = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--emit", "ir", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    success(&output);
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        fs::canonicalize(metadata["project"].as_str().unwrap()).unwrap(),
+        fs::canonicalize(&config).unwrap()
+    );
+    assert_eq!(fs::read_to_string(&config).unwrap(), config_source);
+    assert!(!src.join("main.js").exists());
+    fs::write(&input, "function f(value) { return 1; } console.log(f(2));").unwrap();
+    let failed = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--emit", "ir", "--out"])
+        .arg(temp.path().join("failed.json"))
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("TS7006"));
+}
+
+#[test]
+fn explicit_project_is_used_and_broken_configs_do_not_fall_back() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    fs::write(&input, "console.log(42);").unwrap();
+    fs::write(
+        temp.path().join("tsconfig.json"),
+        "{\"extends\":\"./missing.json\"}",
+    )
+    .unwrap();
+    let explicit = temp.path().join("selected.json");
+    fs::write(&explicit, "{\"compilerOptions\":{\"strict\":true,\"lib\":[\"ES2022\",\"DOM\"],\"types\":[]},\"files\":[\"main.ts\"]}").unwrap();
+    let target = temp.path().join("selected.ir.json");
+    let output = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .arg("--project")
+        .arg(&explicit)
+        .args(["--emit", "ir", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    success(&output);
+    let failed = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--emit", "ir", "--out"])
+        .arg(temp.path().join("failed.json"))
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("missing.json"));
+    assert!(!temp.path().join("failed.json").exists());
 }

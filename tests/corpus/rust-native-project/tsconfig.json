@@ -1,0 +1,5 @@
+{
+  // The Rust parser must preserve JSONC, extends and config-relative paths.
+  "extends": "./config/base.json",
+  "include": ["main.ts", "lib/**/*.ts", "ambient.d.ts"],
+}

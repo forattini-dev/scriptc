@@ -3,6 +3,7 @@
 mod emit;
 mod frontend;
 mod ir;
+mod project;
 
 use std::{
     fs,
@@ -25,7 +26,7 @@ fn execute() -> Result<(), String> {
     let mut args = std::env::args_os().skip(1);
     let command = args
         .next()
-        .ok_or("usage: scriptc build <file.ts|file.js> [--emit bin|ir|rust] --out <path>")?;
+        .ok_or("usage: scriptc build <file.ts|file.js> [--project <tsconfig>] [--emit bin|ir|rust] --out <path>")?;
     if command == "--version" {
         println!(
             "scriptc native 0.1.1-rust.0; frontend {}; IR {}; engine none",
@@ -49,6 +50,7 @@ fn execute() -> Result<(), String> {
     }
     let mut kind = String::from("bin");
     let mut out = None;
+    let mut project_path = None;
     while let Some(arg) = args.next() {
         if arg == "--emit" {
             kind = args
@@ -56,6 +58,10 @@ fn execute() -> Result<(), String> {
                 .ok_or("SCN0001: missing --emit value")?
                 .into_string()
                 .map_err(|_| "SCN0001: invalid --emit")?;
+        } else if arg == "--project" {
+            project_path = Some(PathBuf::from(
+                args.next().ok_or("SCN0001: missing --project value")?,
+            ));
         } else if arg == "--out" {
             out = Some(PathBuf::from(
                 args.next().ok_or("SCN0001: missing --out value")?,
@@ -95,7 +101,8 @@ fn execute() -> Result<(), String> {
         .prefix("scriptc-native-")
         .tempdir()
         .map_err(|e| e.to_string())?;
-    let module = frontend::lower(&input, work.path())?;
+    let project = project::discover(&input, project_path.as_deref())?;
+    let module = frontend::lower(&input, work.path(), project.as_deref())?;
     ir::validate(&module).map_err(|e| format!("SCN9001: {e}"))?;
     let json = serde_json::to_vec_pretty(&module).map_err(|e| e.to_string())?;
     let rust = emit::rust(&module).map_err(|e| format!("SCN9001: {e}"))?;
@@ -134,6 +141,7 @@ fn execute() -> Result<(), String> {
         "{}",
         serde_json::json!({ "compiler": "rust", "backend": "rust", "engine": "none", "externalFfi": false,
         "frontendRevision": frontend::REVISION, "irVersion": ir::VERSION,
+        "project": project,
         "irPath": ir_path, "rustPath": rust_path, "binaryPath": binary_path })
     );
     Ok(())

@@ -14,7 +14,7 @@ const compiler = process.env["SCRIPTC_NATIVE_COMPILER_BIN"] ?? join(root, "packa
 const directory = mkdtempSync(join(tmpdir(), "scriptc-native-ir-contract-"));
 const cases: { fixture: string; irVersion: number; referenceBackendAccepted: boolean }[] = [];
 try {
-  for (const [index, fixture] of ["rust-native-frontend/main.ts", "rust-native-frontend/numbers.ts", "rust-native-frontend/plain.js", "rust-native-functions/main.ts", "rust-native-modules/main.ts"].entries()) {
+  for (const [index, fixture] of ["rust-native-frontend/main.ts", "rust-native-frontend/numbers.ts", "rust-native-frontend/plain.js", "rust-native-functions/main.ts", "rust-native-modules/main.ts", "rust-native-project/main.ts"].entries()) {
     const output = join(directory, index + ".json");
     const result = spawnSync(resolve(compiler), ["build", join(root, "tests/corpus", fixture), "--emit", "ir", "--out", output], {
       encoding: "utf8", timeout: 30_000, windowsHide: true,
