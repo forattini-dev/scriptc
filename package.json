@@ -11,6 +11,7 @@
     "test:rust:san": "node scripts/test-rust-sanitizer.mjs",
     "test:ts7": "node scripts/test-ts7.mjs",
     "test:checker-contract": "node scripts/checker-contract.mjs",
+    "test:compiler-rust:ir": "tsx scripts/check-compiler-rust-ir.ts",
     "test:test262": "tsx tests/test262/run.ts",
     "test:test262:fetch": "node tests/test262/fetch.mjs",
     "test:fetch-conformance": "vitest run tests/harness/fetch-conformance.test.ts",
