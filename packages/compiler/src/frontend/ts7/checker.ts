@@ -274,7 +274,7 @@ export class CheckerFacade {
       const project = this.requireProject();
       decls = symbol.declarations
         .map((h) => h.resolve(project))
-        .filter((n): n is Node => n !== undefined);
+        .filter((n) => n !== undefined);
       this.declsOf.set(symbol, decls);
     }
     return decls;

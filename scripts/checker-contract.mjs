@@ -42,6 +42,10 @@ export async function readTrimmed(): Promise<string> {
 export function implicit(value) { return value; }
 export const invalid: number = "text";
 export const fromOverlay = shadow;
+namespace ContractTypes { export interface ContractReady<T> { value: T } }
+interface ContractChild extends ContractTypes.ContractReady<number> {}
+class ContractBase { value = 42; }
+class ContractDerived extends ContractBase implements ContractChild {}
 `;
 
 export function validateCheckerMatrix(matrix, base) {
@@ -126,7 +130,7 @@ async function probe(config, directory) {
     if (!file) throw new Error("fixture AST was not loaded");
     const named = new Map();
     const nodes = [];
-    const declarations = new Set([SyntaxKind.VariableDeclaration, SyntaxKind.TypeAliasDeclaration, SyntaxKind.FunctionDeclaration, SyntaxKind.ClassDeclaration]);
+    const declarations = new Set([SyntaxKind.VariableDeclaration, SyntaxKind.TypeAliasDeclaration, SyntaxKind.FunctionDeclaration, SyntaxKind.ClassDeclaration, SyntaxKind.InterfaceDeclaration]);
     const visit = node => { nodes.push(node); if (node.name?.text && declarations.has(node.kind)) named.set(node.name.text, node); node.forEachChild(visit); };
     visit(file);
     const type = name => checker.getTypeFromTypeNode(named.get(name).type);
@@ -142,6 +146,12 @@ async function probe(config, directory) {
     }).sort((a, b) => a.code - b.code);
     const strictDiagnostics = diagnostics(project);
     const relaxed = open(false);
+    const heritage = (name, token) => named.get(name).heritageClauses.filter(clause => clause.token === token)
+      .flatMap(clause => clause.types.map(element => {
+        const node = element.kind === SyntaxKind.TypeReference ? element.typeName : element.expression;
+        const terminal = node.kind === SyntaxKind.QualifiedName ? node.right : node.kind === SyntaxKind.PropertyAccessExpression ? node.name : node;
+        return { text: node.getText(), symbol: checker.getSymbolAtLocation(terminal)?.name };
+      }));
     const cases = {
       "assignability.direction": [["Left", "Wide"], ["Wide", "Left"], ["Left", "Optional"], ["Optional", "Required"],
         ["Required", "Optional"], ["WideFn", "LeftFn"], ["LeftFn", "WideFn"], ["FirstType", "SecondType"]]
@@ -157,6 +167,11 @@ async function probe(config, directory) {
         result: checker.typeToString(checker.getReturnTypeOfSignature(callback)) },
       "promise.heterogeneous-tuple": text("all"),
       "await.string-method": text("trimmed"),
+      "heritage.runtime-and-type": {
+        base: heritage("ContractDerived", SyntaxKind.ExtendsKeyword),
+        implements: heritage("ContractDerived", SyntaxKind.ImplementsKeyword),
+        interface: heritage("ContractChild", SyntaxKind.ExtendsKeyword),
+      },
       "filesystem.overlay": text("fromOverlay"),
       "unicode.ast": units(named.get("unicode").initializer.text),
       "unicode.leading-bom": { ast: units(named.get("leadingBom").initializer.text),
@@ -178,6 +193,11 @@ async function probe(config, directory) {
       "callback.optional-async": { parameter: "string", result: "Promise<string>" },
       "promise.heterogeneous-tuple": "Promise<[string, number]>",
       "await.string-method": "string",
+      "heritage.runtime-and-type": {
+        base: [{ text: "ContractBase", symbol: "ContractBase" }],
+        implements: [{ text: "ContractChild", symbol: "ContractChild" }],
+        interface: [{ text: "ContractTypes.ContractReady", symbol: "ContractReady" }],
+      },
     };
     for (const [name, value] of Object.entries(expected)) {
       if (JSON.stringify(cases[name]) !== JSON.stringify(value)) throw new Error(`contract ${name}: ${JSON.stringify(cases[name])}`);

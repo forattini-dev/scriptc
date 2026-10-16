@@ -9,6 +9,7 @@ import { InternalCompilerError } from "../../errors.js";
  * accessor access, upcasts, `new` expressions, and the builtin Error
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
+import { classExtendsElement } from "../ts7/heritage.js";
 import type { Lowerer } from "./lowerer.js";
 import { contextualMapConstruction } from "./contextual-map.js";
 import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/ir.js";
@@ -409,9 +410,7 @@ export interface GenericClassInfo {
       if (v === "opaque") return null;
       if (v !== "effectFree") return v;
     }
-    const heritage = decl.heritageClauses
-      ?.find((c) => c.token === ts.SyntaxKind.ExtendsKeyword)
-      ?.types[0];
+    const heritage = classExtendsElement(decl);
     if (heritage) {
       const h = stripParens(heritage.expression);
       if (h.kind !== ts.SyntaxKind.NullKeyword && !ts.isIdentifier(h)) return null;
@@ -475,7 +474,7 @@ export function collectClassShape(lowerer: Lowerer, decl: ts.ClassDeclaration): 
     {
       const baseIdent = decl.heritageClauses
         ?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword)
-        ?.types.map((t) => t.expression)
+        ?.types.filter(ts.isExpressionWithTypeArguments).map((t) => t.expression)
         .filter(ts.isIdentifier)[0];
       const baseSym = baseIdent ? lowerer.resolveValueSymbol(baseIdent) : null;
       const baseDiags = baseSym ? lowerer.deferredDiags.get(baseSym) : undefined;
@@ -685,6 +684,9 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
         // question, owned by the shape-coercion fences at those sites.)
         if (clause.token === ts.SyntaxKind.ImplementsKeyword) continue;
         const t = clause.types[0];
+        if (t && !ts.isExpressionWithTypeArguments(t)) {
+          lowerer.unsupported("SC1090", t, "extending a non-expression base");
+        }
         // `extends events.EventEmitter` — the namespace-member spelling of
         // the ambient emitter base resolves like the named import.
         if (t && ts.isPropertyAccessExpression(t.expression) && ts.isIdentifier(t.expression.name)) {

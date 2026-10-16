@@ -993,6 +993,7 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
     // "utf8"])), and the checked-dynamic encoding form.
     readFileSync: ["fs.readFileSyncBuf", "fs.readFileSyncBytes", "fs.readFileSyncDyn", "fs.readFdSync", "fs.readFdSyncBytes"],
     appendFileSync: ["fs.appendFileModeSync"],
+    openSync: ["fs.openNumericSync"],
     writeFileSync: ["fs.writeFileSyncBytes", "fs.writeFileModeSync", "fs.writeFileExclusiveModeSync"],
     // The utf8 string overload; the table row is the Buffer-window form.
     writeSync: ["fs.writeStrSync"],
@@ -1022,7 +1023,8 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
   crypto: {
     // The composed randomBytes(n).toString(enc) chain keeps its one-libCall
     // lowering (lowerCryptoComposedCall) — same surface, no Buffer.
-    randomBytes: ["crypto.randomBytesToString"],
+    randomBytes: ["crypto.randomBytesToString", "crypto.randomBytesCb"],
+    randomFillSync: ["crypto.randomFillRest"],
   },
   os: {
     // lowerOsUserInfoCall assembles the record from scalar libCalls.

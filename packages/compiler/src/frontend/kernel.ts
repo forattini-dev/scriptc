@@ -2,6 +2,7 @@
  * which program declarations the native kernels serve. */
 import * as ts from "./ts7/adapter.js";
 import { constituentTypes } from "./ts7/checker.js";
+import { classExtendsElement, heritageTypeName } from "./ts7/heritage.js";
 
 const EFFECT_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
 const EFFECT_UNSTABLE_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]unstable[\\/]([a-z]+)[\\/]([A-Za-z]+)\.d\.ts$/;
@@ -37,7 +38,7 @@ export function effectNamespaceOfNode(checker: ts.TypeChecker, node: ts.Expressi
 /** `class Service extends Context.Service<Self, Shape>()("id") {}` — a kernel SERVICE KEY declaration: the class is the
  * key (an effect that looks the service up), never a runtime class. Answers the id, or null for any other class. */
 export function kernelServiceIdOf(checker: ts.TypeChecker, decl: ts.ClassLikeDeclaration): string | null {
-  const heritage = decl.heritageClauses?.find((c) => c.token === ts.SyntaxKind.ExtendsKeyword)?.types[0];
+  const heritage = classExtendsElement(decl);
   if (heritage === undefined) return null;
   const outer = heritage.expression;
   if (!ts.isCallExpression(outer) || outer.arguments.length !== 1 || !ts.isStringLiteral(outer.arguments[0]!)) return null;
@@ -69,7 +70,7 @@ export interface KernelSchemaClass {
 }
 
 export function kernelSchemaClassOf(checker: ts.TypeChecker, decl: ts.ClassLikeDeclaration): KernelSchemaClass | null {
-  const heritage = decl.heritageClauses?.find((c) => c.token === ts.SyntaxKind.ExtendsKeyword)?.types[0];
+  const heritage = classExtendsElement(decl);
   if (heritage === undefined) return null;
   const outer = heritage.expression;
   if (!ts.isCallExpression(outer) || !ts.isCallExpression(outer.expression)) return null;
@@ -162,8 +163,7 @@ function isSqlClientSymbol(checker: ts.TypeChecker, symbol: ts.Symbol, depth: nu
     if (!ts.isInterfaceDeclaration(decl)) return false;
     if (decl.name.text === "SqlClient" && SQL_CLIENT_DIST.test(decl.getSourceFile().fileName)) return true;
     return (decl.heritageClauses ?? []).some((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword && clause.types.some((heritage) => {
-      const expr = heritage.expression;
-      const name = ts.isIdentifier(expr) ? expr : ts.isPropertyAccessExpression(expr) ? expr.name : undefined;
+      const name = heritageTypeName(heritage);
       const base = name === undefined ? undefined : checker.getSymbolAtLocation(name);
       return base !== undefined && isSqlClientSymbol(checker, base, depth + 1);
     }));

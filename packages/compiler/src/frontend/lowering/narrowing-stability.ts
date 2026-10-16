@@ -542,7 +542,9 @@ export class NarrowingStability {
     if (ts.isClassLikeDeclaration(node)) {
       if (node.modifiers?.some((m) => m.kind === ts.SyntaxKind.Decorator)) return true;
       for (const clause of node.heritageClauses ?? []) {
+        if (clause.token !== ts.SyntaxKind.ExtendsKeyword) continue;
         for (const heritage of clause.types) {
+          if (!ts.isExpressionWithTypeArguments(heritage)) return true;
           const e = heritage.expression;
           if (!ts.isIdentifier(e) && !ts.isPropertyAccessExpression(e)) return true;
         }

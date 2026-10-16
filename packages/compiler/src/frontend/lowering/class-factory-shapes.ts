@@ -40,7 +40,7 @@ function returnedClassOf(L: Lowerer, expression: ts.Expression): ReturnedClass |
   if (heritage?.length !== 1 || heritage[0]?.token !== ts.SyntaxKind.ExtendsKeyword ||
     heritage[0].types.length !== 1) return null;
   const base = heritage[0].types[0];
-  if (!base || base.typeArguments || !ts.isIdentifier(base.expression)) return null;
+  if (!base || !ts.isExpressionWithTypeArguments(base) || base.typeArguments || !ts.isIdentifier(base.expression)) return null;
   let symbol = L.checker.getSymbolAtLocation(base.expression);
   if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = L.checker.getAliasedSymbol(symbol);
   const declaration = symbol ? L.checker.valueDeclarationOf(symbol) : undefined;

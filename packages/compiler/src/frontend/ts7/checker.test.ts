@@ -7,6 +7,44 @@ import * as ts from "./adapter.js";
 import { CheckerFacade, constituentTypes } from "./checker.js";
 import { Ts7Host } from "./program-adapter.js";
 
+test("materialized declarations retain source identity across symbols and signatures", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scriptc-checker-declarations-"));
+  const entry = join(dir, "main.ts");
+  writeFileSync(entry, `
+    interface Merged { value: number }
+    interface Merged { label: string }
+    function identity<T>(value: T): T { return value; }
+    const inferred = (value: number) => value;
+  `);
+  const program = ts.createProgram([entry], { noLib: true });
+  try {
+    const file = program.getSourceFile(entry)!;
+    const checker = program.getTypeChecker();
+    const interfaces = file.statements.filter(ts.isInterfaceDeclaration);
+    const symbol = checker.getSymbolAtLocation(interfaces[0]!.name)!;
+    const declarations = checker.declarationsOf(symbol);
+    expect(declarations).toHaveLength(2);
+    expect(declarations[0]).toBe(interfaces[0]);
+    expect(declarations[1]).toBe(interfaces[1]);
+    expect(checker.declarationsOf(symbol)).toBe(declarations);
+    expect(checker.valueDeclarationOf(symbol)).toBeUndefined();
+    const fn = file.statements.find(ts.isFunctionDeclaration)!;
+    const fnSymbol = checker.getSymbolAtLocation(fn.name!)!;
+    expect(checker.valueDeclarationOf(fnSymbol)).toBe(fn);
+    expect(checker.declarationsOf(fnSymbol)[0]).toBe(fn);
+    const signature = checker.getSignatureFromDeclaration(fn)!;
+    expect(checker.signatureDeclaration(signature)).toBe(fn);
+    expect(checker.signatureDeclaration(signature)).toBe(fn);
+    const variable = file.statements.find(ts.isVariableStatement)!.declarationList.declarations[0]!;
+    const arrow = variable.initializer!;
+    const callable = checker.getCallSignatures(checker.getTypeAtLocation(variable.name))[0]!;
+    expect(checker.signatureDeclaration(callable)).toBe(arrow);
+  } finally {
+    program.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("empty tuple references retain their union arms and instantiated element types", () => {
   const dir = mkdtempSync(join(tmpdir(), "scriptc-empty-tuple-reference-"));
   const entry = join(dir, "main.ts");

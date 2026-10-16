@@ -77,7 +77,7 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     id: "stdlib.date.parse",
     kind: "stdlib",
     name: "Date.parse",
-    fns: ["date.parseGetTime"],
+    fns: ["date.parseGetTime", "date.parse"],
     note: "one date-string argument; invalid input returns NaN",
   },
   {
@@ -203,14 +203,14 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     id: "node-builtin.process.exit",
     kind: "node-builtin",
     name: "process.exit",
-    fns: ["process.exit", "process.exitCodeSet", "process.exiting"],
+    fns: ["process.exit", "process.exitCodeSet", "process.setExitCode", "process.exiting"],
     note: "process.exit, process.exitCode assignment, and the process._exiting flag read are one surface",
   },
   {
     id: "node-builtin.process.exitCode",
     kind: "node-builtin",
     name: "process.exitCode",
-    fns: ["process.currentExitCode", "process.exitCodeSet"],
+    fns: ["process.currentExitCode", "process.exitCodeSet", "process.setExitCode"],
     note: "numeric assignment and reads preserving the unset undefined value",
   },
   {

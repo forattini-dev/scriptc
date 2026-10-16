@@ -1301,7 +1301,10 @@ function nonInertTopLevel7(
     if (hasDecorator(c)) return c;
     for (const h of c.heritageClauses ?? []) {
       if (h.token !== ts.SyntaxKind.ExtendsKeyword) continue;
-      for (const t of h.types) if (!inert(t.expression)) return t.expression;
+      for (const t of h.types) {
+        if (!ts.isExpressionWithTypeArguments(t)) return t;
+        if (!inert(t.expression)) return t.expression;
+      }
     }
     for (const m of c.members) {
       if (ts.isClassStaticBlockDeclaration(m)) return m;
@@ -3055,7 +3058,7 @@ function earlierLinkCrash(
 ): StartupCrash | null {
   if (first === null) return second;
   if (second === null) return first;
-  const moduleIndex = new Map(moduleOrder.map((sf, index) => [sf.fileName, index]));
+  const moduleIndex = new Map<string, number>(moduleOrder.map((sf, index) => [sf.fileName, index]));
   const firstIndex = moduleIndex.get(first.loc.file) ?? Number.MAX_SAFE_INTEGER;
   const secondIndex = moduleIndex.get(second.loc.file) ?? Number.MAX_SAFE_INTEGER;
   if (firstIndex !== secondIndex) return firstIndex < secondIndex ? first : second;

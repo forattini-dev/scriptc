@@ -163,7 +163,7 @@ function mixinFnShapeInner(
   const types = clauses[0]!.types;
   if (types.length !== 1) return null;
   const t = types[0]!;
-  if (t.typeArguments || !ts.isIdentifier(t.expression)) return null;
+  if (!ts.isExpressionWithTypeArguments(t) || t.typeArguments || !ts.isIdentifier(t.expression)) return null;
   if (lowerer.checker.getSymbolAtLocation(t.expression) !== paramSym) return null;
 
   // The parameter's flow must be fully traceable: the extends clause is
