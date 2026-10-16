@@ -120,13 +120,25 @@ pub type PromiseObserveHook = Rc<dyn Fn(Box<dyn FnOnce(Result<Box<dyn Any>, Caug
 pub type UnhandledRejectionHandler = Rc<dyn Fn(Caught, JsPromiseHandle)>;
 pub type RejectionHandledHandler = Rc<dyn Fn(JsPromiseHandle)>;
 
+// Hooks borrow the source weakly. One traced heap node owns its strong edge,
+// so cloned handles and cycles account for exactly the references they hold.
+struct PromiseHandleEdges { trace: Option<PromiseTrace> }
+impl Trace for PromiseHandleEdges {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(trace) = &self.trace { trace(tracer); }
+    }
+}
+impl ClearEdges for PromiseHandleEdges {
+    fn clear_edges(&mut self) { self.trace = None; }
+}
+
 #[derive(Clone)]
 pub struct JsPromiseHandle {
     identity: usize,
     catch: PromiseCatchHook,
     observe: PromiseObserveHook,
     poll: PromisePollHook,
-    trace: PromiseTrace,
+    trace: Gc<PromiseHandleEdges>,
 }
 
 pub fn promise_handle_identity(handle: &JsPromiseHandle) -> usize {
@@ -149,7 +161,7 @@ pub fn promise_handle_observe(handle: &JsPromiseHandle, callback: PromiseObserve
 }
 
 pub fn promise_handle_trace(handle: &JsPromiseHandle, tracer: &mut Tracer<'_>) {
-    (handle.trace)(tracer);
+    tracer.edge(&handle.trace);
 }
 
 pub fn promise_set_unhandled_rejection_handler(
@@ -175,15 +187,16 @@ where
     F: Fn(T) -> U + 'static,
 {
     let identity = promise_view_identity(promise);
-    let source = promise.clone();
-    let observed_source = promise.clone();
+    let source = promise.downgrade();
+    let observed_source = promise.downgrade();
     let traced_source = promise.clone();
-    let polled_source = promise.clone();
+    let polled_source = promise.downgrade();
     let map = Rc::new(map);
     let poll_map = map.clone();
     JsPromiseHandle {
         identity,
         catch: Rc::new(move |callback| {
+            let source = source.upgrade().expect("scriptc: cleared Promise handle");
             let result = promise_new::<()>();
             let target = result.clone();
             promise_then(
@@ -204,6 +217,7 @@ where
             promise_to_handle(&result)
         }),
         observe: Rc::new(move |callback| {
+            let observed_source = observed_source.upgrade().expect("scriptc: cleared Promise handle");
             let map = map.clone();
             promise_then(
                 &observed_source,
@@ -212,10 +226,11 @@ where
                 }),
             );
         }),
-        poll: Rc::new(move || promise_poll(&polled_source).map(|outcome| {
-            promise_view_map_outcome(outcome, poll_map.as_ref())
-        })),
-        trace: Rc::new(move |tracer| tracer.edge(&traced_source)),
+        poll: Rc::new(move || {
+            let polled_source = polled_source.upgrade().expect("scriptc: cleared Promise handle");
+            promise_poll(&polled_source).map(|outcome| promise_view_map_outcome(outcome, poll_map.as_ref()))
+        }),
+        trace: Gc::new(PromiseHandleEdges { trace: Some(Rc::new(move |tracer| tracer.edge(&traced_source))) }),
     }
 }
 

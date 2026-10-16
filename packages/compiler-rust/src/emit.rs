@@ -10,6 +10,7 @@ mod values;
 fn rust_type(ty: Type, module: &Module) -> String {
     match ty {
         Type::Dyn => "NativeValue",
+        Type::Promise { .. } => "runtime::JsPromise<NativeValue>",
         ty @ Type::Func { .. } => {
             return format!("runtime::Gc<{}>", functions::type_name(&ty, module));
         }
@@ -133,7 +134,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         output.push_str("}\n");
     }
     if uses_runtime(module) {
-        output.push_str(&format!("\nfn main() {{ runtime::init(); let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {}())); clear_module_storage(); clear_function_storage(); let error = outcome.err().map(|payload| {{ let caught = runtime::caught_from_panic(payload); runtime::caught_to_string(&caught).to_string() }}); runtime::finish(); if let Some(error) = error {{ eprintln!(\"Uncaught {{error}}\"); std::process::exit(1); }} }}\n", module.entry));
+        output.push_str(&format!("\nfn main() {{ runtime::init(); let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{ {}(); runtime::run_event_loop(); }})); clear_module_storage(); clear_function_storage(); let error = outcome.err().map(|payload| {{ let caught = runtime::caught_from_panic(payload); runtime::caught_to_string(&caught).to_string() }}); let failed = runtime::had_unhandled_rejection(); runtime::finish(); if let Some(error) = error {{ eprintln!(\"Uncaught {{error}}\"); std::process::exit(1); }} if failed {{ std::process::exit(1); }} }}\n", module.entry));
     } else {
         output.push_str(&format!("\nfn main() {{ {}(); }}\n", module.entry));
     }
@@ -152,6 +153,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Expr::DynScalarEq { .. }
             | Expr::DynInvoke { .. }
             | Expr::DynCall { .. } => true,
+            Expr::Intrinsic { name, .. } if name == "promise.resolve" => true,
             Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => true,
             Expr::ClassRef { .. }
             | Expr::NewValue { .. }
@@ -212,7 +214,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Type::Record { .. }
             | Type::Union { .. }
             | Type::Object { .. } => true,
-            Type::Regex | Type::Dyn => true,
+            Type::Regex | Type::Dyn | Type::Promise { .. } => true,
             Type::Func { params, ret } => params.iter().any(ty) || ty(ret),
             _ => false,
         }
@@ -236,6 +238,9 @@ pub fn uses_runtime(module: &Module) -> bool {
 }
 
 fn expr(value: &Expr, function: &Function, module: &Module) -> String {
+    if let Some(code) = values::promise_expression(value, function, module) {
+        return code;
+    }
     if let Some(code) = regex::expression(value, function, module) {
         return code;
     }
@@ -467,6 +472,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Func { .. }
                     | Type::Object { .. }
                     | Type::Regex
+                    | Type::Promise { .. }
             ) {
                 format!("{local_id}.clone()")
             } else {
@@ -485,9 +491,14 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Func { .. }
             );
             let record = matches!(left.ty(), Type::Regex);
+            let promise = matches!(left.ty(), Type::Promise { .. });
             let left = expr(left, function, module);
             let right = expr(right, function, module);
             match op.as_str() {
+                "===" | "!==" if promise => format!(
+                    "(runtime::promise_view_identity(&({left})) {} runtime::promise_view_identity(&({right})))",
+                    if op == "!==" { "!=" } else { "==" }
+                ),
                 "===" | "!==" if array => format!(
                     "{}({left}).ptr_eq(&({right}))",
                     if op == "!==" { "!" } else { "" }

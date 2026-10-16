@@ -80,6 +80,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                     }
                     Type::Dyn => "native_value_eq(&left, &right)",
                     Type::Regex => "std::rc::Rc::ptr_eq(&left, &right)",
+                    Type::Promise { .. } => "runtime::promise_view_identity(&left) == runtime::promise_view_identity(&right)",
                     _ => unreachable!("IR validated"),
                 };
                 format!(

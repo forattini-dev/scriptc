@@ -90,3 +90,33 @@ fn promise_view_mapping_errors_reject_the_observer_without_unwinding_the_loop() 
     finish();
     assert_eq!(live_heap_objects(), baseline);
 }
+
+#[test]
+fn promise_handle_cycles_collect_and_external_aliases_keep_the_source_alive() {
+    struct Holder { handles: Vec<JsPromiseHandle> }
+    impl Trace for Holder {
+        fn trace(&self, tracer: &mut Tracer<'_>) {
+            for handle in &self.handles { promise_handle_trace(handle, tracer); }
+        }
+    }
+    impl ClearEdges for Holder { fn clear_edges(&mut self) { self.handles.clear(); } }
+    init();
+    let baseline = live_heap_objects();
+    let outside = {
+        let holder = Gc::new(Holder { handles: Vec::new() });
+        let promise = promise_resolved(holder.clone());
+        let handle = promise_to_handle(&promise);
+        holder.with_mut(|h| { h.handles.push(handle.clone()); h.handles.push(handle.clone()); });
+        handle
+    };
+    collect_cycles();
+    let view = promise_view_from_handle::<Gc<Holder>>(&outside);
+    let holder = promise_poll(&view).unwrap().unwrap_or_else(|_| panic!("unexpected rejection"));
+    assert_eq!(holder.with(|h| h.handles.len()), 2);
+    assert_eq!(holder.with(|h| promise_handle_identity(&h.handles[0])), promise_handle_identity(&outside));
+    drop(holder);
+    drop(view);
+    drop(outside);
+    finish();
+    assert_eq!(live_heap_objects(), baseline);
+}

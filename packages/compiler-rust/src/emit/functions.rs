@@ -22,6 +22,7 @@ fn types(module: &Module) -> Vec<Type> {
                 visit(ret, found);
             }
             Type::Array { elem } => visit(elem, found),
+            Type::Promise { inner } => visit(inner, found),
             Type::Map { key, value } => {
                 visit(key, found);
                 visit(value, found);
@@ -54,6 +55,7 @@ fn types(module: &Module) -> Vec<Type> {
     for global in &module.globals {
         visit(&global.r#type, &mut found);
     }
+    module.visit_expressions(&mut |e| visit(&e.ty(), &mut found));
     found
 }
 pub(super) fn type_name(ty: &Type, module: &Module) -> String {

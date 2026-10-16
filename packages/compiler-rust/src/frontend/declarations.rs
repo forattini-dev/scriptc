@@ -66,6 +66,7 @@ pub(super) struct Catalog {
     unions: Vec<ir::Union>,
     callables: HashMap<usize, Type>,
     projections: HashMap<Key, Type>,
+    literal_choices: HashMap<Key, Type>,
 }
 pub(super) struct Linked {
     pub hints: HashMap<Key, Hint>,
@@ -73,6 +74,7 @@ pub(super) struct Linked {
     pub unions: Vec<ir::Union>,
     pub callables: HashMap<usize, Type>,
     pub projections: HashMap<Key, Type>,
+    pub literal_choices: HashMap<Key, Type>,
 }
 
 fn unalias(checker: &mut Checker, symbol: SymbolId) -> SymbolId {
@@ -269,7 +271,55 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
         // Preserve checked member/call projections in source consumers. JS
         // implementation inference must not replace a public field with any,
         // or erase control-flow narrowing of an optional public member.
+        fn portable(
+            t: &Type,
+            records: &[ir::Record],
+            unions: &[ir::Union],
+            seen: &mut HashSet<Type>,
+        ) -> bool {
+            if !seen.insert(t.clone()) {
+                return true;
+            }
+            match t {
+                Type::Object { .. } | Type::Classval { .. } => false,
+                Type::Func { params, ret } => {
+                    params.iter().all(|p| portable(p, records, unions, seen))
+                        && portable(ret, records, unions, seen)
+                }
+                Type::Record { shape_id } => {
+                    records[*shape_id]
+                        .fields
+                        .iter()
+                        .all(|f| portable(&f.r#type, records, unions, seen))
+                        && records[*shape_id]
+                            .index_value
+                            .as_ref()
+                            .is_none_or(|t| portable(t, records, unions, seen))
+                }
+                Type::Union { union_id } => unions[*union_id]
+                    .arms
+                    .iter()
+                    .all(|t| portable(t, records, unions, seen)),
+                Type::Array { elem } => portable(elem, records, unions, seen),
+                Type::Promise { inner } => portable(inner, records, unions, seen),
+                Type::Map { key, value } => {
+                    portable(key, records, unions, seen) && portable(value, records, unions, seen)
+                }
+                _ => true,
+            }
+        }
         fn project(lowerer: &mut Lowerer<'_>, node: Node, out: &mut HashMap<Key, Type>) {
+            if node.kind() == SyntaxKind::ObjectLiteralExpression
+                && let Some(choice) = lowerer.contextual_union_literal(node)
+                && portable(
+                    &choice,
+                    &lowerer.records,
+                    &lowerer.unions,
+                    &mut HashSet::new(),
+                )
+            {
+                lowerer.literal_choices.insert(Key::of(node), choice);
+            }
             if matches!(
                 node.kind(),
                 SyntaxKind::Identifier
@@ -278,47 +328,10 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                     | SyntaxKind::CallExpression
             ) {
                 let id = lowerer.checker.get_type_at_location(node);
-                if let Some(ty) = lowerer.type_id(id) {
-                    fn portable(
-                        t: &Type,
-                        records: &[ir::Record],
-                        unions: &[ir::Union],
-                        seen: &mut HashSet<Type>,
-                    ) -> bool {
-                        if !seen.insert(t.clone()) {
-                            return true;
-                        }
-                        match t {
-                            Type::Object { .. } | Type::Classval { .. } => false,
-                            Type::Func { params, ret } => {
-                                params.iter().all(|p| portable(p, records, unions, seen))
-                                    && portable(ret, records, unions, seen)
-                            }
-                            Type::Record { shape_id } => {
-                                records[*shape_id]
-                                    .fields
-                                    .iter()
-                                    .all(|f| portable(&f.r#type, records, unions, seen))
-                                    && records[*shape_id]
-                                        .index_value
-                                        .as_ref()
-                                        .is_none_or(|t| portable(t, records, unions, seen))
-                            }
-                            Type::Union { union_id } => unions[*union_id]
-                                .arms
-                                .iter()
-                                .all(|t| portable(t, records, unions, seen)),
-                            Type::Array { elem } => portable(elem, records, unions, seen),
-                            Type::Map { key, value } => {
-                                portable(key, records, unions, seen)
-                                    && portable(value, records, unions, seen)
-                            }
-                            _ => true,
-                        }
-                    }
-                    if portable(&ty, &lowerer.records, &lowerer.unions, &mut HashSet::new()) {
-                        out.insert(Key::of(node), ty);
-                    }
+                if let Some(ty) = lowerer.type_id(id)
+                    && portable(&ty, &lowerer.records, &lowerer.unions, &mut HashSet::new())
+                {
+                    out.insert(Key::of(node), ty);
                 }
             }
             node.for_each_child(&mut |child| {
@@ -335,6 +348,7 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
         }
         Catalog {
             projections,
+            literal_choices: lowerer.literal_choices,
             edges,
             exports,
             records: lowerer.records,
@@ -428,6 +442,7 @@ impl Catalog {
         }
         Linked {
             projections: self.projections,
+            literal_choices: self.literal_choices,
             hints,
             records: self.records,
             unions: self.unions,

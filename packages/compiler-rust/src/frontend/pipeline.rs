@@ -59,6 +59,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             lowerer.callables = linked.callables;
             lowerer.declarations = linked.hints;
             lowerer.projections = linked.projections;
+            lowerer.literal_choices = linked.literal_choices;
         }
         let plan = modules::ModulePlan::link(lowerer.checker, file)?;
         for binding in plan.bindings {

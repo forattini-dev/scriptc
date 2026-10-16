@@ -1,5 +1,6 @@
 //! The first native subset of the existing scriptc IR v13 wire contract.
 use serde::Serialize;
+mod walk;
 use std::collections::HashMap;
 
 pub const VERSION: u32 = 13;
@@ -28,6 +29,9 @@ pub enum Type {
     Void,
     Array {
         elem: Box<Type>,
+    },
+    Promise {
+        inner: Box<Type>,
     },
     Map {
         key: Box<Type>,
@@ -732,6 +736,7 @@ impl Module {
             Type::Array { elem } => {
                 !matches!(*elem, Type::Func { .. }) && self.valid_type(*elem, active)
             }
+            Type::Promise { inner } => *inner == Type::Void || self.valid_type(*inner, active),
             Type::Map { key, value } => {
                 matches!(*key, Type::F64 | Type::String | Type::Dyn)
                     && !matches!(*value, Type::Func { .. } | Type::Map { .. })
@@ -1687,6 +1692,7 @@ fn validate_function(
                                 | Type::Array { .. }
                                 | Type::Map { .. }
                                 | Type::Object { .. }
+                                | Type::Promise { .. }
                         )
                 } else {
                     left.ty() == Type::F64 && right.ty() == Type::F64
@@ -1709,6 +1715,23 @@ fn validate_function(
                     Ok(())
                 } else {
                     Err("invalid unary types".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { inner },
+                ..
+            } if name == "promise.resolve" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if (args.is_empty() && **inner == Type::Void)
+                    || (args.len() == 1 && args[0].ty() == **inner && **inner != Type::Void)
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native Promise.resolve".into())
                 }
             }
             Expr::Intrinsic {
@@ -2135,6 +2158,77 @@ mod tests {
             loc,
         }];
         assert_eq!(validate(&m).unwrap_err(), "invalid native value call");
+    }
+
+    #[test]
+    fn promise_resolve_validates_payloads_and_inventories_temporary_types() {
+        let mut m = error_module();
+        let loc = m.functions[0].loc.clone();
+        let resolve = |inner, args| Expr::Intrinsic {
+            name: "promise.resolve".into(),
+            args,
+            r#type: Type::Promise {
+                inner: Box::new(inner),
+            },
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: resolve(Type::Void, vec![]),
+            loc: loc.clone(),
+        }];
+        validate(&m).unwrap();
+        let array = Expr::ArrayLit {
+            elems: vec![],
+            r#type: Type::Array {
+                elem: Box::new(Type::F64),
+            },
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: resolve(array.ty(), vec![array]),
+            loc: loc.clone(),
+        }];
+        validate(&m).unwrap();
+        let mut inventory = Vec::new();
+        m.visit_expressions(&mut |e| inventory.push(e.ty()));
+        assert!(inventory.contains(&Type::Array {
+            elem: Box::new(Type::F64)
+        }));
+        let wire = serde_json::to_value(&m).unwrap();
+        assert_eq!(
+            wire["functions"][0]["body"][0]["expr"]["type"]["kind"],
+            "promise"
+        );
+        assert_eq!(
+            wire["functions"][0]["body"][0]["expr"]["name"],
+            "promise.resolve"
+        );
+        for (inner, args) in [
+            (Type::F64, vec![]),
+            (
+                Type::Void,
+                vec![Expr::NumLit {
+                    value: 1.0,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                }],
+            ),
+            (
+                Type::String,
+                vec![Expr::BoolLit {
+                    value: true,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                }],
+            ),
+        ] {
+            m.functions[0].body = vec![Stmt::Expression {
+                expr: resolve(inner, args),
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&m).unwrap_err(), "invalid native Promise.resolve");
+        }
     }
 
     #[test]

@@ -38,6 +38,9 @@ impl Lowerer<'_> {
                 elem: Box::new(elem),
             });
         }
+        if let Some(ty) = self.promise_type(id) {
+            return Some(ty);
+        }
         if let Some(ty) = self.map_type(id) {
             return Some(ty);
         }
@@ -195,6 +198,10 @@ impl Lowerer<'_> {
     pub(super) fn coerce(&self, value: Expr, target: Type, node: Node) -> Result<Expr, String> {
         if value.ty() == target {
             return Ok(value);
+        }
+        if matches!(value.ty(), Type::Promise { .. }) && matches!(target, Type::Promise { .. }) {
+            let value = self.coerce(value, Type::Dyn, node)?;
+            return self.coerce(value, target, node);
         }
         if target == Type::Dyn {
             if let Type::Record { shape_id } = value.ty()
@@ -441,31 +448,25 @@ impl Lowerer<'_> {
                 let Type::Union { union_id } = target else {
                     unreachable!();
                 };
-                let source = self.checker.get_type_at_location(node);
-                let arms = self.unions[union_id].arms.clone();
-                let candidates = self
-                    .types
+                let choice = self
+                    .literal_choices
+                    .get(&declarations::Key::of(node))
+                    .cloned()
+                    .or_else(|| self.contextual_union_literal(node));
+                if let Some(choice) = choice
+                    && self.unions[union_id].arms.contains(&choice)
+                {
+                    let value = self.record_literal(node, choice)?;
+                    return self.coerce(value, target, node);
+                }
+                // A single represented record arm is unambiguous (for example
+                // Record | undefined). Multiple layouts need the checked choice.
+                let matches = self.unions[union_id]
+                    .arms
                     .iter()
-                    .filter_map(|(id, ty)| ty.clone().map(|ty| (*id, ty)))
+                    .filter(|ty| matches!(ty, Type::Record { .. }))
+                    .cloned()
                     .collect::<Vec<_>>();
-                let mut matches = Vec::new();
-                for arm in arms {
-                    if matches!(arm, Type::Record { .. })
-                        && candidates.iter().any(|(id, ty)| {
-                            *ty == arm && self.checker.is_type_assignable_to(source, *id)
-                        })
-                    {
-                        matches.push(arm);
-                    }
-                }
-                if matches.is_empty() {
-                    matches = self.unions[union_id]
-                        .arms
-                        .iter()
-                        .filter(|ty| matches!(ty, Type::Record { .. }))
-                        .cloned()
-                        .collect();
-                }
                 if matches.len() != 1 {
                     return Err(
                         self.refuse(node, "object literal needs one assignable native union arm")
@@ -584,6 +585,9 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             };
             return Ok(self.dynamic_get(node, obj, key));
+        }
+        if matches!(obj.ty(), Type::Union { .. }) {
+            return self.union_record_get(node, obj, node.name().text());
         }
         if matches!(obj.ty(), Type::Map { .. }) && node.name().text() == "size" {
             return self.map_intrinsic(node, obj, "size", vec![]);
@@ -833,6 +837,7 @@ impl Lowerer<'_> {
                         | Type::Map { .. }
                         | Type::Object { .. }
                         | Type::Regex
+                        | Type::Promise { .. }
                 )
         } else {
             left.ty() == Type::F64 && right.ty() == Type::F64

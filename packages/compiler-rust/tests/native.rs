@@ -118,6 +118,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-map-values/hoisting.js",
         "rust-native-map-values/seeds.ts",
         "rust-native-property-keys/contracts.ts",
+        "rust-native-promises/contracts.ts",
+        "rust-native-promises/order.ts",
+        "rust-native-promises/values.ts",
+        "rust-native-promises/resolve-only.ts",
+        "rust-native-union-literals/contracts.ts",
+        "rust-native-union-literals/checked.ts",
     ]
     .into_iter()
     .enumerate()
@@ -258,6 +264,50 @@ fn callable_and_compiled_enum_boundaries_preserve_previous_artifacts() {
             &target.with_extension("rs"),
         ] {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve", "{name}");
+        }
+    }
+}
+
+#[test]
+fn promise_boundaries_preserve_previous_native_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "promise");
+    for source in [
+        "Promise.all([]);",
+        "Promise.resolve().catch(() => {});",
+        "Promise.resolve(1).then(() => 1, () => 2);",
+        "new Promise<void>((resolve) => resolve());",
+        "const value = { then: (resolve: (n: number) => unknown) => { resolve(1); } }; Promise.resolve(value);",
+        "type A = { kind: 'a'; value: string } | { kind: 'b' }; const value: A = { kind: 'c' } as any;",
+    ] {
+        fs::write(&input, source).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
         }
     }
 }

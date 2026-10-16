@@ -41,6 +41,9 @@ impl Lowerer<'_> {
             return Ok(ty.clone());
         }
         let id = self.checker.get_type_at_location(node);
+        if self.checker.ty(id).flags.intersects(TypeFlags::VOID) {
+            return Ok(Type::Undefined);
+        }
         self.type_id(id).ok_or_else(|| {
             self.refuse(
                 node,

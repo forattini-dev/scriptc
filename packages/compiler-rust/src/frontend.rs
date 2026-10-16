@@ -26,11 +26,13 @@ mod helpers;
 mod modules;
 mod parameters;
 mod pipeline;
+mod promises;
 mod property_keys;
 mod regex;
 mod storage;
 mod tuples;
 mod types;
+mod union_literals;
 mod values;
 mod vars;
 
@@ -122,6 +124,7 @@ struct Lowerer<'a> {
     helpers: HashMap<(String, Vec<Type>, Type), String>,
     declarations: HashMap<declarations::Key, declarations::Hint>,
     projections: HashMap<declarations::Key, Type>,
+    literal_choices: HashMap<declarations::Key, Type>,
     classes: classes::ClassGraph,
     constructor_this: Option<Local>,
     module_vars: HashMap<u32, Type>,
@@ -156,6 +159,7 @@ impl<'a> Lowerer<'a> {
             helpers: HashMap::new(),
             declarations: HashMap::new(),
             projections: HashMap::new(),
+            literal_choices: HashMap::new(),
             classes: classes::ClassGraph::default(),
             constructor_this: None,
             module_vars: HashMap::new(),
@@ -944,6 +948,9 @@ impl<'a> Lowerer<'a> {
                 self.binary(node, op)
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.promise_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.function_bind(node)? {
                     return Ok(value);
                 }
@@ -1016,7 +1023,12 @@ impl<'a> Lowerer<'a> {
                     } else {
                         !self.module_namespace(receiver)
                     };
-                    if owned && matches!(self.ty(receiver), Ok(Type::Dyn | Type::Map { .. })) {
+                    if owned
+                        && matches!(
+                            self.ty(receiver),
+                            Ok(Type::Dyn | Type::Map { .. } | Type::Promise { .. })
+                        )
+                    {
                         let recv = self.expression(receiver)?;
                         if matches!(recv.ty(), Type::Map { .. }) {
                             return self.map_intrinsic(

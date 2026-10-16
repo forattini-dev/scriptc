@@ -10,6 +10,9 @@ fn native_map_key(key: NativeValue) -> NativeValue {
     }
 }
 fn native_value_method(recv: NativeValue, method: &str) -> NativeValue {
+    if matches!(&recv, NativeValue::Promise(_)) && method == "then" {
+        return recv;
+    }
     if matches!(&recv, NativeValue::Map(_))
         && matches!(method, "get" | "set" | "has" | "delete" | "clear")
     {
@@ -24,6 +27,9 @@ fn native_value_invoke(
     args: Vec<NativeValue>,
     name: &str,
 ) -> NativeValue {
+    if let NativeValue::Promise(promise) = recv {
+        return NativeValue::Promise(native_promise_then(promise, args));
+    }
     if let NativeValue::Map(map) = recv {
         let key = args.first().cloned().unwrap_or(NativeValue::Undefined);
         match method {
