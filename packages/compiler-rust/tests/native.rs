@@ -82,6 +82,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-records/runtime-types-only.ts",
         "rust-native-callbacks/main.ts",
         "rust-native-callbacks/runtime-types-only.ts",
+        "rust-native-js-contracts/contracts.ts",
     ]
     .into_iter()
     .enumerate()
@@ -523,4 +524,108 @@ fn json_aggregate_mutations_are_refused_without_publishing_artifacts() {
     assert!(String::from_utf8_lossy(&result.stderr).contains("SCN1001"));
     assert!(!target.exists());
     assert!(!target.with_extension("ir.json").exists());
+}
+
+#[test]
+fn declaration_contracts_validate_js_bodies_and_refuse_ambiguous_abis() {
+    for (name, declarations, implementation, call, code) in [
+        (
+            "return-type",
+            "export declare function value(n: number): number;",
+            "export function value(n) { return 'wrong'; }",
+            "value(2)",
+            "SCN1001",
+        ),
+        (
+            "callback-argument",
+            "export declare function value(cb: (n: number) => number): number;",
+            "export function value(cb) { return cb('wrong'); }",
+            "value(n => n + 1)",
+            "SCN1001",
+        ),
+        (
+            "public-any",
+            "export declare function value(n: any): number;",
+            "export function value(n) { return 1; }",
+            "value(2)",
+            "SCN1001",
+        ),
+        (
+            "consumer-type",
+            "export declare function value(n: number): number;",
+            "export function value(n) { return n; }",
+            "value('wrong')",
+            "TS2345",
+        ),
+        (
+            "overloaded",
+            "export declare function value(n: number): number; export declare function value(n: string): string;",
+            "export function value(n) { return n; }",
+            "value(2)",
+            "SCN1001",
+        ),
+        (
+            "conflicting",
+            "export declare function value(n: number): number; export declare function other(n: string): string;",
+            "function shared(n) { return n; } export { shared as value, shared as other };",
+            "value(2)",
+            "SCN1001",
+        ),
+        (
+            "arity",
+            "export declare function value(n: number, extra: number): number;",
+            "export function value(n) { return n; }",
+            "value(2, 3)",
+            "SCN1001",
+        ),
+        (
+            "monomorphic-local",
+            "export declare function value(n: number): number;",
+            "export function value(n) { let local = n; local = 'changed'; return 1; }",
+            "value(2)",
+            "SCN1001",
+        ),
+        (
+            "record-body",
+            "export declare function value(n: number): { count: number };",
+            "export function value(n) { return { count: 'wrong' }; }",
+            "value(2).count",
+            "SCN1001",
+        ),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("package.json"), "{\"type\":\"module\"}").unwrap();
+        let package = temp.path().join("node_modules/contract");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(package.join("package.json"), "{\"name\":\"contract\",\"type\":\"module\",\"exports\":{\".\":{\"types\":\"./public.d.mts\",\"default\":\"./implementation.mjs\"}}}").unwrap();
+        fs::write(package.join("public.d.mts"), declarations).unwrap();
+        fs::write(package.join("implementation.mjs"), implementation).unwrap();
+        let input = temp.path().join("main.ts");
+        fs::write(
+            &input,
+            format!("import {{ value }} from 'contract'; console.log({call});"),
+        )
+        .unwrap();
+        let target = binary(temp.path(), name);
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(input)
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!result.status.success(), "{name}");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains(code),
+            "{name}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            assert!(!artifact.exists(), "{name}: {}", artifact.display());
+        }
+    }
 }

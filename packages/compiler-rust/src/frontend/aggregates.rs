@@ -155,6 +155,11 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn narrowed(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
+        // A lowered value already carries a verified native representation.
+        // Untyped JS doesn't supply additional control-flow evidence.
+        if !matches!(value.ty(), Type::Union { .. }) || self.checker_any(node) {
+            return Ok(value);
+        }
         let target = self.ty(node)?;
         if value.ty() == target {
             return Ok(value);
@@ -207,6 +212,14 @@ impl Lowerer<'_> {
                     {
                         matches.push(arm);
                     }
+                }
+                if matches.is_empty() {
+                    matches = self.unions[union_id]
+                        .arms
+                        .iter()
+                        .filter(|ty| matches!(ty, Type::Record { .. }))
+                        .cloned()
+                        .collect();
                 }
                 if matches.len() != 1 {
                     return Err(
@@ -453,7 +466,11 @@ impl Lowerer<'_> {
             op: op.into(),
             left: Box::new(left),
             right: Box::new(right),
-            r#type: self.ty(node)?,
+            r#type: if matches!(op, "+" | "-" | "*" | "/" | "%" | "**") {
+                Type::F64
+            } else {
+                Type::Bool
+            },
             loc: self.loc(node),
         })
     }

@@ -15,6 +15,7 @@ use std::{
 };
 mod aggregates;
 mod callbacks;
+mod declarations;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
 
@@ -49,7 +50,13 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             .collect::<Vec<_>>()
             .join("\n"));
     }
-    let execution = needs_execution_view().then(|| crate::project::execution_view(options));
+    let needs_execution = needs_execution_view();
+    let catalog = if needs_execution {
+        Some(declarations::snapshot(&source)?)
+    } else {
+        None
+    };
+    let execution = needs_execution.then(|| crate::project::execution_view(options));
     let _execution_scope = execution.map(|program| goport_core::core::enter_program(Some(program)));
     if execution.is_some() {
         program::bind_all();
@@ -67,24 +74,13 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         .find(|node| source_file_info(*node).file_name == source)
         .ok_or_else(|| "SCN0002: frontend did not return the input source file".to_string())?;
     program::with_type_checker_for_file(file, move |checker| {
-        let mut lowerer = Lowerer {
-            checker,
-            file: source.clone(),
-            locals: Vec::new(),
-            bindings: HashMap::new(),
-            functions: HashMap::new(),
-            return_type: None,
-            native_functions: HashMap::new(),
-            native_namespaces: HashMap::new(),
-            json_imports: HashMap::new(),
-            records: Vec::new(),
-            unions: Vec::new(),
-            types: HashMap::new(),
-            outer: Vec::new(),
-            captures: Vec::new(),
-            lifted: Vec::new(),
-            next_closure: 0,
-        };
+        let linked = catalog.map(|catalog| catalog.link(checker));
+        let mut lowerer = Lowerer::new(checker, source.clone());
+        if let Some(linked) = linked {
+            lowerer.records = linked.records;
+            lowerer.unions = linked.unions;
+            lowerer.declarations = linked.hints;
+        }
         let mut files = Vec::new();
         lowerer.dependencies(file, &mut HashSet::new(), &mut HashSet::new(), &mut files)?;
         for file in &files {
@@ -194,9 +190,31 @@ struct Lowerer<'a> {
     captures: Vec<(u32, Param)>,
     lifted: Vec<Function>,
     next_closure: usize,
+    declarations: HashMap<declarations::Key, declarations::Hint>,
 }
 
-impl Lowerer<'_> {
+impl<'a> Lowerer<'a> {
+    fn new(checker: &'a mut Checker, file: String) -> Self {
+        Self {
+            checker,
+            file,
+            locals: Vec::new(),
+            bindings: HashMap::new(),
+            functions: HashMap::new(),
+            return_type: None,
+            native_functions: HashMap::new(),
+            native_namespaces: HashMap::new(),
+            json_imports: HashMap::new(),
+            records: Vec::new(),
+            unions: Vec::new(),
+            types: HashMap::new(),
+            outer: Vec::new(),
+            captures: Vec::new(),
+            lifted: Vec::new(),
+            next_closure: 0,
+            declarations: HashMap::new(),
+        }
+    }
     fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
         let clause = node.import_clause();
         if clause.is_nil() {
@@ -493,6 +511,18 @@ impl Lowerer<'_> {
                 "only named synchronous non-generic function bodies are ported",
             ));
         }
+        let declared = self.declared(node).cloned();
+        if let Some(hint) = &declared {
+            if let Some(reason) = &hint.reason {
+                return Err(self.refuse(node, reason));
+            }
+            if hint.params.len() != node.parameters().len() {
+                return Err(self.refuse(
+                    node,
+                    "public JavaScript contract/implementation arity differs",
+                ));
+            }
+        }
         let mut params = Vec::new();
         for (index, param) in node.parameters().into_iter().enumerate() {
             if param.name().kind() != SyntaxKind::Identifier
@@ -509,17 +539,34 @@ impl Lowerer<'_> {
             params.push(Param {
                 local_id: format!("p{index}"),
                 name: param.name().text().into(),
-                r#type: self.storage_type(param.name())?,
+                r#type: if let Some(hint) = &declared {
+                    hint.params[index].clone().ok_or_else(|| {
+                        self.refuse(
+                            param,
+                            "public JavaScript parameter type has no native representation",
+                        )
+                    })?
+                } else {
+                    self.storage_type(param.name())?
+                },
             });
         }
-        let sig = self.checker.get_signature_from_declaration(node);
-        let ret = self.checker.get_return_type_of_signature(sig);
-        let flags = self.checker.ty(ret).flags;
-        let return_type = self
-            .type_id(ret)
-            .filter(|ty| !matches!(ty, Type::Null | Type::Undefined))
-            .or_else(|| flags.intersects(TypeFlags::VOID).then_some(Type::Void))
-            .ok_or_else(|| self.refuse(node, "function return type is not ported"))?;
+        let return_type = if let Some(hint) = declared {
+            hint.ret.ok_or_else(|| {
+                self.refuse(
+                    node,
+                    "public JavaScript return type has no native representation",
+                )
+            })?
+        } else {
+            let sig = self.checker.get_signature_from_declaration(node);
+            let ret = self.checker.get_return_type_of_signature(sig);
+            let flags = self.checker.ty(ret).flags;
+            self.type_id(ret)
+                .filter(|ty| !matches!(ty, Type::Null | Type::Undefined))
+                .or_else(|| flags.intersects(TypeFlags::VOID).then_some(Type::Void))
+                .ok_or_else(|| self.refuse(node, "function return type is not ported"))?
+        };
         let symbol = self.symbol(node.name());
         if symbol == 0 {
             return Err(self.refuse(node, "function declaration has no resolved native symbol"));
@@ -632,6 +679,16 @@ impl Lowerer<'_> {
         })
     }
     fn storage_type(&mut self, node: Node) -> Result<Type, String> {
+        if node.parent().kind() == SyntaxKind::VariableDeclaration
+            && let Some(hint) = self.declared(node.parent())
+        {
+            return hint.function_type().ok_or_else(|| {
+                self.refuse(
+                    node,
+                    "public JavaScript function value has no native signature",
+                )
+            });
+        }
         let ty = self.ty(node)?;
         if matches!(ty, Type::Null | Type::Undefined) {
             return Err(self.refuse(
@@ -702,8 +759,21 @@ impl Lowerer<'_> {
                             "initialized identifier declarations are required",
                         ));
                     }
-                    let ty = self.storage_type(name)?;
-                    let init = self.expected_expression(declaration.initializer(), ty.clone())?;
+                    let storage = self.storage_type(name);
+                    let (ty, init) = if self.declared(declaration).is_none() && storage.is_err() {
+                        let init = self.expression(declaration.initializer())?;
+                        if matches!(init.ty(), Type::Void | Type::Null | Type::Undefined) {
+                            return Err(
+                                self.refuse(declaration, "initializer has no native storage type")
+                            );
+                        }
+                        (init.ty(), init)
+                    } else {
+                        let ty = storage?;
+                        let init =
+                            self.expected_expression(declaration.initializer(), ty.clone())?;
+                        (ty, init)
+                    };
                     if ty != init.ty() {
                         return Err(self.refuse(declaration, "coercion is not ported"));
                     }
@@ -895,7 +965,7 @@ impl Lowerer<'_> {
                 if !matches!((op, operand.ty()), ("-", Type::F64) | ("!", Type::Bool)) {
                     return Err(self.refuse(node, "unary coercions are not ported"));
                 }
-                let r#type = self.ty(node)?;
+                let r#type = if op == "!" { Type::Bool } else { Type::F64 };
                 Ok(Expr::Unary {
                     op: op.into(),
                     operand,

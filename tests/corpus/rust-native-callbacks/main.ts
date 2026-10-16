@@ -32,6 +32,9 @@ console.log("shared", siblings(), capturedParameter(3), nested(42)()());
 const first = () => 1;
 const second = () => 1;
 console.log("identity", first === first, first === second);
+function fresh(): () => number { return () => 1; }
+function namedReference(): (value: number) => number { return twice; }
+console.log("fresh", fresh() === fresh(), namedReference() === twice);
 function voidCallback(callback: (value: number) => void): void { callback(5); }
 voidCallback(value => console.log("void", value));
 voidCallback(value => value + 2);
