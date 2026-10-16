@@ -52,7 +52,11 @@ pub fn discover(input: &Path, explicit: Option<&Path>) -> Result<Option<PathBuf>
     Ok(None)
 }
 
-pub fn load(input: &Path, work: &Path, project: Option<&Path>) -> Result<(), String> {
+pub fn load(
+    input: &Path,
+    work: &Path,
+    project: Option<&Path>,
+) -> Result<(ProgramOptions, &'static goport_core::core::GoProgram), String> {
     let source = path_for_frontend(input);
     let config_path = if let Some(project) = project {
         project.to_path_buf()
@@ -121,7 +125,7 @@ pub fn load(input: &Path, work: &Path, project: Option<&Path>) -> Result<(), Str
     roots.dedup();
     let config = config.with_file_names(roots);
     let host = new_cached_fs_compiler_host(&cwd, fs, &bundled::lib_path(), None, None, None);
-    program::install_new_program(ProgramOptions {
+    let options = ProgramOptions {
         host,
         config: Rc::new(config),
         use_source_of_project_reference: false,
@@ -130,8 +134,34 @@ pub fn load(input: &Path, work: &Path, project: Option<&Path>) -> Result<(), Str
         project_name: String::new(),
         create_module_resolver: None,
         skip_module_resolution: false,
-    })?;
-    Ok(())
+    };
+    let program = version(options.clone());
+    Ok((options, program))
+}
+
+/// The typed program has already passed diagnostics. Resolve package runtime
+/// exports with the same Rust resolver, keeping declarations for checking only.
+pub fn execution_view(mut options: ProgramOptions) -> &'static goport_core::core::GoProgram {
+    let mut config = options
+        .config
+        .with_file_names(options.config.parsed_config.file_names.clone());
+    let compiler = Rc::make_mut(&mut config.parsed_config.compiler_options);
+    compiler.no_dts_resolution = Tristate::True;
+    compiler.allow_js = Tristate::True;
+    // Consumers are checked against the public declarations in the first
+    // program. JS bodies supply separate inference for native lowering.
+    compiler.check_js = Tristate::False;
+    // A compiler must load package implementations beyond tsc's default
+    // zero-depth JS inference boundary. The loader deduplicates cycles.
+    compiler.max_node_module_js_depth = Some(i64::MAX);
+    options.config = Rc::new(config);
+    version(options)
+}
+
+fn version(options: ProgramOptions) -> &'static goport_core::core::GoProgram {
+    let _parse_scope = goport_core::core::enter_program(None);
+    let native = Rc::new(goport_core::frontend::compiler::new_program(options));
+    program::new_program_version(&native, None)
 }
 
 fn is_declaration(path: &str) -> bool {

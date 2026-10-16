@@ -1,9 +1,12 @@
 //! Theo's Rust parser/binder/checker, directly linked. No compiler subprocess.
-use crate::ir::{self, Expr, Function, Loc, Local, Module, Param, Stmt, Type};
+use crate::{
+    builtins,
+    ir::{self, Expr, Function, Loc, Local, Module, Param, Stmt, Type},
+};
 use goport_core::{
     checker::Checker,
     flags::{ModifierFlags, NodeFlags, SymbolFlags, TypeFlags},
-    prelude::{Node, SyntaxKind, source_file_info},
+    prelude::{Node, SyntaxKind, TypeId, source_file_info},
     program,
 };
 use std::{
@@ -29,7 +32,8 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         return Err("SCN0001: non-Unicode input paths are not ported".into());
     }
     let source = path_for_frontend(input);
-    crate::project::load(input, work, project)?;
+    let (options, checked) = crate::project::load(input, work, project)?;
+    let _checked_scope = goport_core::core::enter_program(Some(checked));
     program::bind_all();
     let mut diagnostics = program::get_config_file_parsing_diagnostics();
     diagnostics.extend(program::get_program_diagnostics());
@@ -43,6 +47,19 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             .collect::<Vec<_>>()
             .join("\n"));
     }
+    let execution = needs_execution_view().then(|| crate::project::execution_view(options));
+    let _execution_scope = execution.map(|program| goport_core::core::enter_program(Some(program)));
+    if execution.is_some() {
+        program::bind_all();
+        let syntax = program::get_syntactic_diagnostics(Node::NIL);
+        if !syntax.is_empty() {
+            return Err(syntax
+                .iter()
+                .map(program::format_diagnostic)
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
+    }
     let file = program::source_files()
         .into_iter()
         .find(|node| source_file_info(*node).file_name == source)
@@ -55,6 +72,9 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             bindings: HashMap::new(),
             functions: HashMap::new(),
             return_type: None,
+            native_functions: HashMap::new(),
+            native_namespaces: HashMap::new(),
+            json_imports: HashMap::new(),
         };
         let mut files = Vec::new();
         lowerer.dependencies(file, &mut HashSet::new(), &mut HashSet::new(), &mut files)?;
@@ -97,6 +117,43 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
     })
 }
 
+fn needs_execution_view() -> bool {
+    program::source_files().into_iter().any(|file| {
+        if is_declaration(&source_file_info(file).file_name) {
+            return false;
+        }
+        program::with_type_checker_for_file(file, move |checker| {
+            file.statements().into_iter().any(|node| {
+                if !matches!(
+                    node.kind(),
+                    SyntaxKind::ImportDeclaration | SyntaxKind::ExportDeclaration
+                ) || node.is_type_only()
+                    || (!node.import_clause().is_nil() && node.import_clause().is_type_only())
+                {
+                    return false;
+                }
+                let specifier = node.module_specifier();
+                if specifier.is_nil() || builtins::module(specifier.text()).is_some() {
+                    return false;
+                }
+                let symbol = checker.get_symbol_at_location(specifier, false);
+                if symbol.0 == 0 {
+                    return false;
+                }
+                let target = checker.sym(symbol).value_declaration;
+                target.kind() == SyntaxKind::SourceFile
+                    && is_declaration(&source_file_info(target).file_name)
+            })
+        })
+    })
+}
+
+fn is_declaration(path: &str) -> bool {
+    [".d.ts", ".d.mts", ".d.cts"]
+        .iter()
+        .any(|suffix| path.ends_with(suffix))
+}
+
 #[derive(Clone)]
 struct Signature {
     node: Node,
@@ -113,16 +170,196 @@ struct Lowerer<'a> {
     bindings: HashMap<u32, Local>,
     functions: HashMap<u32, Signature>,
     return_type: Option<Type>,
+    native_functions: HashMap<u32, (&'static str, String)>,
+    native_namespaces: HashMap<u32, &'static str>,
+    json_imports: HashMap<u32, serde_json::Value>,
 }
 
 impl Lowerer<'_> {
+    fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
+        let clause = node.import_clause();
+        if clause.is_nil() {
+            return Ok(());
+        }
+        let mut default_only = true;
+        clause.for_each_child(&mut |child: Node| {
+            if child.kind() != SyntaxKind::Identifier {
+                default_only = false;
+            }
+            false
+        });
+        if !default_only || clause.name().is_nil() {
+            return Err(self.refuse(node, "only JSON default imports are ported"));
+        }
+        let bytes = std::fs::read(file).map_err(|e| format!("SCN0001: JSON import {file}: {e}"))?;
+        let value = serde_json::from_slice(&bytes)
+            .map_err(|e| self.refuse(node, &format!("JSON value is not representable: {e}")))?;
+        let symbol = self.symbol(clause.name());
+        if symbol == 0 {
+            return Err(self.refuse(node, "JSON import has no resolved default symbol"));
+        }
+        self.json_imports.insert(symbol, value);
+        Ok(())
+    }
+
+    fn json_value(&mut self, node: Node) -> Option<serde_json::Value> {
+        match node.kind() {
+            SyntaxKind::Identifier => {
+                let symbol = self.symbol(node);
+                self.json_imports.get(&symbol).cloned()
+            }
+            SyntaxKind::PropertyAccessExpression => self
+                .json_value(node.expression())?
+                .get(node.name().text())
+                .cloned(),
+            _ => None,
+        }
+    }
+
+    fn json_expression(&self, node: Node, value: serde_json::Value) -> Result<Expr, String> {
+        let loc = self.loc(node);
+        match value {
+            serde_json::Value::String(value) => Ok(Expr::StrLit { value, r#type: Type::String, loc }),
+            serde_json::Value::Bool(value) => Ok(Expr::BoolLit { value, r#type: Type::Bool, loc }),
+            serde_json::Value::Number(value) => Ok(Expr::NumLit { value: value.as_f64().ok_or_else(|| self.refuse(node, "JSON number is not representable"))?, spelling: None, r#type: Type::F64, loc }),
+            _ => Err(self.refuse(node, "JSON objects/arrays/null need native aggregate lowering; only primitive field reads are ported")),
+        }
+    }
+
+    fn native_import(&mut self, node: Node, module: &'static str) {
+        fn walk(node: Node, nodes: &mut Vec<Node>) {
+            nodes.push(node);
+            node.for_each_child(&mut |child| {
+                walk(child, nodes);
+                false
+            });
+        }
+        let mut nodes = Vec::new();
+        walk(node, &mut nodes);
+        let clause = node.import_clause();
+        let default = if clause.is_nil() {
+            Node::NIL
+        } else {
+            clause.name()
+        };
+        if !default.is_nil() {
+            let symbol = self.symbol(default);
+            if symbol != 0 {
+                self.native_namespaces.insert(symbol, module);
+            }
+        }
+        for node in nodes {
+            if node.is_type_only() {
+                continue;
+            }
+            match node.kind() {
+                SyntaxKind::ImportSpecifier | SyntaxKind::ExportSpecifier => {
+                    let symbol = self.symbol(node.name());
+                    if symbol != 0 {
+                        self.native_functions.insert(
+                            symbol,
+                            (module, node.property_name_or_name().text().to_string()),
+                        );
+                    }
+                }
+                SyntaxKind::NamespaceImport => {
+                    let symbol = self.symbol(node.name());
+                    if symbol != 0 {
+                        self.native_namespaces.insert(symbol, module);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn native_namespace(&mut self, node: Node) -> Option<&'static str> {
+        if node.kind() == SyntaxKind::Identifier {
+            let symbol = self.symbol(node);
+            if let Some(module) = self.native_namespaces.get(&symbol) {
+                return Some(*module);
+            }
+            if node.text() == "process" {
+                let symbol = self.checker.get_symbol_at_location(node, false);
+                if symbol.0 == 0 {
+                    return None;
+                }
+                let declaration = self.checker.sym(symbol).value_declaration;
+                if !declaration.is_nil() {
+                    let file = goport_core::ast::get_source_file_of_node(declaration);
+                    let path = &source_file_info(file).file_name;
+                    if path.contains("/node_modules/@types/node/")
+                        || path.contains("/node_modules/bun-types/")
+                    {
+                        return Some("process");
+                    }
+                }
+            }
+        } else if node.kind() == SyntaxKind::PropertyAccessExpression {
+            let base = self.native_namespace(node.expression())?;
+            if base == "path" || base == "path/win32" {
+                return match node.name().text() {
+                    "posix" => Some("path"),
+                    "win32" => Some("path/win32"),
+                    _ => None,
+                };
+            }
+        }
+        None
+    }
+
+    fn native_call(&mut self, node: Node, module: &str, member: &str) -> Result<Expr, String> {
+        let builtin = builtins::get(module, member).ok_or_else(|| {
+            self.refuse(
+                node,
+                &format!("native library call '{module}.{member}' is not ported"),
+            )
+        })?;
+        let mut args = node
+            .arguments()
+            .into_iter()
+            .map(|arg| self.expression(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        if member == "join" || member == "resolve" {
+            if args.iter().any(|arg| arg.ty() != Type::String) {
+                return Err(self.refuse(node, "path arguments must be primitive strings"));
+            }
+            args = vec![Expr::ArrayLit {
+                elems: args,
+                r#type: builtins::STRINGS,
+                loc: self.loc(node),
+            }];
+        } else if member == "basename" && args.len() == 1 {
+            args.push(Expr::StrLit {
+                value: String::new(),
+                r#type: Type::String,
+                loc: self.loc(node),
+            });
+        }
+        if args.len() != builtin.args.len()
+            || args
+                .iter()
+                .zip(builtin.args)
+                .any(|(arg, expected)| arg.ty() != *expected)
+        {
+            return Err(self.refuse(node, "native library overload is not ported"));
+        }
+        Ok(Expr::LibCall {
+            r#fn: builtin.ir.into(),
+            args,
+            r#type: builtin.result,
+            loc: self.loc(node),
+        })
+    }
+
     fn symbol(&mut self, node: Node) -> u32 {
         let mut symbol = self.checker.get_symbol_at_location(node, false);
-        if self
-            .checker
-            .sym(symbol)
-            .flags
-            .intersects(SymbolFlags::ALIAS)
+        if symbol.0 != 0
+            && self
+                .checker
+                .sym(symbol)
+                .flags
+                .intersects(SymbolFlags::ALIAS)
         {
             symbol = self.checker.get_aliased_symbol(symbol);
         }
@@ -143,7 +380,10 @@ impl Lowerer<'_> {
             return Ok(());
         }
         if !active.insert(path.clone()) {
-            return Err(self.refuse(file, "cyclic module initialization is not ported"));
+            // Re-entering an evaluating ESM module does not execute its body
+            // again. Functions are instantiated in the later prepass; main
+            // bindings only become available after their initialization.
+            return Ok(());
         }
         for node in file.statements() {
             if node.kind() != SyntaxKind::ImportDeclaration
@@ -160,14 +400,37 @@ impl Lowerer<'_> {
             if specifier.is_nil() {
                 continue;
             }
+            if let Some(module) = builtins::module(specifier.text()) {
+                self.native_import(node, module);
+                continue;
+            }
             // The project resolver also owns paths/package-import aliases.
             // Only executable source modules proceed to native lowering.
             let symbol = self.checker.get_symbol_at_location(specifier, false);
+            if symbol.0 == 0 {
+                return Err(self.refuse(
+                    node,
+                    &format!(
+                        "Rust frontend did not resolve runtime module '{}'",
+                        specifier.text()
+                    ),
+                ));
+            }
             let target = self.checker.sym(symbol).value_declaration;
             if target.kind() != SyntaxKind::SourceFile {
-                return Err(self.refuse(node, "import has no executable source module"));
+                return Err(self.refuse(
+                    node,
+                    &format!(
+                        "import '{}' has no executable source module",
+                        specifier.text()
+                    ),
+                ));
             }
             let target_path = &source_file_info(target).file_name;
+            if target_path.ends_with(".json") {
+                self.json_import(node, target_path)?;
+                continue;
+            }
             if [".d.ts", ".d.mts", ".d.cts"]
                 .iter()
                 .any(|suffix| target_path.ends_with(suffix))
@@ -175,7 +438,13 @@ impl Lowerer<'_> {
                     .iter()
                     .any(|suffix| target_path.ends_with(suffix))
             {
-                return Err(self.refuse(node, "import has no supported executable source module"));
+                return Err(self.refuse(
+                    node,
+                    &format!(
+                        "import '{}' resolves to unsupported runtime source '{target_path}'",
+                        specifier.text()
+                    ),
+                ));
             }
             self.dependencies(target, active, visited, ordered)?;
             self.file = path.clone();
@@ -221,10 +490,13 @@ impl Lowerer<'_> {
         let ret = self.checker.get_return_type_of_signature(sig);
         let flags = self.checker.ty(ret).flags;
         let return_type = self
-            .primitive_type(flags)
+            .type_id(ret)
             .or_else(|| flags.intersects(TypeFlags::VOID).then_some(Type::Void))
             .ok_or_else(|| self.refuse(node, "function return type is not ported"))?;
         let symbol = self.symbol(node.name());
+        if symbol == 0 {
+            return Err(self.refuse(node, "function declaration has no resolved native symbol"));
+        }
         if self.functions.contains_key(&symbol) {
             return Err(self.refuse(node, "function overloads are not ported"));
         }
@@ -289,6 +561,21 @@ impl Lowerer<'_> {
             None
         }
     }
+    fn type_id(&mut self, id: TypeId) -> Option<Type> {
+        if let Some(ty) = self.primitive_type(self.checker.ty(id).flags) {
+            return Some(ty);
+        }
+        if self.checker.is_array_type(id) {
+            let element = self.checker.get_element_type_of_array_type(id);
+            return match self.primitive_type(self.checker.ty(element).flags)? {
+                Type::String => Some(builtins::STRINGS),
+                Type::F64 => Some(Type::Array { elem: &Type::F64 }),
+                Type::Bool => Some(Type::Array { elem: &Type::Bool }),
+                _ => None,
+            };
+        }
+        None
+    }
     fn loc(&self, node: Node) -> Loc {
         Loc {
             file: self.file.clone(),
@@ -307,8 +594,7 @@ impl Lowerer<'_> {
     }
     fn ty(&mut self, node: Node) -> Result<Type, String> {
         let id = self.checker.get_type_at_location(node);
-        let flags = self.checker.ty(id).flags;
-        self.primitive_type(flags).ok_or_else(|| {
+        self.type_id(id).ok_or_else(|| {
             self.refuse(
                 node,
                 "type has no representation in the first native IR subset",
@@ -443,8 +729,34 @@ impl Lowerer<'_> {
         Ok(vec![stmt])
     }
     fn expression(&mut self, node: Node) -> Result<Expr, String> {
+        if let Some(value) = self.json_value(node) {
+            return self.json_expression(node, value);
+        }
         let loc = self.loc(node);
         match node.kind() {
+            SyntaxKind::ArrayLiteralExpression => {
+                let r#type = self.ty(node)?;
+                let elems = node
+                    .elements()
+                    .into_iter()
+                    .map(|element| self.expression(element))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if !matches!(r#type, Type::Array { .. }) {
+                    return Err(self.refuse(node, "only primitive array literals are ported"));
+                }
+                Ok(Expr::ArrayLit { elems, r#type, loc })
+            }
+            SyntaxKind::PropertyAccessExpression
+                if node.name().text() == "platform"
+                    && self.native_namespace(node.expression()) == Some("process") =>
+            {
+                Ok(Expr::LibCall {
+                    r#fn: "process.platform".into(),
+                    args: vec![],
+                    r#type: Type::String,
+                    loc,
+                })
+            }
             SyntaxKind::ParenthesizedExpression => self.expression(node.expression()),
             SyntaxKind::NumericLiteral => {
                 let text = node.text().replace('_', "");
@@ -533,6 +845,16 @@ impl Lowerer<'_> {
             }
             SyntaxKind::CallExpression => {
                 let member = node.expression();
+                if member.kind() == SyntaxKind::Identifier {
+                    let symbol = self.symbol(member);
+                    if let Some((module, name)) = self.native_functions.get(&symbol).cloned() {
+                        return self.native_call(node, module, &name);
+                    }
+                } else if member.kind() == SyntaxKind::PropertyAccessExpression
+                    && let Some(module) = self.native_namespace(member.expression())
+                {
+                    return self.native_call(node, module, member.name().text());
+                }
                 let symbol_node = if member.kind() == SyntaxKind::PropertyAccessExpression {
                     member.name()
                 } else {
@@ -546,9 +868,11 @@ impl Lowerer<'_> {
                     let base = self
                         .checker
                         .get_symbol_at_location(member.expression(), false);
-                    if self.checker.sym(base).flags.intersects(SymbolFlags::ALIAS) {
+                    if base.0 != 0 && self.checker.sym(base).flags.intersects(SymbolFlags::ALIAS) {
                         let target = self.checker.get_aliased_symbol(base);
-                        self.checker.sym(target).value_declaration.kind() == SyntaxKind::SourceFile
+                        target.0 != 0
+                            && self.checker.sym(target).value_declaration.kind()
+                                == SyntaxKind::SourceFile
                     } else {
                         false
                     }
@@ -598,9 +922,12 @@ impl Lowerer<'_> {
                 for arg in node.arguments() {
                     args.push(self.expression(arg)?);
                 }
-                if args.iter().any(|arg| arg.ty() == Type::Void) {
+                if args
+                    .iter()
+                    .any(|arg| !matches!(arg.ty(), Type::F64 | Type::String | Type::Bool))
+                {
                     return Err(
-                        self.refuse(node, "undefined console argument values are not ported")
+                        self.refuse(node, "non-primitive console argument values are not ported")
                     );
                 }
                 if args.len() > 1

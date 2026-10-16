@@ -11,6 +11,7 @@ pub enum Type {
     String,
     Bool,
     Void,
+    Array { elem: &'static Type },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -63,6 +64,17 @@ pub struct Local {
     rename_all_fields = "camelCase"
 )]
 pub enum Expr {
+    ArrayLit {
+        elems: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    LibCall {
+        r#fn: String,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     NumLit {
         #[serde(serialize_with = "number")]
         value: f64,
@@ -123,6 +135,8 @@ impl Expr {
             | Self::Bin { r#type, .. }
             | Self::Unary { r#type, .. }
             | Self::Call { r#type, .. }
+            | Self::ArrayLit { r#type, .. }
+            | Self::LibCall { r#type, .. }
             | Self::Intrinsic { r#type, .. } => *r#type,
         }
     }
@@ -216,7 +230,16 @@ pub fn validate(module: &Module) -> Result<(), String> {
 fn validate_function(f: &Function, functions: &HashMap<&str, &Function>) -> Result<(), String> {
     let mut locals = HashMap::new();
     for local in &f.locals {
-        if local.r#type == Type::Void || locals.insert(local.id.as_str(), local).is_some() {
+        let supported = matches!(
+            local.r#type,
+            Type::F64
+                | Type::String
+                | Type::Bool
+                | Type::Array {
+                    elem: &Type::F64 | &Type::String | &Type::Bool
+                }
+        );
+        if !supported || locals.insert(local.id.as_str(), local).is_some() {
             return Err("duplicate/void local".into());
         }
     }
@@ -237,6 +260,34 @@ fn validate_function(f: &Function, functions: &HashMap<&str, &Function>) -> Resu
         functions: &HashMap<&str, &Function>,
     ) -> Result<(), String> {
         match e {
+            Expr::ArrayLit {
+                elems,
+                r#type: Type::Array { elem },
+                ..
+            } => {
+                for value in elems {
+                    expr(value, locals, initialized, functions)?;
+                    if value.ty() != **elem {
+                        return Err("invalid array element".into());
+                    }
+                }
+                Ok(())
+            }
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } => {
+                let builtin = crate::builtins::by_ir(r#fn).ok_or("unknown native library call")?;
+                if *r#type != builtin.result || args.len() != builtin.args.len() {
+                    return Err("invalid native library signature".into());
+                }
+                for (arg, expected) in args.iter().zip(builtin.args) {
+                    expr(arg, locals, initialized, functions)?;
+                    if arg.ty() != *expected {
+                        return Err("invalid native library argument".into());
+                    }
+                }
+                Ok(())
+            }
             Expr::NumLit {
                 r#type: Type::F64, ..
             }
@@ -298,8 +349,8 @@ fn validate_function(f: &Function, functions: &HashMap<&str, &Function>) -> Resu
             } if name == "console.log" || name == "console.error" => {
                 for arg in args {
                     expr(arg, locals, initialized, functions)?;
-                    if arg.ty() == Type::Void {
-                        return Err("void console argument".into());
+                    if !matches!(arg.ty(), Type::F64 | Type::String | Type::Bool) {
+                        return Err("non-primitive console argument".into());
                     }
                 }
                 Ok(())

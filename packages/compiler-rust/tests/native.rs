@@ -72,6 +72,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-functions/main.ts",
         "rust-native-modules/main.ts",
         "rust-native-project/main.ts",
+        "rust-native-builtins/main.ts",
+        "rust-native-package/main.ts",
+        "rust-native-json/main.ts",
+        "rust-native-builtins/runtime-types-only.ts",
+        "rust-native-builtins/process-import.ts",
+        "rust-native-cycles/main.ts",
     ]
     .into_iter()
     .enumerate()
@@ -102,6 +108,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         let actual = Command::new(&target)
             .env("PATH", &path)
             .env("SCRIPTC_FORBIDDEN_MARKER", &marker)
+            .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
             .output()
             .unwrap();
         assert_eq!(actual.status.code(), expected.status.code(), "{name}");
@@ -207,14 +214,14 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
 }
 
 #[test]
-fn module_cycles_and_dependency_diagnostics_publish_no_artifacts() {
+fn module_tdz_reads_and_dependency_diagnostics_publish_no_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("main.ts");
     let dependency = temp.path().join("dependency.ts");
     for (source, other, code) in [
         (
-            "import './dependency.ts'; console.log('entry');",
-            "import './main.ts'; console.log('dependency');",
+            "import { other } from './dependency.ts'; export const value: number = other; console.log(value);",
+            "import { value } from './main.ts'; export const other: number = value;",
             "SCN1001",
         ),
         (
@@ -382,4 +389,87 @@ fn explicit_project_is_used_and_broken_configs_do_not_fall_back() {
     assert!(!failed.status.success());
     assert!(String::from_utf8_lossy(&failed.stderr).contains("missing.json"));
     assert!(!temp.path().join("failed.json").exists());
+}
+
+#[test]
+fn package_declarations_are_checked_before_runtime_implementation_lowering() {
+    let temp = tempfile::tempdir().unwrap();
+    for (entry, code, detail) in [
+        ("type-error.ts", "TS2345", "not assignable"),
+        ("unported-api.ts", "SCN1001", "fs/promises.readFile"),
+    ] {
+        let input = root()
+            .join("tests/corpus/rust-native-package/negative")
+            .join(entry);
+        let target = binary(temp.path(), entry);
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(input)
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(stderr.contains(code) && stderr.contains(detail), "{stderr}");
+        assert!(!target.exists());
+        assert!(!target.with_extension("ir.json").exists());
+    }
+}
+
+#[test]
+fn concurrent_native_builds_share_dependencies_without_binary_collisions() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = root().join("tests/corpus/rust-native-builtins/tsconfig.json");
+    let mut children = Vec::new();
+    for name in ["first", "second"] {
+        let input = temp.path().join(format!("{name}.ts"));
+        fs::write(&input, format!("import {{ dirname }} from 'node:path/posix'; console.log(dirname('/{name}/file')); ")).unwrap();
+        let output = binary(temp.path(), name);
+        let child = Command::new(compiler())
+            .arg("build")
+            .arg(input)
+            .arg("--project")
+            .arg(&project)
+            .arg("--out")
+            .arg(&output)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        children.push((name, output, child));
+    }
+    for (name, target, child) in children {
+        success(&child.wait_with_output().unwrap());
+        let actual = Command::new(target)
+            .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+            .output()
+            .unwrap();
+        success(&actual);
+        assert_eq!(actual.stdout, format!("/{name}\n").as_bytes());
+        assert!(actual.stderr.is_empty());
+    }
+}
+
+#[test]
+fn json_aggregate_mutations_are_refused_without_publishing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("package.json"), "{\"type\":\"module\"}").unwrap();
+    fs::write(temp.path().join("data.json"), "{\"version\":\"1.0.0\"}").unwrap();
+    let input = temp.path().join("main.ts");
+    fs::write(&input, "import data from './data.json' with { type: 'json' }; data.version = 'changed'; console.log(data.version);").unwrap();
+    let target = binary(temp.path(), "mutated-json");
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(input)
+        .arg("--project")
+        .arg(root().join("tests/corpus/rust-native-json/tsconfig.json"))
+        .arg("--out")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("SCN1001"));
+    assert!(!target.exists());
+    assert!(!target.with_extension("ir.json").exists());
 }

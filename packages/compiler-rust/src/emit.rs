@@ -6,6 +6,12 @@ fn rust_type(ty: Type) -> &'static str {
         Type::Bool => "bool",
         Type::String => "String",
         Type::Void => "()",
+        Type::Array {
+            elem: &Type::String,
+        } => "runtime::JsArray<runtime::JsString>",
+        Type::Array { elem: &Type::F64 } => "runtime::JsArray<f64>",
+        Type::Array { elem: &Type::Bool } => "runtime::JsArray<bool>",
+        Type::Array { .. } => unreachable!("IR validated"),
     }
 }
 
@@ -15,6 +21,9 @@ pub fn rust(module: &Module) -> Result<String, String> {
         "// scriptc native IR v13; engine: none\n#![forbid(unsafe_code)]\n#![allow(unused_parens, unused_mut, unused_variables)]\n",
     );
     output.push_str(include_str!("program_support.rs"));
+    if uses_runtime(module) {
+        output.push_str("\nuse scriptc_runtime as runtime;\n");
+    }
     for function in &module.functions {
         let params = function
             .params
@@ -32,19 +41,99 @@ pub fn rust(module: &Module) -> Result<String, String> {
         }
         output.push_str("}\n");
     }
-    output.push_str(&format!("\nfn main() {{ {}(); }}\n", module.entry));
+    if uses_runtime(module) {
+        output.push_str(&format!("\nfn main() {{ runtime::init(); let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {}())); let error = outcome.err().map(|payload| {{ let caught = runtime::caught_from_panic(payload); runtime::caught_to_string(&caught).to_string() }}); runtime::finish(); if let Some(error) = error {{ eprintln!(\"Uncaught {{error}}\"); std::process::exit(1); }} }}\n", module.entry));
+    } else {
+        output.push_str(&format!("\nfn main() {{ {}(); }}\n", module.entry));
+    }
     Ok(output)
+}
+
+pub fn uses_runtime(module: &Module) -> bool {
+    fn expr(value: &Expr) -> bool {
+        match value {
+            Expr::ArrayLit { .. } | Expr::LibCall { .. } => true,
+            Expr::Bin { left, right, .. } => expr(left) || expr(right),
+            Expr::Unary { operand, .. } => expr(operand),
+            Expr::Call { args, .. } | Expr::Intrinsic { args, .. } => args.iter().any(expr),
+            _ => false,
+        }
+    }
+    fn body(stmts: &[Stmt]) -> bool {
+        stmts.iter().any(|stmt| match stmt {
+            Stmt::VarDecl { init, .. } => expr(init),
+            Stmt::Assign { value, .. } => expr(value),
+            Stmt::Expression { expr: value, .. } => expr(value),
+            Stmt::Return { value, .. } => value.as_ref().is_some_and(expr),
+            Stmt::Block { body: stmts, .. } => body(stmts),
+            Stmt::If {
+                cond, then, else_, ..
+            } => expr(cond) || body(then) || else_.as_ref().is_some_and(|other| body(other)),
+        })
+    }
+    module.functions.iter().any(|f| {
+        matches!(f.return_type, Type::Array { .. })
+            || f.params
+                .iter()
+                .any(|p| matches!(p.r#type, Type::Array { .. }))
+            || f.locals
+                .iter()
+                .any(|local| matches!(local.r#type, Type::Array { .. }))
+            || body(&f.body)
+    })
 }
 
 fn expr(value: &Expr) -> String {
     match value {
+        Expr::ArrayLit {
+            elems,
+            r#type: Type::Array { elem },
+            ..
+        } => {
+            let values = elems
+                .iter()
+                .map(|value| {
+                    if **elem == Type::String {
+                        format!("runtime::JsString::from({})", expr(value))
+                    } else {
+                        expr(value)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let element = if **elem == Type::String {
+                "runtime::JsString"
+            } else {
+                rust_type(**elem)
+            };
+            format!("runtime::array_new::<{element}>(vec![{values}])")
+        }
+        Expr::ArrayLit { .. } => unreachable!("IR validated"),
+        Expr::LibCall { r#fn, args, .. } => {
+            let builtin = crate::builtins::by_ir(r#fn).expect("IR validated");
+            let args = args
+                .iter()
+                .map(|arg| match arg.ty() {
+                    Type::String => format!("&runtime::JsString::from({})", expr(arg)),
+                    Type::Array { .. } => format!("&({})", expr(arg)),
+                    _ => expr(arg),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let call = format!("runtime::{}({args})", builtin.runtime);
+            if builtin.result == Type::String {
+                format!("({call}).to_string()")
+            } else {
+                call
+            }
+        }
         Expr::NumLit { value, .. } => format!("f64::from_bits({}_u64)", value.to_bits()),
         Expr::StrLit { value, .. } => format!("String::from({value:?})"),
         Expr::BoolLit { value, .. } => value.to_string(),
         Expr::VarRef {
             local_id, r#type, ..
         } => {
-            if *r#type == Type::String {
+            if matches!(r#type, Type::String | Type::Array { .. }) {
                 format!("{local_id}.clone()")
             } else {
                 local_id.clone()
@@ -75,6 +164,7 @@ fn expr(value: &Expr) -> String {
                     Type::Bool => format!("({}).to_string()", expr(arg)),
                     Type::String => expr(arg),
                     Type::Void => unreachable!("IR validated"),
+                    Type::Array { .. } => unreachable!("IR validated"),
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -93,12 +183,7 @@ fn statement(stmt: &Stmt, function: &Function, output: &mut String) {
                 .find(|local| local.id == *local_id)
                 .expect("IR validated");
             let mutable = if local.mutable { "mut " } else { "" };
-            let ty = match local.r#type {
-                Type::F64 => "f64",
-                Type::Bool => "bool",
-                Type::String => "String",
-                Type::Void => unreachable!("IR validated"),
-            };
+            let ty = rust_type(local.r#type);
             writeln!(output, "let {mutable}{local_id}: {ty} = {};", expr(init)).unwrap();
         }
         Stmt::Assign {

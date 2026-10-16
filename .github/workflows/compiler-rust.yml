@@ -34,10 +34,13 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             packages/compiler-rust/target
-          key: compiler-rust-${{ runner.os }}-${{ hashFiles('packages/compiler-rust/Cargo.lock', 'packages/compiler-rust/rust-toolchain.toml') }}
+          key: compiler-rust-${{ runner.os }}-${{ hashFiles('packages/compiler-rust/Cargo.lock', 'packages/compiler-rust/rust-toolchain.toml', 'packages/runtime-rust/Cargo.lock') }}
       - name: Format
         working-directory: packages/compiler-rust
         run: cargo fmt --check
+      - name: Fetch pinned runtime dependencies
+        working-directory: packages/compiler-rust
+        run: cargo fetch --locked --manifest-path ../runtime-rust/Cargo.toml
       - name: Native and differential tests
         working-directory: packages/compiler-rust
         run: cargo test --locked -- --test-threads=1

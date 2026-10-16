@@ -6,21 +6,30 @@ The pipeline is source → Theo's Rust frontend → scriptc IR v13 → native IR
 
 The current subset accepts `.ts`, `.mts`, `.js` and `.mjs` files with initialized `let`/`const` identifiers, primitive numbers/strings/booleans, numeric arithmetic and comparisons, unary minus/boolean negation, local assignments, blocks, boolean `if`/`else`, type aliases/interfaces and ambient `console.log`/`console.error`. Symbol identities preserve shadowed bindings. Non-finite numbers, negative zero and decimal literal spelling use the existing IR encoding.
 
-Named top-level synchronous functions accept required primitive parameters and primitive/void returns. Direct calls, hoisting, recursion, mutual recursion and parameter reassignment lower to the existing IR `call`/`return` contract. Parameters retain their matching entries in the IR locals table.
+Named top-level synchronous functions accept required native value parameters and native value/void returns. Direct calls, hoisting, recursion, mutual recursion and parameter reassignment lower to the existing IR `call`/`return` contract. Parameters retain their matching entries in the IR locals table. Flat arrays of strings, numbers and booleans can be created, assigned, passed and returned using the existing typed array IR; indexed access, spreads, mutation and array console inspection are later migrations.
 
-ESM source imports use the Rust frontend's resolved module symbols, including config-relative paths aliases and package imports. Named/default imports, namespace function calls, re-exports and imported primitive values are linked across `.ts`, `.mts`, `.js` and `.mjs` source modules. Acyclic modules initialize once in dependency order; `import type` dependencies are erased. Functions may call imported functions but cannot capture module variables yet.
+ESM source imports use the Rust frontend's resolved module symbols, including config-relative paths aliases and package imports. Named/default imports, namespace function calls, re-exports and imported primitive values are linked across `.ts`, `.mts`, `.js` and `.mjs` source modules. Modules initialize once in DFS evaluation order, including cycles with hoisted function calls and initialized native values; reads before initialization are refused. `import type` dependencies are erased. Functions may call imported functions but cannot capture module variables yet.
 
 The compiler discovers the closest `tsconfig.json` above the entry, or accepts `--project <file-or-directory>`. The upstream Rust parser preserves JSONC, `extends`, module resolution, paths, libs and Node/Bun type environments. Checking roots are the selected entry and project ambient declarations; executable dependencies are loaded by the resolver. Unrelated source/test roots are excluded. The native compiler overrides only `noEmit` and the checker worker count, and never edits the project. Invalid projects fail without fallback. Sources without a project use the standalone strict ES2022/ESNext configuration and a minimal mergeable console declaration.
 
-Closures, function values, nested/generic/async functions, optional/default/rest parameters, module cycles, npm/CommonJS imports, objects/arrays, loops, async operations, coercions, console format substitutions and lone UTF-16 surrogates are not ported yet. They produce TypeScript diagnostics or `SCN1001`; they never execute through another compiler or engine. Console calls with multiple arguments require a non-format literal when the first argument is a string. This executable does not yet compile the reddb applications or replace the existing CLI.
+For ESM packages that publish declarations separately from JavaScript, the public imports are typechecked first. A second Rust program resolves implementation exports with `noDtsResolution`, JavaScript loading and unrestricted package inference depth. That implementation AST supplies native lowering; unsupported bodies are refused. No user JavaScript is run during compilation. The `rust-native-package` differential fixture checks a `.d.mts`/`.mjs` package, aliases, module initialization and a local TypeScript dependency.
+
+Default JSON imports can supply static string/number/boolean fields, including nested field reads such as `pkg.version`. General JSON aggregate values and mutations are refused until their native record/array representation is ported.
+
+The first native Node calls are `path` join/resolve/normalize/dirname/basename/extname/isAbsolute/relative (including explicit posix/win32 variants), `fs.existsSync`, `os.homedir`/`tmpdir`/`platform`, and `process.cwd`/`platform`. They use existing IR `libCall` nodes and the memory-safe Rust runtime with `default-features = false`; no island feature is enabled. Other registered builtin imports may be unused, but unsupported calls are named refusals. Loading Node/Bun declarations does not itself implement their runtime APIs.
+
+Closures, function values, nested/generic/async functions, optional/default/rest parameters, CommonJS constructs, objects, general array operations, loops, async operations, coercions, console format substitutions and lone UTF-16 surrogates are not ported yet. They produce TypeScript diagnostics or `SCN1001`; they never execute through another compiler or engine. Console calls with multiple arguments require a non-format literal when the first argument is a string. This executable does not yet compile the reddb applications or replace the existing CLI.
 
 Build with the pinned Rust 1.98.0 toolchain:
 
 ```sh
 cargo build --locked --manifest-path packages/compiler-rust/Cargo.toml
+cargo fetch --locked --manifest-path packages/runtime-rust/Cargo.toml
 ```
 
 On Windows, the compiler is `packages/compiler-rust/target/debug/scriptc.exe`; on Unix it is `packages/compiler-rust/target/debug/scriptc`. `--version` reports the frontend revision, IR version and engine mode. The Windows binary output must have an `.exe` extension.
+
+Runtime-backed outputs currently require the sibling `packages/runtime-rust` sources at the compiler's build location. The fetch command preloads the pinned Rust dependencies; output builds remain offline. Dependency artifacts are shared under `packages/compiler-rust/target/native-programs` (override with `SCRIPTC_NATIVE_CARGO_TARGET_DIR`). Each build uses a distinct package/binary name, then copies its result into the temporary build directory before publishing, so concurrent builds cannot overwrite one another's executable. The program cache is separate from the compiler/test Cargo target lock.
 
 The first fixture can be compiled on Windows with:
 

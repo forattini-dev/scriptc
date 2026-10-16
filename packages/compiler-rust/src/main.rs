@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod builtins;
 mod emit;
 mod frontend;
 mod ir;
@@ -120,7 +121,7 @@ fn execute() -> Result<(), String> {
             let rust_path = out.with_extension("rs");
             // Compile before publishing any artifacts. A failed build leaves
             // previous successful outputs intact.
-            let binary = compile(&rust, work.path())?;
+            let binary = compile(&rust, work.path(), emit::uses_runtime(&module))?;
             let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
             fs::copy(&binary, staged.path()).map_err(|e| e.to_string())?;
             staged.flush().map_err(|e| e.to_string())?;
@@ -155,12 +156,36 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn compile(source: &str, work: &Path) -> Result<PathBuf, String> {
+fn compile(source: &str, work: &Path, uses_runtime: bool) -> Result<PathBuf, String> {
     fs::create_dir(work.join("src")).map_err(|e| e.to_string())?;
     fs::write(work.join("src/main.rs"), source).map_err(|e| e.to_string())?;
-    fs::write(work.join("Cargo.toml"), "[package]\nname = \"scriptc_program\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[dependencies]\nryu-js = \"=1.0.2\"\n[profile.dev]\ndebug = 0\nincremental = false\n").map_err(|e| e.to_string())?;
+    // Unique package names let parallel builds share dependency artifacts
+    // without racing over the program binary after Cargo releases its lock.
+    let package = work
+        .file_name()
+        .ok_or("missing work directory name")?
+        .to_string_lossy()
+        .replace('-', "_");
+    let compiler_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let runtime_root = compiler_root.join("../runtime-rust");
+    let quote_path = |path: &Path| {
+        serde_json::to_string(&frontend::path_for_frontend(path)).map_err(|e| e.to_string())
+    };
+    let mut manifest = format!(
+        "[package]\nname = {package:?}\nversion = \"0.0.0\"\nedition = \"2024\"\n[dependencies]\nryu-js = \"=1.0.2\"\n"
+    );
+    if uses_runtime {
+        let runtime = fs::canonicalize(&runtime_root).map_err(|e| e.to_string())?;
+        manifest.push_str(&format!("scriptc-runtime = {{ path = {}, default-features = false }}\n[patch.crates-io]\nzlib-rs = {{path = {}}}\nurl = {{path = {}}}\n", quote_path(&runtime)?, quote_path(&runtime.join("vendor/zlib-rs"))?, quote_path(&runtime.join("vendor/url"))?));
+        fs::copy(runtime.join("Cargo.lock"), work.join("Cargo.lock")).map_err(|e| e.to_string())?;
+    }
+    manifest.push_str("[profile.dev]\ndebug = 0\nincremental = false\n");
+    fs::write(work.join("Cargo.toml"), manifest).map_err(|e| e.to_string())?;
+    let target = std::env::var_os("SCRIPTC_NATIVE_CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| compiler_root.join("target/native-programs"));
     // The only executable used by the compiler is the Rust build toolchain.
-    // Offline dependencies were fetched while building this compiler itself.
+    // Offline dependencies are preloaded by the documented Cargo fetch step.
     let output = Command::new("cargo")
         .current_dir(work)
         .args([
@@ -173,7 +198,7 @@ fn compile(source: &str, work: &Path) -> Result<PathBuf, String> {
         ])
         .arg(work.join("Cargo.toml"))
         .arg("--target-dir")
-        .arg(work.join("target"))
+        .arg(&target)
         .env("CARGO_INCREMENTAL", "0")
         .env("CARGO_BUILD_JOBS", "1")
         .output()
@@ -185,9 +210,15 @@ fn compile(source: &str, work: &Path) -> Result<PathBuf, String> {
         ));
     }
     let name = if cfg!(windows) {
-        "scriptc_program.exe"
+        format!("{package}.exe")
     } else {
-        "scriptc_program"
+        package
     };
-    Ok(work.join("target/debug").join(name))
+    let binary = work.join(if cfg!(windows) {
+        "program.exe"
+    } else {
+        "program"
+    });
+    fs::copy(target.join("debug").join(name), &binary).map_err(|e| e.to_string())?;
+    Ok(binary)
 }
