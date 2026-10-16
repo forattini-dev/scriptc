@@ -6,9 +6,13 @@ The pipeline is source → Theo's Rust frontend → scriptc IR v13 → native IR
 
 The current subset accepts `.ts`, `.mts`, `.js` and `.mjs` files with initialized `let`/`const` identifiers, primitive numbers/strings/booleans, numeric arithmetic and comparisons, unary minus/boolean negation, local assignments, blocks, boolean `if`/`else`, type aliases/interfaces and ambient `console.log`/`console.error`. Symbol identities preserve shadowed bindings. Non-finite numbers, negative zero and decimal literal spelling use the existing IR encoding.
 
-Each invocation checks one entry with an explicit strict ES2022 configuration and a minimal console declaration. Loading the application's tsconfig and linking imported modules are later migration steps.
+Named top-level synchronous functions accept required primitive parameters and primitive/void returns. Direct calls, hoisting, recursion, mutual recursion and parameter reassignment lower to the existing IR `call`/`return` contract. Parameters retain their matching entries in the IR locals table.
 
-Functions, imports, objects/arrays, loops, async operations, coercions, console format substitutions and lone UTF-16 surrogates are not ported yet. They produce TypeScript diagnostics or `SCN1001`; they never execute through another compiler or engine. Console calls with multiple arguments require a non-format literal when the first argument is a string. This executable does not yet compile the reddb applications or replace the existing CLI.
+Relative ESM imports use the Rust frontend's resolved module symbols. Named/default imports, namespace function calls, re-exports and imported primitive values are linked across `.ts`, `.mts`, `.js` and `.mjs` source modules. Acyclic modules initialize once in dependency order; `import type` dependencies are erased. Functions may call imported functions but cannot capture module variables yet.
+
+Each invocation checks one entry and its source dependencies with an explicit strict ES2022/ESNext configuration, bundler module resolution, verbatim module syntax and a minimal console declaration. Loading the application's own tsconfig is a later migration step.
+
+Closures, function values, nested/generic/async functions, optional/default/rest parameters, module cycles, npm/CommonJS imports, objects/arrays, loops, async operations, coercions, console format substitutions and lone UTF-16 surrogates are not ported yet. They produce TypeScript diagnostics or `SCN1001`; they never execute through another compiler or engine. Console calls with multiple arguments require a non-format literal when the first argument is a string. This executable does not yet compile the reddb applications or replace the existing CLI.
 
 Build with the pinned Rust 1.98.0 toolchain:
 

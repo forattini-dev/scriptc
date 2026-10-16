@@ -1,4 +1,13 @@
-use crate::ir::{Expr, Module, Stmt, Type};
+use crate::ir::{Expr, Function, Module, Stmt, Type};
+
+fn rust_type(ty: Type) -> &'static str {
+    match ty {
+        Type::F64 => "f64",
+        Type::Bool => "bool",
+        Type::String => "String",
+        Type::Void => "()",
+    }
+}
 
 pub fn rust(module: &Module) -> Result<String, String> {
     crate::ir::validate(module)?;
@@ -6,11 +15,24 @@ pub fn rust(module: &Module) -> Result<String, String> {
         "// scriptc native IR v13; engine: none\n#![forbid(unsafe_code)]\n#![allow(unused_parens, unused_mut, unused_variables)]\n",
     );
     output.push_str(include_str!("program_support.rs"));
-    output.push_str("\nfn main() {\n");
-    for stmt in &module.functions[0].body {
-        statement(stmt, module, &mut output);
+    for function in &module.functions {
+        let params = function
+            .params
+            .iter()
+            .map(|p| format!("mut {}: {}", p.local_id, rust_type(p.r#type)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        output.push_str(&format!(
+            "\nfn {}({params}) -> {} {{\n",
+            function.name,
+            rust_type(function.return_type)
+        ));
+        for stmt in &function.body {
+            statement(stmt, function, &mut output);
+        }
+        output.push_str("}\n");
     }
-    output.push_str("}\n");
+    output.push_str(&format!("\nfn main() {{ {}(); }}\n", module.entry));
     Ok(output)
 }
 
@@ -41,6 +63,10 @@ fn expr(value: &Expr) -> String {
             }
         }
         Expr::Unary { op, operand, .. } => format!("({op}({}))", expr(operand)),
+        Expr::Call { callee, args, .. } => format!(
+            "{callee}({})",
+            args.iter().map(expr).collect::<Vec<_>>().join(", ")
+        ),
         Expr::Intrinsic { name, args, .. } => {
             let args = args
                 .iter()
@@ -57,11 +83,11 @@ fn expr(value: &Expr) -> String {
     }
 }
 
-fn statement(stmt: &Stmt, module: &Module, output: &mut String) {
+fn statement(stmt: &Stmt, function: &Function, output: &mut String) {
     use std::fmt::Write;
     match stmt {
         Stmt::VarDecl { local_id, init, .. } => {
-            let local = module.functions[0]
+            let local = function
                 .locals
                 .iter()
                 .find(|local| local.id == *local_id)
@@ -83,18 +109,26 @@ fn statement(stmt: &Stmt, module: &Module, output: &mut String) {
         Stmt::Expression { expr: value, .. } => {
             writeln!(output, "{};", expr(value)).unwrap();
         }
+        Stmt::Return { value, .. } => {
+            writeln!(
+                output,
+                "return {};",
+                value.as_ref().map(expr).unwrap_or_default()
+            )
+            .unwrap();
+        }
         Stmt::If {
             cond, then, else_, ..
         } => {
             writeln!(output, "if {} {{", expr(cond)).unwrap();
             for stmt in then {
-                statement(stmt, module, output);
+                statement(stmt, function, output);
             }
             output.push('}');
             if let Some(other) = else_ {
                 output.push_str(" else {\n");
                 for stmt in other {
-                    statement(stmt, module, output);
+                    statement(stmt, function, output);
                 }
                 output.push('}');
             }
@@ -103,7 +137,7 @@ fn statement(stmt: &Stmt, module: &Module, output: &mut String) {
         Stmt::Block { body, .. } => {
             output.push_str("{\n");
             for stmt in body {
-                statement(stmt, module, output);
+                statement(stmt, function, output);
             }
             output.push_str("}\n");
         }

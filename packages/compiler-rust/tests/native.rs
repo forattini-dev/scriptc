@@ -65,9 +65,18 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     let mut paths = vec![traps];
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
-    for name in ["main.ts", "numbers.ts", "plain.js"] {
-        let input = root().join("tests/corpus/rust-native-frontend").join(name);
-        let target = binary(temp.path(), name);
+    for (index, name) in [
+        "rust-native-frontend/main.ts",
+        "rust-native-frontend/numbers.ts",
+        "rust-native-frontend/plain.js",
+        "rust-native-functions/main.ts",
+        "rust-native-modules/main.ts",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let input = root().join("tests/corpus").join(name);
+        let target = binary(temp.path(), &format!("case-{index}"));
         let expected = Command::new(oracle()).arg(&input).output().unwrap();
         success(&expected);
         let build = Command::new(compiler())
@@ -105,6 +114,17 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
             serde_json::from_slice(&fs::read(target.with_extension("ir.json")).unwrap()).unwrap();
         assert_eq!(ir["irVersion"], 13);
         assert_eq!(ir["functions"][0]["name"], ir["entry"]);
+        if name.contains("functions") || name.contains("modules") {
+            let functions = ir["functions"].as_array().unwrap();
+            assert!(functions.len() > 1);
+            assert!(functions.iter().skip(1).any(|f| {
+                f["params"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|p| p["localId"].is_string() && p.get("id").is_none())
+            }));
+        }
         assert!(
             fs::read_to_string(target.with_extension("rs"))
                 .unwrap()
@@ -124,8 +144,8 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ),
         ("syntax", "const broken: = 1;", "TS1110"),
         (
-            "function",
-            "function f(): number { return 1; } console.log(f());",
+            "capture",
+            "const outer = 1; function f(): number { return outer; } console.log(f());",
             "SCN1001",
         ),
         ("loop", "while (true) {}", "SCN1001"),
@@ -134,6 +154,37 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ("bigint", "console.log(1n);", "SCN1001"),
         ("truthiness", "console.log(!1);", "SCN1001"),
         ("void-argument", "console.log(console.log(1));", "SCN1001"),
+        (
+            "block-function",
+            "{ function f() { return 1; } console.log(f()); }",
+            "SCN1001",
+        ),
+        (
+            "function-value",
+            "function f() { return 1; } const alias = f; console.log(alias());",
+            "SCN1001",
+        ),
+        (
+            "default-param",
+            "function f(n: number = 1) { return n; } console.log(f());",
+            "SCN1001",
+        ),
+        (
+            "optional-param",
+            "function f(n?: number) { return 1; } console.log(f());",
+            "SCN1001",
+        ),
+        ("async", "async function f() { return 1; }", "SCN1001"),
+        (
+            "generic",
+            "function f<T>(n: T) { return n; } console.log(f(1));",
+            "SCN1001",
+        ),
+        (
+            "nested-function",
+            "function f() { function inner() { return 1; } return inner(); } console.log(f());",
+            "SCN1001",
+        ),
     ] {
         let input = temp.path().join(format!("{name}.ts"));
         fs::write(&input, source).unwrap();
@@ -151,6 +202,59 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         assert!(!target.exists());
         assert!(!target.with_extension("rs").exists());
         assert!(!target.with_extension("ir.json").exists());
+    }
+}
+
+#[test]
+fn module_cycles_and_dependency_diagnostics_publish_no_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let dependency = temp.path().join("dependency.ts");
+    for (source, other, code) in [
+        (
+            "import './dependency.ts'; console.log('entry');",
+            "import './main.ts'; console.log('dependency');",
+            "SCN1001",
+        ),
+        (
+            "import { value } from './dependency.ts'; console.log(value);",
+            "export const value: number = 'invalid';",
+            "TS2322",
+        ),
+        (
+            "import { f } from './dependency.ts'; console.log(f());",
+            "const captured = 2; export function f(): number { return captured; }",
+            "SCN1001",
+        ),
+        (
+            "import * as ns from './dependency.ts'; console.log((console.log('receiver effect'), ns).f(1));",
+            "export function f(n: number): number { return n; }",
+            "SCN1001",
+        ),
+    ] {
+        fs::write(&input, source).unwrap();
+        fs::write(&dependency, other).unwrap();
+        let target = binary(temp.path(), "bad-module");
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains(code),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            assert!(!artifact.exists());
+        }
     }
 }
 
@@ -183,7 +287,7 @@ fn emit_modes_and_paths_with_spaces_preserve_sources_and_failed_outputs() {
     assert_eq!(fs::read(&input).unwrap(), original);
     let target = binary(temp.path(), "old");
     fs::write(&target, "previous artifact").unwrap();
-    fs::write(&input, "function unported() {}").unwrap();
+    fs::write(&input, "while (true) {}").unwrap();
     let result = Command::new(compiler())
         .arg("build")
         .arg(&input)

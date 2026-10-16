@@ -14,9 +14,9 @@ const compiler = process.env["SCRIPTC_NATIVE_COMPILER_BIN"] ?? join(root, "packa
 const directory = mkdtempSync(join(tmpdir(), "scriptc-native-ir-contract-"));
 const cases: { fixture: string; irVersion: number; referenceBackendAccepted: boolean }[] = [];
 try {
-  for (const fixture of ["main.ts", "numbers.ts", "plain.js"]) {
-    const output = join(directory, fixture + ".json");
-    const result = spawnSync(resolve(compiler), ["build", join(root, "tests/corpus/rust-native-frontend", fixture), "--emit", "ir", "--out", output], {
+  for (const [index, fixture] of ["rust-native-frontend/main.ts", "rust-native-frontend/numbers.ts", "rust-native-frontend/plain.js", "rust-native-functions/main.ts", "rust-native-modules/main.ts"].entries()) {
+    const output = join(directory, index + ".json");
+    const result = spawnSync(resolve(compiler), ["build", join(root, "tests/corpus", fixture), "--emit", "ir", "--out", output], {
       encoding: "utf8", timeout: 30_000, windowsHide: true,
     });
     assert.ifError(result.error);
@@ -29,7 +29,7 @@ try {
     const rust = emitRustModule(mod);
     assert.ok(rust.includes("fn main()"));
     assert.ok(!rust.includes("island_eval"));
-    writeFileSync(join(directory, fixture + ".reference.rs"), rust);
+    writeFileSync(join(directory, index + ".reference.rs"), rust);
     cases.push({ fixture, irVersion: mod.irVersion, referenceBackendAccepted: true });
   }
   console.log(JSON.stringify({ verdict: "PASS", cases }));
