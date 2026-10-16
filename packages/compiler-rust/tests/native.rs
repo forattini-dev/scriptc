@@ -95,6 +95,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-map-seeds/main.ts",
         "rust-native-map-seeds/order.ts",
         "rust-native-map-seeds/contracts.ts",
+        "rust-native-errors/main.ts",
+        "rust-native-errors/contracts.ts",
     ]
     .into_iter()
     .enumerate()
@@ -155,6 +157,118 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
                 .unwrap()
                 .contains("#![forbid(unsafe_code)]")
         );
+    }
+}
+
+#[test]
+fn error_definitions_defer_instance_code_and_refuse_unported_effects() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "errors");
+    fs::write(&input, "class Unused extends Error { context: unknown; constructor(value: unknown) { super(); this.context = value; while (false) {} } } console.log('defined');").unwrap();
+    let output = temp.path().join("unused.json");
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--emit", "ir", "--out"])
+        .arg(&output)
+        .output()
+        .unwrap();
+    success(&result);
+    let ir: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(ir["functions"].as_array().unwrap().len(), 1);
+    assert!(
+        ir["classes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["runtime"] == true)
+    );
+    assert!(
+        ir["globals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|g| g["name"] == "Unused")
+    );
+    for (name, source) in [
+        (
+            "static-field",
+            "class Fault extends Error { static effect = console.log('must not vanish'); }",
+        ),
+        (
+            "static-block",
+            "class Fault extends Error { static { console.log('must not vanish'); } }",
+        ),
+        (
+            "computed-field",
+            "class Fault extends Error { ['field'] = 1; }",
+        ),
+        (
+            "heritage-effect",
+            "function base(): typeof Error { console.log('base'); return Error; } class Fault extends base() {}",
+        ),
+        (
+            "method",
+            "class Fault extends Error { method(): number { return 1; } }",
+        ),
+        (
+            "accessor",
+            "class Fault extends Error { get field(): number { return 1; } }",
+        ),
+        (
+            "shadow",
+            "export {}; class Error { message = 'user'; } new Error();",
+        ),
+        ("generic", "class Fault<T> extends Error {}"),
+        ("cause", "new Error('message', { cause: 1 });"),
+        (
+            "unknown-field",
+            "class Fault extends Error { context: unknown; constructor(value: unknown) { super(); this.context = value; } } const fault = new Fault(1);",
+        ),
+        (
+            "constructor-body",
+            "class Fault extends Error { constructor() { super(); while (false) {} } } new Fault();",
+        ),
+        (
+            "constructor-return",
+            "class Fault extends Error { constructor(message: string) { super(message); if (message === '') return; } } new Fault('');",
+        ),
+        (
+            "parameter-property",
+            "class Fault extends Error { constructor(public code: number) { super(); } } new Fault(1);",
+        ),
+        (
+            "class-value",
+            "class Fault extends Error {} const Alias = Fault; new Alias();",
+        ),
+    ] {
+        fs::write(&input, source).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let failed = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!failed.status.success(), "{name}");
+        let stderr = String::from_utf8_lossy(&failed.stderr);
+        assert!(stderr.contains("SCN1001"), "{name}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{name}: {stderr}");
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read(artifact).unwrap(), b"preserve", "{name}");
+        }
     }
 }
 
@@ -512,6 +626,24 @@ fn module_slots_check_tdz_on_reads_writes_defaults_and_cycles() {
             "import { value } from 'tdz-contract'; console.log(value);",
             "",
             "value",
+        ),
+        (
+            5,
+            "console.log('before'); make(); class Fault extends Error {} function arg(): string { console.log('argument'); return 'late'; } function make(): void { new Fault(arg()); }",
+            "",
+            "Fault",
+        ),
+        (
+            6,
+            "console.log('before'); inspect(new Error()); class Fault extends Error {} function inspect(value: Error): void { console.log(value instanceof Fault); }",
+            "",
+            "Fault",
+        ),
+        (
+            7,
+            "import './dependency.ts'; export class Fault extends Error {}",
+            "import { Fault } from './main.ts'; console.log('before'); export class Child extends Fault {}",
+            "Fault",
         ),
     ] {
         fs::write(&input, source).unwrap();

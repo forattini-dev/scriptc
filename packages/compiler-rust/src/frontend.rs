@@ -16,6 +16,7 @@ use std::{
 mod aggregates;
 mod arrays;
 mod callbacks;
+mod classes;
 mod collections;
 mod declarations;
 mod functions;
@@ -114,6 +115,8 @@ struct Lowerer<'a> {
     next_closure: usize,
     helpers: HashMap<(String, Vec<Type>, Type), String>,
     declarations: HashMap<declarations::Key, declarations::Hint>,
+    classes: classes::ClassGraph,
+    constructor_this: Option<Local>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -139,6 +142,8 @@ impl<'a> Lowerer<'a> {
             next_closure: 0,
             helpers: HashMap::new(),
             declarations: HashMap::new(),
+            classes: classes::ClassGraph::default(),
+            constructor_this: None,
         }
     }
     fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
@@ -498,6 +503,7 @@ impl<'a> Lowerer<'a> {
     fn statement(&mut self, node: Node) -> Result<Vec<Stmt>, String> {
         let loc = self.loc(node);
         let stmt = match node.kind() {
+            SyntaxKind::ClassDeclaration => return self.class_declaration(node),
             SyntaxKind::FunctionDeclaration
                 if self.return_type.is_none() && node.parent().kind() == SyntaxKind::SourceFile =>
             {
@@ -604,6 +610,9 @@ impl<'a> Lowerer<'a> {
                         return Ok(vec![self.dictionary_set(expression)?]);
                     }
                     if expression.left().kind() == SyntaxKind::PropertyAccessExpression {
+                        if let Some(stmt) = self.class_set(expression)? {
+                            return Ok(vec![stmt]);
+                        }
                         return Ok(vec![self.record_set(expression)?]);
                     }
                     if expression.left().kind() != SyntaxKind::Identifier {
@@ -654,7 +663,13 @@ impl<'a> Lowerer<'a> {
         }
         let loc = self.loc(node);
         match node.kind() {
-            SyntaxKind::NewExpression => self.map_new(node),
+            SyntaxKind::NewExpression => {
+                if let Some(value) = self.class_new(node)? {
+                    return Ok(value);
+                }
+                self.map_new(node)
+            }
+            SyntaxKind::ThisKeyword => self.this_expression(node),
             SyntaxKind::ElementAccessExpression => {
                 let obj = self.expression(node.expression())?;
                 if let Type::Array { elem } = obj.ty() {
@@ -711,7 +726,12 @@ impl<'a> Lowerer<'a> {
             SyntaxKind::PropertyAccessExpression if self.module_namespace(node.expression()) => {
                 self.expression(node.name())
             }
-            SyntaxKind::PropertyAccessExpression => self.record_get(node),
+            SyntaxKind::PropertyAccessExpression => {
+                if let Some(value) = self.class_get(node)? {
+                    return Ok(value);
+                }
+                self.record_get(node)
+            }
             SyntaxKind::NumericLiteral => {
                 let text = node.text().replace('_', "");
                 let value = source_frontend::jsnum::from_string(&text).value();
@@ -799,6 +819,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::BinaryExpression => {
+                if node.operator_token().kind() == SyntaxKind::InstanceOfKeyword {
+                    return self.class_instanceof(node);
+                }
                 let op = match node.operator_token().kind() {
                     SyntaxKind::PlusToken => "+",
                     SyntaxKind::MinusToken => "-",
@@ -819,6 +842,9 @@ impl<'a> Lowerer<'a> {
                 self.binary(node, op)
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.error_call(node)? {
+                    return Ok(value);
+                }
                 let member = node.expression();
                 if member.kind() == SyntaxKind::PropertyAccessExpression {
                     let symbol = self.symbol(member.expression());

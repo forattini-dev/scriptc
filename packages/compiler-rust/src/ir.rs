@@ -14,6 +14,12 @@ pub enum Type {
     F64,
     String,
     Bool,
+    // Reserved Error ABI metadata; never a native value or storage type.
+    Dyn,
+    Object {
+        #[serde(rename = "className")]
+        class_name: String,
+    },
     Void,
     Array {
         elem: Box<Type>,
@@ -100,6 +106,21 @@ pub struct Module {
     pub unions: Vec<Union>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub globals: Vec<Global>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub classes: Vec<Class>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Class {
+    pub name: String,
+    pub js_name: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub runtime: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    pub fields: Vec<Field>,
+    pub loc: Loc,
 }
 
 /// Program-lifetime live bindings. Initialization is the first top-level
@@ -150,6 +171,35 @@ pub struct Local {
     rename_all_fields = "camelCase"
 )]
 pub enum Expr {
+    New {
+        class_name: String,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    FieldGet {
+        obj: Box<Expr>,
+        class_name: String,
+        field: String,
+        r#type: Type,
+        loc: Loc,
+    },
+    Upcast {
+        value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    Downcast {
+        value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    InstanceOf {
+        value: Box<Expr>,
+        class_name: String,
+        r#type: Type,
+        loc: Loc,
+    },
     ArrayGet {
         arr: Box<Expr>,
         index: Box<Expr>,
@@ -330,7 +380,12 @@ pub enum Expr {
 impl Expr {
     pub fn ty(&self) -> Type {
         match self {
-            Self::ArrayGet { r#type, .. }
+            Self::New { r#type, .. }
+            | Self::FieldGet { r#type, .. }
+            | Self::Upcast { r#type, .. }
+            | Self::Downcast { r#type, .. }
+            | Self::InstanceOf { r#type, .. }
+            | Self::ArrayGet { r#type, .. }
             | Self::MapNew { r#type, .. }
             | Self::MapIntrinsic { r#type, .. }
             | Self::RecordKeyGet { r#type, .. }
@@ -368,6 +423,13 @@ impl Expr {
     rename_all_fields = "camelCase"
 )]
 pub enum Stmt {
+    FieldSet {
+        obj: Expr,
+        class_name: String,
+        field: String,
+        value: Expr,
+        loc: Loc,
+    },
     While {
         cond: Expr,
         body: Vec<Stmt>,
@@ -480,6 +542,21 @@ pub fn validate(module: &Module) -> Result<(), String> {
 }
 
 impl Module {
+    pub fn class(&self, name: &str) -> Option<&Class> {
+        self.classes.iter().find(|class| class.name == name)
+    }
+
+    pub fn subclass(&self, child: &str, parent: &str) -> bool {
+        let mut next = Some(child);
+        for _ in 0..=self.classes.len() {
+            let Some(name) = next else { return false };
+            if name == parent {
+                return self.class(name).is_some();
+            }
+            next = self.class(name).and_then(|class| class.base.as_deref());
+        }
+        false
+    }
     pub fn global(&self, id: &str) -> Option<&Global> {
         self.globals.iter().find(|global| global.id == id)
     }
@@ -531,11 +608,12 @@ impl Module {
         }
         active.push(ty.clone());
         let valid = match ty {
+            Type::Object { class_name } => self.class(&class_name).is_some(),
             Type::Func { params, ret } => {
                 params.iter().all(|p| self.valid_type(p.clone(), active))
                     && (*ret == Type::Void || self.valid_type(*ret, active))
             }
-            Type::Void | Type::Null | Type::Undefined => false,
+            Type::Void | Type::Null | Type::Undefined | Type::Dyn => false,
             Type::Array { elem } => {
                 !matches!(*elem, Type::Func { .. }) && self.valid_type(*elem, active)
             }
@@ -559,6 +637,11 @@ impl Module {
             Type::Union { union_id } => self.unions.get(union_id).is_some_and(|u| {
                 u.id == union_id
                     && u.arms.len() >= 2
+                    && u.arms
+                        .iter()
+                        .filter(|a| matches!(a, Type::Object { .. }))
+                        .count()
+                        <= 1
                     && u.arms.iter().all(|arm| {
                         matches!(arm, Type::Null | Type::Undefined)
                             || (!matches!(
@@ -573,6 +656,41 @@ impl Module {
         valid
     }
     fn validate_layouts(&self) -> Result<(), String> {
+        let mut names = std::collections::HashSet::new();
+        for class in &self.classes {
+            if !names.insert(&class.name) {
+                return Err("duplicate class".into());
+            }
+            let header = error_fields();
+            let builtin = matches!(
+                class.name.as_str(),
+                "%Error" | "%TypeError" | "%RangeError" | "%SyntaxError"
+            );
+            if !class.fields.starts_with(&header) || class.runtime != builtin
+                || !self.subclass(&class.name, "%Error")
+                || (class.name == "%Error" && class.base.is_some())
+                || (builtin && class.name != "%Error" && class.base.as_deref() != Some("%Error"))
+                || (builtin && class.fields.len() != header.len())
+                || !class.fields.iter().skip(header.len()).all(|field| matches!(&field.r#type, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|u| u.arms.contains(&Type::Undefined)))) {
+                return Err("invalid native Error class/header/slot".into());
+            }
+            if let Some(base) = &class.base {
+                let base = self.class(base).ok_or("unknown class base")?;
+                if self.subclass(&base.name, &class.name) || !class.fields.starts_with(&base.fields)
+                {
+                    return Err("invalid class inheritance/prefix".into());
+                }
+            }
+            let mut fields = std::collections::HashSet::new();
+            if !class.fields.iter().enumerate().all(|(i, field)| {
+                fields.insert(&field.name)
+                    && (i < header.len()
+                        || (!matches!(field.r#type, Type::Func { .. })
+                            && self.valid_type(field.r#type.clone(), &mut vec![])))
+            }) {
+                return Err("invalid class field layout".into());
+            }
+        }
         for (id, r) in self.records.iter().enumerate() {
             let mut names = r.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>();
             if r.id != id
@@ -610,6 +728,22 @@ impl Module {
         }
         Ok(())
     }
+}
+
+pub fn error_fields() -> Vec<Field> {
+    [
+        ("name", Type::String),
+        ("message", Type::String),
+        ("%code", Type::String),
+        ("%hasCause", Type::Bool),
+        ("%cause", Type::Dyn),
+    ]
+    .into_iter()
+    .map(|(name, r#type)| Field {
+        name: name.into(),
+        r#type,
+    })
+    .collect()
 }
 
 fn validate_function(
@@ -653,6 +787,128 @@ fn validate_function(
         module: &Module,
     ) -> Result<(), String> {
         match e {
+            Expr::New {
+                class_name,
+                args,
+                r#type,
+                ..
+            } => {
+                let ctor = functions
+                    .get(format!("%{class_name}.constructor").as_str())
+                    .ok_or("missing native constructor")?;
+                let object = Type::Object {
+                    class_name: class_name.clone(),
+                };
+                if module.class(class_name).is_none()
+                    || *r#type != object
+                    || ctor.return_type != Type::Void
+                    || ctor.captures.is_some()
+                    || ctor.params.len() != args.len() + 1
+                    || ctor.params.first().map(|p| &p.r#type) != Some(&object)
+                {
+                    return Err("invalid native constructor ABI".into());
+                }
+                for (arg, param) in args.iter().zip(ctor.params.iter().skip(1)) {
+                    expr(arg, locals, initialized, functions, module)?;
+                    if arg.ty() != param.r#type {
+                        return Err("invalid native constructor argument".into());
+                    }
+                }
+                Ok(())
+            }
+            Expr::FieldGet {
+                obj,
+                class_name,
+                field,
+                r#type,
+                ..
+            } => {
+                expr(obj, locals, initialized, functions, module)?;
+                if matches!(field.as_str(), "%code" | "%hasCause" | "%cause")
+                    || obj.ty()
+                        != (Type::Object {
+                            class_name: class_name.clone(),
+                        })
+                    || !module.class(class_name).is_some_and(|c| {
+                        c.fields
+                            .iter()
+                            .any(|f| f.name == *field && f.r#type == *r#type)
+                    })
+                {
+                    return Err("invalid native field read".into());
+                }
+                Ok(())
+            }
+            Expr::Upcast {
+                value,
+                r#type: Type::Object { class_name: parent },
+                ..
+            } => {
+                expr(value, locals, initialized, functions, module)?;
+                if !matches!(value.ty(), Type::Object { class_name: child } if child != *parent && module.subclass(&child, parent))
+                {
+                    return Err("invalid native upcast".into());
+                }
+                Ok(())
+            }
+            Expr::Downcast {
+                value,
+                r#type: Type::Object { class_name: child },
+                ..
+            } => {
+                expr(value, locals, initialized, functions, module)?;
+                if !matches!(value.ty(), Type::Object { class_name: parent } if parent != *child && module.subclass(child, &parent))
+                {
+                    return Err("invalid native downcast".into());
+                }
+                Ok(())
+            }
+            Expr::InstanceOf {
+                value,
+                class_name,
+                r#type: Type::Bool,
+                ..
+            } => {
+                expr(value, locals, initialized, functions, module)?;
+                if !matches!(value.ty(), Type::Object { .. }) || module.class(class_name).is_none()
+                {
+                    return Err("invalid native instanceof".into());
+                }
+                Ok(())
+            }
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if r#fn.starts_with("error.") => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let builtin = |ty: Type| matches!(ty, Type::Object { class_name } if matches!(class_name.as_str(), "%Error" | "%TypeError" | "%RangeError" | "%SyntaxError") && module.class(&class_name).is_some_and(|c| c.runtime));
+                let valid = match r#fn.as_str() {
+                    "error.new" => {
+                        args.len() == 1 && args[0].ty() == Type::String && builtin(r#type.clone())
+                    }
+                    "error.ctor" => {
+                        args.len() == 2
+                            && builtin(args[0].ty())
+                            && args[1].ty() == Type::String
+                            && *r#type == Type::Void
+                    }
+                    "error.toString" => {
+                        args.len() == 1
+                            && args[0].ty()
+                                == (Type::Object {
+                                    class_name: "%Error".into(),
+                                })
+                            && *r#type == Type::String
+                    }
+                    _ => false,
+                };
+                if valid {
+                    Ok(())
+                } else {
+                    Err("invalid native Error operation".into())
+                }
+            }
             Expr::ArrayGet {
                 arr, index, r#type, ..
             } => {
@@ -1079,6 +1335,7 @@ fn validate_function(
                                 | Type::Func { .. }
                                 | Type::Array { .. }
                                 | Type::Map { .. }
+                                | Type::Object { .. }
                         )
                 } else {
                     left.ty() == Type::F64 && right.ty() == Type::F64
@@ -1152,6 +1409,29 @@ fn validate_function(
     ) -> Result<(), String> {
         for stmt in stmts {
             match stmt {
+                Stmt::FieldSet {
+                    obj,
+                    class_name,
+                    field,
+                    value,
+                    ..
+                } => {
+                    expr(obj, locals, initialized, functions, module)?;
+                    expr(value, locals, initialized, functions, module)?;
+                    if matches!(field.as_str(), "%code" | "%hasCause" | "%cause")
+                        || obj.ty()
+                            != (Type::Object {
+                                class_name: class_name.clone(),
+                            })
+                        || !module.class(class_name).is_some_and(|c| {
+                            c.fields
+                                .iter()
+                                .any(|f| f.name == *field && f.r#type == value.ty())
+                        })
+                    {
+                        return Err("invalid native field write".into());
+                    }
+                }
                 Stmt::RecordKeySet {
                     obj,
                     key,
@@ -1335,6 +1615,114 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn error_module() -> Module {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        m.classes.push(Class {
+            name: "%Error".into(),
+            js_name: "Error".into(),
+            runtime: true,
+            base: None,
+            fields: error_fields(),
+            loc: loc.clone(),
+        });
+        m.classes.push(Class {
+            name: "Detail".into(),
+            js_name: "Detail".into(),
+            runtime: false,
+            base: Some("%Error".into()),
+            fields: error_fields(),
+            loc: loc.clone(),
+        });
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::FieldGet {
+                obj: Box::new(Expr::LibCall {
+                    r#fn: "error.new".into(),
+                    args: vec![Expr::StrLit {
+                        value: "message".into(),
+                        r#type: Type::String,
+                        loc: loc.clone(),
+                    }],
+                    r#type: Type::Object {
+                        class_name: "%Error".into(),
+                    },
+                    loc: loc.clone(),
+                }),
+                class_name: "%Error".into(),
+                field: "message".into(),
+                r#type: Type::String,
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        m
+    }
+
+    #[test]
+    fn error_layouts_validate_prefixes_roots_and_reserved_metadata() {
+        let mut m = error_module();
+        assert!(validate(&m).is_ok());
+        m.classes[1].fields[0].r#type = Type::Bool;
+        assert!(validate(&m).unwrap_err().contains("Error class/header"));
+        m = error_module();
+        m.classes[1].base = Some("Detail".into());
+        assert!(validate(&m).is_err());
+        m = error_module();
+        m.classes[1].fields.push(Field {
+            name: "uninitialized".into(),
+            r#type: Type::String,
+        });
+        assert!(validate(&m).is_err());
+        m = error_module();
+        m.functions[0].locals.push(Local {
+            id: "dynamic".into(),
+            name: "dynamic".into(),
+            r#type: Type::Dyn,
+            mutable: false,
+            boxed: false,
+        });
+        assert_eq!(validate(&m).unwrap_err(), "duplicate/void local");
+        m = error_module();
+        m.unions.push(Union {
+            id: 0,
+            arms: vec![
+                Type::Object {
+                    class_name: "%Error".into(),
+                },
+                Type::Object {
+                    class_name: "Detail".into(),
+                },
+            ],
+        });
+        assert_eq!(validate(&m).unwrap_err(), "invalid/recursive union layout");
+    }
+
+    #[test]
+    fn error_operations_require_typed_fields_related_casts_and_constructors() {
+        let mut m = error_module();
+        let loc = m.functions[0].loc.clone();
+        if let Stmt::Expression {
+            expr: Expr::FieldGet { field, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *field = "missing".into();
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid native field read");
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::New {
+                class_name: "Detail".into(),
+                args: vec![],
+                r#type: Type::Object {
+                    class_name: "Detail".into(),
+                },
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert_eq!(validate(&m).unwrap_err(), "missing native constructor");
+    }
 
     #[test]
     fn tuple_layouts_require_dense_positions_and_keep_the_wire_flag() {
@@ -1912,6 +2300,7 @@ mod tests {
             records: vec![],
             unions: vec![],
             globals: vec![],
+            classes: vec![],
             functions: vec![
                 Function {
                     captures: None,
@@ -2031,6 +2420,7 @@ mod tests {
             records: vec![],
             unions: vec![],
             globals: vec![],
+            classes: vec![],
             ir_version: VERSION,
             source_file: loc.file.clone(),
             entry: "main".into(),

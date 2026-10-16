@@ -70,7 +70,9 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             .enumerate()
             .map(|(tag, ty)| {
                 let equality = match ty {
-                    Type::Record { .. } | Type::Array { .. } => "left.ptr_eq(&right)",
+                    Type::Record { .. } | Type::Array { .. } | Type::Object { .. } => {
+                        "left.ptr_eq(&right)"
+                    }
                     Type::Null | Type::Undefined => "true",
                     Type::F64 | Type::String | Type::Bool => "left == right",
                     _ => unreachable!("IR validated"),

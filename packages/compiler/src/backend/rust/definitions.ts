@@ -740,6 +740,24 @@ export class RustDefinitionEmitter {
     }
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`impl ${name} {`);
+    this.context.pushIndent();
+    this.context.line("fn ptr_eq(&self, other: &Self) -> bool {");
+    this.context.pushIndent();
+    this.context.line("match (self, other) {");
+    this.context.pushIndent();
+    this.context.line("(Self::Builtin(left), Self::Builtin(right)) => left == right,");
+    for (const root of roots) {
+      const variant = this.context.errorValueVariant(root);
+      this.context.line(`(Self::${variant}(left), Self::${variant}(right)) => left.ptr_eq(right),`);
+    }
+    this.context.line("_ => false,");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line(`impl runtime::Trace for ${name} {`);
     this.context.pushIndent();
     this.context.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");

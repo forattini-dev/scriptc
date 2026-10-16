@@ -17,6 +17,9 @@ impl Lowerer<'_> {
         if let Some(ty) = self.primitive_type(self.checker.ty(id).flags) {
             return Some(ty);
         }
+        if let Some(ty) = self.class_type(id) {
+            return Some(ty);
+        }
         self.aggregate_type(id)
     }
     pub(super) fn ty(&mut self, node: Node) -> Result<Type, String> {

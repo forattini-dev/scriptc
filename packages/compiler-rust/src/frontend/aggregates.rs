@@ -170,6 +170,9 @@ impl Lowerer<'_> {
             return Some(arms[0].clone());
         }
         if arms.is_empty()
+            // Different static Error views can alias the same object. Keep a
+            // single object arm until cross-arm identity is part of the IR ABI.
+            || arms.iter().filter(|a| matches!(a, Type::Object { .. })).count() > 1
             || arms
                 .iter()
                 .any(|a| matches!(a, Type::Void | Type::Map { .. } | Type::Func { .. }))
@@ -188,6 +191,16 @@ impl Lowerer<'_> {
         if value.ty() == target {
             return Ok(value);
         }
+        if let (Type::Object { class_name: child }, Type::Object { class_name: parent }) =
+            (value.ty(), &target)
+            && self.classes.subclass(&child, parent)
+        {
+            return Ok(Expr::Upcast {
+                value: Box::new(value),
+                r#type: target,
+                loc: self.loc(node),
+            });
+        }
         if let Type::Union { union_id } = target
             && let Some(tag) = self.unions[union_id]
                 .arms
@@ -202,13 +215,45 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             });
         }
+        if let Type::Union { union_id } = target
+            && let Type::Object { class_name: child } = value.ty()
+        {
+            let candidates = self.unions[union_id].arms.iter().enumerate().filter(|(_, arm)| matches!(arm, Type::Object { class_name: parent } if self.classes.subclass(&child, parent))).collect::<Vec<_>>();
+            if let [(tag, arm)] = candidates.as_slice() {
+                let value = self.coerce(value, (*arm).clone(), node)?;
+                return Ok(Expr::UnionWrap {
+                    union_id: format!("u{union_id}"),
+                    tag: *tag,
+                    value: Box::new(value),
+                    r#type: target,
+                    loc: self.loc(node),
+                });
+            }
+        }
         Err(self.refuse(node, "native representation coercion is not ported"))
     }
 
     pub(super) fn narrowed(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
         // A lowered value already carries a verified native representation.
         // Untyped JS doesn't supply additional control-flow evidence.
-        if !matches!(value.ty(), Type::Union { .. }) || self.checker_any(node) {
+        if self.checker_any(node) {
+            return Ok(value);
+        }
+        if let Type::Object { class_name: parent } = value.ty() {
+            let target = self.ty(node)?;
+            if let Type::Object { class_name: child } = &target
+                && *child != parent
+                && self.classes.subclass(child, &parent)
+            {
+                return Ok(Expr::Downcast {
+                    value: Box::new(value),
+                    r#type: target,
+                    loc: self.loc(node),
+                });
+            }
+            return Ok(value);
+        }
+        if !matches!(value.ty(), Type::Union { .. }) {
             return Ok(value);
         }
         let target = self.ty(node)?;
@@ -517,9 +562,17 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn binary(&mut self, node: Node, op: &str) -> Result<Expr, String> {
-        let left = self.expression(node.left())?;
-        let right = self.expression(node.right())?;
+        let mut left = self.expression(node.left())?;
+        let mut right = self.expression(node.right())?;
         if matches!(op, "===" | "!==") {
+            if matches!(left.ty(), Type::Object { .. }) && matches!(right.ty(), Type::Object { .. })
+            {
+                let root = Type::Object {
+                    class_name: "%Error".into(),
+                };
+                left = self.coerce(left, root.clone(), node.left())?;
+                right = self.coerce(right, root, node.right())?;
+            }
             if matches!(left, Expr::UnitLit { .. }) && matches!(right, Expr::UnitLit { .. }) {
                 return Ok(Expr::BoolLit {
                     value: (left.ty() == right.ty()) != (op == "!=="),
@@ -611,6 +664,7 @@ impl Lowerer<'_> {
                         | Type::Func { .. }
                         | Type::Array { .. }
                         | Type::Map { .. }
+                        | Type::Object { .. }
                 )
         } else {
             left.ty() == Type::F64 && right.ty() == Type::F64

@@ -66,6 +66,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             }
         }
         lowerer.inventory(&plan.evaluation_order);
+        lowerer.inventory_classes(&plan.evaluation_order);
         lowerer.inventory_storage(&plan.evaluation_order);
         let mut body = Vec::new();
         for file in &plan.evaluation_order {
@@ -85,7 +86,14 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
                 end: file.end(),
             },
         }];
-        while let Some((symbol, signature)) = lowerer.functions.next() {
+        loop {
+            if let Some(index) = lowerer.classes.next() {
+                functions.push(lowerer.lower_constructor(index)?);
+                continue;
+            }
+            let Some((symbol, signature)) = lowerer.functions.next() else {
+                break;
+            };
             let function = lowerer
                 .lower_function(signature)
                 .map_err(|error| lowerer.functions.explain(symbol, error))?;
@@ -101,6 +109,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             records: lowerer.records,
             unions: lowerer.unions,
             globals: lowerer.globals,
+            classes: lowerer.classes.layouts.into_iter().flatten().collect(),
         })
     })
 }

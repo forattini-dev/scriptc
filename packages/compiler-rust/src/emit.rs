@@ -1,10 +1,12 @@
 use crate::ir::{Expr, Function, Module, Stmt, Type};
+mod classes;
 mod collections;
 mod layouts;
 mod storage;
 
 fn rust_type(ty: Type) -> String {
     match ty {
+        Type::Dyn => unreachable!("reserved Error metadata has no native value representation"),
         Type::Func { params, ret } => {
             return format!(
                 "std::rc::Rc<dyn Fn({}) -> {}>",
@@ -18,6 +20,7 @@ fn rust_type(ty: Type) -> String {
         }
         Type::F64 => "f64",
         Type::Bool => "bool",
+        Type::Object { .. } => "runtime::Gc<NativeError>",
         Type::String => "String",
         Type::Void => "()",
         Type::Map { key, value } => {
@@ -56,6 +59,19 @@ fn field_name(name: &str) -> String {
     )
 }
 
+fn function_name(name: &str) -> String {
+    if name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_') {
+        return name.into();
+    }
+    format!(
+        "encoded_{}",
+        name.as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    )
+}
+
 pub fn rust(module: &Module) -> Result<String, String> {
     crate::ir::validate(module)?;
     let mut output = String::from(
@@ -67,6 +83,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         output.push_str(include_str!("heap_support.rs"));
         output.push_str(include_str!("collections_support.rs"));
         layouts::definitions(module, &mut output);
+        classes::definitions(module, &mut output);
     }
     storage::definitions(module, &mut output);
     for function in &module.functions {
@@ -90,7 +107,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
             .collect::<String>();
         output.push_str(&format!(
             "\nfn {}({captures}{params}) -> {} {{\n",
-            function.name,
+            function_name(&function.name),
             rust_type(function.return_type.clone())
         ));
         for param in &function.params {
@@ -116,9 +133,9 @@ pub fn rust(module: &Module) -> Result<String, String> {
             };
             output.push_str(&format!(
                 "thread_local! {{ static FN_{}: {} = std::rc::Rc::new({}); }}\n",
-                function.name,
+                function_name(&function.name),
                 rust_type(ty),
-                function.name
+                function_name(&function.name)
             ));
         }
     }
@@ -133,6 +150,11 @@ pub fn rust(module: &Module) -> Result<String, String> {
 pub fn uses_runtime(module: &Module) -> bool {
     fn expr(value: &Expr) -> bool {
         match value {
+            Expr::New { .. }
+            | Expr::FieldGet { .. }
+            | Expr::Upcast { .. }
+            | Expr::Downcast { .. }
+            | Expr::InstanceOf { .. } => true,
             Expr::ArrayLit { .. } | Expr::LibCall { .. } => true,
             Expr::ArrayIntrinsic { .. } => true,
             Expr::ArrayGet { .. } => true,
@@ -160,6 +182,7 @@ pub fn uses_runtime(module: &Module) -> bool {
     }
     fn body(stmts: &[Stmt]) -> bool {
         stmts.iter().any(|stmt| match stmt {
+            Stmt::FieldSet { .. } => true,
             Stmt::RecordKeySet {
                 obj, key, value, ..
             } => expr(obj) || expr(key) || expr(value),
@@ -179,14 +202,17 @@ pub fn uses_runtime(module: &Module) -> bool {
     }
     fn ty(t: &Type) -> bool {
         match t {
-            Type::Array { .. } | Type::Map { .. } | Type::Record { .. } | Type::Union { .. } => {
-                true
-            }
+            Type::Array { .. }
+            | Type::Map { .. }
+            | Type::Record { .. }
+            | Type::Union { .. }
+            | Type::Object { .. } => true,
             Type::Func { params, ret } => params.iter().any(ty) || ty(ret),
             _ => false,
         }
     }
-    !module.globals.is_empty()
+    !module.classes.is_empty()
+        || !module.globals.is_empty()
         || !module.records.is_empty()
         || !module.unions.is_empty()
         || module
@@ -203,10 +229,18 @@ pub fn uses_runtime(module: &Module) -> bool {
 }
 
 fn expr(value: &Expr, function: &Function, module: &Module) -> String {
+    if let Some(code) = classes::expression(value, function, module) {
+        return code;
+    }
     if let Some(code) = collections::expression(value, function, module) {
         return code;
     }
     match value {
+        Expr::New { .. }
+        | Expr::FieldGet { .. }
+        | Expr::Upcast { .. }
+        | Expr::Downcast { .. }
+        | Expr::InstanceOf { .. } => unreachable!("class expression"),
         Expr::ArrayGet { .. }
         | Expr::MapNew { .. }
         | Expr::MapIntrinsic { .. }
@@ -224,7 +258,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 .find(|f| f.name == *fn_name)
                 .expect("IR validated");
             if target.captures.is_none() {
-                return format!("FN_{fn_name}.with(Clone::clone)");
+                return format!("FN_{}.with(Clone::clone)", function_name(fn_name));
             }
             let saved = captures
                 .iter()
@@ -243,7 +277,8 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "{{ {saved} std::rc::Rc::new(move |{params}| {fn_name}({args})) as {} }}",
+                "{{ {saved} std::rc::Rc::new(move |{params}| {}({args})) as {} }}",
+                function_name(fn_name),
                 rust_type(r#type.clone())
             )
         }
@@ -432,6 +467,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Record { .. }
                     | Type::Union { .. }
                     | Type::Func { .. }
+                    | Type::Object { .. }
             ) {
                 format!("{local_id}.clone()")
             } else {
@@ -443,7 +479,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         } => {
             let array = matches!(
                 left.ty(),
-                Type::Array { .. } | Type::Record { .. } | Type::Map { .. }
+                Type::Array { .. } | Type::Record { .. } | Type::Map { .. } | Type::Object { .. }
             );
             let record = matches!(left.ty(), Type::Func { .. });
             let left = expr(left, function, module);
@@ -465,7 +501,8 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         }
         Expr::Unary { op, operand, .. } => format!("({op}({}))", expr(operand, function, module)),
         Expr::Call { callee, args, .. } => format!(
-            "{callee}({})",
+            "{}({})",
+            function_name(callee),
             args.iter()
                 .map(|v| expr(v, function, module))
                 .collect::<Vec<_>>()
@@ -491,6 +528,27 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
 fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut String) {
     use std::fmt::Write;
     match stmt {
+        Stmt::FieldSet {
+            obj,
+            class_name,
+            field,
+            value,
+            ..
+        } => {
+            let index = module
+                .classes
+                .iter()
+                .position(|c| c.name == *class_name)
+                .unwrap();
+            writeln!(
+                output,
+                "{{ let object = {}; let value = {}; error_set_{index}_{}(object, value); }}",
+                expr(obj, function, module),
+                expr(value, function, module),
+                field_name(field)
+            )
+            .unwrap();
+        }
         Stmt::RecordKeySet {
             obj, key, value, ..
         } => {
