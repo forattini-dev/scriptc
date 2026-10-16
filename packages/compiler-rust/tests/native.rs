@@ -92,6 +92,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-storage/main.ts",
         "rust-native-storage/cycle.ts",
         "rust-native-storage/namespace.ts",
+        "rust-native-map-seeds/main.ts",
+        "rust-native-map-seeds/order.ts",
+        "rust-native-map-seeds/contracts.ts",
     ]
     .into_iter()
     .enumerate()
@@ -248,6 +251,37 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         ("loop", "while (true) {}", "SCN1001"),
+        (
+            "map-this-arg",
+            "const values = [1].map(value => value, {});",
+            "SCN1001",
+        ),
+        (
+            "map-rest-tuple",
+            "function f(pair: [string, ...number[]]): void {} f;",
+            "SCN1001",
+        ),
+        (
+            "map-optional-tuple",
+            "function f(pair: [string, number?]): void {} f;",
+            "SCN1001",
+        ),
+        (
+            "map-sparse-input",
+            "const values: number[] = [1, , 2];",
+            "TS2322",
+        ),
+        ("map-callable", "const values = [1].map(1);", "TS2345"),
+        (
+            "map-pair-key",
+            "const map = new Map<string, number>([1].map(value => [value, value]));",
+            "TS2769",
+        ),
+        (
+            "map-other-iterable",
+            "const map = new Map(new Map<string, number>());",
+            "SCN1001",
+        ),
         ("format", "console.log('%s', 42);", "SCN1001"),
         ("surrogate", "console.log('\\uD800');", "SCN1001"),
         ("bigint", "console.log(1n);", "SCN1001"),

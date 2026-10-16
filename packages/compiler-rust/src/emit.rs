@@ -169,6 +169,9 @@ pub fn uses_runtime(module: &Module) -> bool {
             Stmt::Expression { expr: value, .. } => expr(value),
             Stmt::Return { value, .. } => value.as_ref().is_some_and(expr),
             Stmt::Block { body: stmts, .. } => body(stmts),
+            Stmt::While {
+                cond, body: stmts, ..
+            } => expr(cond) || body(stmts),
             Stmt::If {
                 cond, then, else_, ..
             } => expr(cond) || body(then) || else_.as_ref().is_some_and(|other| body(other)),
@@ -578,6 +581,13 @@ fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut Str
                 output.push('}');
             }
             output.push('\n');
+        }
+        Stmt::While { cond, body, .. } => {
+            writeln!(output, "while {} {{", expr(cond, function, module)).unwrap();
+            for stmt in body {
+                statement(stmt, function, module, output);
+            }
+            output.push_str("}\n");
         }
         Stmt::Block { body, .. } => {
             output.push_str("{\n");

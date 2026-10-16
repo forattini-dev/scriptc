@@ -14,14 +14,17 @@ use std::{
     path::Path,
 };
 mod aggregates;
+mod arrays;
 mod callbacks;
 mod collections;
 mod declarations;
 mod functions;
+mod helpers;
 mod modules;
 mod parameters;
 mod pipeline;
 mod storage;
+mod tuples;
 mod types;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
@@ -109,6 +112,7 @@ struct Lowerer<'a> {
     captures: Vec<(u32, Param)>,
     lifted: Vec<Function>,
     next_closure: usize,
+    helpers: HashMap<(String, Vec<Type>, Type), String>,
     declarations: HashMap<declarations::Key, declarations::Hint>,
 }
 
@@ -133,6 +137,7 @@ impl<'a> Lowerer<'a> {
             captures: Vec::new(),
             lifted: Vec::new(),
             next_closure: 0,
+            helpers: HashMap::new(),
             declarations: HashMap::new(),
         }
     }
@@ -661,6 +666,11 @@ impl<'a> Lowerer<'a> {
                         loc: self.loc(node),
                     });
                 }
+                if let Type::Record { shape_id } = obj.ty()
+                    && self.records[shape_id].tuple
+                {
+                    return self.tuple_get(node, obj);
+                }
                 let key = self.expected_expression(node.argument_expression(), Type::String)?;
                 self.dictionary_get(node, obj, key)
             }
@@ -692,6 +702,10 @@ impl<'a> Lowerer<'a> {
                     r#type: Type::String,
                     loc,
                 })
+            }
+            SyntaxKind::AsExpression | SyntaxKind::TypeAssertionExpression => {
+                let target = self.ty(node)?;
+                self.expected_expression(node.expression(), target)
             }
             SyntaxKind::ParenthesizedExpression => self.expression(node.expression()),
             SyntaxKind::PropertyAccessExpression if self.module_namespace(node.expression()) => {
@@ -815,6 +829,9 @@ impl<'a> Lowerer<'a> {
                         .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
                         .map(|l| l.r#type.clone())
                         .or_else(|| self.ty(member.expression()).ok());
+                    if matches!(receiver_type, Some(Type::Array { .. })) {
+                        return self.array_call(node);
+                    }
                     if matches!(receiver_type, Some(Type::Map { .. })) {
                         let receiver = self.expression(member.expression())?;
                         return self.map_intrinsic(

@@ -136,10 +136,43 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                 expr(key, function, module)
             )
         }
-        Expr::ArrayIntrinsic { receiver, .. } => format!(
-            "runtime::array_len(&({}))",
-            expr(receiver, function, module)
-        ),
+        Expr::ArrayIntrinsic {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            if method == "length" {
+                format!(
+                    "runtime::array_len(&({}))",
+                    expr(receiver, function, module)
+                )
+            } else {
+                let arguments = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, arg)| format!("let arg{i} = {};", expr(arg, function, module)))
+                    .collect::<String>();
+                let writes = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, arg)| {
+                        format!(
+                            "runtime::array_push(&array, {});",
+                            if arg.ty() == Type::String {
+                                format!("runtime::JsString::from(arg{i})")
+                            } else {
+                                format!("arg{i}")
+                            }
+                        )
+                    })
+                    .collect::<String>();
+                format!(
+                    "{{ let array = {}; {arguments} {writes} runtime::array_len(&array) }}",
+                    expr(receiver, function, module)
+                )
+            }
+        }
         _ => return None,
     })
 }

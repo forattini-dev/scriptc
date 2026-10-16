@@ -99,15 +99,21 @@ impl Lowerer<'_> {
         let mut seed = Vec::new();
         if let Some(argument) = arguments.first() {
             if argument.kind() != SyntaxKind::ArrayLiteralExpression {
-                return Err(
-                    self.refuse(*argument, "Map seeds currently require literal entry pairs")
-                );
+                let entries = self.expression(*argument)?;
+                return self.map_from_array(node, entries, ty);
             }
             for pair in argument.elements() {
                 if pair.kind() != SyntaxKind::ArrayLiteralExpression {
-                    return Err(
-                        self.refuse(pair, "Map seed entry must be a key/value pair literal")
-                    );
+                    let pair = self
+                        .intern_tuple(vec![(**key).clone(), (**value).clone()])
+                        .ok_or_else(|| self.refuse(pair, "Map entry layout is not ported"))?;
+                    let entries = self.expected_expression(
+                        *argument,
+                        Type::Array {
+                            elem: Box::new(pair),
+                        },
+                    )?;
+                    return self.map_from_array(node, entries, ty);
                 }
                 let elements = pair.elements().into_iter().collect::<Vec<_>>();
                 if pair.kind() != SyntaxKind::ArrayLiteralExpression || elements.len() != 2 {

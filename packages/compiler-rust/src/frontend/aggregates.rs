@@ -22,6 +22,9 @@ impl Lowerer<'_> {
 
     fn aggregate_type_inner(&mut self, id: TypeId) -> Option<Type> {
         let flags = self.checker.ty(id).flags;
+        if self.checker.is_tuple_type(id) {
+            return self.tuple_type(id);
+        }
         if self.checker.is_array_type(id) {
             let element = self.checker.get_element_type_of_array_type(id);
             let elem = self.type_id(element)?;
@@ -65,7 +68,6 @@ impl Lowerer<'_> {
                 .ty(id)
                 .object_flags()
                 .intersects(ObjectFlags::CLASS)
-            || self.checker.is_tuple_type(id)
             || !self
                 .checker
                 .get_signatures_of_type(id, SignatureKind::CALL)
@@ -144,7 +146,7 @@ impl Lowerer<'_> {
         if let Some(record) = self
             .records
             .iter()
-            .find(|r| r.fields == fields && r.index_value == index_value)
+            .find(|r| !r.tuple && r.fields == fields && r.index_value == index_value)
         {
             return Some(Type::Record {
                 shape_id: record.id,
@@ -155,6 +157,7 @@ impl Lowerer<'_> {
             id: shape_id,
             fields,
             declared_order,
+            tuple: false,
             index_value,
         });
         Some(Type::Record { shape_id })
@@ -237,10 +240,23 @@ impl Lowerer<'_> {
 
     pub(super) fn expected_expression(&mut self, node: Node, target: Type) -> Result<Expr, String> {
         match node.kind() {
+            SyntaxKind::CallExpression
+                if matches!(target, Type::Array { .. }) && self.is_array_map(node) =>
+            {
+                self.array_map(node, Some(target))
+            }
+            SyntaxKind::AsExpression | SyntaxKind::TypeAssertionExpression => {
+                self.expected_expression(node.expression(), target)
+            }
             SyntaxKind::NewExpression if matches!(target, Type::Map { .. }) => {
                 self.map_new_expected(node, Some(target))
             }
             SyntaxKind::ArrayLiteralExpression => {
+                if let Type::Record { shape_id } = &target
+                    && self.records[*shape_id].tuple
+                {
+                    return self.tuple_literal(node, target);
+                }
                 let array = match &target {
                     Type::Array { .. } => target.clone(),
                     Type::Union { union_id } => {
@@ -347,6 +363,9 @@ impl Lowerer<'_> {
             return Err(self.refuse(node, "record literal needs a closed shape"));
         };
         let record = self.records[shape_id].clone();
+        if record.tuple {
+            return Err(self.refuse(node, "object literals cannot initialize tuple layouts"));
+        }
         let mut seen = HashSet::new();
         let mut fields = Vec::new();
         for property in node.properties() {
@@ -428,6 +447,27 @@ impl Lowerer<'_> {
                 "property receiver has no closed record representation",
             ));
         };
+        if self.records[shape_id].tuple && node.name().text() == "length" {
+            let helper =
+                helpers::Helper::new("tuple_length", vec![obj.ty()], Type::F64, self.loc(node));
+            let mut function = helper.function;
+            function.body.push(Stmt::Return {
+                value: Some(Expr::NumLit {
+                    value: self.records[shape_id].fields.len() as f64,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: self.loc(node),
+                }),
+                loc: self.loc(node),
+            });
+            let callee = self.install_helper(function);
+            return Ok(Expr::Call {
+                callee,
+                args: vec![obj],
+                r#type: Type::F64,
+                loc: self.loc(node),
+            });
+        }
         if self.records[shape_id].index_value.is_some() {
             let key = Expr::StrLit {
                 value: node.name().text().into(),

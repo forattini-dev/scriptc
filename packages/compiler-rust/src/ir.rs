@@ -55,6 +55,8 @@ pub struct Record {
     pub id: usize,
     pub fields: Vec<Field>,
     pub declared_order: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub tuple: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index_value: Option<Type>,
 }
@@ -366,6 +368,11 @@ impl Expr {
     rename_all_fields = "camelCase"
 )]
 pub enum Stmt {
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+        loc: Loc,
+    },
     RecordKeySet {
         obj: Expr,
         shape_id: String,
@@ -574,6 +581,13 @@ impl Module {
             {
                 return Err("invalid/recursive record layout".into());
             }
+            if r.tuple
+                && (r.index_value.is_some()
+                    || (0..r.fields.len())
+                        .any(|index| !names.contains(&index.to_string().as_str())))
+            {
+                return Err("invalid tuple positions".into());
+            }
             names.sort_unstable();
             let mut order = r
                 .declared_order
@@ -735,13 +749,26 @@ fn validate_function(
                 receiver,
                 args,
                 method,
-                r#type: Type::F64,
+                r#type,
                 ..
-            } if method == "length"
-                && args.is_empty()
-                && matches!(receiver.ty(), Type::Array { .. }) =>
-            {
-                expr(receiver, locals, initialized, functions, module)
+            } => {
+                expr(receiver, locals, initialized, functions, module)?;
+                let Type::Array { elem } = receiver.ty() else {
+                    return Err("non-array receiver".into());
+                };
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if *r#type != Type::F64
+                    || match method.as_str() {
+                        "length" => !args.is_empty(),
+                        "push" => args.iter().any(|arg| arg.ty() != *elem),
+                        _ => true,
+                    }
+                {
+                    return Err("invalid array operation".into());
+                }
+                Ok(())
             }
             Expr::Closure {
                 fn_name,
@@ -1242,6 +1269,23 @@ fn validate_function(
                         )?;
                     }
                 }
+                Stmt::While {
+                    cond, body: stmts, ..
+                } => {
+                    expr(cond, locals, initialized, functions, module)?;
+                    if cond.ty() != Type::Bool {
+                        return Err("non-boolean loop condition".into());
+                    }
+                    body(
+                        stmts,
+                        locals,
+                        &mut initialized.clone(),
+                        functions,
+                        return_type.clone(),
+                        module,
+                        function,
+                    )?;
+                }
                 Stmt::Block { body: stmts, .. } => body(
                     stmts,
                     locals,
@@ -1291,6 +1335,116 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tuple_layouts_require_dense_positions_and_keep_the_wire_flag() {
+        let mut m = record_module();
+        m.records[0].tuple = true;
+        assert_eq!(validate(&m).unwrap_err(), "invalid tuple positions");
+        m.records[0].fields[0].name = "0".into();
+        m.records[0].declared_order = vec!["0".into()];
+        m.functions[0].body.clear();
+        validate(&m).unwrap();
+        assert_eq!(serde_json::to_value(&m.records[0]).unwrap()["tuple"], true);
+        m.records[0].tuple = false;
+        assert!(
+            serde_json::to_value(&m.records[0])
+                .unwrap()
+                .get("tuple")
+                .is_none()
+        );
+        m.records[0].tuple = true;
+        m.records[0].index_value = Some(Type::F64);
+        assert!(validate(&m).is_err());
+    }
+
+    #[test]
+    fn loop_bodies_do_not_initialize_outer_reads_and_conditions_are_boolean() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        m.functions[0].locals.push(Local {
+            id: "temp".into(),
+            name: "temp".into(),
+            r#type: Type::F64,
+            mutable: false,
+            boxed: false,
+        });
+        m.functions[0].body = vec![
+            Stmt::While {
+                cond: Expr::BoolLit {
+                    value: false,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                },
+                body: vec![Stmt::VarDecl {
+                    local_id: "temp".into(),
+                    init: Expr::NumLit {
+                        value: 1.0,
+                        spelling: None,
+                        r#type: Type::F64,
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                }],
+                loc: loc.clone(),
+            },
+            Stmt::Expression {
+                expr: Expr::VarRef {
+                    local_id: "temp".into(),
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            },
+        ];
+        assert!(validate(&m).is_err());
+        m.functions[0].body.pop();
+        validate(&m).unwrap();
+        if let Stmt::While { cond, .. } = &mut m.functions[0].body[0] {
+            *cond = Expr::NumLit {
+                value: 1.0,
+                spelling: None,
+                r#type: Type::F64,
+                loc,
+            };
+        }
+        assert_eq!(validate(&m).unwrap_err(), "non-boolean loop condition");
+    }
+
+    #[test]
+    fn array_push_checks_every_argument_and_the_result_type() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::ArrayIntrinsic {
+                method: "push".into(),
+                receiver: Box::new(Expr::ArrayLit {
+                    elems: vec![],
+                    r#type: Type::Array {
+                        elem: Box::new(Type::F64),
+                    },
+                    loc: loc.clone(),
+                }),
+                args: vec![Expr::StrLit {
+                    value: "wrong".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                }],
+                r#type: Type::F64,
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert_eq!(validate(&m).unwrap_err(), "invalid array operation");
+        if let Stmt::Expression {
+            expr: Expr::ArrayIntrinsic { args, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            args.clear();
+        }
+        validate(&m).unwrap();
+    }
 
     #[test]
     fn owned_container_layouts_validate_edges_and_keep_the_wire_contract() {
@@ -1442,6 +1596,7 @@ mod tests {
             id: 0,
             fields: vec![],
             declared_order: vec![],
+            tuple: false,
             index_value: Some(Type::F64),
         });
         m.functions[0].body = vec![Stmt::Expression {
@@ -1617,6 +1772,7 @@ mod tests {
                 r#type: Type::F64,
             }],
             declared_order: vec!["count".into()],
+            tuple: false,
             index_value: None,
         });
         let loc = m.functions[0].loc.clone();
