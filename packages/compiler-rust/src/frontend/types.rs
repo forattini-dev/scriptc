@@ -20,6 +20,9 @@ impl Lowerer<'_> {
         if let Some(ty) = self.class_type(id) {
             return Some(ty);
         }
+        if self.is_regex_type(id) {
+            return Some(Type::Regex);
+        }
         self.aggregate_type(id)
     }
     pub(super) fn ty(&mut self, node: Node) -> Result<Type, String> {

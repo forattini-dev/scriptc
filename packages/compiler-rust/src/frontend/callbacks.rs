@@ -123,6 +123,8 @@ impl Lowerer<'_> {
         let saved_captures = std::mem::take(&mut self.captures);
         let saved_return = self.return_type.replace((**ret).clone());
         let saved_this = self.constructor_this.take();
+        let saved_var_types = self.var_types.clone();
+        let saved_var_defined = std::mem::take(&mut self.var_defined);
         self.outer.push(saved_bindings.clone());
         let nodes = node.parameters().into_iter().collect::<Vec<_>>();
         let mut params = Vec::new();
@@ -141,6 +143,9 @@ impl Lowerer<'_> {
             params.push(param);
         }
         let loc = self.loc(node);
+        if node.body().kind() == SyntaxKind::Block {
+            body.extend(self.hoist_local_vars(node.body())?);
+        }
         body.extend(if node.body().kind() == SyntaxKind::Block {
             self.statements(node.body().statements())?
         } else if **ret == Type::Void {
@@ -176,6 +181,8 @@ impl Lowerer<'_> {
         self.bindings = saved_bindings;
         self.return_type = saved_return;
         self.constructor_this = saved_this;
+        self.var_types = saved_var_types;
+        self.var_defined = saved_var_defined;
         self.outer.pop();
         let mut sources = Vec::new();
         for (symbol, _) in captures {

@@ -14,6 +14,7 @@ pub enum Type {
     F64,
     String,
     Bool,
+    Regex,
     // Reserved Error ABI metadata; never a native value or storage type.
     Dyn,
     Object {
@@ -171,6 +172,19 @@ pub struct Local {
     rename_all_fields = "camelCase"
 )]
 pub enum Expr {
+    RegexLit {
+        pattern: String,
+        flags: String,
+        r#type: Type,
+        loc: Loc,
+    },
+    RegexIntrinsic {
+        method: String,
+        receiver: Box<Expr>,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     New {
         class_name: String,
         args: Vec<Expr>,
@@ -380,7 +394,9 @@ pub enum Expr {
 impl Expr {
     pub fn ty(&self) -> Type {
         match self {
-            Self::New { r#type, .. }
+            Self::RegexLit { r#type, .. }
+            | Self::RegexIntrinsic { r#type, .. }
+            | Self::New { r#type, .. }
             | Self::FieldGet { r#type, .. }
             | Self::Upcast { r#type, .. }
             | Self::Downcast { r#type, .. }
@@ -787,6 +803,65 @@ fn validate_function(
         module: &Module,
     ) -> Result<(), String> {
         match e {
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if r#fn == "regex.new" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if args.len() == 2
+                    && args.iter().all(|a| a.ty() == Type::String)
+                    && *r#type == Type::Regex
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native regex constructor".into())
+                }
+            }
+            Expr::RegexLit {
+                flags,
+                r#type: Type::Regex,
+                ..
+            } => {
+                let mut seen = std::collections::HashSet::new();
+                if flags
+                    .chars()
+                    .all(|f| "gimsuy".contains(f) && seen.insert(f))
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native regex flags".into())
+                }
+            }
+            Expr::RegexIntrinsic {
+                method,
+                receiver,
+                args,
+                r#type,
+                ..
+            } => {
+                expr(receiver, locals, initialized, functions, module)?;
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let valid = receiver.ty() == Type::Regex
+                    && match method.as_str() {
+                        "test" => {
+                            args.len() == 1 && args[0].ty() == Type::String && *r#type == Type::Bool
+                        }
+                        "source" | "flags" => args.is_empty() && *r#type == Type::String,
+                        "lastIndex" => args.is_empty() && *r#type == Type::F64,
+                        "setLastIndex" => {
+                            args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::F64
+                        }
+                        _ => false,
+                    };
+                if valid {
+                    Ok(())
+                } else {
+                    Err("invalid native regex operation".into())
+                }
+            }
             Expr::New {
                 class_name,
                 args,
@@ -1615,6 +1690,58 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn regex_contracts_validate_flags_operands_and_wire_names() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        let regex = || Expr::RegexLit {
+            pattern: "x".into(),
+            flags: "g".into(),
+            r#type: Type::Regex,
+            loc: loc.clone(),
+        };
+        let value = Expr::RegexIntrinsic {
+            method: "test".into(),
+            receiver: Box::new(regex()),
+            args: vec![Expr::StrLit {
+                value: "x".into(),
+                r#type: Type::String,
+                loc: loc.clone(),
+            }],
+            r#type: Type::Bool,
+            loc: loc.clone(),
+        };
+        assert_eq!(
+            serde_json::to_value(&value).unwrap()["kind"],
+            "regexIntrinsic"
+        );
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: value,
+            loc: loc.clone(),
+        }];
+        assert!(validate(&m).is_ok());
+        if let Stmt::Expression {
+            expr: Expr::RegexIntrinsic { r#type, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = Type::F64;
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid native regex operation");
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: regex(),
+            loc: loc.clone(),
+        }];
+        if let Stmt::Expression {
+            expr: Expr::RegexLit { flags, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *flags = "gg".into();
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid native regex flags");
+    }
 
     fn error_module() -> Module {
         let mut m = callable_module();

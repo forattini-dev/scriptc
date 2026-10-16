@@ -532,7 +532,41 @@ pub fn regex_split(subject: &JsString, regex: &JsRegex, limit: f64) -> JsArray<J
 }
 
 pub fn regex_source(regex: &JsRegex) -> JsString {
-    regex.source.clone()
+    // EscapeRegExpPattern serializes a pattern back into literal syntax.
+    // Compilation still uses the original source; only this property changes.
+    let mut units = Vec::new();
+    let mut escaped = false;
+    let mut class_depth = 0usize;
+    let unicode_sets = regex.flags.to_utf8_lossy().contains('v');
+    for unit in regex.source.encode_utf16() {
+        let line = match unit {
+            10 => Some("n"),
+            13 => Some("r"),
+            0x2028 => Some("u2028"),
+            0x2029 => Some("u2029"),
+            _ => None,
+        };
+        if let Some(line) = line {
+            if !escaped { units.push(u16::from(b'\\')); }
+            units.extend(line.encode_utf16());
+            escaped = false;
+            continue;
+        }
+        if escaped {
+            units.push(unit);
+            escaped = false;
+            continue;
+        }
+        match unit {
+            92 => escaped = true,
+            91 if class_depth == 0 || unicode_sets => class_depth += 1,
+            93 => class_depth = class_depth.saturating_sub(1),
+            47 if class_depth == 0 => units.push(u16::from(b'\\')),
+            _ => {}
+        }
+        units.push(unit);
+    }
+    string_from_utf16(&units)
 }
 
 pub fn regex_flags(regex: &JsRegex) -> JsString {

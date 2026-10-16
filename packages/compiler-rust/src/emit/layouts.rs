@@ -75,6 +75,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                     }
                     Type::Null | Type::Undefined => "true",
                     Type::F64 | Type::String | Type::Bool => "left == right",
+                    Type::Regex => "std::rc::Rc::ptr_eq(&left, &right)",
                     _ => unreachable!("IR validated"),
                 };
                 format!(

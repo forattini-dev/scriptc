@@ -3,6 +3,27 @@ struct RegexCapture(Option<JsString>);
 impl ArrayElement for RegexCapture {}
 
 #[test]
+fn regex_source_serializes_literal_syntax_without_changing_matching() {
+    for (pattern, expected) in [
+        ("/", r"\/"),
+        ("[/]", "[/]"),
+        (r"\/", r"\/"),
+        (r"\\/", r"\\\/"),
+        ("\n", r"\n"),
+        ("\r", r"\r"),
+        ("\u{2028}", r"\u2028"),
+        ("\u{2029}", r"\u2029"),
+        ("\\\n", r"\n"),
+        ("", "(?:)"),
+    ] {
+        assert_eq!(regex_source(&regex_new(pattern, "")).to_utf8_lossy(), expected);
+    }
+    assert!(regex_test(&regex_new("\n", ""), &string("a\nb")));
+    let surrogate = JsString::from_utf16(&[0xd800]);
+    assert_eq!(regex_source(&regex_new(&surrogate, "")).encode_utf16().collect::<Vec<_>>(), vec![0xd800]);
+}
+
+#[test]
 fn regex_test_preserves_ecmascript_flags_and_state() {
     let unicode = regex_new("^.$", "u");
     let legacy = regex_new("^.$", "");

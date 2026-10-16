@@ -2,6 +2,7 @@ use crate::ir::{Expr, Function, Module, Stmt, Type};
 mod classes;
 mod collections;
 mod layouts;
+mod regex;
 mod storage;
 
 fn rust_type(ty: Type) -> String {
@@ -20,6 +21,7 @@ fn rust_type(ty: Type) -> String {
         }
         Type::F64 => "f64",
         Type::Bool => "bool",
+        Type::Regex => "runtime::JsRegex",
         Type::Object { .. } => "runtime::Gc<NativeError>",
         Type::String => "String",
         Type::Void => "()",
@@ -150,6 +152,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
 pub fn uses_runtime(module: &Module) -> bool {
     fn expr(value: &Expr) -> bool {
         match value {
+            Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => true,
             Expr::New { .. }
             | Expr::FieldGet { .. }
             | Expr::Upcast { .. }
@@ -207,6 +210,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Type::Record { .. }
             | Type::Union { .. }
             | Type::Object { .. } => true,
+            Type::Regex => true,
             Type::Func { params, ret } => params.iter().any(ty) || ty(ret),
             _ => false,
         }
@@ -229,6 +233,9 @@ pub fn uses_runtime(module: &Module) -> bool {
 }
 
 fn expr(value: &Expr, function: &Function, module: &Module) -> String {
+    if let Some(code) = regex::expression(value, function, module) {
+        return code;
+    }
     if let Some(code) = classes::expression(value, function, module) {
         return code;
     }
@@ -236,6 +243,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         return code;
     }
     match value {
+        Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => unreachable!("regex expression"),
         Expr::New { .. }
         | Expr::FieldGet { .. }
         | Expr::Upcast { .. }
@@ -468,6 +476,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Union { .. }
                     | Type::Func { .. }
                     | Type::Object { .. }
+                    | Type::Regex
             ) {
                 format!("{local_id}.clone()")
             } else {
@@ -481,7 +490,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 left.ty(),
                 Type::Array { .. } | Type::Record { .. } | Type::Map { .. } | Type::Object { .. }
             );
-            let record = matches!(left.ty(), Type::Func { .. });
+            let record = matches!(left.ty(), Type::Func { .. } | Type::Regex);
             let left = expr(left, function, module);
             let right = expr(right, function, module);
             match op.as_str() {

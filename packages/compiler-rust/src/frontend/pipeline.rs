@@ -68,7 +68,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         lowerer.inventory(&plan.evaluation_order);
         lowerer.inventory_classes(&plan.evaluation_order);
         lowerer.inventory_storage(&plan.evaluation_order);
-        let mut body = Vec::new();
+        let mut body = lowerer.hoist_module_vars(&plan.evaluation_order)?;
         for file in &plan.evaluation_order {
             lowerer.file = source_file_info(*file).file_name.to_string();
             body.extend(lowerer.statements(file.statements())?);

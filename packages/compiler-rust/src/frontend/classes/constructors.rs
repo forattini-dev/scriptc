@@ -148,6 +148,8 @@ impl Lowerer<'_> {
         self.captures.clear();
         self.constructor_this = None;
         self.return_type = Some(Type::Void);
+        self.var_types = self.module_vars.clone();
+        self.var_defined.clear();
         let params = definition.signature.clone().unwrap();
         self.bind_parameter(None, &params[0])?;
         let this = self.locals[0].clone();
@@ -186,6 +188,7 @@ impl Lowerer<'_> {
             for (node, param) in ctor.parameters().into_iter().zip(params.iter().skip(1)) {
                 body.extend(self.bind_parameter(Some(node), param)?);
             }
+            body.extend(self.hoist_local_vars(ctor.body())?);
             let mut super_seen = false;
             for statement in ctor.body().statements() {
                 let call = if statement.kind() == SyntaxKind::ExpressionStatement {

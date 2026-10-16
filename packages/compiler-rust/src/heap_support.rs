@@ -11,6 +11,9 @@ impl NativeTrace for bool {
 impl NativeTrace for String {
     fn trace_native(&self, _: &mut runtime::Tracer<'_>) {}
 }
+impl NativeTrace for runtime::JsRegex {
+    fn trace_native(&self, _: &mut runtime::Tracer<'_>) {}
+}
 impl<T: runtime::Trace + runtime::ClearEdges + 'static> NativeTrace for runtime::Gc<T> {
     fn trace_native(&self, tracer: &mut runtime::Tracer<'_>) {
         tracer.edge(self);

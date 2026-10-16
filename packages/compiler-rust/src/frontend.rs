@@ -24,9 +24,11 @@ mod helpers;
 mod modules;
 mod parameters;
 mod pipeline;
+mod regex;
 mod storage;
 mod tuples;
 mod types;
+mod vars;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
 
@@ -117,6 +119,9 @@ struct Lowerer<'a> {
     declarations: HashMap<declarations::Key, declarations::Hint>,
     classes: classes::ClassGraph,
     constructor_this: Option<Local>,
+    module_vars: HashMap<u32, Type>,
+    var_types: HashMap<u32, Type>,
+    var_defined: HashSet<u32>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -144,6 +149,9 @@ impl<'a> Lowerer<'a> {
             declarations: HashMap::new(),
             classes: classes::ClassGraph::default(),
             constructor_this: None,
+            module_vars: HashMap::new(),
+            var_types: HashMap::new(),
+            var_defined: HashSet::new(),
         }
     }
     fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
@@ -448,6 +456,8 @@ impl<'a> Lowerer<'a> {
         self.locals.clear();
         self.bindings.clear();
         self.captures.clear();
+        self.var_types = self.module_vars.clone();
+        self.var_defined.clear();
         self.return_type = Some(signature.return_type.clone());
         let mut body = Vec::new();
         for (node, param) in signature
@@ -458,6 +468,7 @@ impl<'a> Lowerer<'a> {
         {
             body.extend(self.bind_parameter(Some(node), param)?);
         }
+        body.extend(self.hoist_local_vars(signature.node.body())?);
         body.extend(self.statements(signature.node.body().statements())?);
         if signature.return_type != Type::Void && !ir::always_returns(&body) {
             return Err(self.refuse(
@@ -537,7 +548,7 @@ impl<'a> Lowerer<'a> {
                 let list = node.declaration_list();
                 let flags = list.flags();
                 if !flags.intersects(NodeFlags::LET | NodeFlags::CONST) {
-                    return Err(self.refuse(node, "var hoisting is not ported"));
+                    return self.var_statement(node);
                 }
                 let mut out = Vec::new();
                 for declaration in list.declarations().nodes() {
@@ -610,6 +621,9 @@ impl<'a> Lowerer<'a> {
                         return Ok(vec![self.dictionary_set(expression)?]);
                     }
                     if expression.left().kind() == SyntaxKind::PropertyAccessExpression {
+                        if let Some(value) = self.regex_set(expression)? {
+                            return Ok(vec![value]);
+                        }
                         if let Some(stmt) = self.class_set(expression)? {
                             return Ok(vec![stmt]);
                         }
@@ -619,8 +633,17 @@ impl<'a> Lowerer<'a> {
                         return Err(self.refuse(expression, "only local assignment is ported"));
                     }
                     let local = self.binding(expression.left())?;
-                    let value =
-                        self.expected_expression(expression.right(), local.r#type.clone())?;
+                    let symbol = self.symbol(expression.left());
+                    let target = self
+                        .var_types
+                        .get(&symbol)
+                        .cloned()
+                        .unwrap_or_else(|| local.r#type.clone());
+                    let value = self.expected_expression(expression.right(), target)?;
+                    let value = self.coerce(value, local.r#type.clone(), expression)?;
+                    if self.var_types.contains_key(&symbol) {
+                        self.var_assignment_fact(symbol, &value);
+                    }
                     Stmt::Assign {
                         local_id: local.id,
                         initializes_global: false,
@@ -637,39 +660,40 @@ impl<'a> Lowerer<'a> {
                     Stmt::Expression { expr, loc }
                 }
             }
-            SyntaxKind::IfStatement => {
-                let cond = self.expression(node.expression())?;
-                if cond.ty() != Type::Bool {
-                    return Err(self.refuse(node, "truthiness coercions are not ported"));
-                }
-                Stmt::If {
-                    cond,
-                    then: self.statement(node.then_statement())?,
-                    else_: if node.else_statement().is_nil() {
-                        None
-                    } else {
-                        Some(self.statement(node.else_statement())?)
-                    },
-                    loc,
-                }
-            }
+            SyntaxKind::IfStatement => self.var_if(node)?,
             _ => return Err(self.refuse(node, "statement is not ported")),
         };
         Ok(vec![stmt])
     }
     fn expression(&mut self, node: Node) -> Result<Expr, String> {
+        let value = self.expression_inner(node);
+        if matches!(
+            node.kind(),
+            SyntaxKind::CallExpression | SyntaxKind::NewExpression
+        ) && !matches!(&value, Ok(Expr::Intrinsic { .. }))
+        {
+            self.var_call_effects();
+        }
+        value
+    }
+
+    fn expression_inner(&mut self, node: Node) -> Result<Expr, String> {
         if let Some(value) = self.json_value(node) {
             return self.json_expression(node, value);
         }
         let loc = self.loc(node);
         match node.kind() {
             SyntaxKind::NewExpression => {
+                if let Some(value) = self.regex_new(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.class_new(node)? {
                     return Ok(value);
                 }
                 self.map_new(node)
             }
             SyntaxKind::ThisKeyword => self.this_expression(node),
+            SyntaxKind::RegularExpressionLiteral => self.regex_literal(node),
             SyntaxKind::ElementAccessExpression => {
                 let obj = self.expression(node.expression())?;
                 if let Type::Array { elem } = obj.ty() {
@@ -727,6 +751,9 @@ impl<'a> Lowerer<'a> {
                 self.expression(node.name())
             }
             SyntaxKind::PropertyAccessExpression => {
+                if let Some(value) = self.regex_get(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.class_get(node)? {
                     return Ok(value);
                 }
@@ -798,6 +825,9 @@ impl<'a> Lowerer<'a> {
                     r#type: local.r#type,
                     loc,
                 };
+                if self.var_types.contains_key(&symbol) && !self.var_defined.contains(&symbol) {
+                    return Ok(value);
+                }
                 self.narrowed(value, node)
             }
             SyntaxKind::PrefixUnaryExpression => {
@@ -842,6 +872,9 @@ impl<'a> Lowerer<'a> {
                 self.binary(node, op)
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.regex_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.error_call(node)? {
                     return Ok(value);
                 }

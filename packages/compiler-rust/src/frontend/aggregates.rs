@@ -284,6 +284,18 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn expected_expression(&mut self, node: Node, target: Type) -> Result<Expr, String> {
+        let value = self.expected_expression_inner(node, target);
+        if matches!(
+            node.kind(),
+            SyntaxKind::CallExpression | SyntaxKind::NewExpression
+        ) && !matches!(&value, Ok(Expr::Intrinsic { .. }))
+        {
+            self.var_call_effects();
+        }
+        value
+    }
+
+    fn expected_expression_inner(&mut self, node: Node, target: Type) -> Result<Expr, String> {
         match node.kind() {
             SyntaxKind::CallExpression
                 if matches!(target, Type::Array { .. }) && self.is_array_map(node) =>
@@ -565,6 +577,25 @@ impl Lowerer<'_> {
         let mut left = self.expression(node.left())?;
         let mut right = self.expression(node.right())?;
         if matches!(op, "===" | "!==") {
+            // Shared IR binary equality is numeric/reference-layout-specific.
+            // Regex identity already has a portable union equality contract.
+            if left.ty() == Type::Regex && right.ty() == Type::Regex {
+                let union = self
+                    .intern_union(vec![Type::Regex, Type::Undefined])
+                    .unwrap();
+                let Type::Union { union_id } = union else {
+                    unreachable!()
+                };
+                return Ok(Expr::UnionEq {
+                    union_id: format!("u{union_id}"),
+                    negated: op == "!==",
+                    same_value: false,
+                    left: Box::new(self.coerce(left, union.clone(), node.left())?),
+                    right: Box::new(self.coerce(right, union, node.right())?),
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                });
+            }
             if matches!(left.ty(), Type::Object { .. }) && matches!(right.ty(), Type::Object { .. })
             {
                 let root = Type::Object {
@@ -665,6 +696,7 @@ impl Lowerer<'_> {
                         | Type::Array { .. }
                         | Type::Map { .. }
                         | Type::Object { .. }
+                        | Type::Regex
                 )
         } else {
             left.ty() == Type::F64 && right.ty() == Type::F64

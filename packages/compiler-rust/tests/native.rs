@@ -97,6 +97,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-map-seeds/contracts.ts",
         "rust-native-errors/main.ts",
         "rust-native-errors/contracts.ts",
+        "rust-native-regex/main.ts",
+        "rust-native-regex/contracts.ts",
+        "rust-native-vars/main.ts",
+        "rust-native-vars/cycle.ts",
+        "rust-native-vars/contracts.ts",
     ]
     .into_iter()
     .enumerate()
@@ -157,6 +162,57 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
                 .unwrap()
                 .contains("#![forbid(unsafe_code)]")
         );
+    }
+}
+
+#[test]
+fn regex_and_var_boundaries_refuse_without_replacing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "boundary");
+    for (name, source) in [
+        ("regex-exec", "const pattern = /x/; pattern.exec('x');"),
+        ("regex-flags", "const pattern = /x/d;"),
+        ("regex-copy", "const pattern = new RegExp(/x/);"),
+        ("var-function", "var callback = () => 1; callback();"),
+        ("var-destructure", "var [value] = [1]; console.log(value);"),
+        (
+            "var-return-contract",
+            "read(); var value = 1; function read(): number { return value; }",
+        ),
+        (
+            "var-call-write",
+            "var value: number | undefined = 1; function clear(): void { value = undefined; } if (value !== undefined) { clear(); console.log(value as number); }",
+        ),
+        (
+            "var-map-write",
+            "var value: number | undefined = 1; if (value !== undefined) { const mapped = [1].map(item => { value = undefined; return item; }); console.log(value as number); }",
+        ),
+        (
+            "var-null-call-write",
+            "function run(value: number | null): void { var value: number | null; const clear = (): void => { value = null; }; if (value !== null) { clear(); console.log(value as number); } } run(1);",
+        ),
+    ] {
+        fs::write(&input, source).unwrap();
+        fs::write(&target, "preserve").unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001"),
+            "{name}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("panicked") && !stderr.contains("SCN9001"),
+            "{name}: {stderr}"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"preserve", "{name}");
+        assert!(!target.with_extension("ir.json").exists());
     }
 }
 
