@@ -2,9 +2,49 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
+import { promisify, TextDecoder, TextEncoder } from "node:util";
 import { expect, test, vi } from "vitest";
-import { Ts7Host, getPreEmitDiagnostics } from "./program-adapter.js";
+import { Ts7Host, getPreEmitDiagnostics, preserveTransportBoms } from "./program-adapter.js";
+import { tsgoPath } from "../dts-paths.js";
+
+class Decoder {
+  readonly raw: TextDecoder;
+  calls = 0;
+  constructor(readonly ignoreBOM = false) { this.raw = new TextDecoder("utf-8", { ignoreBOM }); }
+  decode(input?: Uint8Array, options?: { stream?: boolean }): string {
+    this.calls++;
+    // Preserve the transport's WTF-8-specific decoding instead of replacing it
+    // with generic UTF-8 decoding, which would lose this surrogate code unit.
+    if (input?.[0] === 0xed) return "\uD800";
+    return this.raw.decode(input, options);
+  }
+}
+
+test("BOM normalization delegates to the decoder and patches its prototype once", () => {
+  const decoder = new Decoder();
+  const project = { program: { decoder } };
+  preserveTransportBoms(project);
+  const first = Decoder.prototype.decode;
+  preserveTransportBoms(project);
+  expect(Decoder.prototype.decode).toBe(first);
+  for (const text of ["text", "\uFEFFtext", "\uFEFF\uFEFFtext", ""]) {
+    expect(decoder.decode(new TextEncoder().encode(text))).toBe(text);
+  }
+  expect(decoder.decode(new Uint8Array([0xed, 0xa0, 0x80]))).toBe("\uD800");
+  expect(decoder.decode()).toBe("");
+  expect(decoder.calls).toBe(6);
+});
+
+test("a client that already preserves BOMs receives no extra code unit", () => {
+  const decoder = new Decoder(true);
+  preserveTransportBoms({ program: { decoder } });
+  expect(decoder.decode(new TextEncoder().encode("\uFEFFtext"))).toBe("\uFEFFtext");
+});
+
+test("an incompatible decoder fails explicitly before reading any AST", () => {
+  expect(() => preserveTransportBoms({ program: {} })).toThrow("program decoder is unavailable");
+  expect(() => preserveTransportBoms({ program: { decoder: Object.create(null) } })).toThrow("program decoder prototype is unavailable");
+});
 
 test.each(["owned", "shared"])("discarded %s-host programs release materialized ASTs and checker facades", async (mode) => {
   const dir = mkdtempSync(join(tmpdir(), "scriptc-ts7-retention-"));
@@ -23,7 +63,7 @@ test.each(["owned", "shared"])("discarded %s-host programs release materialized 
     const host = process.argv[2] === "shared" ? new Ts7Host({ cwd: ${JSON.stringify(dir)} }) : undefined;
     function prepare() {
       const program = createProgram([${JSON.stringify(entry)}], { noLib: true }, host);
-      const file = program.getSourceFiles().find(file => file.fileName === ${JSON.stringify(entry)});
+      const file = program.getSourceFile(${JSON.stringify(entry)});
       assert.ok(file);
       const checker = program.getTypeChecker();
       checker.getTypeAtLocation(file.statements[0]);
@@ -65,8 +105,8 @@ test("semantic diagnostics are reused across preflight and later consumers of on
     const strict = host.createProgram([entry, other], { strict: true });
     const query = vi.spyOn(strict.project.program, "getSemanticDiagnostics");
     const preflight = getPreEmitDiagnostics(strict);
-    expect(preflight.some((d) => d.code === 7006 && d.fileName === entry)).toBe(true);
-    expect(preflight.some((d) => d.code === 2322 && d.fileName === other)).toBe(true);
+    expect(preflight.some((d) => d.code === 7006 && d.fileName === tsgoPath(entry))).toBe(true);
+    expect(preflight.some((d) => d.code === 2322 && d.fileName === tsgoPath(other))).toBe(true);
     const first = strict.getSemanticDiagnostics();
     expect(strict.getSemanticDiagnostics()).toEqual(first);
     expect(query).toHaveBeenCalledTimes(1);
@@ -76,7 +116,7 @@ test("semantic diagnostics are reused across preflight and later consumers of on
     if (sf === undefined) throw new Error("missing entry source file");
     const scoped = strict.getSemanticDiagnostics(sf);
     expect(scoped.some((d) => d.code === 7006)).toBe(true);
-    expect(scoped.every((d) => d.fileName === entry)).toBe(true);
+    expect(scoped.every((d) => d.fileName === tsgoPath(entry))).toBe(true);
     expect(strict.getSemanticDiagnostics(sf)).toEqual(scoped);
     expect(query).toHaveBeenCalledTimes(2);
 

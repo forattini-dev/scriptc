@@ -148,7 +148,7 @@ const bomPreservingDecoderPrototypes = new WeakSet<object>();
  * one leading U+FEFF. Patch that decoder class once after the first project
  * exposes an instance: delegate to its WTF-8-aware implementation, then
  * restore the one BOM TextDecoder consumed. */
-function preserveTransportBoms(project: Project): void {
+export function preserveTransportBoms(project: { readonly program: object }): void {
   const decoder = (project.program as unknown as { decoder?: Ts7TransportDecoder }).decoder;
   if (decoder === undefined) {
     throw new InternalCompilerError("ts7 createProgram: program decoder is unavailable");

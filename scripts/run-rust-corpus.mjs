@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { readMatrix, writeMatrix } from "./rust-corpus-matrix.mjs";
+import { compareMatrices } from "./compare-rust-corpus.mjs";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
@@ -17,7 +18,10 @@ function option(name, fallback) {
   return args[index + 1];
 }
 for (let index = 0; index < args.length; index += 2)
-  if (!["--out-dir", "--shards", "--pattern"].includes(args[index])) throw new Error(`unknown option: ${args[index]}`);
+  if (!["--out-dir", "--shards", "--pattern", "--baseline"].includes(args[index])) throw new Error(`unknown option: ${args[index]}`);
+const baselineFile = option("--baseline", "");
+const baseline = baselineFile ? JSON.parse(fs.readFileSync(path.resolve(baselineFile), "utf8")) : undefined;
+if (baseline) compareMatrices(baseline, baseline); // Validate before starting native work.
 const shards = Number(option("--shards", "2"));
 if (!Number.isInteger(shards) || shards < 1 || shards > 8) throw new Error("--shards must be 1 through 8");
 const pattern = option("--pattern", "");
@@ -84,5 +88,8 @@ fs.writeFileSync(path.join(output, "completed.json"), JSON.stringify({ finishedA
 const matrix = readMatrix(output);
 matrix.metadata.evidenceDirectory = output;
 writeMatrix(matrix, output);
+const comparison = baseline ? compareMatrices(baseline, matrix) : undefined;
+if (comparison) fs.writeFileSync(path.join(output, "rust-corpus-comparison.json"), JSON.stringify(comparison, null, 2) + "\n");
 console.log(JSON.stringify({ complete: matrix.complete, counts: matrix.counts, failures: matrix.failures }));
-process.exitCode = results.some(result => result.exit !== 0) || !matrix.complete || matrix.counts.skipped || matrix.counts["passed-profile-missing"] ? 1 : 0;
+if (comparison) console.log(JSON.stringify({ verdict: comparison.verdict, protected: comparison.protectedCount, retained: comparison.retained.length, regressions: comparison.regressions }));
+process.exitCode = results.some(result => result.exit !== 0) || !matrix.complete || matrix.counts.skipped || matrix.counts["passed-profile-missing"] || comparison?.verdict === "FAIL" ? 1 : 0;
