@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const configOnly = process.argv[2] === "--check-config";
+if (process.argv.length > 2 && (!configOnly || process.argv.length !== 3)) {
+  console.error("usage: node scripts/test-ts7.mjs [--check-config]");
+  process.exit(2);
+}
 
 const ALLOWED_TYPESCRIPT5_IMPORTS = new Set([
   "packages/compiler/src/frontend/bun-island-rewrite.ts",
@@ -13,6 +18,7 @@ const ALLOWED_TYPESCRIPT5_IMPORTS = new Set([
   "packages/compiler/src/frontend/cjs-lexer.ts",
   "packages/compiler/src/frontend/lowering/lower-comptime.ts",
   "packages/compiler/src/frontend/npm-static-declarations.ts",
+  "packages/compiler/src/frontend/npm-static-readability.ts",
   "packages/compiler/src/frontend/npm-static-rewrite.ts",
   "packages/compiler/src/frontend/npm-static-types.ts",
   "packages/compiler/src/frontend/npm-typescript.ts",
@@ -56,9 +62,13 @@ if (missing.length > 0 || unexpected.length > 0) {
 const compilerPackage = JSON.parse(
   readFileSync(resolve(repoRoot, "packages/compiler/package.json"), "utf8"),
 );
-if (compilerPackage.scripts?.build !== "node node_modules/typescript/bin/tsc -p tsconfig.json") {
+if (compilerPackage.scripts?.build !== "node scripts/build-native-checker.mjs && node node_modules/typescript/bin/tsc -p tsconfig.json") {
   console.error("@scriptc/compiler must build with the TypeScript 7 toolchain");
   process.exit(1);
+}
+if (configOnly) {
+  console.log("TypeScript 7 import boundaries and build configuration verified");
+  process.exit(0);
 }
 
 const vitest = resolve(repoRoot, "node_modules/vitest/vitest.mjs");
