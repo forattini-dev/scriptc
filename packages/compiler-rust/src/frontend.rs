@@ -13,6 +13,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
 };
+mod aggregates;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
 
@@ -75,6 +76,9 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             native_functions: HashMap::new(),
             native_namespaces: HashMap::new(),
             json_imports: HashMap::new(),
+            records: Vec::new(),
+            unions: Vec::new(),
+            types: HashMap::new(),
         };
         let mut files = Vec::new();
         lowerer.dependencies(file, &mut HashSet::new(), &mut HashSet::new(), &mut files)?;
@@ -113,6 +117,8 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             source_file: source.clone(),
             entry: "__main".into(),
             functions,
+            records: lowerer.records,
+            unions: lowerer.unions,
         })
     })
 }
@@ -173,6 +179,10 @@ struct Lowerer<'a> {
     native_functions: HashMap<u32, (&'static str, String)>,
     native_namespaces: HashMap<u32, &'static str>,
     json_imports: HashMap<u32, serde_json::Value>,
+    records: Vec<ir::Record>,
+    unions: Vec<ir::Union>,
+    // None is also the in-progress sentinel: recursive layouts are refused.
+    types: HashMap<TypeId, Option<Type>>,
 }
 
 impl Lowerer<'_> {
@@ -353,7 +363,12 @@ impl Lowerer<'_> {
     }
 
     fn symbol(&mut self, node: Node) -> u32 {
-        let mut symbol = self.checker.get_symbol_at_location(node, false);
+        let mut symbol = if node.parent().kind() == SyntaxKind::ShorthandPropertyAssignment {
+            self.checker
+                .get_shorthand_assignment_value_symbol(node.parent())
+        } else {
+            self.checker.get_symbol_at_location(node, false)
+        };
         if symbol.0 != 0
             && self
                 .checker
@@ -477,13 +492,13 @@ impl Lowerer<'_> {
             {
                 return Err(self.refuse(
                     param,
-                    "only required primitive identifier parameters are ported",
+                    "only required native identifier parameters are ported",
                 ));
             }
             params.push(Param {
                 local_id: format!("p{index}"),
                 name: param.name().text().into(),
-                r#type: self.ty(param.name())?,
+                r#type: self.storage_type(param.name())?,
             });
         }
         let sig = self.checker.get_signature_from_declaration(node);
@@ -491,6 +506,7 @@ impl Lowerer<'_> {
         let flags = self.checker.ty(ret).flags;
         let return_type = self
             .type_id(ret)
+            .filter(|ty| !matches!(ty, Type::Null | Type::Undefined))
             .or_else(|| flags.intersects(TypeFlags::VOID).then_some(Type::Void))
             .ok_or_else(|| self.refuse(node, "function return type is not ported"))?;
         let symbol = self.symbol(node.name());
@@ -574,7 +590,7 @@ impl Lowerer<'_> {
                 _ => None,
             };
         }
-        None
+        self.aggregate_type(id)
     }
     fn loc(&self, node: Node) -> Loc {
         Loc {
@@ -600,6 +616,16 @@ impl Lowerer<'_> {
                 "type has no representation in the first native IR subset",
             )
         })
+    }
+    fn storage_type(&mut self, node: Node) -> Result<Type, String> {
+        let ty = self.ty(node)?;
+        if matches!(ty, Type::Null | Type::Undefined) {
+            return Err(self.refuse(
+                node,
+                "standalone unit storage outside a union is not ported",
+            ));
+        }
+        Ok(ty)
     }
     fn binding(&mut self, node: Node) -> Result<Local, String> {
         let symbol = self.symbol(node);
@@ -635,7 +661,7 @@ impl Lowerer<'_> {
                 let value = if node.expression().is_nil() {
                     None
                 } else {
-                    Some(self.expression(node.expression())?)
+                    Some(self.expected_expression(node.expression(), ret)?)
                 };
                 if value.as_ref().map_or(Type::Void, Expr::ty) != ret {
                     return Err(self.refuse(node, "return coercion is not ported"));
@@ -664,8 +690,8 @@ impl Lowerer<'_> {
                             "initialized identifier declarations are required",
                         ));
                     }
-                    let init = self.expression(declaration.initializer())?;
-                    let ty = self.ty(name)?;
+                    let ty = self.storage_type(name)?;
+                    let init = self.expected_expression(declaration.initializer(), ty)?;
                     if ty != init.ty() {
                         return Err(self.refuse(declaration, "coercion is not ported"));
                     }
@@ -691,11 +717,14 @@ impl Lowerer<'_> {
                 if expression.kind() == SyntaxKind::BinaryExpression
                     && expression.operator_token().kind() == SyntaxKind::EqualsToken
                 {
+                    if expression.left().kind() == SyntaxKind::PropertyAccessExpression {
+                        return Ok(vec![self.record_set(expression)?]);
+                    }
                     if expression.left().kind() != SyntaxKind::Identifier {
                         return Err(self.refuse(expression, "only local assignment is ported"));
                     }
                     let local = self.binding(expression.left())?;
-                    let value = self.expression(expression.right())?;
+                    let value = self.expected_expression(expression.right(), local.r#type)?;
                     Stmt::Assign {
                         local_id: local.id,
                         value,
@@ -734,6 +763,19 @@ impl Lowerer<'_> {
         }
         let loc = self.loc(node);
         match node.kind() {
+            SyntaxKind::ObjectLiteralExpression => {
+                let ty = self.ty(node)?;
+                self.record_literal(node, ty)
+            }
+            SyntaxKind::ConditionalExpression => {
+                let ty = self.ty(node)?;
+                self.expected_expression(node, ty)
+            }
+            SyntaxKind::NullKeyword => Ok(Expr::UnitLit {
+                unit: "null",
+                r#type: Type::Null,
+                loc,
+            }),
             SyntaxKind::ArrayLiteralExpression => {
                 let r#type = self.ty(node)?;
                 let elems = node
@@ -758,6 +800,7 @@ impl Lowerer<'_> {
                 })
             }
             SyntaxKind::ParenthesizedExpression => self.expression(node.expression()),
+            SyntaxKind::PropertyAccessExpression => self.record_get(node),
             SyntaxKind::NumericLiteral => {
                 let text = node.text().replace('_', "");
                 let value = goport_core::jsnum::from_string(&text).value();
@@ -789,12 +832,29 @@ impl Lowerer<'_> {
                 loc,
             }),
             SyntaxKind::Identifier => {
+                let symbol = self.symbol(node);
+                if node.text() == "undefined"
+                    && symbol != 0
+                    && !self.bindings.contains_key(&symbol)
+                    && self
+                        .checker
+                        .sym(goport_core::prelude::SymbolId(symbol))
+                        .value_declaration
+                        .is_nil()
+                {
+                    return Ok(Expr::UnitLit {
+                        unit: "undefined",
+                        r#type: Type::Undefined,
+                        loc,
+                    });
+                }
                 let local = self.binding(node)?;
-                Ok(Expr::VarRef {
+                let value = Expr::VarRef {
                     local_id: local.id,
                     r#type: local.r#type,
                     loc,
-                })
+                };
+                self.narrowed(value, node)
             }
             SyntaxKind::PrefixUnaryExpression => {
                 let op = match node.operator() {
@@ -828,20 +888,11 @@ impl Lowerer<'_> {
                     SyntaxKind::GreaterThanEqualsToken => ">=",
                     SyntaxKind::EqualsEqualsEqualsToken => "===",
                     SyntaxKind::ExclamationEqualsEqualsToken => "!==",
+                    SyntaxKind::AmpersandAmpersandToken => "&&",
+                    SyntaxKind::BarBarToken => "||",
                     _ => return Err(self.refuse(node, "binary operator is not ported")),
                 };
-                let left = Box::new(self.expression(node.left())?);
-                let right = Box::new(self.expression(node.right())?);
-                if left.ty() != Type::F64 || right.ty() != Type::F64 {
-                    return Err(self.refuse(node, "only numeric binary operands are ported"));
-                }
-                Ok(Expr::Bin {
-                    op: op.into(),
-                    left,
-                    right,
-                    r#type: self.ty(node)?,
-                    loc,
-                })
+                self.binary(node, op)
             }
             SyntaxKind::CallExpression => {
                 let member = node.expression();
@@ -885,9 +936,10 @@ impl Lowerer<'_> {
                         let args = node
                             .arguments()
                             .into_iter()
-                            .map(|arg| self.expression(arg))
+                            .zip(&signature.params)
+                            .map(|(arg, param)| self.expected_expression(arg, param.r#type))
                             .collect::<Result<Vec<_>, _>>()?;
-                        if args.len() != signature.params.len()
+                        if node.arguments().len() != signature.params.len()
                             || args
                                 .iter()
                                 .zip(&signature.params)

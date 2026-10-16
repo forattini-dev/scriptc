@@ -78,6 +78,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-builtins/runtime-types-only.ts",
         "rust-native-builtins/process-import.ts",
         "rust-native-cycles/main.ts",
+        "rust-native-records/main.ts",
+        "rust-native-records/runtime-types-only.ts",
     ]
     .into_iter()
     .enumerate()
@@ -183,6 +185,47 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         ("async", "async function f() { return 1; }", "SCN1001"),
+        (
+            "recursive-record",
+            "interface Link { next?: Link }; function f(link: Link): void {}",
+            "SCN1001",
+        ),
+        (
+            "index-record",
+            "function f(record: Record<string, string>): void {}",
+            "SCN1001",
+        ),
+        (
+            "record-accessor",
+            "const record = { get value(): number { return 1; } }; console.log(record.value);",
+            "SCN1001",
+        ),
+        (
+            "record-method",
+            "const record = { value(): number { return 1; } }; console.log(record.value());",
+            "SCN1001",
+        ),
+        (
+            "record-prototype",
+            "const record = { __proto__: { value: 1 } };",
+            "SCN1001",
+        ),
+        ("unit-storage", "const empty: null = null;", "SCN1001"),
+        (
+            "record-width",
+            "function f(record: { n: number }): number { return record.n; } const record = { n: 1, extra: 2 }; console.log(f(record));",
+            "SCN1001",
+        ),
+        (
+            "readonly-record",
+            "const record: { readonly n: number } = { n: 1 }; record.n = 2;",
+            "TS2540",
+        ),
+        (
+            "optional-record-type",
+            "function f(record: { n?: number }): void {} f({ n: 'bad' });",
+            "TS2322",
+        ),
         (
             "generic",
             "function f<T>(n: T) { return n; } console.log(f(1));",
