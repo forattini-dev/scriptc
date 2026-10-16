@@ -83,6 +83,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-callbacks/main.ts",
         "rust-native-callbacks/runtime-types-only.ts",
         "rust-native-js-contracts/contracts.ts",
+        "rust-native-parameters/main.ts",
+        "rust-native-parameters/function-values.ts",
     ]
     .into_iter()
     .enumerate()
@@ -178,14 +180,29 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         (
-            "default-param",
-            "function f(n: number = 1) { return n; } console.log(f());",
+            "default-unit-param",
+            "function f(n: number | undefined = undefined) { return 1; } console.log(f());",
             "SCN1001",
         ),
         (
-            "optional-param",
-            "function f(n?: number) { return 1; } console.log(f());",
+            "optional-array-param",
+            "function f(n?: number[]) { return 1; } console.log(f());",
             "SCN1001",
+        ),
+        (
+            "rest-param",
+            "function f(...n: number[]) { return 1; } console.log(f());",
+            "SCN1001",
+        ),
+        (
+            "required-after-default",
+            "function f(a = 1, b: number) { return a + b; } console.log(f());",
+            "TS2554",
+        ),
+        (
+            "self-default",
+            "function f(a: number = a) { return a; } console.log(f());",
+            "TS2372",
         ),
         ("async", "async function f() { return 1; }", "SCN1001"),
         (

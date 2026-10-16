@@ -112,7 +112,7 @@ impl Lowerer<'_> {
         Some(Type::Record { shape_id })
     }
 
-    fn intern_union(&mut self, mut arms: Vec<Type>) -> Option<Type> {
+    pub(super) fn intern_union(&mut self, mut arms: Vec<Type>) -> Option<Type> {
         arms.sort_by_key(|a| format!("{a:?}"));
         arms.dedup();
         if arms.len() == 1 {

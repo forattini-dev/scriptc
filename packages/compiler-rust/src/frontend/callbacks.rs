@@ -10,10 +10,7 @@ impl Lowerer<'_> {
         }
         let signature = signatures[0];
         let sig = self.checker.sig(signature);
-        if !sig.type_parameters.is_empty()
-            || sig.has_rest_parameter()
-            || sig.min_argument_count() != sig.parameters.len() as i32
-            || sig.this_parameter.0 != 0
+        if !sig.type_parameters.is_empty() || sig.has_rest_parameter() || sig.this_parameter.0 != 0
         {
             return None;
         }
@@ -21,7 +18,11 @@ impl Lowerer<'_> {
         let mut params = Vec::new();
         for symbol in symbols {
             let id = self.checker.get_type_of_symbol(symbol);
-            let ty = self.type_id(id)?;
+            let mut ty = self.type_id(id)?;
+            let declaration = self.checker.sym(symbol).value_declaration;
+            if !declaration.is_nil() && declaration.kind() == SyntaxKind::Parameter {
+                ty = self.parameter_type(declaration, ty).ok()?;
+            }
             if matches!(ty, Type::Void | Type::Null | Type::Undefined) {
                 return None;
             }
@@ -105,8 +106,6 @@ impl Lowerer<'_> {
         }
         for param in node.parameters() {
             if param.name().kind() != SyntaxKind::Identifier
-                || !param.initializer().is_nil()
-                || !param.question_token().is_nil()
                 || !param.dot_dot_dot_token().is_nil()
                 || param.name().text() == "this"
             {
@@ -122,31 +121,22 @@ impl Lowerer<'_> {
         self.outer.push(saved_bindings.clone());
         let nodes = node.parameters().into_iter().collect::<Vec<_>>();
         let mut params = Vec::new();
+        let mut body = Vec::new();
         for (index, ty) in types.iter().enumerate() {
             let name = nodes
                 .get(index)
                 .map(|n| n.name().text().to_string())
                 .unwrap_or_else(|| format!("ignored{index}"));
-            let local = Local {
-                id: format!("p{index}"),
+            let param = Param {
+                local_id: format!("p{index}"),
                 name,
                 r#type: ty.clone(),
-                mutable: true,
-                boxed: false,
             };
-            if let Some(node) = nodes.get(index) {
-                let symbol = self.symbol(node.name());
-                self.bindings.insert(symbol, local.clone());
-            }
-            params.push(Param {
-                local_id: local.id.clone(),
-                name: local.name.clone(),
-                r#type: local.r#type.clone(),
-            });
-            self.locals.push(local);
+            body.extend(self.bind_parameter(nodes.get(index).copied(), &param)?);
+            params.push(param);
         }
         let loc = self.loc(node);
-        let body = if node.body().kind() == SyntaxKind::Block {
+        body.extend(if node.body().kind() == SyntaxKind::Block {
             self.statements(node.body().statements())?
         } else if **ret == Type::Void {
             vec![
@@ -164,7 +154,7 @@ impl Lowerer<'_> {
                 value: Some(self.expected_expression(node.body(), (**ret).clone())?),
                 loc: self.loc(node.body()),
             }]
-        };
+        });
         if **ret != Type::Void && !ir::always_returns(&body) {
             return Err(self.refuse(node, "callback can fall through"));
         }
@@ -206,15 +196,7 @@ impl Lowerer<'_> {
         let Type::Func { params, ret } = callee.ty() else {
             return Err(self.refuse(node, "callee has no native function representation"));
         };
-        if params.len() != node.arguments().len() {
-            return Err(self.refuse(node, "indirect call arity is not ported"));
-        }
-        let args = node
-            .arguments()
-            .into_iter()
-            .zip(params)
-            .map(|(arg, ty)| self.expected_expression(arg, ty))
-            .collect::<Result<Vec<_>, _>>()?;
+        let args = self.call_arguments(node, &params)?;
         Ok(Expr::CallValue {
             callee: Box::new(callee),
             args,

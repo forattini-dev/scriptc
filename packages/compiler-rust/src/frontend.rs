@@ -16,6 +16,7 @@ use std::{
 mod aggregates;
 mod callbacks;
 mod declarations;
+mod parameters;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
 
@@ -527,28 +528,27 @@ impl<'a> Lowerer<'a> {
         for (index, param) in node.parameters().into_iter().enumerate() {
             if param.name().kind() != SyntaxKind::Identifier
                 || param.name().text() == "this"
-                || !param.initializer().is_nil()
-                || !param.question_token().is_nil()
                 || !param.dot_dot_dot_token().is_nil()
             {
                 return Err(self.refuse(
                     param,
-                    "only required native identifier parameters are ported",
+                    "only native identifier parameters without rest/receiver are ported",
                 ));
             }
+            let ty = if let Some(hint) = &declared {
+                hint.params[index].clone().ok_or_else(|| {
+                    self.refuse(
+                        param,
+                        "public JavaScript parameter type has no native representation",
+                    )
+                })?
+            } else {
+                self.storage_type(param.name())?
+            };
             params.push(Param {
                 local_id: format!("p{index}"),
                 name: param.name().text().into(),
-                r#type: if let Some(hint) = &declared {
-                    hint.params[index].clone().ok_or_else(|| {
-                        self.refuse(
-                            param,
-                            "public JavaScript parameter type has no native representation",
-                        )
-                    })?
-                } else {
-                    self.storage_type(param.name())?
-                },
+                r#type: self.parameter_type(param, ty)?,
             });
         }
         let return_type = if let Some(hint) = declared {
@@ -591,25 +591,16 @@ impl<'a> Lowerer<'a> {
         self.bindings.clear(); // Captured outer bindings require a later closure/global representation.
         self.captures.clear();
         self.return_type = Some(signature.return_type.clone());
+        let mut body = Vec::new();
         for (node, param) in signature
             .node
             .parameters()
             .into_iter()
             .zip(&signature.params)
         {
-            let symbol = self.symbol(node.name());
-            let local = Local {
-                id: param.local_id.clone(),
-                name: param.name.clone(),
-                r#type: param.r#type.clone(),
-                mutable: true,
-                boxed: false,
-            };
-            // IR v13 parameters reference entries in the function's locals table.
-            self.bindings.insert(symbol, local.clone());
-            self.locals.push(local);
+            body.extend(self.bind_parameter(Some(node), param)?);
         }
-        let body = self.statements(signature.node.body().statements())?;
+        body.extend(self.statements(signature.node.body().statements())?);
         if signature.return_type != Type::Void && !ir::always_returns(&body) {
             return Err(self.refuse(
                 signature.node,
@@ -1049,20 +1040,12 @@ impl<'a> Lowerer<'a> {
                 if member.kind() == SyntaxKind::Identifier || namespace_call {
                     let symbol = self.symbol(symbol_node);
                     if let Some(signature) = self.functions.get(&symbol).cloned() {
-                        let args = node
-                            .arguments()
-                            .into_iter()
-                            .zip(&signature.params)
-                            .map(|(arg, param)| self.expected_expression(arg, param.r#type.clone()))
-                            .collect::<Result<Vec<_>, _>>()?;
-                        if node.arguments().len() != signature.params.len()
-                            || args
-                                .iter()
-                                .zip(&signature.params)
-                                .any(|(arg, param)| arg.ty() != param.r#type)
-                        {
-                            return Err(self.refuse(node, "call arity/coercions are not ported"));
-                        }
+                        let types = signature
+                            .params
+                            .iter()
+                            .map(|p| p.r#type.clone())
+                            .collect::<Vec<_>>();
+                        let args = self.call_arguments(node, &types)?;
                         return Ok(Expr::Call {
                             callee: signature.name,
                             args,
