@@ -731,10 +731,13 @@ impl Lowerer<'_> {
                         loc,
                     }
                 } else {
-                    Stmt::Expression {
-                        expr: self.expression(expression)?,
-                        loc,
+                    let expr = self.expression(expression)?;
+                    if matches!(expr.ty(), Type::Null | Type::Undefined) {
+                        return Err(
+                            self.refuse(expression, "standalone unit expressions are not ported")
+                        );
                     }
+                    Stmt::Expression { expr, loc }
                 }
             }
             SyntaxKind::IfStatement => {

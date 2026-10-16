@@ -346,6 +346,13 @@ impl Lowerer<'_> {
         let left = self.expression(node.left())?;
         let right = self.expression(node.right())?;
         if matches!(op, "===" | "!==") {
+            if matches!(left, Expr::UnitLit { .. }) && matches!(right, Expr::UnitLit { .. }) {
+                return Ok(Expr::BoolLit {
+                    value: (left.ty() == right.ty()) != (op == "!=="),
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                });
+            }
             // Only unit comparisons can become tag tests: comparing two
             // payload values requires JS equality, not tag equality.
             let mut test = None;

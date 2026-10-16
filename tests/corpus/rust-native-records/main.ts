@@ -82,3 +82,4 @@ function nestedInfo(value: BuildInfo | null): string {
   return value.app;
 }
 console.log("nullable-record", nestedInfo(nullableBuild(true)), nestedInfo(nullableBuild(false)));
+console.log("units", null === null, undefined === undefined, null !== undefined);

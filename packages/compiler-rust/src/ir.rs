@@ -512,14 +512,6 @@ fn validate_function(
                 }
                 Ok(())
             }
-            Expr::UnitLit { unit, r#type, .. }
-                if matches!(
-                    (*unit, r#type),
-                    ("null", Type::Null) | ("undefined", Type::Undefined)
-                ) =>
-            {
-                Ok(())
-            }
             Expr::RecordLit {
                 fields,
                 r#type: Type::Record { shape_id },
@@ -577,7 +569,24 @@ fn validate_function(
                 r#type,
                 ..
             } => {
-                expr(value, locals, initialized, functions, module)?;
+                if matches!(value.ty(), Type::Null | Type::Undefined) {
+                    if !matches!(
+                        value.as_ref(),
+                        Expr::UnitLit {
+                            unit: "null",
+                            r#type: Type::Null,
+                            ..
+                        } | Expr::UnitLit {
+                            unit: "undefined",
+                            r#type: Type::Undefined,
+                            ..
+                        }
+                    ) {
+                        return Err("unit union payload must be a unit literal".into());
+                    }
+                } else {
+                    expr(value, locals, initialized, functions, module)?;
+                }
                 let Type::Union { union_id: id } = r#type else {
                     return Err("non-union wrap".into());
                 };
@@ -607,6 +616,11 @@ fn validate_function(
                 };
                 let union = module.unions.get(id).ok_or("unknown union")?;
                 let arm = union.arms.get(*tag).ok_or("invalid union tag")?;
+                if matches!(e, Expr::UnionNarrow { .. })
+                    && matches!(arm, Type::Null | Type::Undefined)
+                {
+                    return Err("standalone unit narrowing".into());
+                }
                 if *union_id != format!("u{id}")
                     || *r#type
                         != if matches!(e, Expr::UnionIsTag { .. }) {
@@ -692,22 +706,12 @@ fn validate_function(
                 expr(right, locals, initialized, functions, module)?;
                 let result = match op.as_str() {
                     "+" | "-" | "*" | "/" | "%" | "**" => Type::F64,
-                    "<" | "<=" | ">" | ">=" | "===" | "!==" | "&&" | "||" => Type::Bool,
+                    "<" | "<=" | ">" | ">=" | "===" | "!==" => Type::Bool,
                     _ => return Err("invalid numeric operator".into()),
                 };
-                let operands = if matches!(op.as_str(), "&&" | "||") {
-                    left.ty() == Type::Bool && right.ty() == Type::Bool
-                } else if matches!(op.as_str(), "===" | "!==") {
+                let operands = if matches!(op.as_str(), "===" | "!==") {
                     left.ty() == right.ty()
-                        && matches!(
-                            left.ty(),
-                            Type::F64
-                                | Type::String
-                                | Type::Bool
-                                | Type::Null
-                                | Type::Undefined
-                                | Type::Record { .. }
-                        )
+                        && matches!(left.ty(), Type::F64 | Type::Bool | Type::Record { .. })
                 } else {
                     left.ty() == Type::F64 && right.ty() == Type::F64
                 };
@@ -996,6 +1000,39 @@ mod tests {
         assert_eq!(validate(&m).unwrap_err(), "invalid union wrap");
         m.unions[0].arms.push(Type::Null);
         assert_eq!(validate(&m).unwrap_err(), "invalid/recursive union layout");
+    }
+
+    #[test]
+    fn unit_and_operator_nodes_follow_the_shared_wire_contract() {
+        let mut m = record_module();
+        let loc = m.functions[0].loc.clone();
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::UnitLit {
+                unit: "null",
+                r#type: Type::Null,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert_eq!(validate(&m).unwrap_err(), "invalid native expression");
+        let make_bool = || {
+            Box::new(Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc: loc.clone(),
+            })
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::Bin {
+                op: "&&".into(),
+                left: make_bool(),
+                right: make_bool(),
+                r#type: Type::Bool,
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert_eq!(validate(&m).unwrap_err(), "invalid numeric operator");
     }
 
     fn callable_module() -> Module {

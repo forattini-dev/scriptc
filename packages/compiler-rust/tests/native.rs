@@ -211,6 +211,12 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         ("unit-storage", "const empty: null = null;", "SCN1001"),
+        ("unit-expression", "null;", "SCN1001"),
+        (
+            "unit-return",
+            "function f(): null { return null; }",
+            "SCN1001",
+        ),
         (
             "record-width",
             "function f(record: { n: number }): number { return record.n; } const record = { n: 1, extra: 2 }; console.log(f(record));",
