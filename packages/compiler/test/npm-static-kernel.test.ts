@@ -58,7 +58,7 @@ test("npm auto compiles Effect through the native Rust kernel with Node parity",
   await fixture(async (entry, directory) => {
     const result = await compile(entry, {
       backend: "rust", allowEngine: false, npmStatic: "auto", target: "node24",
-      outDir: join(directory, "out"), outPath: join(directory, "out/program"),
+      outDir: join(directory, "out"), outPath: join(directory, "out", process.platform === "win32" ? "program.exe" : "program"),
     });
     expect(result.ok, result.ok ? undefined : JSON.stringify(result.diagnostics)).toBe(true);
     if (!result.ok) return;
