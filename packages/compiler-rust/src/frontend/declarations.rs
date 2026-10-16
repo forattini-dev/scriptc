@@ -93,7 +93,7 @@ fn edges(checker: &mut Checker, files: &[Node]) -> Vec<Edge> {
                 continue;
             }
             let target = checker.sym(symbol).value_declaration;
-            if target.kind() != SyntaxKind::SourceFile {
+            if target.is_nil() || target.kind() != SyntaxKind::SourceFile {
                 continue;
             }
             edges.push(Edge {
@@ -267,10 +267,12 @@ impl Catalog {
                     continue;
                 }
                 let node = checker.sym(symbol).value_declaration;
-                if matches!(
-                    node.kind(),
-                    SyntaxKind::FunctionDeclaration | SyntaxKind::VariableDeclaration
-                ) {
+                if !node.is_nil()
+                    && matches!(
+                        node.kind(),
+                        SyntaxKind::FunctionDeclaration | SyntaxKind::VariableDeclaration
+                    )
+                {
                     targets.insert((path.clone(), name), Key::of(node));
                 }
             }

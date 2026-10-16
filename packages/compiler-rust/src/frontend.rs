@@ -739,6 +739,7 @@ impl<'a> Lowerer<'a> {
             }
             SyntaxKind::EmptyStatement
             | SyntaxKind::InterfaceDeclaration
+            | SyntaxKind::JsTypeAliasDeclaration
             | SyntaxKind::TypeAliasDeclaration => return Ok(vec![]),
             SyntaxKind::Block => Stmt::Block {
                 body: self.statements(node.statements())?,
