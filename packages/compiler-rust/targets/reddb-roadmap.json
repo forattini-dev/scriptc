@@ -1,0 +1,288 @@
+{
+  "schemaVersion": 1,
+  "baselineCompilerCommit": "64056ba8981e36db65256396776da99e425eec63",
+  "primaryTarget": "red-skills-release",
+  "orderRationale": "Prioritize shared language contracts and the smallest linked application graph. The listed dependencies are semantic prerequisites, not a promise that all other tasks are serial.",
+  "measurement": "Inventory includes uncalled bodies and direct syntax only; it is a conservative risk map, not a count of remaining failures, a coverage percentage or an ETA. Demand and isolated runtime checks refine it.",
+  "steps": [
+    {
+      "id": "inventory",
+      "status": "implemented",
+      "work": "Refresh linked-source prerequisites for all three pinned applications, including uncalled bodies and direct global/native API uses.",
+      "dependsOn": [],
+      "acceptanceAndRisks": [
+        "No source is dropped when lowering refuses an earlier construct.",
+        "Keep locations and distinguish resolver sources from linked sources; syntax occurrences do not prove demand or unsupported semantics.",
+        "Audit aliases, reflective calls and conditional resolution separately."
+      ]
+    },
+    {
+      "id": "runtime-code-generation-audit",
+      "status": "audit-required",
+      "targetScope": [
+        "redskilled"
+      ],
+      "work": "Resolve the MCP/Ajv runtime-generated validator path before claiming complete no-engine application support.",
+      "dependsOn": [
+        "inventory"
+      ],
+      "evidence": [
+        {
+          "file": "node_modules/.pnpm/ajv@8.20.0/node_modules/ajv/dist/compile/index.js",
+          "line": 89,
+          "fact": "Constructs new Function from generated sourceCode."
+        },
+        {
+          "file": "node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js",
+          "line": 108,
+          "fact": "Defaults to new AjvJsonSchemaValidator when no custom validator is supplied."
+        },
+        {
+          "file": "node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js",
+          "line": 66,
+          "fact": "getValidator(schema) calls this._ajv.compile(schema)."
+        }
+      ],
+      "acceptanceAndRisks": [
+        "The static graph contains this code, including uncalled bodies; determine demanded calls and whether schemas are available at compilation or arrive at runtime.",
+        "Compile statically closed generated code through the AOT path only when its inputs and semantics are proven.",
+        "If runtime schemas demand the path, design a native Rust JSON-Schema validation contract and compare keywords/options, references, formats, errors and callable metadata with the pinned provider.",
+        "No JS engine, arbitrary source evaluator, ignored validation, removed branches, modified application/dependencies or compiler fallback.",
+        "No new Function/eval observation was found in the direct linked release inventory; keep the primary milestone separate from the larger application risk."
+      ]
+    },
+    {
+      "id": "symbol-sentinels",
+      "status": "partial",
+      "work": "Own primitive symbol identity across source types, containers, unions, erasure and exceptions.",
+      "dependsOn": [
+        "inventory"
+      ],
+      "acceptanceAndRisks": [
+        "Symbol creation and registry identity match Node; equal descriptions never imply equality.",
+        "Keep well-known symbols, factory aliases, descriptor keys and unsupported coercions as explicit boundaries until covered."
+      ]
+    },
+    {
+      "id": "console-function-values",
+      "status": "required",
+      "work": "Represent console.log/error as first-class native callbacks, including aliases and dependency declaration signatures.",
+      "dependsOn": [
+        "inventory"
+      ],
+      "acceptanceAndRisks": [
+        "Preserve function identity, argument evaluation, stdout/stderr selection and callback return type.",
+        "Exercise the red-dev log.ts shape; distinguish simple messages from format-string and object-inspection semantics."
+      ]
+    },
+    {
+      "id": "binary-data-and-web-streams",
+      "status": "required",
+      "work": "Represent TextEncoder/TextDecoder, byte buffers and the Web Streams contracts imported by the parser.",
+      "dependsOn": [
+        "inventory",
+        "symbol-sentinels"
+      ],
+      "evidence": "The next original release refusal after primitive symbols is module-initialization new TextEncoder() in @reddb-io/toon/dist/toonl.js; the following initializer constructs TextDecoder.",
+      "acceptanceAndRisks": [
+        "Preserve UTF-8/UTF-16 conversion, lone surrogates, decoder streaming/fatal/BOM modes and owning buffer aliasing.",
+        "Keep module-level codec allocation effects and identities; do not delete an initializer because its data path is unused.",
+        "Readable/Writable/TransformStream must preserve backpressure, cancellation, pipe/reader locking and error propagation before claiming stream support.",
+        "Native runtime functionality must be connected through owned types/IR; a declared browser/Node global is not a representation."
+      ]
+    },
+    {
+      "id": "source-control-flow",
+      "status": "required",
+      "work": "Lower source loops, switch, updates and abrupt branch targets into owned structured IR.",
+      "dependsOn": [
+        "inventory"
+      ],
+      "acceptanceAndRisks": [
+        "Preserve for initializer/test/update order, per-iteration lexical captures and var scope.",
+        "Break/continue/return/throw through nested finally must target the correct scope.",
+        "Test UTF-16 string indexing and live mutation separately from dense-array helper semantics."
+      ]
+    },
+    {
+      "id": "bindings-and-spread",
+      "status": "required",
+      "work": "Add dependency destructuring, defaults, rest/spread and parameter binding without losing callable identities.",
+      "dependsOn": [
+        "source-control-flow"
+      ],
+      "acceptanceAndRisks": [
+        "Evaluate sources and computed keys once, in source order; apply defaults only for undefined.",
+        "Preserve holes, argument arity, own enumerable property ordering, accessors and symbol keys.",
+        "Keep function identity and module live bindings through aliases and destructuring."
+      ]
+    },
+    {
+      "id": "objects-and-values",
+      "status": "required",
+      "work": "Broaden dependency object APIs, class accessors/static members, native callable receivers, unions and recursive handle layouts.",
+      "dependsOn": [
+        "symbol-sentinels",
+        "inventory"
+      ],
+      "acceptanceAndRisks": [
+        "Cover Object.keys/entries/assign/fromEntries, descriptors/prototypes and symbol-keyed storage as separate contracts.",
+        "Do not project nominal classes into structural records or invent an ABI for incompatible overrides.",
+        "Preserve absence versus undefined, GC ownership and object/function identity across public JS signatures."
+      ]
+    },
+    {
+      "id": "iterator-protocol-and-generators",
+      "status": "required",
+      "work": "Compile synchronous iterators and source generators, especially the streaming parser dependency.",
+      "dependsOn": [
+        "symbol-sentinels",
+        "source-control-flow",
+        "objects-and-values"
+      ],
+      "acceptanceAndRisks": [
+        "Keep suspended local state, generator identity, next/return/throw and delegated yields.",
+        "IteratorClose and generator finally run exactly when Node runs them; never eagerly consume a lazy generator.",
+        "Test the original parser in isolated encode/decode scenarios before claiming the dependency works."
+      ]
+    },
+    {
+      "id": "async-state-and-completions",
+      "status": "required",
+      "work": "Compile async functions, await and async iteration with pending completions across suspension.",
+      "dependsOn": [
+        "source-control-flow",
+        "objects-and-values",
+        "iterator-protocol-and-generators"
+      ],
+      "acceptanceAndRisks": [
+        "Preserve microtask order, rejected awaits, adoption, thenables and return/throw replacement by finally.",
+        "Include rejection handlers, Promise.all heterogeneous results, top-level await and entry completion.",
+        "Async iteration must close on abrupt exits and preserve cleanup failures."
+      ]
+    },
+    {
+      "id": "module-runtime-and-entry",
+      "status": "required",
+      "work": "Support reachable dynamic imports/CommonJS patterns, import.meta and Node entry/process contracts.",
+      "dependsOn": [
+        "inventory",
+        "bindings-and-spread",
+        "async-state-and-completions"
+      ],
+      "acceptanceAndRisks": [
+        "Respect conditional package exports, module cache identity, cycles, top-level effects and dynamic-import completion.",
+        "Match argv/env/platform/cwd/exitCode/stdout/stderr and entry guards; do not skip dependency initialization.",
+        "No runtime source evaluation, TS/Go fallback or replacement application entry."
+      ]
+    },
+    {
+      "id": "application-io",
+      "status": "required",
+      "work": "Expose the native runtime APIs and options used by the linked release dependency graph.",
+      "dependsOn": [
+        "objects-and-values",
+        "async-state-and-completions",
+        "module-runtime-and-entry",
+        "binary-data-and-web-streams"
+      ],
+      "acceptanceAndRisks": [
+        "Prioritize fs sync/promises with options, directory entries and errors; then subprocess status/signal/stdin/stdout/stderr.",
+        "Cover JSON/Date/URL/Buffer/crypto and GitHub HTTP/stream response shapes from source evidence.",
+        "Use temporary directories, injected fixtures and local services for comparisons; do not run real releases or provisioning."
+      ]
+    },
+    {
+      "id": "bun-api-facades",
+      "status": "required",
+      "work": "Implement the Bun APIs used by the original applications as native Rust operations over the owned ABI.",
+      "dependsOn": [
+        "binary-data-and-web-streams",
+        "async-state-and-completions",
+        "application-io"
+      ],
+      "evidence": "Original red-dev sources use Bun.spawn/spawnSync, Bun.which, Bun.file(...).text(), Bun.write, Bun.TOML.parse and Bun shell tagged templates. Static linked-source counts are recorded separately from source-text checks.",
+      "acceptanceAndRisks": [
+        "No Bun executable, JS engine, source evaluator or compiler fallback in the resulting application.",
+        "Preserve subprocess pipes/status/signals, file handles/Response bytes and TOML/shell error and quoting contracts.",
+        "Use Node parity for Node-compatible programs; Bun-only source behavior needs a separately pinned Bun oracle, never an invented Node parity claim through shims.",
+        "Do not replace the original entry or dependencies to make a build pass."
+      ]
+    },
+    {
+      "id": "cross-platform-and-general-gates",
+      "status": "required",
+      "work": "Separate compiler correctness, reference interoperability and toolchain/host failures before shipping.",
+      "dependsOn": [
+        "inventory"
+      ],
+      "acceptanceAndRisks": [
+        "Keep native Node differential and IR/reference matrices enabled on Windows and Ubuntu.",
+        "Preserve the protected Rust corpus and heap audits; include wrong-type, failure and artifact-atomicity tests.",
+        "Resolve the existing LLVM multi-instance SAN failure and obtain a completed plain run; a 240-second timeout is not a pass.",
+        "Investigate Defender reference-executable rejection without exclusions or disabled protection."
+      ]
+    },
+    {
+      "id": "original-application-acceptance",
+      "status": "pending",
+      "work": "Emit the original pinned release binary and compare isolated application behavior, then expand to redskilled and red-dev.",
+      "dependsOn": [
+        "console-function-values",
+        "iterator-protocol-and-generators",
+        "async-state-and-completions",
+        "module-runtime-and-entry",
+        "application-io",
+        "cross-platform-and-general-gates"
+      ],
+      "acceptanceAndRisks": [
+        "All original entries and dependency snapshots remain unchanged.",
+        "Check isolated --help/version/error exits and parser/filesystem scenarios against Node.",
+        "Verify no engine or fallback is linked; shipping requires the repository gates.",
+        "A later first diagnostic does not satisfy this milestone."
+      ],
+      "conditionalDependencies": [
+        {
+          "step": "bun-api-facades",
+          "when": "The original linked entry/dependencies require Bun-specific runtime APIs."
+        },
+        {
+          "step": "runtime-code-generation-audit",
+          "when": "Demand reaches runtime-generated JavaScript validators or other source constructors."
+        }
+      ]
+    },
+    {
+      "id": "native-cli-cutover-and-retirement",
+      "status": "pending",
+      "work": "Distribute the validated Rust driver as the default compiler and retire compatibility pieces only after their callers and replacement contracts are covered.",
+      "dependsOn": [
+        "original-application-acceptance",
+        "cross-platform-and-general-gates"
+      ],
+      "acceptanceAndRisks": [
+        "Match project configuration, package resolution, diagnostics, artifact modes, cache identity and supported library/CLI interfaces.",
+        "Production source checking/lowering/emission must remain Rust with no automatic legacy retry.",
+        "Preserve the reference oracle until its replacement and independent interoperability checks exist; reconcile pending legacy edits deliberately."
+      ]
+    }
+  ],
+  "unknownsToAudit": [
+    "Aliased/reflective global and Node API calls; inspector currently records direct syntax.",
+    "Declaration/implementation overload mismatches and erased callable receiver contracts.",
+    "Platform/environment-specific package branches, native addons, eval/Function constructors and dynamic require paths.",
+    "Data-dependent generic/recursive layouts, hidden prototype effects and implicit coercion.",
+    "Application behavior after a successful build: emitted code alone does not establish Node parity.",
+    "Other source operators, optional chains, rest parameters and implicit coercion paths need semantic demand checks beyond the current structural syntax categories.",
+    "GlobalThis/member aliases and builtin values used as callbacks are only partially visible to direct global-syntax inventory."
+  ],
+  "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
+  "observedFirstRefusals": {
+    "compilerSourceBaseCommit": "64056ba8981e36db65256396776da99e425eec63",
+    "after": "primitive Symbol support",
+    "red-skills-release": "@reddb-io/toon/dist/toonl.js module initializer new TextEncoder()",
+    "redskilled": "@reddb-io/toon/dist/toonl.js module initializer new TextEncoder()",
+    "red-dev": "src/log.ts console.log used as a callback value",
+    "completedOriginalApplicationBinaries": 0
+  }
+}

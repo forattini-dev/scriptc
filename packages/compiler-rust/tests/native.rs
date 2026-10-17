@@ -173,6 +173,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/callbacks.ts",
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
+        "rust-native-symbols/sentinels.js",
+        "rust-native-symbols/registry.ts",
+        "rust-native-symbols/containers.ts",
+        "rust-native-symbols/erased.ts",
         "rust-native-methods/direct.ts",
         "rust-native-methods/dispatch.ts",
         "rust-native-methods/contracts.ts",
@@ -1400,7 +1404,7 @@ fn module_slots_check_tdz_on_reads_writes_defaults_and_cycles() {
 #[test]
 fn emit_modes_and_paths_with_spaces_preserve_sources_and_failed_outputs() {
     let temp = tempfile::tempdir().unwrap();
-    let input = temp.path().join("ação entry.ts");
+    let input = temp.path().join("aÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o entry.ts");
     fs::write(&input, "console.log('ok', 42);").unwrap();
     for (kind, extension) in [("ir", "json"), ("rust", "rs")] {
         let target = temp.path().join(format!("result.{extension}"));
@@ -1743,7 +1747,8 @@ fn inspection_includes_uncalled_bodies_and_keeps_outputs_atomic() {
     fs::write(temp.path().join("tsconfig.json"), r#"{"compilerOptions":{"module":"NodeNext","moduleResolution":"NodeNext","target":"ES2022","strict":true,"types":["node"],"skipLibCheck":true}}"#).unwrap();
     let project = root().join("tests/corpus/rust-native-process/tsconfig.json");
     let input = temp.path().join("inspect.ts");
-    fs::write(&input, "import { readFileSync as read, existsSync } from 'node:fs'; async function unused() { for (const file of ['x']) { try { await Promise.resolve(read(file, 'utf8')); } catch {} } } console.log(existsSync('.')); ").unwrap();
+    fs::write(temp.path().join("host.d.ts"), "declare const HostRuntime: { open(): void; run(template: TemplateStringsArray): string }; ").unwrap();
+    fs::write(&input, "/// <reference path='./host.d.ts' />\nimport { readFileSync as read, existsSync } from 'node:fs'; async function unused() { for (const file of ['x']) { try { await Promise.resolve(read(file, 'utf8')); } catch {} } } console.log(existsSync('.')); class Surface { async method() {} *empty() {} get value() { return 1; } } const token = Symbol('inventory'); const sink = console.log; Object.keys({}); const codec = new TextEncoder(); Math.max(1, 2); function unusedHost() { HostRuntime.open(); return HostRuntime.run`echo`; } function shadow(Object: {keys(value: {}): string[]}) { return Object.keys({}); } ").unwrap();
     let target = temp.path().join("inventory.json");
     // Explicit project gives the same bundled declarations as the build command.
     let result = Command::new(compiler())
@@ -1764,7 +1769,7 @@ fn inspection_includes_uncalled_bodies_and_keeps_outputs_atomic() {
             .as_array()
             .unwrap()
             .len(),
-        1
+        2
     );
     assert_eq!(report["requirements"]["await"].as_array().unwrap().len(), 1);
     assert_eq!(
@@ -1781,6 +1786,50 @@ fn inspection_includes_uncalled_bodies_and_keeps_outputs_atomic() {
     assert_eq!(
         report["builtinCalls"]["fs.existsSync"]["signatureAvailable"],
         true
+    );
+    for feature in ["generator-functions", "accessors", "tagged-templates"] {
+        assert_eq!(report["requirements"][feature].as_array().unwrap().len(), 1);
+    }
+    assert_eq!(report["globalCalls"]["Symbol"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        report["globalCalls"]["new TextEncoder"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        report["globalCalls"]["Math.max"].as_array().unwrap().len(),
+        1
+    );
+    assert!(report["globalValues"].get("max").is_none());
+    assert_eq!(
+        report["globalCalls"]["HostRuntime.open"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        report["globalValues"]["HostRuntime.run"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        report["globalCalls"]["Object.keys"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        report["globalValues"]["console.log"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
     assert!(!target.with_extension("rs").exists());
     let original = fs::read(&target).unwrap();
@@ -1963,4 +2012,48 @@ fn uncaught_exceptions_run_finalizers_and_release_native_storage() {
     }
     assert!(!String::from_utf8_lossy(&actual.stderr).contains("heap audit"));
     assert!(!String::from_utf8_lossy(&actual.stderr).contains("panicked"));
+}
+
+#[test]
+fn symbol_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "symbol-boundary");
+    for source in [
+        "const iterator = Symbol.iterator; console.log(iterator);",
+        "const obj = { [Symbol('key')]: 1 }; console.log(obj);",
+        "const factory = Symbol; const value = factory('key');",
+        "const value = Symbol(1 as any);",
+        "const value = Symbol('key'); console.log(`${value}`);",
+    ] {
+        fs::write(&input, source).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            error.contains("SCN1001") || error.contains("TS2731"),
+            "{error}"
+        );
+        assert!(!error.contains("panicked"), "{error}");
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
 }

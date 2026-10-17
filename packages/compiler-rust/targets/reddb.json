@@ -100,5 +100,7 @@
       ]
     }
   ],
-  "reportingRule": "A new first diagnostic is an observation, not an application success. The primary milestone remains pending until the original entry emits a binary and its isolated scenarios pass."
+  "reportingRule": "A new first diagnostic is an observation, not an application success. The primary milestone remains pending until the original entry emits a binary and its isolated scenarios pass.",
+  "roadmap": "reddb-roadmap.json",
+  "inventorySnapshot": "reddb-inventory.json"
 }

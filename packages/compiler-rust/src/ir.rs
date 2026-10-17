@@ -57,6 +57,7 @@ pub enum Type {
     String,
     Bool,
     Regex,
+    Symbol,
     // Owned native tagged value; never an embedded engine handle.
     Dyn,
     Caught,
@@ -1234,6 +1235,7 @@ fn validate_function(
                     && matches!(
                         test.as_str(),
                         "string"
+                            | "symbol"
                             | "number"
                             | "boolean"
                             | "undefined"
@@ -1299,6 +1301,30 @@ fn validate_function(
                 }
             }
 
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if r#fn.starts_with("sym.") || r#fn == "dyn.typeof" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let arg_types = args.iter().map(Expr::ty).collect::<Vec<_>>();
+                let valid = match r#fn.as_str() {
+                    "sym.newAnon" => arg_types.is_empty() && *r#type == Type::Symbol,
+                    "sym.new" | "sym.for" => arg_types == [Type::String] && *r#type == Type::Symbol,
+                    "sym.toString" => arg_types == [Type::Symbol] && *r#type == Type::String,
+                    "dyn.typeof" => arg_types == [Type::Dyn] && *r#type == Type::String,
+                    "sym.desc" | "sym.keyFor" => {
+                        arg_types == [Type::Symbol]
+                            && matches!(r#type, Type::Union { union_id } if module.unions.get(*union_id).is_some_and(|u| u.arms.len()==2 && u.arms.contains(&Type::String) && u.arms.contains(&Type::Undefined)))
+                    }
+                    _ => false,
+                };
+                if valid {
+                    Ok(())
+                } else {
+                    Err("invalid native symbol/typeof operation".into())
+                }
+            }
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } if r#fn == "regex.new" => {
@@ -2457,6 +2483,61 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn symbols_validate_owning_operands_results_and_wire_contract() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        m.unions.push(Union {
+            id: 0,
+            arms: vec![Type::String, Type::Undefined],
+        });
+        let fresh = || Expr::LibCall {
+            r#fn: "sym.newAnon".into(),
+            args: vec![],
+            r#type: Type::Symbol,
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "sym.desc".into(),
+                args: vec![fresh()],
+                r#type: Type::Union { union_id: 0 },
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        validate(&m).unwrap();
+        let wire = serde_json::to_value(&m).unwrap();
+        assert_eq!(
+            wire["functions"][0]["body"][0]["expr"]["args"][0]["type"]["kind"],
+            "symbol"
+        );
+        if let Stmt::Expression {
+            expr: Expr::LibCall { r#type, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = Type::String;
+        }
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native symbol/typeof operation"
+        );
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "sym.newAnon".into(),
+                args: vec![fresh()],
+                r#type: Type::Symbol,
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native symbol/typeof operation"
+        );
+    }
 
     #[test]
     fn regex_contracts_validate_flags_operands_and_wire_names() {

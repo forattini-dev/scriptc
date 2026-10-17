@@ -295,6 +295,16 @@ impl Lowerer<'_> {
     pub(super) fn narrowed(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
         if value.ty() == Type::Caught {
             let target = self.ty(node)?;
+            if target == Type::Symbol {
+                // The shared caughtNarrow contract covers numeric/string/Error
+                // views. Other primitive payloads use its owning dynamic bridge.
+                let value = Expr::CaughtToDyn {
+                    value: Box::new(value),
+                    r#type: Type::Dyn,
+                    loc: self.loc(node),
+                };
+                return self.coerce(value, target, node);
+            }
             if matches!(
                 target,
                 Type::F64 | Type::String | Type::Bool | Type::Object { .. }
@@ -757,7 +767,13 @@ impl Lowerer<'_> {
                     if value.ty() == Type::Dyn
                         && matches!(
                             kind.text(),
-                            "number" | "string" | "boolean" | "undefined" | "object" | "function"
+                            "number"
+                                | "string"
+                                | "boolean"
+                                | "symbol"
+                                | "undefined"
+                                | "object"
+                                | "function"
                         )
                     {
                         return Ok(Expr::DynTest {
@@ -809,7 +825,12 @@ impl Lowerer<'_> {
         if matches!(op, "===" | "!==") {
             // Shared IR binary equality is numeric/reference-layout-specific.
             // Regex identity already has a portable union equality contract.
-            if left.ty() == right.ty() && matches!(left.ty(), Type::Regex | Type::Classval { .. }) {
+            if left.ty() == right.ty()
+                && matches!(
+                    left.ty(),
+                    Type::Regex | Type::Symbol | Type::Classval { .. }
+                )
+            {
                 let union = self.intern_union(vec![left.ty(), Type::Undefined]).unwrap();
                 let Type::Union { union_id } = union else {
                     unreachable!()

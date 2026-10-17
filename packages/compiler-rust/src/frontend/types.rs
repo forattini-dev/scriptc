@@ -7,6 +7,8 @@ impl Lowerer<'_> {
             Some(Type::F64)
         } else if flags.intersects(TypeFlags::STRING_LIKE) {
             Some(Type::String)
+        } else if flags.intersects(TypeFlags::ES_SYMBOL_LIKE) {
+            Some(Type::Symbol)
         } else if flags.intersects(TypeFlags::BOOLEAN_LIKE) {
             Some(Type::Bool)
         } else {

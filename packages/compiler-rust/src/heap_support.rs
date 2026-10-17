@@ -19,6 +19,9 @@ impl NativeTrace for bool {
 impl NativeTrace for String {
     fn trace_native(&self, _: &mut runtime::Tracer<'_>) {}
 }
+impl NativeTrace for runtime::JsSymbol {
+    fn trace_native(&self, _: &mut runtime::Tracer<'_>) {}
+}
 impl NativeTrace for runtime::JsRegex {
     fn trace_native(&self, _: &mut runtime::Tracer<'_>) {}
 }

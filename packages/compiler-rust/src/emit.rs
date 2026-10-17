@@ -8,6 +8,7 @@ mod process;
 mod regex;
 mod sets;
 mod storage;
+mod symbols;
 mod values;
 
 fn rust_type(ty: Type, module: &Module) -> String {
@@ -20,6 +21,7 @@ fn rust_type(ty: Type, module: &Module) -> String {
         Type::F64 => "f64",
         Type::Bool => "bool",
         Type::Regex => "runtime::JsRegex",
+        Type::Symbol => "runtime::JsSymbol",
         Type::Object { .. } => "runtime::Gc<NativeInstance>",
         Type::Classval { .. } => "NativeClass",
         Type::String => "String",
@@ -228,7 +230,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Type::Record { .. }
             | Type::Union { .. }
             | Type::Object { .. } => true,
-            Type::Regex | Type::Dyn | Type::Promise { .. } => true,
+            Type::Regex | Type::Symbol | Type::Dyn | Type::Promise { .. } => true,
             Type::Func { params, ret } => params.iter().any(ty) || ty(ret),
             _ => false,
         }
@@ -262,6 +264,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         return code;
     }
     if let Some(code) = values::promise_expression(value, function, module) {
+        return code;
+    }
+    if let Some(code) = symbols::expression(value, function, module) {
         return code;
     }
     if let Some(code) = regex::expression(value, function, module) {
@@ -516,6 +521,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Func { .. }
                     | Type::Object { .. }
                     | Type::Regex
+                    | Type::Symbol
                     | Type::Promise { .. }
             ) {
                 format!("{local_id}.clone()")

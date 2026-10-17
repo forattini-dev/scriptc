@@ -38,6 +38,7 @@ mod regex;
 mod sets;
 mod storage;
 mod strings;
+mod symbols;
 mod tuples;
 mod types;
 mod union_literals;
@@ -902,6 +903,9 @@ impl<'a> Lowerer<'a> {
                 if let Some(value) = self.enum_get(node)? {
                     return Ok(value);
                 }
+                if let Some(value) = self.symbol_get(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.regex_get(node)? {
                     return Ok(value);
                 }
@@ -1037,7 +1041,20 @@ impl<'a> Lowerer<'a> {
                 };
                 self.binary(node, op)
             }
+            SyntaxKind::TypeOfExpression => {
+                let value = self.expression(node.expression())?;
+                let value = self.coerce(value, Type::Dyn, node)?;
+                Ok(Expr::LibCall {
+                    r#fn: "dyn.typeof".into(),
+                    args: vec![value],
+                    r#type: Type::String,
+                    loc,
+                })
+            }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.symbol_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.promise_call(node)? {
                     return Ok(value);
                 }

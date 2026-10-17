@@ -18,6 +18,8 @@ pub struct Report {
     linked_sources: Option<Vec<String>>,
     requirements: BTreeMap<String, Vec<Loc>>,
     builtin_calls: BTreeMap<String, LibraryRequirement>,
+    global_calls: BTreeMap<String, Vec<Loc>>,
+    global_values: BTreeMap<String, Vec<Loc>>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,7 +59,7 @@ pub fn inspect(input: &Path, work: &Path, project: Option<&Path>) -> Result<Repo
             entry,
             frontend_revision: REVISION,
             engine: "none",
-            scope: "all non-declaration execution-resolver sources, including uncalled bodies; prerequisites only, not a build certificate or complete semantic gap analysis",
+            scope: "all non-declaration execution-resolver sources, including uncalled bodies; prerequisites only, not a build certificate or complete semantic gap analysis; globalCalls/globalValues record direct declaration-backed syntax, including type/value references",
             sources: files
                 .iter()
                 .map(|f| source_file_info(*f).file_name.to_string())
@@ -75,6 +77,8 @@ pub fn inspect(input: &Path, work: &Path, project: Option<&Path>) -> Result<Repo
             }),
             requirements: BTreeMap::new(),
             builtin_calls: BTreeMap::new(),
+            global_calls: BTreeMap::new(),
+            global_values: BTreeMap::new(),
         };
         for file in files {
             let mut imports = Imports::new();
@@ -203,6 +207,86 @@ fn visit(checker: &mut Checker, node: Node, imports: &Imports, report: &mut Repo
         }
         _ => None,
     };
+    let function_like = matches!(
+        node.kind(),
+        SyntaxKind::FunctionDeclaration
+            | SyntaxKind::FunctionExpression
+            | SyntaxKind::ArrowFunction
+            | SyntaxKind::MethodDeclaration
+    );
+    let mut additional = Vec::new();
+    if function_like && !node.asterisk_token().is_nil() {
+        additional.push("generator-functions");
+    }
+    if node.kind() == SyntaxKind::MethodDeclaration
+        && node.modifier_flags().intersects(ModifierFlags::ASYNC)
+    {
+        additional.push("async-functions");
+    }
+    match node.kind() {
+        SyntaxKind::GetAccessor | SyntaxKind::SetAccessor => additional.push("accessors"),
+        SyntaxKind::ComputedPropertyName => additional.push("computed-property-names"),
+        SyntaxKind::PrivateIdentifier => additional.push("private-members"),
+        SyntaxKind::ForOfStatement if !node.await_modifier().is_nil() => {
+            additional.push("async-iteration")
+        }
+        SyntaxKind::BreakStatement | SyntaxKind::ContinueStatement => {
+            additional.push("abrupt-loop-targets")
+        }
+        SyntaxKind::ThisKeyword => additional.push("this-references"),
+        SyntaxKind::MetaProperty => additional.push("meta-properties"),
+        SyntaxKind::TaggedTemplateExpression => additional.push("tagged-templates"),
+        _ => {}
+    }
+    for name in additional {
+        report
+            .requirements
+            .entry(name.into())
+            .or_default()
+            .push(location());
+    }
+    if let Some((root, name)) = global_access(node) {
+        let id = checker.get_symbol_at_location(root, false);
+        if id.0 != 0
+            && checker.sym(id).declarations.iter().any(|decl| {
+                if decl.is_nil() {
+                    return false;
+                }
+                let file =
+                    source_file_info(source_frontend::prelude::get_source_file_of_node(*decl))
+                        .file_name
+                        .to_string();
+                // Include ambient host namespaces (for example Bun), not just
+                // a hand-picked browser/Node list. This records a prerequisite,
+                // never an implementation or liveness claim.
+                is_declaration(&file)
+            })
+        {
+            let called = node.parent().kind() == SyntaxKind::CallExpression
+                && node.parent().expression() == node;
+            let constructed = node.parent().kind() == SyntaxKind::NewExpression
+                && node.parent().expression() == node;
+            if called || constructed {
+                report
+                    .global_calls
+                    .entry(if constructed {
+                        format!("new {name}")
+                    } else {
+                        name
+                    })
+                    .or_default()
+                    .push(location());
+            } else if node.parent().kind() != SyntaxKind::PropertyAccessExpression
+                || node.parent().expression() != node
+            {
+                report
+                    .global_values
+                    .entry(name)
+                    .or_default()
+                    .push(location());
+            }
+        }
+    }
     if let Some(category) = category {
         report
             .requirements
@@ -242,4 +326,24 @@ fn visit(checker: &mut Checker, node: Node, imports: &Imports, report: &mut Repo
         visit(checker, child, imports, report);
         false
     });
+}
+
+// Direct global syntax only. Aliases, reflective lookup and conditional package
+// loading require later demand/runtime checks; this inventory is not proof of support.
+fn global_access(node: Node) -> Option<(Node, String)> {
+    if node.kind() == SyntaxKind::Identifier {
+        // A member name is not a second global root (Math.max must not also
+        // record a global named max). The caller verifies declaration origin.
+        if node.parent().kind() == SyntaxKind::PropertyAccessExpression
+            && node.parent().name() == node
+        {
+            return None;
+        }
+        return Some((node, node.text().into()));
+    }
+    if node.kind() == SyntaxKind::PropertyAccessExpression {
+        let (root, name) = global_access(node.expression())?;
+        return Some((root, format!("{name}.{}", node.name().text())));
+    }
+    None
 }
