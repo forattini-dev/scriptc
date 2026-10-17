@@ -112,6 +112,10 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
                 functions.push(lowerer.lower_constructor(index)?);
                 continue;
             }
+            if let Some(signature) = lowerer.classes.next_method() {
+                functions.push(lowerer.lower_function(signature)?);
+                continue;
+            }
             let Some((symbol, signature)) = lowerer.functions.next() else {
                 break;
             };

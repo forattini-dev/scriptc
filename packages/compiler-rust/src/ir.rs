@@ -180,6 +180,11 @@ pub struct Class {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
     pub fields: Vec<Field>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub methods: Vec<String>,
+    /// Full own surface, including bodies not demanded by the source call graph.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub method_names: Vec<String>,
     pub loc: Loc,
 }
 
@@ -351,6 +356,13 @@ pub enum Expr {
     },
     Downcast {
         value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    VirtualCall {
+        class_name: String,
+        method: String,
+        args: Vec<Expr>,
         r#type: Type,
         loc: Loc,
     },
@@ -582,6 +594,7 @@ impl Expr {
             | Self::FieldGet { r#type, .. }
             | Self::Upcast { r#type, .. }
             | Self::Downcast { r#type, .. }
+            | Self::VirtualCall { r#type, .. }
             | Self::InstanceOf { r#type, .. }
             | Self::ClassRef { r#type, .. }
             | Self::NewValue { r#type, .. }
@@ -734,6 +747,55 @@ pub fn validate(module: &Module) -> Result<(), String> {
             return Err("duplicate function".into());
         }
     }
+    for class in &module.classes {
+        let mut names = std::collections::HashSet::new();
+        for name in &class.method_names {
+            if !names.insert(name)
+                || class.runtime
+                || name == "constructor"
+                || name.starts_with('%')
+                || name.contains(':')
+            {
+                return Err("invalid native method surface".into());
+            }
+        }
+        names.clear();
+        for name in &class.methods {
+            let method = functions
+                .get(format!("%{}.{name}", class.name).as_str())
+                .ok_or("missing native method function")?;
+            if !names.insert(name)
+                || !class.method_names.contains(name)
+                || class.runtime
+                || name == "constructor"
+                || name.starts_with('%')
+                || name.contains(':')
+                || method
+                    .captures
+                    .as_ref()
+                    .is_some_and(|captures| !captures.is_empty())
+                || method.params.first().map(|param| &param.r#type)
+                    != Some(&Type::Object {
+                        class_name: class.name.clone(),
+                    })
+            {
+                return Err("invalid native method declaration/receiver".into());
+            }
+            if let Some(base) = class
+                .base
+                .as_ref()
+                .and_then(|base| module.method(base, name))
+                && (base.params.iter().skip(1).map(|p| &p.r#type).ne(method
+                    .params
+                    .iter()
+                    .skip(1)
+                    .map(|p| &p.r#type))
+                    || base.return_type != method.return_type)
+            {
+                return Err("incompatible native method override".into());
+            }
+        }
+    }
     let entry = functions
         .get(module.entry.as_str())
         .ok_or("missing entry")?;
@@ -757,6 +819,19 @@ pub fn validate(module: &Module) -> Result<(), String> {
 }
 
 impl Module {
+    pub fn method(&self, class: &str, name: &str) -> Option<&Function> {
+        let mut class = self.class(class)?;
+        for _ in 0..=self.classes.len() {
+            if class.methods.iter().any(|method| method == name) {
+                return self
+                    .functions
+                    .iter()
+                    .find(|f| f.name == format!("%{}.{name}", class.name));
+            }
+            class = self.class(class.base.as_deref()?)?;
+        }
+        None
+    }
     pub fn class(&self, name: &str) -> Option<&Class> {
         self.classes.iter().find(|class| class.name == name)
     }
@@ -919,6 +994,16 @@ impl Module {
                 }
             }
             let mut fields = std::collections::HashSet::new();
+            for field in &class.fields {
+                let mut current = Some(class);
+                for _ in 0..=self.classes.len() {
+                    let Some(owner) = current else { break };
+                    if owner.method_names.contains(&field.name) {
+                        return Err("native field shadows a method surface".into());
+                    }
+                    current = owner.base.as_deref().and_then(|base| self.class(base));
+                }
+            }
             if !class.fields.iter().enumerate().all(|(i, field)| {
                 fields.insert(&field.name)
                     && (i < header_len
@@ -1384,6 +1469,40 @@ fn validate_function(
                 if !matches!(value.ty(), Type::Object { class_name: parent } if parent != *child && module.subclass(child, &parent))
                 {
                     return Err("invalid native downcast".into());
+                }
+                Ok(())
+            }
+            Expr::VirtualCall {
+                class_name,
+                method,
+                args,
+                r#type,
+                ..
+            } => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let target = module
+                    .method(class_name, method)
+                    .ok_or("unknown native virtual method")?;
+                if args.first().map(Expr::ty)
+                    != Some(Type::Object {
+                        class_name: class_name.clone(),
+                    })
+                    || args.len() != target.params.len()
+                    || *r#type != target.return_type
+                    || args.iter().skip(1).map(Expr::ty).ne(target
+                        .params
+                        .iter()
+                        .skip(1)
+                        .map(|p| p.r#type.clone()))
+                    || !module.classes.iter().any(|c| {
+                        c.name != *class_name
+                            && module.subclass(&c.name, class_name)
+                            && c.methods.contains(method)
+                    })
+                {
+                    return Err("invalid native virtual call ABI/override".into());
                 }
                 Ok(())
             }
@@ -2400,6 +2519,8 @@ mod tests {
             runtime: true,
             base: None,
             fields: error_fields(),
+            methods: vec![],
+            method_names: vec![],
             loc: loc.clone(),
         });
         m.classes.push(Class {
@@ -2408,6 +2529,8 @@ mod tests {
             runtime: false,
             base: Some("%Error".into()),
             fields: error_fields(),
+            methods: vec![],
+            method_names: vec![],
             loc: loc.clone(),
         });
         m.functions[0].body = vec![Stmt::Expression {
@@ -2664,6 +2787,139 @@ mod tests {
     }
 
     #[test]
+    fn method_dispatch_validates_receivers_overrides_and_walks_arguments() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        let receiver = |name: &str| Type::Object {
+            class_name: name.into(),
+        };
+        for (name, base) in [("Base", None), ("Child", Some("Base"))] {
+            m.classes.push(Class {
+                name: name.into(),
+                js_name: name.into(),
+                runtime: false,
+                base: base.map(String::from),
+                fields: vec![],
+                methods: vec!["value".into()],
+                method_names: vec!["value".into()],
+                loc: loc.clone(),
+            });
+            m.functions.push(Function {
+                name: format!("%{name}.value"),
+                captures: None,
+                params: vec![Param {
+                    local_id: "p0".into(),
+                    name: "this".into(),
+                    r#type: receiver(name),
+                }],
+                locals: vec![Local {
+                    id: "p0".into(),
+                    name: "this".into(),
+                    r#type: receiver(name),
+                    mutable: false,
+                    boxed: false,
+                }],
+                return_type: Type::F64,
+                body: vec![Stmt::Return {
+                    value: Some(Expr::NumLit {
+                        value: 1.0,
+                        spelling: None,
+                        r#type: Type::F64,
+                        loc: loc.clone(),
+                    }),
+                    loc: loc.clone(),
+                }],
+                loc: loc.clone(),
+            });
+        }
+        m.functions.push(Function {
+            name: "dispatch".into(),
+            captures: None,
+            params: vec![Param {
+                local_id: "p0".into(),
+                name: "this".into(),
+                r#type: receiver("Base"),
+            }],
+            locals: vec![Local {
+                id: "p0".into(),
+                name: "this".into(),
+                r#type: receiver("Base"),
+                mutable: false,
+                boxed: false,
+            }],
+            return_type: Type::F64,
+            body: vec![Stmt::Return {
+                value: Some(Expr::VirtualCall {
+                    class_name: "Base".into(),
+                    method: "value".into(),
+                    args: vec![Expr::VarRef {
+                        local_id: "p0".into(),
+                        r#type: receiver("Base"),
+                        loc: loc.clone(),
+                    }],
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                }),
+                loc: loc.clone(),
+            }],
+            loc,
+        });
+        validate(&m).unwrap();
+        let mut dispatches = 0;
+        let mut receiver_reads = 0;
+        m.visit_expressions(&mut |value| {
+            if matches!(value, Expr::VirtualCall { .. }) {
+                dispatches += 1;
+            }
+            if matches!(
+                value,
+                Expr::VarRef {
+                    r#type: Type::Object { .. },
+                    ..
+                }
+            ) {
+                receiver_reads += 1;
+            }
+        });
+        assert_eq!((dispatches, receiver_reads), (1, 1));
+        let wire = serde_json::to_value(&m).unwrap();
+        assert_eq!(
+            wire["classes"][0]["methodNames"],
+            serde_json::json!(["value"])
+        );
+        assert_eq!(
+            wire["functions"][4]["body"][0]["value"]["kind"],
+            "virtualCall"
+        );
+        m.functions[3].return_type = Type::String;
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "incompatible native method override"
+        );
+        m.functions[3].return_type = Type::F64;
+        m.functions[3].params[0].r#type = receiver("Base");
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native method declaration/receiver"
+        );
+        m.functions[3].params[0].r#type = receiver("Child");
+        m.classes[1].methods.clear();
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native virtual call ABI/override"
+        );
+        m.classes[1].methods.push("value".into());
+        m.classes[1].method_names.clear();
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native method declaration/receiver"
+        );
+        m.classes[1].method_names.push("value".into());
+        m.functions[3].name = "missing".into();
+        assert_eq!(validate(&m).unwrap_err(), "missing native method function");
+    }
+
+    #[test]
     fn ordinary_layouts_validate_headers_slots_and_ancestry_independently() {
         let mut m = error_module();
         let loc = m.functions[0].loc.clone();
@@ -2680,6 +2936,8 @@ mod tests {
                 name: "name".into(),
                 r#type: Type::Union { union_id: 0 },
             }],
+            methods: vec![],
+            method_names: vec![],
             loc: loc.clone(),
         };
         let child = Class {

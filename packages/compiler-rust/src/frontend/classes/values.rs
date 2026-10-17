@@ -140,7 +140,7 @@ impl Lowerer<'_> {
             .skip(1)
             .map(|p| p.r#type)
             .collect::<Vec<_>>();
-        let args = self.call_arguments(node, &types)?;
+        let args = self.method_arguments(node, &types)?;
         let result = self.classes.object(index);
         Ok(Some(Expr::NewValue {
             callee: Box::new(callee),
@@ -232,10 +232,10 @@ impl Lowerer<'_> {
     }
 
     pub(in crate::frontend) fn this_expression(&self, node: Node) -> Result<Expr, String> {
-        let local = self.constructor_this.as_ref().ok_or_else(|| {
+        let local = self.instance_this.as_ref().ok_or_else(|| {
             self.refuse(
                 node,
-                "this before super or outside a native constructor is not ported",
+                "this before super or outside a represented instance body is not ported",
             )
         })?;
         Ok(Expr::VarRef {
@@ -260,7 +260,7 @@ impl Lowerer<'_> {
     pub(in crate::frontend) fn class_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
         // Probe the type without lowering the receiver twice (calls can enqueue helpers).
         let ty = if node.expression().kind() == SyntaxKind::ThisKeyword {
-            self.constructor_this.as_ref().map(|l| l.r#type.clone())
+            self.instance_this.as_ref().map(|l| l.r#type.clone())
         } else {
             self.ty(node.expression()).ok()
         };
@@ -277,18 +277,37 @@ impl Lowerer<'_> {
             .ok_or_else(|| self.refuse(node, "class property is not ported"))?;
         let value = Expr::FieldGet {
             obj: Box::new(obj),
-            class_name,
-            field,
+            class_name: class_name.clone(),
+            field: field.clone(),
             r#type: ty,
             loc: self.loc(node),
         };
+        if self.checker_any(node)
+            && let Some(class) = self
+                .classes
+                .definitions
+                .iter()
+                .find(|class| class.name == class_name)
+            && let Some(target) = self
+                .class_contract(class.node)
+                .and_then(|hint| hint.fields.iter().find(|(name, _)| *name == field))
+                .and_then(|(_, ty)| ty.clone())
+        {
+            if value.ty() == target {
+                return Ok(Some(value));
+            }
+            // A public JS declaration supplies a contract, not checker-local
+            // inference for the implementation. Verify extraction from storage.
+            let value = self.coerce(value, Type::Dyn, node)?;
+            return Ok(Some(self.coerce(value, target, node)?));
+        }
         Ok(Some(self.narrowed(value, node)?))
     }
 
     pub(in crate::frontend) fn class_set(&mut self, node: Node) -> Result<Option<Stmt>, String> {
         let member = node.left();
         let ty = if member.expression().kind() == SyntaxKind::ThisKeyword {
-            self.constructor_this.as_ref().map(|l| l.r#type.clone())
+            self.instance_this.as_ref().map(|l| l.r#type.clone())
         } else {
             self.ty(member.expression()).ok()
         };

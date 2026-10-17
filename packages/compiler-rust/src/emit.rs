@@ -168,7 +168,8 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Expr::FieldGet { .. }
             | Expr::Upcast { .. }
             | Expr::Downcast { .. }
-            | Expr::InstanceOf { .. } => true,
+            | Expr::InstanceOf { .. }
+            | Expr::VirtualCall { .. } => true,
             Expr::ArrayLit { .. }
             | Expr::LibCall { .. }
             | Expr::SetNew { .. }
@@ -295,7 +296,8 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         | Expr::FieldGet { .. }
         | Expr::Upcast { .. }
         | Expr::Downcast { .. }
-        | Expr::InstanceOf { .. } => unreachable!("class expression"),
+        | Expr::InstanceOf { .. }
+        | Expr::VirtualCall { .. } => unreachable!("class expression"),
         Expr::ArrayGet { .. }
         | Expr::MapNew { .. }
         | Expr::MapIntrinsic { .. }

@@ -155,6 +155,37 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     let class_index = |name: &str| module.classes.iter().position(|c| c.name == name).unwrap();
     Some(match value {
+        Expr::VirtualCall {
+            class_name,
+            method,
+            args,
+            ..
+        } => {
+            let evaluate = args
+                .iter()
+                .enumerate()
+                .map(|(index, arg)| format!("let arg{index} = {};", expr(arg, function, module)))
+                .collect::<String>();
+            let arguments = (0..args.len())
+                .map(|index| format!("arg{index}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let cases = module
+                .classes
+                .iter()
+                .enumerate()
+                .filter(|(_, class)| module.subclass(&class.name, class_name))
+                .map(|(index, class)| {
+                    let target = module
+                        .method(&class.name, method)
+                        .expect("validated inherited dispatch");
+                    format!("{index} => {}({arguments}),", function_name(&target.name))
+                })
+                .collect::<String>();
+            format!(
+                "{{ {evaluate} let kind = arg0.with(|object| object.kind); match kind {{ {cases} _ => unreachable!(\"validated native method receiver\"), }} }}"
+            )
+        }
         Expr::ClassRef { class_name, .. } => format!("NativeClass({})", class_index(class_name)),
         Expr::NewValue {
             args,

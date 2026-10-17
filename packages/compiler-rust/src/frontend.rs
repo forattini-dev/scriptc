@@ -135,7 +135,7 @@ struct Lowerer<'a> {
     projections: HashMap<declarations::Key, Type>,
     literal_choices: HashMap<declarations::Key, Type>,
     classes: classes::ClassGraph,
-    constructor_this: Option<Local>,
+    instance_this: Option<Local>,
     module_vars: HashMap<u32, Type>,
     var_types: HashMap<u32, Type>,
     var_defined: HashSet<u32>,
@@ -174,7 +174,7 @@ impl<'a> Lowerer<'a> {
             projections: HashMap::new(),
             literal_choices: HashMap::new(),
             classes: classes::ClassGraph::default(),
-            constructor_this: None,
+            instance_this: None,
             module_vars: HashMap::new(),
             var_types: HashMap::new(),
             var_defined: HashSet::new(),
@@ -468,7 +468,16 @@ impl<'a> Lowerer<'a> {
                 || self.file.ends_with(".mjs")
                 || self.file.ends_with(".cjs"))
             && params.iter().any(|p| p.r#type == Type::Dyn);
-        let return_type = if erase_private_result {
+        let method_void = if node.kind() == SyntaxKind::MethodDeclaration && declared.is_none() {
+            let signature = self.checker.get_signature_from_declaration(node);
+            let result = self.checker.get_return_type_of_signature(signature);
+            self.checker.ty(result).flags.intersects(TypeFlags::VOID)
+        } else {
+            false
+        };
+        let return_type = if method_void {
+            Type::Void
+        } else if erase_private_result {
             Type::Dyn
         } else if let Some(hint) = declared {
             hint.ret.ok_or_else(|| {
@@ -507,12 +516,18 @@ impl<'a> Lowerer<'a> {
         self.var_types = self.module_vars.clone();
         self.var_defined.clear();
         self.return_type = Some(signature.return_type.clone());
+        self.instance_this = None;
         let mut body = Vec::new();
+        let method = signature.node.kind() == SyntaxKind::MethodDeclaration;
+        if method {
+            self.bind_parameter(None, &signature.params[0])?;
+            self.instance_this = Some(self.locals[0].clone());
+        }
         for (node, param) in signature
             .node
             .parameters()
             .into_iter()
-            .zip(&signature.params)
+            .zip(signature.params.iter().skip(usize::from(method)))
         {
             body.extend(self.bind_parameter(Some(node), param)?);
         }
@@ -524,6 +539,7 @@ impl<'a> Lowerer<'a> {
                 "non-void function fallthrough is not ported",
             ));
         }
+        self.instance_this = None;
         Ok(Function {
             name: signature.name,
             params: signature.params,
@@ -1032,6 +1048,9 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 if let Some(value) = self.regex_call(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.class_call(node)? {
                     return Ok(value);
                 }
                 if let Some(value) = self.error_call(node)? {

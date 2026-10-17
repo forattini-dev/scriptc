@@ -173,6 +173,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/callbacks.ts",
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
+        "rust-native-methods/direct.ts",
+        "rust-native-methods/dispatch.ts",
+        "rust-native-methods/contracts.ts",
+        "rust-native-methods/errors.ts",
+        "rust-native-methods/deferred.ts",
         "rust-native-classes/objects.ts",
         "rust-native-classes/order.ts",
         "rust-native-classes/exceptions.ts",
@@ -892,7 +897,7 @@ fn error_definitions_defer_instance_code_and_refuse_unported_effects() {
         ),
         (
             "method",
-            "class Fault extends Error { method(): number { return 1; } }",
+            "class Fault extends Error { async method(): Promise<number> { return 1; } } new Fault().method();",
         ),
         (
             "accessor",
@@ -1844,7 +1849,7 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
     let target = binary(temp.path(), "class-boundary");
     for source in [
         "class Box { static value = console.log('effect'); } new Box();",
-        "class Box { method() { return 1; } } new Box();",
+        "class Box { method() { return 1; } } const unbound = new Box().method; unbound();",
         "class Box { get value() { return 1; } } new Box();",
         "class Box { ['value'] = 1; } new Box();",
         "class Box { #value = 1; } new Box();",
@@ -1853,6 +1858,11 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
         "class Box { '__proto__' = 1; } new Box();",
         "class Box { constructor() { if (false) return; } } new Box();",
         "class Base {} class Child extends Base { constructor() { if (true) super(); } } new Child();",
+        "class Box { method(): () => number { return () => this.value; } value = 1; } new Box().method();",
+        "class Box { *method(): Generator<number> { yield 1; } } new Box().method();",
+        "class Box { async method(): Promise<number> { return 1; } } new Box().method();",
+        "class Base { method(value: number): number { return value; } } class Child extends Base { method(value: number | undefined): number { return 1; } } const value: Base = new Child(); value.method(1);",
+        "class Fault extends Error { toString(): string { return 'custom'; } } new Fault();",
     ] {
         fs::write(&input, source).unwrap();
         let artifacts = [
@@ -1879,6 +1889,51 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn erased_method_names_keep_a_boundary_without_demanding_bodies() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    fs::write(&input, "class Box { unused(): number { while (true) {} } } const box: unknown = new Box(); try { const method = (box as any).unused; console.log('must not become undefined', method === undefined); } catch (error) { if (error instanceof TypeError) console.log(error.message); }").unwrap();
+    let target = binary(temp.path(), "erased-method");
+    let build = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    success(&build);
+    let ir: serde_json::Value =
+        serde_json::from_slice(&fs::read(target.with_extension("ir.json")).unwrap()).unwrap();
+    assert!(
+        ir["classes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |class| class["methodNames"] == serde_json::json!(["unused"])
+                    && class.get("methods").is_none()
+            )
+    );
+    assert!(
+        !ir["functions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|function| function["name"].as_str().unwrap().ends_with(".unused"))
+    );
+    let actual = Command::new(target)
+        .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+        .output()
+        .unwrap();
+    success(&actual);
+    assert_eq!(
+        String::from_utf8_lossy(&actual.stdout).trim(),
+        "scriptc: erased instance method values require a receiver ABI"
+    );
+    assert!(actual.stderr.is_empty());
 }
 
 #[test]

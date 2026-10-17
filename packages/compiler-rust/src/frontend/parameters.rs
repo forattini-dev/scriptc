@@ -35,6 +35,23 @@ impl Lowerer<'_> {
         node: Node,
         types: &[Type],
     ) -> Result<Vec<Expr>, String> {
+        self.call_arguments_in(node, types, false)
+    }
+
+    pub(super) fn method_arguments(
+        &mut self,
+        node: Node,
+        types: &[Type],
+    ) -> Result<Vec<Expr>, String> {
+        self.call_arguments_in(node, types, true)
+    }
+
+    fn call_arguments_in(
+        &mut self,
+        node: Node,
+        types: &[Type],
+        preserve_values: bool,
+    ) -> Result<Vec<Expr>, String> {
         let arguments = node.arguments().into_iter().collect::<Vec<_>>();
         if arguments.len() > types.len() {
             return Err(self.refuse(node, "extra native call arguments are not ported"));
@@ -44,6 +61,19 @@ impl Lowerer<'_> {
             .enumerate()
             .map(|(index, ty)| {
                 if let Some(arg) = arguments.get(index) {
+                    if preserve_values
+                        && *ty == Type::Dyn
+                        && matches!(
+                            arg.kind(),
+                            SyntaxKind::ObjectLiteralExpression
+                                | SyntaxKind::ArrayLiteralExpression
+                        )
+                        && let Ok(layout @ (Type::Record { .. } | Type::Array { .. })) =
+                            self.ty(*arg)
+                    {
+                        let value = self.expected_expression(*arg, layout)?;
+                        return self.coerce(value, Type::Dyn, *arg);
+                    }
                     self.expected_expression(*arg, ty.clone())
                 } else if *ty == Type::Dyn || self.undefined_tag(ty).is_some() {
                     self.coerce(

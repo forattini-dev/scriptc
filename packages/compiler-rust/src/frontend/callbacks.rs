@@ -148,7 +148,7 @@ impl Lowerer<'_> {
         let saved_bindings = std::mem::take(&mut self.bindings);
         let saved_captures = std::mem::take(&mut self.captures);
         let saved_return = self.return_type.replace((**ret).clone());
-        let saved_this = self.constructor_this.take();
+        let saved_this = self.instance_this.take();
         let saved_var_types = self.var_types.clone();
         let saved_var_defined = std::mem::take(&mut self.var_defined);
         let mut captured_scope = saved_bindings.clone();
@@ -216,7 +216,7 @@ impl Lowerer<'_> {
         };
         self.bindings = saved_bindings;
         self.return_type = saved_return;
-        self.constructor_this = saved_this;
+        self.instance_this = saved_this;
         self.var_types = saved_var_types;
         self.var_defined = saved_var_defined;
         self.outer.pop();

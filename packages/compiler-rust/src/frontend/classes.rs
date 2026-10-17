@@ -22,6 +22,8 @@ pub(super) struct ClassGraph {
     pub layouts: Vec<Option<ir::Class>>,
     pending: VecDeque<usize>,
     layout_active: HashSet<usize>,
+    methods: HashMap<(usize, String), Signature>,
+    method_queue: VecDeque<Signature>,
 }
 
 impl ClassGraph {
@@ -197,6 +199,8 @@ impl Lowerer<'_> {
                 runtime: true,
                 base: base.map(|i| self.classes.definitions[i].name.clone()),
                 fields: ir::error_fields(),
+                methods: vec![],
+                method_names: vec![],
                 loc: Loc {
                     file: "<builtin>".into(),
                     start: 0,
@@ -231,7 +235,9 @@ impl Lowerer<'_> {
     }
 
     fn resolve_class(&mut self, index: usize) -> Result<(), String> {
+        let file = std::mem::replace(&mut self.file, self.classes.definitions[index].file.clone());
         let result = self.resolve_class_inner(index);
+        self.file = file;
         self.classes.definitions[index].resolving = false;
         result
     }
@@ -293,19 +299,39 @@ impl Lowerer<'_> {
                     .into_iter()
                     .any(|m| m.kind() == SyntaxKind::Decorator)
                 || (member.kind() != SyntaxKind::Constructor
-                    && (member.kind() != SyntaxKind::PropertyDeclaration
-                        || !matches!(
-                            member.name().kind(),
-                            SyntaxKind::Identifier | SyntaxKind::StringLiteral
-                        )))
+                    && (!matches!(
+                        member.kind(),
+                        SyntaxKind::PropertyDeclaration | SyntaxKind::MethodDeclaration
+                    ) || !matches!(
+                        member.name().kind(),
+                        SyntaxKind::Identifier | SyntaxKind::StringLiteral
+                    )))
             {
                 return Err(self.refuse(
                     member,
-                    "class methods, static/computed fields and decorators are not ported",
+                    "class accessors, static/computed/private members and decorators are not ported",
                 ));
             }
         }
         self.classes.definitions[index].base = base;
+        for member in node
+            .members()
+            .into_iter()
+            .filter(|m| m.kind() == SyntaxKind::MethodDeclaration)
+        {
+            let name = member.name().text();
+            if name.starts_with('%')
+                || name.contains(':')
+                || name == "constructor"
+                || (matches!(name, "toString" | "valueOf")
+                    && self.classes.subclass(&definition.name, "%Error"))
+            {
+                return Err(self.refuse(
+                    member,
+                    "reserved methods and Error coercion overrides are not ported",
+                ));
+            }
+        }
         self.classes.definitions[index].resolved = true;
         self.classes.definitions[index].resolving = false;
         Ok(())
@@ -375,6 +401,8 @@ impl Lowerer<'_> {
             base: definition
                 .base
                 .map(|base| self.classes.definitions[base].name.clone()),
+            methods: vec![],
+            method_names: vec![],
             fields: definition
                 .base
                 .map(|base| self.classes.layouts[base].as_ref().unwrap().fields.clone())
@@ -484,6 +512,28 @@ impl Lowerer<'_> {
                 layout.fields.push(ir::Field { name, r#type: ty });
             }
         }
+        layout.method_names = definition
+            .node
+            .members()
+            .into_iter()
+            .filter(|member| member.kind() == SyntaxKind::MethodDeclaration)
+            .map(|member| member.name().text().to_string())
+            .collect();
+        let mut seen = HashSet::new();
+        layout.method_names.retain(|name| seen.insert(name.clone()));
+        if let Some(field) = layout
+            .fields
+            .iter()
+            .find(|field| self.classes.method(index, &field.name).is_some())
+        {
+            return Err(self.refuse(
+                definition.node,
+                &format!(
+                    "instance field '{}' shadows a method; property descriptors are not ported",
+                    field.name
+                ),
+            ));
+        }
         self.classes.layouts[index] = Some(layout);
         Ok(())
     }
@@ -515,4 +565,5 @@ impl Lowerer<'_> {
 }
 
 mod constructors;
+mod methods;
 mod values;

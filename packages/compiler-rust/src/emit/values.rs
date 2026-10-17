@@ -333,6 +333,19 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
                 )
                 .unwrap();
             }
+            let mut class = Some(c);
+            let mut methods = std::collections::HashSet::new();
+            while let Some(current) = class {
+                for method in &current.method_names {
+                    methods.insert(method);
+                }
+                class = current.base.as_deref().and_then(|base| module.class(base));
+            }
+            let mut methods = methods.into_iter().collect::<Vec<_>>();
+            methods.sort();
+            for method in methods {
+                writeln!(out, "{:?} => runtime::throw_type_error(\"scriptc: erased instance method values require a receiver ABI\".into()),", method).unwrap();
+            }
             out.push_str("_ => native_value_missing(&key), },\n");
         }
         out.push_str("_ => unreachable!(\"validated native instance kind\") } },\n");

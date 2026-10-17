@@ -158,7 +158,7 @@ impl Lowerer<'_> {
         self.locals.clear();
         self.bindings.clear();
         self.captures.clear();
-        self.constructor_this = None;
+        self.instance_this = None;
         self.return_type = Some(Type::Void);
         self.var_types = self.module_vars.clone();
         self.var_defined.clear();
@@ -175,7 +175,7 @@ impl Lowerer<'_> {
         // Base fields run before parameter defaults. Derived fields run after
         // the successful super call, before the following body statement.
         if base.is_none() {
-            self.constructor_this = Some(this.clone());
+            self.instance_this = Some(this.clone());
             body.extend(self.initialize_fields(index)?);
         }
         if let Some(ctor) = ctor {
@@ -238,7 +238,7 @@ impl Lowerer<'_> {
                         self.call_arguments(call, &types)?
                     };
                     body.push(self.super_call(index, args, call)?);
-                    self.constructor_this = Some(this.clone());
+                    self.instance_this = Some(this.clone());
                     body.extend(self.initialize_fields(index)?);
                     super_seen = true;
                 } else {
@@ -270,10 +270,10 @@ impl Lowerer<'_> {
                 })
                 .collect();
             body.push(self.super_call(index, args, definition.node)?);
-            self.constructor_this = Some(this);
+            self.instance_this = Some(this);
             body.extend(self.initialize_fields(index)?);
         }
-        self.constructor_this = None;
+        self.instance_this = None;
         Ok(Function {
             name: format!("%{}.constructor", definition.name),
             params,

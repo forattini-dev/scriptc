@@ -1141,6 +1141,10 @@ export interface IrClassDef {
    * `get:<prop>` / `set:<prop>` entries — names no user identifier can
    * spell — and behave as ordinary methods here. */
   methods?: string[];
+  /** Complete own method-name surface, including undemanded bodies. Native
+   * erased property reads use it to distinguish a method requiring a receiver
+   * ABI from a genuinely missing property; it does not supply executable code. */
+  methodNames?: string[];
   /** Declared `abstract class` — never instantiated (tsc rejects `new` on
    * it, including through class values), so its own vtable entries for
    * abstract slots may stay empty. */

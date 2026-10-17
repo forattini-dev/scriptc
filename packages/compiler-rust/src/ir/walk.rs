@@ -139,7 +139,8 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
                 expression(arg, visitor);
             }
         }
-        Expr::New { args, .. }
+        Expr::VirtualCall { args, .. }
+        | Expr::New { args, .. }
         | Expr::LibCall { args, .. }
         | Expr::Intrinsic { args, .. }
         | Expr::Call { args, .. }

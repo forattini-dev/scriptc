@@ -26,6 +26,7 @@ impl Key {
 pub(super) struct ClassHint {
     pub params: Vec<Option<Type>>,
     pub fields: Vec<(String, Option<Type>)>,
+    pub methods: Vec<(String, Option<Type>)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -196,15 +197,19 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                     let instance = lowerer.checker.get_return_type_of_signature(signature);
                     let properties = lowerer.checker.get_properties_of_type(instance).to_vec();
                     let mut fields = Vec::new();
+                    let mut methods = Vec::new();
                     for property in properties {
                         let info = lowerer.checker.sym(property);
-                        if info
-                            .flags
-                            .intersects(SymbolFlags::METHOD | SymbolFlags::ACCESSOR)
-                        {
+                        let name = info.name.to_string();
+                        if info.flags.intersects(SymbolFlags::METHOD) {
+                            let id = lowerer.checker.get_type_of_symbol(property);
+                            let signature = lowerer.function_type(id);
+                            methods.push((name, signature));
                             continue;
                         }
-                        let name = info.name.to_string();
+                        if info.flags.intersects(SymbolFlags::ACCESSOR) {
+                            continue;
+                        }
                         let id = lowerer.checker.get_type_of_symbol(property);
                         fields.push((
                             name,
@@ -215,7 +220,11 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                             },
                         ));
                     }
-                    hint.class = Some(ClassHint { params, fields });
+                    hint.class = Some(ClassHint {
+                        params,
+                        fields,
+                        methods,
+                    });
                 } else if !signatures.is_empty() {
                     // Polymorphic public signatures use an owned native value ABI.
                     // This preserves payloads instead of choosing an arbitrary overload.

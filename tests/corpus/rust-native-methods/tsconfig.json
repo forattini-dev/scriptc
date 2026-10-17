@@ -1,0 +1,1 @@
+{"compilerOptions":{"strict":true,"allowJs":true,"checkJs":false,"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","types":[],"lib":["ES2022","DOM"]},"include":["*.ts","*.mjs"]}

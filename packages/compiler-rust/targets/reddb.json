@@ -43,9 +43,10 @@
     {
       "id": "object-and-class-model",
       "status": "partial",
-      "evidence": "rust-native-classes fixtures: ordinary root/derived storage and constructors, field/default/super ordering, aliases, identity, instanceof, caught instances and public generic JS constructor payloads",
+      "evidence": "rust-native-classes fixtures: ordinary root/derived storage and constructors, field/default/super ordering, aliases, identity, instanceof, caught instances and public generic JS constructor payloads; rust-native-methods: synchronous receiver calls, recursive/default methods, inheritance/super, closed-hierarchy virtual dispatch, public JS method signatures and generic record/array payload identity",
       "remaining": [
-        "methods/accessors and lexical this captures",
+        "accessors, extracted/erased method calls, lexical this captures and nonexact override ABIs",
+        "generic/overloaded source methods, async/generator method bodies and source Error coercion hooks",
         "static/computed/private members, parameter properties and source generic classes",
         "constructor return forms and conditional super",
         "general prototype operations and dependency object APIs"
