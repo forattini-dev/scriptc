@@ -45,7 +45,7 @@ fn execute() -> Result<(), String> {
     .map_err(|e| format!("SCN0001: input: {e}"))?;
     if !matches!(
         input.extension().and_then(|e| e.to_str()),
-        Some("ts" | "js" | "mts" | "mjs")
+        Some("ts" | "js" | "mts" | "mjs" | "cjs")
     ) {
         return Err("SCN0001: expected a TypeScript/JavaScript file".into());
     }

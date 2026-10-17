@@ -230,7 +230,83 @@ impl Lowerer<'_> {
         })
     }
 
+    fn nullable_call(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let name = node.expression();
+        if name.kind() != SyntaxKind::Identifier {
+            return Ok(None);
+        }
+        let Ok(local) = self.binding(name) else {
+            return Ok(None);
+        };
+        let Type::Union { union_id } = local.r#type else {
+            return Ok(None);
+        };
+        let arms = &self.unions[union_id].arms;
+        let functions = arms
+            .iter()
+            .filter(|t| matches!(t, Type::Func { .. }))
+            .collect::<Vec<_>>();
+        if functions.len() != 1
+            || arms
+                .iter()
+                .any(|t| !matches!(t, Type::Func { .. } | Type::Null | Type::Undefined))
+        {
+            return Ok(None);
+        }
+        let Type::Func { params, ret } = functions[0].clone() else {
+            unreachable!()
+        };
+        let mut types = vec![local.r#type.clone()];
+        types.extend(params.clone());
+        let mut helper = helpers::Helper::new(
+            &format!("nullable_call_{}", name.text()),
+            types,
+            (*ret).clone(),
+            self.loc(node),
+        );
+        let callee = self.coerce(helper.read(&helper.param(0)), Type::Dyn, name)?;
+        let args = params
+            .iter()
+            .enumerate()
+            .map(|(i, _)| self.coerce(helper.read(&helper.param(i + 1)), Type::Dyn, node))
+            .collect::<Result<Vec<_>, _>>()?;
+        let call = Expr::DynCall {
+            callee: Box::new(callee),
+            callee_name: name.text().into(),
+            args,
+            r#type: Type::Dyn,
+            loc: self.loc(node),
+        };
+        if *ret == Type::Void {
+            helper.function.body.push(Stmt::Expression {
+                expr: call,
+                loc: self.loc(node),
+            });
+        } else {
+            helper.function.body.push(Stmt::Return {
+                value: Some(self.coerce(call, (*ret).clone(), node)?),
+                loc: self.loc(node),
+            });
+        }
+        let callee = self.install_helper(helper.function);
+        let mut args = vec![Expr::VarRef {
+            local_id: local.id,
+            r#type: local.r#type,
+            loc: self.loc(name),
+        }];
+        args.extend(self.call_arguments(node, &params)?);
+        Ok(Some(Expr::Call {
+            callee,
+            args,
+            r#type: *ret,
+            loc: self.loc(node),
+        }))
+    }
+
     pub(super) fn call_value(&mut self, node: Node) -> Result<Expr, String> {
+        if let Some(value) = self.nullable_call(node)? {
+            return Ok(value);
+        }
         let value = self.expression(node.expression())?;
         let callee = self.callable_body(value, node)?;
         if callee.ty() == Type::Dyn {

@@ -747,17 +747,13 @@ impl Module {
     pub fn initializer(&self, id: &str) -> Option<&Stmt> {
         self.functions
             .iter()
-            .find(|f| f.name == self.entry)?
-            .body
-            .iter()
+            .flat_map(|f| &f.body)
             .find(|stmt| matches!(stmt, Stmt::Assign { local_id, initializes_global: true, .. } if local_id == id))
     }
 
-    pub fn initializes(&self, stmt: &Stmt, function: &Function, id: &str) -> bool {
-        function.name == self.entry
-            && self
-                .initializer(id)
-                .is_some_and(|first| std::ptr::eq(first, stmt))
+    pub fn initializes(&self, stmt: &Stmt, _function: &Function, id: &str) -> bool {
+        self.initializer(id)
+            .is_some_and(|first| std::ptr::eq(first, stmt))
     }
     fn lookup_result(&self, value: &Type, result: &Type) -> bool {
         if *value == Type::Dyn {
@@ -1790,6 +1786,20 @@ fn validate_function(
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } => {
+                if r#fn == "dyn.keySet" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    if args.len() != 3
+                        || args[0].ty() != Type::Dyn
+                        || args[1].ty() != Type::String
+                        || args[2].ty() != Type::Dyn
+                        || *r#type != Type::Void
+                    {
+                        return Err("invalid native dynamic property write".into());
+                    }
+                    return Ok(());
+                }
                 if r#fn == "process.envGet" {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
@@ -2805,6 +2815,112 @@ mod tests {
         validate(&m).unwrap();
         m.globals.push(m.globals[0].clone());
         assert!(validate(&m).unwrap_err().contains("global storage"));
+    }
+
+    #[test]
+    fn dynamic_property_writes_keep_the_shared_void_signature() {
+        let mut m = callable_module();
+        m.functions.truncate(1);
+        m.functions[0].body.clear();
+        let loc = m.functions[0].loc.clone();
+        m.functions[0].body.push(Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "dyn.keySet".into(),
+                args: vec![
+                    Expr::DynObjLit {
+                        fields: vec![],
+                        r#type: Type::Dyn,
+                        loc: loc.clone(),
+                    },
+                    Expr::StrLit {
+                        value: "field".into(),
+                        r#type: Type::String,
+                        loc: loc.clone(),
+                    },
+                    Expr::DynObjLit {
+                        fields: vec![],
+                        r#type: Type::Dyn,
+                        loc: loc.clone(),
+                    },
+                ],
+                r#type: Type::Void,
+                loc: loc.clone(),
+            },
+            loc,
+        });
+        validate(&m).unwrap();
+        if let Stmt::Expression {
+            expr: Expr::LibCall { r#type, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = Type::Dyn;
+        }
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native dynamic property write"
+        );
+        if let Stmt::Expression {
+            expr: Expr::LibCall { r#type, args, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = Type::Void;
+            args.pop();
+        }
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native dynamic property write"
+        );
+    }
+
+    #[test]
+    fn a_module_thunk_owns_one_global_initializer() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        m.globals.push(Global {
+            id: "%g.0".into(),
+            name: "exports".into(),
+            r#type: Type::Dyn,
+            mutable: true,
+        });
+        let initializer = Stmt::Assign {
+            local_id: "%g.0".into(),
+            initializes_global: true,
+            value: Expr::DynObjLit {
+                fields: vec![],
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        };
+        m.functions.push(Function {
+            name: "module_thunk".into(),
+            params: vec![],
+            captures: None,
+            return_type: Type::Void,
+            locals: vec![],
+            body: vec![initializer],
+            loc,
+        });
+        validate(&m).unwrap();
+        assert!(m.initializes(
+            &m.functions.last().unwrap().body[0],
+            m.functions.last().unwrap(),
+            "%g.0"
+        ));
+        let bad = Stmt::Assign {
+            local_id: "%g.0".into(),
+            initializes_global: true,
+            value: Expr::DynObjLit {
+                fields: vec![],
+                r#type: Type::Dyn,
+                loc: m.functions[0].loc.clone(),
+            },
+            loc: m.functions[0].loc.clone(),
+        };
+        m.functions[0].body.push(bad);
+        assert_eq!(validate(&m).unwrap_err(), "invalid global assignment");
     }
 
     #[test]

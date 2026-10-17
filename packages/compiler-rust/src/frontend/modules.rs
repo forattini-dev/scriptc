@@ -2,11 +2,21 @@
 use super::*;
 
 pub(super) struct ModulePlan {
-    pub evaluation_order: Vec<Node>,
+    pub modules: Vec<Node>,
+    pub execution_order: Vec<Node>,
     pub bindings: Vec<ImportBinding>,
+    pub requires: HashMap<declarations::Key, Node>,
 }
 
 pub(super) enum ImportBinding {
+    NativeRequire {
+        name: Node,
+        module: &'static str,
+    },
+    CommonJs {
+        node: Node,
+        target: Node,
+    },
     Native {
         node: Node,
         module: &'static str,
@@ -42,11 +52,43 @@ pub(super) fn runtime_specifier(node: Node) -> Option<Node> {
 impl ModulePlan {
     pub(super) fn link(checker: &mut Checker, entry: Node) -> Result<Self, String> {
         let mut plan = Self {
-            evaluation_order: Vec::new(),
+            modules: Vec::new(),
+            execution_order: Vec::new(),
             bindings: Vec::new(),
+            requires: HashMap::new(),
         };
         plan.visit(checker, entry, &mut HashSet::new(), &mut HashSet::new())?;
+        plan.schedule(checker, entry, &mut HashSet::new());
         Ok(plan)
+    }
+
+    fn schedule(&mut self, checker: &mut Checker, file: Node, visited: &mut HashSet<String>) {
+        let path = source_file_info(file).file_name.to_string();
+        if !visited.insert(path) {
+            return;
+        }
+        if !commonjs::is_module(file) {
+            for node in file.statements() {
+                let Some(specifier) = runtime_specifier(node) else {
+                    continue;
+                };
+                if builtins::module(specifier.text()).is_some() {
+                    continue;
+                }
+                let symbol = checker.get_symbol_at_location(specifier, false);
+                if symbol.0 == 0 {
+                    continue;
+                }
+                let target = checker.sym(symbol).value_declaration;
+                if !target.is_nil()
+                    && target.kind() == SyntaxKind::SourceFile
+                    && !source_file_info(target).file_name.ends_with(".json")
+                {
+                    self.schedule(checker, target, visited);
+                }
+            }
+        }
+        self.execution_order.push(file);
     }
 
     fn visit(
@@ -104,7 +146,7 @@ impl ModulePlan {
                 continue;
             }
             if is_declaration(&target_path)
-                || ![".ts", ".mts", ".js", ".mjs"]
+                || ![".ts", ".mts", ".js", ".mjs", ".cjs"]
                     .iter()
                     .any(|suffix| target_path.ends_with(suffix))
             {
@@ -117,11 +159,59 @@ impl ModulePlan {
                     ),
                 ));
             }
+            if commonjs::is_module(target) {
+                if node.kind() != SyntaxKind::ImportDeclaration {
+                    return Err(refusal(&path, node, "CommonJS re-exports are not ported"));
+                }
+                self.bindings.push(ImportBinding::CommonJs { node, target });
+            }
+            self.visit(checker, target, active, visited)?;
+        }
+        let mut calls = Vec::new();
+        commonjs::require_calls(checker, file, &mut calls)?;
+        for (call, specifier) in calls {
+            if let Some(module) = builtins::module(specifier.text()) {
+                let declaration = call.parent();
+                if declaration.kind() != SyntaxKind::VariableDeclaration
+                    || declaration.name().kind() != SyntaxKind::Identifier
+                {
+                    return Err(refusal(
+                        &path,
+                        call,
+                        "native require needs an identifier namespace binding",
+                    ));
+                }
+                self.bindings.push(ImportBinding::NativeRequire {
+                    name: declaration.name(),
+                    module,
+                });
+                continue;
+            }
+            let symbol = checker.get_symbol_at_location(specifier, false);
+            if symbol.0 == 0 {
+                return Err(refusal(
+                    &path,
+                    call,
+                    "CommonJS require has no resolved source module",
+                ));
+            }
+            let target = checker.sym(symbol).value_declaration;
+            if target.is_nil()
+                || target.kind() != SyntaxKind::SourceFile
+                || !commonjs::is_module(target)
+            {
+                return Err(refusal(
+                    &path,
+                    call,
+                    "require currently needs a source CommonJS module",
+                ));
+            }
+            self.requires.insert(declarations::Key::of(call), target);
             self.visit(checker, target, active, visited)?;
         }
         active.remove(&path);
         visited.insert(path);
-        self.evaluation_order.push(file);
+        self.modules.push(file);
         Ok(())
     }
 }

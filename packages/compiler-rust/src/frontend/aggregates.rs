@@ -678,6 +678,30 @@ impl Lowerer<'_> {
     pub(super) fn record_set(&mut self, node: Node) -> Result<Stmt, String> {
         let member = node.left();
         let obj = self.expression(member.expression())?;
+        if obj.ty() == Type::Dyn {
+            let key = member.name().text();
+            if key == "__proto__" {
+                return Err(self.refuse(node, "dynamic prototype writes are not ported"));
+            }
+            let value = self.expected_expression(node.right(), Type::Dyn)?;
+            return Ok(Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: "dyn.keySet".into(),
+                    args: vec![
+                        obj,
+                        Expr::StrLit {
+                            value: key.into(),
+                            r#type: Type::String,
+                            loc: self.loc(member),
+                        },
+                        value,
+                    ],
+                    r#type: Type::Void,
+                    loc: self.loc(node),
+                },
+                loc: self.loc(node),
+            });
+        }
         let Type::Record { shape_id } = obj.ty() else {
             return Err(self.refuse(node, "property assignment requires a closed record"));
         };

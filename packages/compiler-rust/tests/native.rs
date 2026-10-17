@@ -156,6 +156,17 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-process/reads.ts",
         "rust-native-process/imports.ts",
         "rust-native-process/shadows.ts",
+        "rust-native-commonjs/order.ts",
+        "rust-native-commonjs/cycles.ts",
+        "rust-native-commonjs/replacement.ts",
+        "rust-native-commonjs/named.ts",
+        "rust-native-commonjs/cjs/entry.js",
+        "rust-native-commonjs/snapshots.ts",
+        "rust-native-commonjs/cjs/cache.cjs",
+        "rust-native-commonjs/cjs/builtins.js",
+        "rust-native-conditions/callbacks.ts",
+        "rust-native-conditions/live.js",
+        "rust-native-conditions/values.ts",
     ]
     .into_iter()
     .enumerate()
@@ -380,6 +391,87 @@ fn data_table_and_process_boundaries_preserve_previous_artifacts() {
             &target.with_extension("rs"),
         ] {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn commonjs_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("tsconfig.json"), r#"{"compilerOptions":{"module":"NodeNext","moduleResolution":"NodeNext","target":"ES2022","allowJs":true,"checkJs":false,"types":[],"lib":["ES2022","DOM"]}}"#).unwrap();
+    fs::write(temp.path().join("package.json"), r#"{"type":"commonjs"}"#).unwrap();
+    fs::write(temp.path().join("dep.js"), "exports.value = 1;").unwrap();
+    let input = temp.path().join("entry.js");
+    let target = binary(temp.path(), "cjs-boundary");
+    for source in [
+        "const request = './dep.js'; require(request);",
+        "if (true) require('./dep.js');",
+        "function load() { return require('./dep.js'); } load();",
+        "var path = require('path'); path = {};",
+        "var path = require('path'); var path = console.log('must not drop');",
+        "exports.__proto__ = {};",
+        "var exports; console.log(exports === module.exports);",
+        "var module; console.log(module.exports);",
+        "if (console.log('effect')) console.log('truthy');",
+        "exports.child = require('./data.json');",
+    ] {
+        fs::write(&input, source).unwrap();
+        fs::write(temp.path().join("data.json"), "{}").unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+    fs::write(temp.path().join("package.json"), r#"{"type":"module"}"#).unwrap();
+    fs::write(temp.path().join("dep.cjs"), "exports.value = 1;").unwrap();
+    for source in [
+        "import * as namespace from './dep.cjs'; console.log(namespace.value);",
+        "export { value } from './dep.cjs';",
+        "const dependency = require('./dep.cjs');",
+    ] {
+        fs::write(&input, source).unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
         }
     }
 }
@@ -863,7 +955,6 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ("format", "console.log('%s', 42);", "SCN1001"),
         ("surrogate", "console.log('\\uD800');", "SCN1001"),
         ("bigint", "console.log(1n);", "SCN1001"),
-        ("truthiness", "if (1) console.log(1);", "SCN1001"),
         ("void-argument", "console.log(console.log(1));", "SCN1001"),
         (
             "block-function",

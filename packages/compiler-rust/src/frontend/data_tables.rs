@@ -41,7 +41,7 @@ impl Lowerer<'_> {
         let mut aliases = Vec::new();
         for file in files {
             let path = source_file_info(*file).file_name.to_string();
-            if !path.ends_with(".js") && !path.ends_with(".mjs") {
+            if !path.ends_with(".js") && !path.ends_with(".mjs") && !path.ends_with(".cjs") {
                 continue;
             }
             self.file = path;

@@ -62,27 +62,47 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             lowerer.literal_choices = linked.literal_choices;
         }
         let plan = modules::ModulePlan::link(lowerer.checker, file)?;
-        for binding in plan.bindings {
+        lowerer.inventory_commonjs(&plan)?;
+        for binding in &plan.bindings {
             match binding {
+                modules::ImportBinding::NativeRequire { name, module } => {
+                    let symbol = lowerer.checker.get_symbol_at_location(*name, false).0;
+                    lowerer.commonjs.local_symbols.insert(symbol);
+                    lowerer
+                        .commonjs
+                        .native_declarations
+                        .insert(declarations::Key::of(name.parent()));
+                    lowerer.native_namespaces.insert(symbol, module);
+                }
+                modules::ImportBinding::CommonJs { .. } => {}
                 modules::ImportBinding::Native { node, module, file } => {
-                    lowerer.file = file;
-                    lowerer.native_import(node, module);
+                    lowerer.file = file.clone();
+                    lowerer.native_import(*node, module);
                 }
                 modules::ImportBinding::Json { node, path, file } => {
-                    lowerer.file = file;
-                    lowerer.json_import(node, &path)?;
+                    lowerer.file = file.clone();
+                    lowerer.json_import(*node, path)?;
                 }
             }
         }
-        lowerer.inventory(&plan.evaluation_order);
-        lowerer.inventory_enums(&plan.evaluation_order)?;
-        lowerer.inventory_classes(&plan.evaluation_order);
-        lowerer.inventory_data_tables(&plan.evaluation_order);
-        lowerer.inventory_storage(&plan.evaluation_order);
-        let mut body = lowerer.hoist_module_vars(&plan.evaluation_order)?;
-        for file in &plan.evaluation_order {
+        lowerer.inventory(&plan.modules);
+        lowerer.inventory_enums(&plan.modules)?;
+        lowerer.inventory_classes(&plan.modules);
+        lowerer.inventory_data_tables(&plan.modules);
+        lowerer.inventory_storage(&plan.modules);
+        let mut body = lowerer.commonjs_prelude();
+        body.extend(lowerer.hoist_module_vars(&plan.modules)?);
+        for file in &plan.execution_order {
             lowerer.file = source_file_info(*file).file_name.to_string();
-            body.extend(lowerer.statements(file.statements())?);
+            if let Some(index) = lowerer.commonjs_index(*file) {
+                body.push(Stmt::Expression {
+                    expr: lowerer.commonjs_call(index, *file),
+                    loc: lowerer.loc(*file),
+                });
+                body.extend(lowerer.commonjs_snapshots(index, *file));
+            } else {
+                body.extend(lowerer.statements(file.statements())?);
+            }
         }
         let mut functions = vec![Function {
             name: "__main".into(),
@@ -97,6 +117,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
                 end: file.end(),
             },
         }];
+        functions.extend(lowerer.lower_commonjs()?);
         loop {
             if let Some(index) = lowerer.classes.next() {
                 functions.push(lowerer.lower_constructor(index)?);

@@ -37,6 +37,19 @@ impl Lowerer<'_> {
         self.aggregate_type(id)
     }
     pub(super) fn ty(&mut self, node: Node) -> Result<Type, String> {
+        if self
+            .commonjs
+            .requires
+            .contains_key(&declarations::Key::of(node))
+        {
+            return Ok(Type::Dyn);
+        }
+        if let Some(binding) = self.commonjs_binding(node) {
+            return Ok(binding.r#type);
+        }
+        if matches!(self.commonjs_import(node), Some((_, None))) {
+            return Ok(Type::Dyn);
+        }
         if node.kind() == SyntaxKind::Identifier {
             let symbol = self.symbol(node);
             if self.data_bindings.contains(&symbol) {
@@ -84,7 +97,9 @@ impl Lowerer<'_> {
         let ty = self.ty(node)?;
         if ty == Type::Dyn
             && node.parent().kind() == SyntaxKind::VariableDeclaration
-            && (self.file.ends_with(".js") || self.file.ends_with(".mjs"))
+            && (self.file.ends_with(".js")
+                || self.file.ends_with(".mjs")
+                || self.file.ends_with(".cjs"))
             && node
                 .parent()
                 .parent()

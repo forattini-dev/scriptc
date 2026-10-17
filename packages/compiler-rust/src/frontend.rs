@@ -19,6 +19,7 @@ mod callables;
 mod callbacks;
 mod classes;
 mod collections;
+mod commonjs;
 mod data_tables;
 mod declarations;
 mod enums;
@@ -139,6 +140,7 @@ struct Lowerer<'a> {
     polymorphic_callables: HashMap<u32, usize>,
     data_bindings: HashSet<u32>,
     data_types: HashSet<TypeId>,
+    commonjs: commonjs::Graph,
 }
 
 impl<'a> Lowerer<'a> {
@@ -176,6 +178,7 @@ impl<'a> Lowerer<'a> {
             polymorphic_callables: HashMap::new(),
             data_bindings: HashSet::new(),
             data_types: HashSet::new(),
+            commonjs: commonjs::Graph::default(),
         }
     }
     fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
@@ -311,6 +314,9 @@ impl<'a> Lowerer<'a> {
     }
 
     fn module_namespace(&mut self, node: Node) -> bool {
+        if self.commonjs_import(node).is_some() {
+            return false;
+        }
         if node.kind() != SyntaxKind::Identifier {
             return false;
         }
@@ -322,6 +328,9 @@ impl<'a> Lowerer<'a> {
                 .flags
                 .intersects(SymbolFlags::ALIAS)
         {
+            return false;
+        }
+        if self.commonjs.local_symbols.contains(&symbol.0) {
             return false;
         }
         let target = self.checker.get_aliased_symbol(symbol);
@@ -384,6 +393,7 @@ impl<'a> Lowerer<'a> {
             self.checker.get_symbol_at_location(node, false)
         };
         if symbol.0 != 0
+            && !self.commonjs.local_symbols.contains(&symbol.0)
             && self
                 .checker
                 .sym(symbol)
@@ -443,7 +453,9 @@ impl<'a> Lowerer<'a> {
             });
         }
         let erase_private_result = declared.is_none()
-            && (self.file.ends_with(".js") || self.file.ends_with(".mjs"))
+            && (self.file.ends_with(".js")
+                || self.file.ends_with(".mjs")
+                || self.file.ends_with(".cjs"))
             && params.iter().any(|p| p.r#type == Type::Dyn);
         let return_type = if erase_private_result {
             Type::Dyn
@@ -523,6 +535,9 @@ impl<'a> Lowerer<'a> {
         refusal(&self.file, node, detail)
     }
     fn binding(&mut self, node: Node) -> Result<Local, String> {
+        if let Some(binding) = self.commonjs_binding(node) {
+            return Ok(binding);
+        }
         let symbol = self.symbol(node);
         self.resolve_binding(symbol, node)
     }
@@ -581,6 +596,10 @@ impl<'a> Lowerer<'a> {
                 let mut out = Vec::new();
                 for declaration in list.declarations().nodes() {
                     let name = declaration.name();
+                    let symbol = self.symbol(name);
+                    if self.native_namespaces.contains_key(&symbol) {
+                        continue;
+                    }
                     if name.kind() != SyntaxKind::Identifier || declaration.initializer().is_nil() {
                         return Err(self.refuse(
                             declaration,
@@ -665,6 +684,13 @@ impl<'a> Lowerer<'a> {
                             self.refuse(expression, "enum namespace reassignment is not ported")
                         );
                     }
+                    let symbol = self.symbol(expression.left());
+                    if self.native_namespaces.contains_key(&symbol) {
+                        return Err(self.refuse(
+                            expression,
+                            "native namespace alias reassignment is not ported",
+                        ));
+                    }
                     let local = self.binding(expression.left())?;
                     let symbol = self.symbol(expression.left());
                     let target = self
@@ -738,6 +764,9 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expression_inner(&mut self, node: Node) -> Result<Expr, String> {
+        if let Some(value) = self.commonjs_value(node)? {
+            return Ok(value);
+        }
         if let Some(value) = self.process_read(node)? {
             return Ok(value);
         }
@@ -917,27 +946,17 @@ impl<'a> Lowerer<'a> {
                     SyntaxKind::ExclamationToken => "!",
                     _ => return Err(self.refuse(node, "unary operator is not ported")),
                 };
-                let raw = self.expression(node.operand())?;
-                if op == "!"
-                    && matches!(
-                        raw.ty(),
-                        Type::Dyn
-                            | Type::String
-                            | Type::F64
-                            | Type::Null
-                            | Type::Undefined
-                            | Type::Union { .. }
-                    )
-                {
-                    let raw = self.coerce(raw, Type::Dyn, node.operand())?;
-                    return Ok(Expr::DynTest {
-                        value: Box::new(raw),
-                        test: "truthy".into(),
-                        negated: true,
+                if op == "!" {
+                    let raw = self.condition_value(node.operand())?;
+                    let operand = self.condition(raw, node.operand())?;
+                    return Ok(Expr::Unary {
+                        op: "!".into(),
+                        operand: Box::new(operand),
                         r#type: Type::Bool,
                         loc,
                     });
                 }
+                let raw = self.expression(node.operand())?;
                 let operand = Box::new(raw);
                 if !matches!((op, operand.ty()), ("-", Type::F64) | ("!", Type::Bool)) {
                     return Err(self.refuse(node, "unary coercions are not ported"));
@@ -990,15 +1009,21 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 let member = node.expression();
+                if self.commonjs_import(member).is_some() {
+                    return self.call_value(node);
+                }
                 if member.kind() == SyntaxKind::PropertyAccessExpression {
                     let symbol = self.symbol(member.expression());
-                    let receiver_type = self
+                    let mut receiver_type = self
                         .bindings
                         .get(&symbol)
                         .or_else(|| self.module_bindings.get(&symbol))
                         .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
                         .map(|l| l.r#type.clone())
                         .or_else(|| self.ty(member.expression()).ok());
+                    if matches!(receiver_type, Some(Type::Union { .. })) {
+                        receiver_type = self.ty(member.expression()).ok();
+                    }
                     if matches!(receiver_type, Some(Type::Array { .. })) {
                         return self.array_call(node);
                     }
@@ -1059,7 +1084,8 @@ impl<'a> Lowerer<'a> {
                     let receiver = member.expression();
                     let owned = if receiver.kind() == SyntaxKind::Identifier {
                         let symbol = self.symbol(receiver);
-                        self.bindings.contains_key(&symbol)
+                        self.commonjs_import(receiver).is_some()
+                            || self.bindings.contains_key(&symbol)
                             || self.module_bindings.contains_key(&symbol)
                             || self.outer.iter().any(|scope| scope.contains_key(&symbol))
                     } else {

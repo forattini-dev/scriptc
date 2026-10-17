@@ -15,6 +15,10 @@ impl Lowerer<'_> {
                 }
                 for declaration in list.declarations().nodes() {
                     let name = declaration.name();
+                    let symbol = self.symbol(name);
+                    if self.native_namespaces.contains_key(&symbol) {
+                        continue;
+                    }
                     if name.kind() != SyntaxKind::Identifier {
                         continue;
                     }

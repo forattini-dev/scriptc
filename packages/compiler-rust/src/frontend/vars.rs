@@ -91,6 +91,10 @@ impl Lowerer<'_> {
             let mut nodes = Vec::new();
             declarations(*file, &mut nodes);
             for declaration in nodes {
+                let symbol = self.symbol(declaration.name());
+                if self.native_namespaces.contains_key(&symbol) {
+                    continue;
+                }
                 let ty = self.var_value_type(declaration)?;
                 let symbol = self.symbol(declaration.name());
                 if self.functions.contains(symbol) {
@@ -165,6 +169,19 @@ impl Lowerer<'_> {
         let mut body = Vec::new();
         for declaration in node.declaration_list().declarations().nodes() {
             let symbol = self.symbol(declaration.name());
+            if self.native_namespaces.contains_key(&symbol) {
+                if !self
+                    .commonjs
+                    .native_declarations
+                    .contains(&declarations::Key::of(declaration))
+                {
+                    return Err(self.refuse(
+                        declaration,
+                        "native namespace alias redeclaration is not ported",
+                    ));
+                }
+                continue;
+            }
             let ty = self.var_types.get(&symbol).cloned().ok_or_else(|| {
                 self.refuse(declaration, "var was not instantiated in its native scope")
             })?;
@@ -225,11 +242,45 @@ impl Lowerer<'_> {
         None
     }
 
-    pub(super) fn var_if(&mut self, node: Node) -> Result<Stmt, String> {
-        let cond = self.expression(node.expression())?;
-        if cond.ty() != Type::Bool {
-            return Err(self.refuse(node, "truthiness coercions are not ported"));
+    // A presence test observes the live slot, even when a checker refinement
+    // survives a call that can mutate a captured or module binding.
+    pub(super) fn condition_value(&mut self, node: Node) -> Result<Expr, String> {
+        if node.kind() == SyntaxKind::ParenthesizedExpression {
+            return self.condition_value(node.expression());
         }
+        if node.kind() == SyntaxKind::Identifier
+            && let Ok(local) = self.binding(node)
+        {
+            return Ok(Expr::VarRef {
+                local_id: local.id,
+                r#type: local.r#type,
+                loc: self.loc(node),
+            });
+        }
+        self.expression(node)
+    }
+
+    // Box once into the owning value ABI; testing presence never invokes a callback.
+    pub(super) fn condition(&self, value: Expr, node: Node) -> Result<Expr, String> {
+        if value.ty() == Type::Bool {
+            return Ok(value);
+        }
+        if value.ty() == Type::Void {
+            return Err(self.refuse(node, "void-valued conditions are not ported"));
+        }
+        let value = self.coerce(value, Type::Dyn, node)?;
+        Ok(Expr::DynTest {
+            value: Box::new(value),
+            test: "truthy".into(),
+            negated: false,
+            r#type: Type::Bool,
+            loc: self.loc(node),
+        })
+    }
+
+    pub(super) fn var_if(&mut self, node: Node) -> Result<Stmt, String> {
+        let value = self.condition_value(node.expression())?;
+        let cond = self.condition(value, node.expression())?;
         let before = self.var_defined.clone();
         if let Some(symbol) = self.guarded_var(node.expression(), true) {
             self.var_defined.insert(symbol);
