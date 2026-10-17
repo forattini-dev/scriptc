@@ -175,6 +175,14 @@ fn calls() -> &'static [Builtin] {
                 "process_platform"
             ),
             call!("process", "cwd", "process.cwd", [], String, "process_cwd"),
+            call!(
+                "process",
+                "isTTY",
+                "process.isTTY",
+                [Type::F64],
+                Bool,
+                "process_is_tty"
+            ),
         ]
     })
 }

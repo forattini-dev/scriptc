@@ -14,6 +14,9 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn type_id(&mut self, id: TypeId) -> Option<Type> {
+        if self.data_types.contains(&id) {
+            return Some(Type::Dyn);
+        }
         if self
             .checker
             .ty(id)
@@ -34,6 +37,12 @@ impl Lowerer<'_> {
         self.aggregate_type(id)
     }
     pub(super) fn ty(&mut self, node: Node) -> Result<Type, String> {
+        if node.kind() == SyntaxKind::Identifier {
+            let symbol = self.symbol(node);
+            if self.data_bindings.contains(&symbol) {
+                return Ok(Type::Dyn);
+            }
+        }
         if let Some(ty) = self.enum_type(node) {
             return Ok(ty);
         }
@@ -52,6 +61,10 @@ impl Lowerer<'_> {
         })
     }
     pub(super) fn storage_type(&mut self, node: Node) -> Result<Type, String> {
+        let symbol = self.symbol(node);
+        if self.data_bindings.contains(&symbol) {
+            return Ok(Type::Dyn);
+        }
         if node.parent().kind() == SyntaxKind::VariableDeclaration
             && let Some(hint) = self.declared(node.parent())
             && hint.class.is_none()

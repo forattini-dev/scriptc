@@ -3,6 +3,7 @@ mod classes;
 mod collections;
 mod functions;
 mod layouts;
+mod process;
 mod regex;
 mod sets;
 mod storage;
@@ -248,6 +249,9 @@ pub fn uses_runtime(module: &Module) -> bool {
 }
 
 fn expr(value: &Expr, function: &Function, module: &Module) -> String {
+    if let Some(code) = process::expression(value, function, module) {
+        return code;
+    }
     if let Some(code) = sets::expression(value, function, module) {
         return code;
     }

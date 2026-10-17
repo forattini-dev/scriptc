@@ -77,6 +77,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         lowerer.inventory(&plan.evaluation_order);
         lowerer.inventory_enums(&plan.evaluation_order)?;
         lowerer.inventory_classes(&plan.evaluation_order);
+        lowerer.inventory_data_tables(&plan.evaluation_order);
         lowerer.inventory_storage(&plan.evaluation_order);
         let mut body = lowerer.hoist_module_vars(&plan.evaluation_order)?;
         for file in &plan.evaluation_order {

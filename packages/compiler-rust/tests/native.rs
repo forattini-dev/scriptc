@@ -21,6 +21,25 @@ fn binary(dir: &Path, name: &str) -> PathBuf {
 fn oracle() -> String {
     std::env::var("SCRIPTC_NODE_ORACLE").unwrap_or_else(|_| "node".into())
 }
+fn process_environment(case: &str, building: bool) -> Vec<(&'static str, &'static str)> {
+    if !case.starts_with("rust-native-process/") {
+        return vec![];
+    }
+    vec![
+        (
+            "SCRIPTC_NATIVE_PROCESS_VALUE",
+            if building {
+                "compile-value"
+            } else {
+                "runtime-value"
+            },
+        ),
+        (
+            "SCRIPTC_NATIVE_PROCESS_EMPTY",
+            if building { "compile-value" } else { "" },
+        ),
+    ]
+}
 fn success(output: &Output) {
     assert!(
         output.status.success(),
@@ -132,13 +151,23 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-sets/contracts.ts",
         "rust-native-sets/seeds.ts",
         "rust-native-sets/order.ts",
+        "rust-native-data-tables/contracts.ts",
+        "rust-native-data-tables/plain.js",
+        "rust-native-process/reads.ts",
+        "rust-native-process/imports.ts",
+        "rust-native-process/shadows.ts",
     ]
     .into_iter()
     .enumerate()
     {
         let input = root().join("tests/corpus").join(name);
         let target = binary(temp.path(), &format!("case-{index}"));
-        let expected = Command::new(oracle()).arg(&input).output().unwrap();
+        let expected = Command::new(oracle())
+            .arg(&input)
+            .envs(process_environment(name, false))
+            .env_remove("SCRIPTC_NATIVE_PROCESS_MISSING")
+            .output()
+            .unwrap();
         success(&expected);
         let build = Command::new(compiler())
             .args(["build"])
@@ -147,6 +176,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
             .arg(&target)
             .env("PATH", &path)
             .env("SCRIPTC_FORBIDDEN_MARKER", &marker)
+            .envs(process_environment(name, true))
+            .env("SCRIPTC_NATIVE_PROCESS_MISSING", "compile-value")
             .output()
             .unwrap();
         success(&build);
@@ -163,6 +194,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
             .env("PATH", &path)
             .env("SCRIPTC_FORBIDDEN_MARKER", &marker)
             .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+            .envs(process_environment(name, false))
+            .env_remove("SCRIPTC_NATIVE_PROCESS_MISSING")
             .output()
             .unwrap();
         assert_eq!(actual.status.code(), expected.status.code(), "{name}");
@@ -272,6 +305,81 @@ fn callable_and_compiled_enum_boundaries_preserve_previous_artifacts() {
             &target.with_extension("rs"),
         ] {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve", "{name}");
+        }
+    }
+}
+
+#[test]
+fn data_table_and_process_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.js");
+    let target = binary(temp.path(), "data-boundary");
+    for source in [
+        "function effect() { console.log('effect'); return 1; } const table = { rows: ['GET', {a: 1}, {b: 2}], value: effect() }; var alias = table;",
+        "const table = { rows: ['GET', {a: 1}, {b: 2}], get value() { console.log('getter'); return 1; } }; var alias = table;",
+        "const other = { value: 1 }; const table = { rows: ['GET', {a: 1}, {b: 2}], ...other }; var alias = table;",
+        "const table = { __proto__: null, rows: ['GET', {a: 1}, {b: 2}] }; var alias = table;",
+        "const table = { rows: ['GET', {a: 1}, {b: 2}], value: 1, value: 2 }; var alias = table;",
+        "let table = { rows: ['GET', {a: 1}, {b: 2}] }; var alias = table; table = { value: 1, value: 2 };",
+        "const table = { rows: ['GET', {a: 1}, {b: 2}], sparse: [1, , 3] }; var alias = table;",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+    let input = temp.path().join("main.ts");
+    for source in [
+        "process.env.SCRIPTC_NATIVE_UNSUPPORTED_WRITE = 'x';",
+        "const saved = process.env; console.log(saved.SCRIPTC_NATIVE_PROCESS_VALUE);",
+        "const output = process.stdout; console.log(output.isTTY === true);",
+    ] {
+        fs::write(&input, source).unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--project")
+            .arg(root().join("tests/corpus/rust-native-process/tsconfig.json"))
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
 }
@@ -755,7 +863,7 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ("format", "console.log('%s', 42);", "SCN1001"),
         ("surrogate", "console.log('\\uD800');", "SCN1001"),
         ("bigint", "console.log(1n);", "SCN1001"),
-        ("truthiness", "console.log(!1);", "SCN1001"),
+        ("truthiness", "if (1) console.log(1);", "SCN1001"),
         ("void-argument", "console.log(console.log(1));", "SCN1001"),
         (
             "block-function",

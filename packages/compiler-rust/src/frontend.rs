@@ -19,6 +19,7 @@ mod callables;
 mod callbacks;
 mod classes;
 mod collections;
+mod data_tables;
 mod declarations;
 mod enums;
 mod functions;
@@ -26,6 +27,7 @@ mod helpers;
 mod modules;
 mod parameters;
 mod pipeline;
+mod process;
 mod promises;
 mod property_keys;
 mod regex;
@@ -135,6 +137,8 @@ struct Lowerer<'a> {
     enums: enums::EnumGraph,
     callables: HashMap<usize, Type>,
     polymorphic_callables: HashMap<u32, usize>,
+    data_bindings: HashSet<u32>,
+    data_types: HashSet<TypeId>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -170,6 +174,8 @@ impl<'a> Lowerer<'a> {
             enums: enums::EnumGraph::default(),
             callables: HashMap::new(),
             polymorphic_callables: HashMap::new(),
+            data_bindings: HashSet::new(),
+            data_types: HashSet::new(),
         }
     }
     fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
@@ -732,6 +738,9 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expression_inner(&mut self, node: Node) -> Result<Expr, String> {
+        if let Some(value) = self.process_read(node)? {
+            return Ok(value);
+        }
         if let Some(value) = self.json_value(node) {
             return self.json_expression(node, value);
         }
@@ -909,7 +918,18 @@ impl<'a> Lowerer<'a> {
                     _ => return Err(self.refuse(node, "unary operator is not ported")),
                 };
                 let raw = self.expression(node.operand())?;
-                if op == "!" && raw.ty() == Type::Dyn {
+                if op == "!"
+                    && matches!(
+                        raw.ty(),
+                        Type::Dyn
+                            | Type::String
+                            | Type::F64
+                            | Type::Null
+                            | Type::Undefined
+                            | Type::Union { .. }
+                    )
+                {
+                    let raw = self.coerce(raw, Type::Dyn, node.operand())?;
                     return Ok(Expr::DynTest {
                         value: Box::new(raw),
                         test: "truthy".into(),

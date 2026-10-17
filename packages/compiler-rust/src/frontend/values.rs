@@ -17,6 +17,7 @@ impl Lowerer<'_> {
             });
         }
         let mut fields = Vec::new();
+        let mut names = HashSet::new();
         for property in node.properties() {
             if !matches!(
                 property.kind(),
@@ -27,6 +28,13 @@ impl Lowerer<'_> {
                 return Err(self.refuse(
                     property,
                     "native value objects require plain named data properties",
+                ));
+            }
+            let name = self.data_property_name(property.name()).unwrap();
+            if !names.insert(name) {
+                return Err(self.refuse(
+                    property,
+                    "duplicate native value object properties are not ported",
                 ));
             }
             let key = Expr::StrLit {

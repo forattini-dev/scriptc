@@ -1790,6 +1790,18 @@ fn validate_function(
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } => {
+                if r#fn == "process.envGet" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    if args.len() != 1
+                        || args[0].ty() != Type::String
+                        || !module.lookup_result(&Type::String, r#type)
+                    {
+                        return Err("invalid native environment read".into());
+                    }
+                    return Ok(());
+                }
                 let builtin = crate::builtins::by_ir(r#fn).ok_or("unknown native library call")?;
                 if *r#type != builtin.result || args.len() != builtin.args.len() {
                     return Err("invalid native library signature".into());
@@ -3255,6 +3267,42 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn environment_reads_require_the_optional_string_contract() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        module.unions.push(Union {
+            id: 0,
+            arms: vec![Type::String, Type::Undefined],
+        });
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "process.envGet".into(),
+                args: vec![Expr::StrLit {
+                    value: "KEY".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                }],
+                r#type: Type::Union { union_id: 0 },
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert!(validate(&module).is_ok());
+        if let Stmt::Expression {
+            expr: Expr::LibCall { r#type, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        {
+            *r#type = Type::String;
+        }
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "invalid native environment read"
+        );
     }
 
     #[test]
