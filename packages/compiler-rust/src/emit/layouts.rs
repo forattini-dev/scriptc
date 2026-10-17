@@ -72,6 +72,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                 let equality = match ty {
                     Type::Record { .. }
                     | Type::Array { .. }
+                    | Type::Set { .. }
                     | Type::Object { .. }
                     | Type::Func { .. } => "left.ptr_eq(&right)",
                     Type::Null | Type::Undefined => "true",

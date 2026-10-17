@@ -21,7 +21,7 @@ fn types(module: &Module) -> Vec<Type> {
                 }
                 visit(ret, found);
             }
-            Type::Array { elem } => visit(elem, found),
+            Type::Array { elem } | Type::Set { elem } => visit(elem, found),
             Type::Promise { inner } => visit(inner, found),
             Type::Map { key, value } => {
                 visit(key, found);

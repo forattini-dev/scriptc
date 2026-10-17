@@ -220,7 +220,16 @@ impl Lowerer<'_> {
                 "native Object.assign requires one plain data source for a callable target",
             ));
         }
-        let target = self.expression(arguments[0])?;
+        let contextual = expected.as_ref().and_then(|ty| match ty {
+            Type::Record { shape_id } => self.callables.get(shape_id).cloned(),
+            _ => None,
+        });
+        let target =
+            if let Some(signature) = contextual.filter(|_| self.fresh_function(arguments[0])) {
+                self.expected_expression(arguments[0], signature)?
+            } else {
+                self.expression(arguments[0])?
+            };
         let (ty, create) = match target.ty() {
             Type::Func { .. } => {
                 if !self.fresh_function(arguments[0]) {

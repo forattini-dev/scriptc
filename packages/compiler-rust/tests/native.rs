@@ -128,6 +128,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-strings/templates.ts",
         "rust-native-strings/joins.ts",
         "rust-native-strings/order.ts",
+        "rust-native-tuple-rest/contracts.ts",
+        "rust-native-sets/contracts.ts",
+        "rust-native-sets/seeds.ts",
+        "rust-native-sets/order.ts",
     ]
     .into_iter()
     .enumerate()
@@ -270,6 +274,80 @@ fn callable_and_compiled_enum_boundaries_preserve_previous_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve", "{name}");
         }
     }
+}
+
+#[test]
+fn set_and_tuple_rest_boundaries_preserve_previous_native_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "set-boundary");
+    for source in [
+        "const set = new Set([{id: 1}]);",
+        "const seed = new Set<string>(); const set = new Set(seed);",
+        "const set = new Set<string>(); set.values();",
+        "const set = new Set<string>(); const value: unknown = set;",
+        "const set = new Set<string>(); const value: unknown = {set};",
+        "const set = new Set<string>(); const value: unknown = [set];",
+        "function read(value: Set<string> | string): number { return 1; } console.log(read('x'));",
+        "function read(set: Set<string>): boolean { return set.has('x'); } const value: unknown = read;",
+    ] {
+        fs::write(&input, source).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+    fs::write(
+        temp.path().join("library.d.ts"),
+        "export declare const variable: (...args: string[]) => string;",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("library.js"),
+        "export const variable = function (value) { return value; };",
+    )
+    .unwrap();
+    fs::write(
+        &input,
+        "import { variable } from './library.js'; console.log(variable('x')); ",
+    )
+    .unwrap();
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .arg("--out")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(
+        !result.status.success() && String::from_utf8_lossy(&result.stderr).contains("SCN1001"),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(fs::read_to_string(target).unwrap(), "preserve");
 }
 
 #[test]

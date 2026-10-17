@@ -4,6 +4,7 @@ mod collections;
 mod functions;
 mod layouts;
 mod regex;
+mod sets;
 mod storage;
 mod values;
 
@@ -27,6 +28,9 @@ fn rust_type(ty: Type, module: &Module) -> String {
                 rust_type(*key, module),
                 rust_type(*value, module)
             );
+        }
+        Type::Set { elem } => {
+            return format!("runtime::Gc<NativeMap<{}, bool>>", rust_type(*elem, module));
         }
         Type::Array { elem } => {
             return format!(
@@ -162,7 +166,10 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Expr::Upcast { .. }
             | Expr::Downcast { .. }
             | Expr::InstanceOf { .. } => true,
-            Expr::ArrayLit { .. } | Expr::LibCall { .. } => true,
+            Expr::ArrayLit { .. }
+            | Expr::LibCall { .. }
+            | Expr::SetNew { .. }
+            | Expr::SetIntrinsic { .. } => true,
             Expr::ArrayIntrinsic { .. } => true,
             Expr::ArrayGet { .. } => true,
             Expr::MapNew { seed, .. } => seed.iter().any(|p| expr(&p.key) || expr(&p.value)),
@@ -213,6 +220,7 @@ pub fn uses_runtime(module: &Module) -> bool {
         match t {
             Type::Array { .. }
             | Type::Map { .. }
+            | Type::Set { .. }
             | Type::Record { .. }
             | Type::Union { .. }
             | Type::Object { .. } => true,
@@ -240,6 +248,9 @@ pub fn uses_runtime(module: &Module) -> bool {
 }
 
 fn expr(value: &Expr, function: &Function, module: &Module) -> String {
+    if let Some(code) = sets::expression(value, function, module) {
+        return code;
+    }
     if let Some(code) = values::promise_expression(value, function, module) {
         return code;
     }
@@ -278,6 +289,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         | Expr::MapIntrinsic { .. }
         | Expr::RecordKeyGet { .. }
         | Expr::ArrayIntrinsic { .. } => unreachable!("collection expression"),
+        Expr::SetNew { .. } | Expr::SetIntrinsic { .. } => unreachable!("Set expression"),
         Expr::Closure {
             fn_name,
             captures,
@@ -483,6 +495,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Dyn
                     | Type::Array { .. }
                     | Type::Map { .. }
+                    | Type::Set { .. }
                     | Type::Record { .. }
                     | Type::Union { .. }
                     | Type::Func { .. }
@@ -503,6 +516,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 Type::Array { .. }
                     | Type::Record { .. }
                     | Type::Map { .. }
+                    | Type::Set { .. }
                     | Type::Object { .. }
                     | Type::Func { .. }
             );

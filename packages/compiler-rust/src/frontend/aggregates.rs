@@ -44,6 +44,9 @@ impl Lowerer<'_> {
         if let Some(ty) = self.map_type(id) {
             return Some(ty);
         }
+        if let Some(ty) = self.set_type(id) {
+            return Some(ty);
+        }
         if flags.intersects(TypeFlags::OBJECT | TypeFlags::INTERSECTION)
             && !self
                 .checker
@@ -178,6 +181,9 @@ impl Lowerer<'_> {
             return Some(arms[0].clone());
         }
         if arms.is_empty()
+            || (arms.iter().any(|a| matches!(a, Type::Set { .. }))
+                && (arms.iter().filter(|a| matches!(a, Type::Set { .. })).count() != 1
+                    || arms.iter().any(|a| !matches!(a, Type::Set { .. } | Type::Null | Type::Undefined))))
             // Different static Error views can alias the same object. Keep a
             // single object arm until cross-arm identity is part of the IR ABI.
             || arms.iter().filter(|a| matches!(a, Type::Object { .. })).count() > 1
@@ -204,6 +210,12 @@ impl Lowerer<'_> {
             return self.coerce(value, target, node);
         }
         if target == Type::Dyn {
+            if ir::contains_set(&value.ty(), &self.records, &self.unions) {
+                return Err(self.refuse(
+                    node,
+                    "erasing Set requires a shared native Set value contract",
+                ));
+            }
             if let Type::Record { shape_id } = value.ty()
                 && self.callables.contains_key(&shape_id)
             {
@@ -354,6 +366,12 @@ impl Lowerer<'_> {
     }
 
     fn expected_expression_inner(&mut self, node: Node, target: Type) -> Result<Expr, String> {
+        if matches!(target, Type::Promise { .. })
+            && node.kind() == SyntaxKind::CallExpression
+            && let Some(value) = self.promise_call_expected(node, Some(target.clone()))?
+        {
+            return Ok(value);
+        }
         if let Some(value) = self.contextual_callable(node, &target)? {
             return Ok(value);
         }
@@ -386,6 +404,9 @@ impl Lowerer<'_> {
             }
             SyntaxKind::NewExpression if matches!(target, Type::Map { .. }) => {
                 self.map_new_expected(node, Some(target))
+            }
+            SyntaxKind::NewExpression if matches!(target, Type::Set { .. }) => {
+                self.set_new(node, Some(target))
             }
             SyntaxKind::ArrayLiteralExpression => {
                 if let Type::Record { shape_id } = &target
@@ -591,6 +612,9 @@ impl Lowerer<'_> {
         }
         if matches!(obj.ty(), Type::Map { .. }) && node.name().text() == "size" {
             return self.map_intrinsic(node, obj, "size", vec![]);
+        }
+        if matches!(obj.ty(), Type::Set { .. }) && node.name().text() == "size" {
+            return self.set_intrinsic(node, obj, "size", vec![]);
         }
         if matches!(obj.ty(), Type::Array { .. }) && node.name().text() == "length" {
             return Ok(Expr::ArrayIntrinsic {
@@ -852,6 +876,7 @@ impl Lowerer<'_> {
                         | Type::Func { .. }
                         | Type::Array { .. }
                         | Type::Map { .. }
+                        | Type::Set { .. }
                         | Type::Object { .. }
                         | Type::Regex
                         | Type::Promise { .. }

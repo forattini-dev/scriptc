@@ -61,6 +61,13 @@ impl Lowerer<'_> {
         })
     }
     pub(super) fn promise_call(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        self.promise_call_expected(node, None)
+    }
+    pub(super) fn promise_call_expected(
+        &mut self,
+        node: Node,
+        expected: Option<Type>,
+    ) -> Result<Option<Expr>, String> {
         let member = node.expression();
         if member.kind() != SyntaxKind::PropertyAccessExpression {
             return Ok(None);
@@ -78,13 +85,31 @@ impl Lowerer<'_> {
             if args.len() > 1 {
                 return Err(self.refuse(node, "Promise.resolve extra arguments are not ported"));
             }
-            let result = self.ty(node)?;
+            let contextual = expected.is_some();
+            let result = match expected {
+                Some(ty) => ty,
+                None => self.ty(node)?,
+            };
             if !matches!(result, Type::Promise { .. }) {
                 return Err(self.refuse(node, "Promise.resolve needs a native Promise contract"));
             }
+            let Type::Promise { inner: payload } = &result else {
+                unreachable!()
+            };
             let mut values = args
                 .into_iter()
-                .map(|arg| self.expression(arg))
+                .map(|arg| {
+                    let source = self.ty(arg)?;
+                    self.refuse_thenable(&source, arg)?;
+                    if contextual
+                        && **payload != Type::Void
+                        && !matches!(source, Type::Promise { .. } | Type::Null | Type::Undefined)
+                    {
+                        self.expected_expression(arg, (**payload).clone())
+                    } else {
+                        self.expression(arg)
+                    }
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             if values
                 .first()

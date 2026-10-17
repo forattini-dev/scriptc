@@ -29,6 +29,7 @@ mod pipeline;
 mod promises;
 mod property_keys;
 mod regex;
+mod sets;
 mod storage;
 mod strings;
 mod tuples;
@@ -744,6 +745,9 @@ impl<'a> Lowerer<'a> {
                 if let Some(value) = self.class_new(node)? {
                     return Ok(value);
                 }
+                if matches!(self.ty(node), Ok(Type::Set { .. })) {
+                    return self.set_new(node, None);
+                }
                 self.map_new(node)
             }
             SyntaxKind::ThisKeyword => self.this_expression(node),
@@ -986,6 +990,17 @@ impl<'a> Lowerer<'a> {
                     if matches!(receiver_type, Some(Type::Map { .. })) {
                         let receiver = self.expression(member.expression())?;
                         return self.map_intrinsic(
+                            node,
+                            receiver,
+                            member.name().text(),
+                            node.arguments().into_iter().collect(),
+                        );
+                    }
+                    if matches!(receiver_type, Some(Type::Set { .. }))
+                        || matches!(self.ty(member.expression()), Ok(Type::Set { .. }))
+                    {
+                        let receiver = self.expression(member.expression())?;
+                        return self.set_intrinsic(
                             node,
                             receiver,
                             member.name().text(),

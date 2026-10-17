@@ -15,7 +15,7 @@ fn types(module: &Module) -> Vec<Type> {
                 }
                 visit(ret, out);
             }
-            Type::Array { elem } => visit(elem, out),
+            Type::Array { elem } | Type::Set { elem } => visit(elem, out),
             Type::Promise { inner } => visit(inner, out),
             Type::Map { key, value } => {
                 visit(key, out);
@@ -112,6 +112,7 @@ fn specialized(ty: &Type) -> bool {
             | Type::Array { .. }
             | Type::Func { .. }
             | Type::Map { .. }
+            | Type::Set { .. }
             | Type::Classval { .. }
     )
 }
@@ -221,6 +222,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
         "string" => matches!(key, "trim" | "trimStart" | "trimEnd" | "split" | "replace" | "replaceAll" | "match" | "matchAll" | "search" | "slice" | "substring" | "substr" | "includes" | "startsWith" | "endsWith" | "charAt" | "charCodeAt" | "codePointAt" | "at" | "indexOf" | "lastIndexOf" | "toLowerCase" | "toUpperCase" | "repeat" | "padStart" | "padEnd" | "normalize" | "concat" | "localeCompare" | "toLocaleLowerCase" | "toLocaleUpperCase"),
         "regex" => matches!(key, "source" | "flags" | "lastIndex" | "global" | "ignoreCase" | "multiline" | "dotAll" | "unicode" | "unicodeSets" | "sticky" | "hasIndices" | "exec" | "test" | "compile"),
         "promise" => matches!(key, "then" | "catch" | "finally"),
+        "set" => matches!(key, "add" | "has" | "delete" | "clear" | "size" | "entries" | "keys" | "values" | "forEach"),
         "map" => matches!(key, "get" | "set" | "size" | "has" | "delete" | "clear" | "entries" | "keys" | "values" | "forEach"),
         "number" => matches!(key, "toFixed" | "toExponential" | "toPrecision"),
         _ => false,
@@ -286,6 +288,9 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
                 "NativeValue::V{i}(_) => native_value_missing_kind(&key, \"function\"),"
             )
             .unwrap();
+        }
+        if matches!(t, Type::Set { .. }) {
+            writeln!(out, "NativeValue::V{i}(set) => {{ if key == \"size\" {{ NativeValue::Number(set.with(|set| set.entries.len() as f64)) }} else {{ native_value_missing_kind(&key, \"set\") }} }},").unwrap();
         }
         if matches!(t, Type::Map { .. }) && specialized(t) {
             writeln!(

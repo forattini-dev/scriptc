@@ -5,6 +5,47 @@ use std::collections::HashMap;
 
 pub const VERSION: u32 = 13;
 
+/// Typed Sets have a portable reference ABI, but the shared dynamic value
+/// contract cannot box them (including inside a composite or callback ABI).
+pub fn contains_set(ty: &Type, records: &[Record], unions: &[Union]) -> bool {
+    fn visit(
+        ty: &Type,
+        records: &[Record],
+        unions: &[Union],
+        seen: &mut std::collections::HashSet<Type>,
+    ) -> bool {
+        if !seen.insert(ty.clone()) {
+            return false;
+        }
+        match ty {
+            Type::Set { .. } => true,
+            Type::Array { elem } | Type::Promise { inner: elem } => {
+                visit(elem, records, unions, seen)
+            }
+            Type::Map { key, value } => {
+                visit(key, records, unions, seen) || visit(value, records, unions, seen)
+            }
+            Type::Func { params, ret } => {
+                params.iter().any(|t| visit(t, records, unions, seen))
+                    || visit(ret, records, unions, seen)
+            }
+            Type::Record { shape_id } => records.get(*shape_id).is_some_and(|r| {
+                r.fields
+                    .iter()
+                    .any(|f| visit(&f.r#type, records, unions, seen))
+                    || r.index_value
+                        .as_ref()
+                        .is_some_and(|t| visit(t, records, unions, seen))
+            }),
+            Type::Union { union_id } => unions
+                .get(*union_id)
+                .is_some_and(|u| u.arms.iter().any(|t| visit(t, records, unions, seen))),
+            _ => false,
+        }
+    }
+    visit(ty, records, unions, &mut std::collections::HashSet::new())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Type {
@@ -28,6 +69,9 @@ pub enum Type {
     },
     Void,
     Array {
+        elem: Box<Type>,
+    },
+    Set {
         elem: Box<Type>,
     },
     Promise {
@@ -309,6 +353,19 @@ pub enum Expr {
         r#type: Type,
         loc: Loc,
     },
+    SetNew {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        seed: Option<Box<Expr>>,
+        r#type: Type,
+        loc: Loc,
+    },
+    SetIntrinsic {
+        method: String,
+        receiver: Box<Expr>,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     MapIntrinsic {
         method: String,
         receiver: Box<Expr>,
@@ -509,6 +566,8 @@ impl Expr {
             | Self::NewValue { r#type, .. }
             | Self::ArrayGet { r#type, .. }
             | Self::MapNew { r#type, .. }
+            | Self::SetNew { r#type, .. }
+            | Self::SetIntrinsic { r#type, .. }
             | Self::MapIntrinsic { r#type, .. }
             | Self::RecordKeyGet { r#type, .. }
             | Self::ArrayIntrinsic { r#type, .. }
@@ -750,6 +809,7 @@ impl Module {
                 !matches!(*elem, Type::Func { .. }) && self.valid_type(*elem, active)
             }
             Type::Promise { inner } => *inner == Type::Void || self.valid_type(*inner, active),
+            Type::Set { elem } => matches!(*elem, Type::String | Type::F64),
             Type::Map { key, value } => {
                 matches!(*key, Type::F64 | Type::String | Type::Dyn)
                     && !matches!(*value, Type::Func { .. } | Type::Map { .. })
@@ -769,6 +829,16 @@ impl Module {
             Type::Union { union_id } => self.unions.get(union_id).is_some_and(|u| {
                 u.id == union_id
                     && u.arms.len() >= 2
+                    && (!u.arms.iter().any(|a| matches!(a, Type::Set { .. }))
+                        || (u
+                            .arms
+                            .iter()
+                            .filter(|a| matches!(a, Type::Set { .. }))
+                            .count()
+                            == 1
+                            && u.arms.iter().all(|a| {
+                                matches!(a, Type::Set { .. } | Type::Null | Type::Undefined)
+                            })))
                     && u.arms
                         .iter()
                         .filter(|a| matches!(a, Type::Object { .. }))
@@ -918,6 +988,9 @@ fn validate_function(
     ) -> Result<(), String> {
         match e {
             Expr::DynFrom { value, r#type, .. } => {
+                if contains_set(&value.ty(), &module.records, &module.unions) {
+                    return Err("Set erasure is not in the shared native value contract".into());
+                }
                 if let Expr::UnitLit { unit, r#type, .. } = &**value
                     && !matches!(
                         (*unit, r#type),
@@ -1370,6 +1443,48 @@ fn validate_function(
                 }
                 Ok(())
             }
+            Expr::SetNew { seed, r#type, .. } => {
+                let Type::Set { elem } = r#type else {
+                    return Err("non-Set construction".into());
+                };
+                if !matches!(**elem, Type::String | Type::F64) {
+                    return Err("invalid Set element type".into());
+                }
+                if let Some(seed) = seed {
+                    expr(seed, locals, initialized, functions, module)?;
+                    if seed.ty() != (Type::Array { elem: elem.clone() }) {
+                        return Err("invalid Set seed".into());
+                    }
+                }
+                Ok(())
+            }
+            Expr::SetIntrinsic {
+                method,
+                receiver,
+                args,
+                r#type,
+                ..
+            } => {
+                expr(receiver, locals, initialized, functions, module)?;
+                let Type::Set { elem } = receiver.ty() else {
+                    return Err("non-Set receiver".into());
+                };
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let (arity, result) = match method.as_str() {
+                    "add" => (1, Type::Void),
+                    "has" | "delete" => (1, Type::Bool),
+                    "clear" => (0, Type::Void),
+                    "size" => (0, Type::F64),
+                    _ => return Err("invalid Set operation".into()),
+                };
+                if args.len() != arity || *r#type != result || args.iter().any(|a| a.ty() != *elem)
+                {
+                    return Err("invalid Set operation".into());
+                }
+                Ok(())
+            }
             Expr::StrConcat {
                 left,
                 right,
@@ -1731,6 +1846,7 @@ fn validate_function(
                                 | Type::Func { .. }
                                 | Type::Array { .. }
                                 | Type::Map { .. }
+                                | Type::Set { .. }
                                 | Type::Object { .. }
                                 | Type::Promise { .. }
                         )
@@ -3139,6 +3255,82 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn set_operations_validate_seed_elements_and_walk_the_seed() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        module.unions.push(Union {
+            id: 0,
+            arms: vec![
+                Type::Set {
+                    elem: Box::new(Type::String),
+                },
+                Type::String,
+            ],
+        });
+        assert!(!module.valid_type(Type::Union { union_id: 0 }, &mut vec![]));
+        assert!(contains_set(
+            &Type::Array {
+                elem: Box::new(Type::Set {
+                    elem: Box::new(Type::String)
+                })
+            },
+            &module.records,
+            &module.unions
+        ));
+        module.unions.clear();
+        let loc = module.functions[0].loc.clone();
+        let set = Expr::SetNew {
+            seed: Some(Box::new(Expr::ArrayLit {
+                elems: vec![Expr::NumLit {
+                    value: 1.0,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                }],
+                r#type: Type::Array {
+                    elem: Box::new(Type::F64),
+                },
+                loc: loc.clone(),
+            })),
+            r#type: Type::Set {
+                elem: Box::new(Type::F64),
+            },
+            loc: loc.clone(),
+        };
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::SetIntrinsic {
+                method: "has".into(),
+                receiver: Box::new(set),
+                args: vec![Expr::NumLit {
+                    value: 1.0,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                }],
+                r#type: Type::Bool,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert!(validate(&module).is_ok());
+        let mut count = 0;
+        module.visit_expressions(&mut |_| count += 1);
+        assert_eq!(count, 5);
+        if let Stmt::Expression {
+            expr: Expr::SetIntrinsic { args, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        {
+            args[0] = Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc,
+            };
+        }
+        assert_eq!(validate(&module).unwrap_err(), "invalid Set operation");
     }
 
     #[test]

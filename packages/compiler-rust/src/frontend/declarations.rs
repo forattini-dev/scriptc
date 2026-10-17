@@ -239,28 +239,15 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                             .collect();
                         hint.ret = Some(Type::Dyn);
                     } else {
-                        let signature = signatures[0];
-                        let sig = lowerer.checker.sig(signature);
-                        let parameters = sig.parameters.clone();
-                        if sig.this_parameter.0 != 0 || sig.has_rest_parameter() {
-                            hint.reason = Some(
-                                "receiver/rest public JavaScript contracts are not ported".into(),
-                            );
-                        }
-                        for parameter in parameters {
-                            let id = lowerer.checker.get_type_of_symbol(parameter);
-                            hint.params.push(lowerer.type_id(id).filter(|t| {
-                                !matches!(t, Type::Null | Type::Undefined | Type::Void)
-                            }));
-                        }
-                        let id = lowerer.checker.get_return_type_of_signature(signature);
-                        hint.ret = if lowerer.checker.ty(id).flags.intersects(TypeFlags::VOID) {
-                            Some(Type::Void)
+                        // Use the same signature adapter as first-class calls:
+                        // a fixed tuple rest is a finite list of ABI slots.
+                        if let Some(Type::Func { params, ret }) = lowerer.function_type(ty) {
+                            hint.params = params.into_iter().map(Some).collect();
+                            hint.ret = Some(*ret);
                         } else {
-                            lowerer
-                                .type_id(id)
-                                .filter(|t| !matches!(t, Type::Null | Type::Undefined))
-                        };
+                            hint.reason =
+                                Some("public JavaScript signature has no fixed native ABI".into());
+                        }
                         if hint.reason.is_none()
                             && !lowerer.checker.get_properties_of_type(ty).is_empty()
                         {
@@ -315,7 +302,7 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                     .arms
                     .iter()
                     .all(|t| portable(t, records, unions, seen)),
-                Type::Array { elem } => portable(elem, records, unions, seen),
+                Type::Array { elem } | Type::Set { elem } => portable(elem, records, unions, seen),
                 Type::Promise { inner } => portable(inner, records, unions, seen),
                 Type::Map { key, value } => {
                     portable(key, records, unions, seen) && portable(value, records, unions, seen)

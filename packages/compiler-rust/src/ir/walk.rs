@@ -108,6 +108,11 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
             args,
             ..
         }
+        | Expr::SetIntrinsic {
+            receiver: recv,
+            args,
+            ..
+        }
         | Expr::CallValue {
             callee: recv, args, ..
         } => {
@@ -141,6 +146,11 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
             for pair in seed {
                 expression(&pair.key, visitor);
                 expression(&pair.value, visitor);
+            }
+        }
+        Expr::SetNew { seed, .. } => {
+            if let Some(seed) = seed {
+                expression(seed, visitor);
             }
         }
         Expr::Ternary {
