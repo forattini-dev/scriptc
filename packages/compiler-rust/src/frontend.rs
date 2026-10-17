@@ -393,6 +393,12 @@ impl<'a> Lowerer<'a> {
         } else {
             self.checker.get_symbol_at_location(node, false)
         };
+        if self.commonjs.local_symbols.contains(&symbol.0)
+            && node.kind() == SyntaxKind::Identifier
+            && let Some(local) = self.commonjs_lexical_symbol(node)
+        {
+            symbol = local;
+        }
         if symbol.0 != 0
             && !self.commonjs.local_symbols.contains(&symbol.0)
             && self

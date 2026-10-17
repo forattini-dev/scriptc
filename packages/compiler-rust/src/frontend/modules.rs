@@ -190,11 +190,12 @@ impl ModulePlan {
                 let declaration = call.parent();
                 if declaration.kind() != SyntaxKind::VariableDeclaration
                     || declaration.name().kind() != SyntaxKind::Identifier
+                    || declaration.parent().parent().parent().kind() != SyntaxKind::SourceFile
                 {
                     return Err(refusal(
                         &path,
                         call,
-                        "native require needs an identifier namespace binding",
+                        "native require needs an unconditional module-level identifier namespace binding",
                     ));
                 }
                 self.bindings.push(ImportBinding::NativeRequire {
@@ -203,15 +204,11 @@ impl ModulePlan {
                 });
                 continue;
             }
-            let symbol = checker.get_symbol_at_location(specifier, false);
-            if symbol.0 == 0 {
-                return Err(refusal(
-                    &path,
-                    call,
-                    "CommonJS require has no resolved source module",
-                ));
-            }
-            let target = checker.sym(symbol).value_declaration;
+            // Assignment RHS requests need not have a declaration symbol at
+            // their string literal. Use the program's resolved module graph.
+            let target = program::get_resolved_module_from_module_specifier(file, specifier)
+                .map(|resolved| program::get_source_file_for_resolved_module(&resolved))
+                .unwrap_or(Node::NIL);
             if target.is_nil()
                 || target.kind() != SyntaxKind::SourceFile
                 || (!source_file_info(target).file_name.ends_with(".json")

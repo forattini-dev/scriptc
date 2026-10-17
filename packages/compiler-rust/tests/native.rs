@@ -22,6 +22,12 @@ fn oracle() -> String {
     std::env::var("SCRIPTC_NODE_ORACLE").unwrap_or_else(|_| "node".into())
 }
 fn process_environment(case: &str, building: bool) -> Vec<(&'static str, &'static str)> {
+    if case.starts_with("rust-native-conditional-require/") {
+        return vec![(
+            "SCRIPTC_NATIVE_REQUIRE_SIDE",
+            if building { "right" } else { "left" },
+        )];
+    }
     if !case.starts_with("rust-native-process/") {
         return vec![];
     }
@@ -167,6 +173,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/callbacks.ts",
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
+        "rust-native-conditional-require/entry.cjs",
+        "rust-native-conditional-require/assignments.cjs",
+        "rust-native-conditional-require/blocks.cjs",
+        "rust-native-conditional-require/cycles.cjs",
         "rust-native-json-require/objects.cjs",
         "rust-native-json-require/roots.cjs",
         "rust-native-json-require/numbers.cjs",
@@ -216,6 +226,34 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         assert_eq!(actual.status.code(), expected.status.code(), "{name}");
         assert_eq!(actual.stdout, expected.stdout, "stdout: {name}");
         assert_eq!(actual.stderr, expected.stderr, "stderr: {name}");
+        if name.starts_with("rust-native-conditional-require/") {
+            let expected = Command::new(oracle())
+                .arg(&input)
+                .env("SCRIPTC_NATIVE_REQUIRE_SIDE", "right")
+                .output()
+                .unwrap();
+            success(&expected);
+            let actual = Command::new(&target)
+                .env("PATH", &path)
+                .env("SCRIPTC_FORBIDDEN_MARKER", &marker)
+                .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+                .env("SCRIPTC_NATIVE_REQUIRE_SIDE", "right")
+                .output()
+                .unwrap();
+            assert_eq!(
+                actual.status.code(),
+                expected.status.code(),
+                "{name}: right branch"
+            );
+            assert_eq!(
+                actual.stdout, expected.stdout,
+                "{name}: right branch stdout"
+            );
+            assert_eq!(
+                actual.stderr, expected.stderr,
+                "{name}: right branch stderr"
+            );
+        }
         assert!(
             !marker.exists(),
             "a forbidden compiler/runtime process was invoked"
@@ -409,12 +447,16 @@ fn commonjs_boundaries_preserve_previous_artifacts() {
     let target = binary(temp.path(), "cjs-boundary");
     for source in [
         "const request = './dep.js'; require(request);",
-        "if (true) require('./dep.js');",
+        "while (false) require('./dep.js');",
+        "try { require('./dep.js'); } catch (error) {}",
+        "false && require('./dep.js');",
+        "var selected = true ? require('./dep.js') : require('./dep.js');",
+        "if (false) { var path = require('path'); } console.log(path);",
         "function load() { return require('./dep.js'); } load();",
         "var path = require('path'); path = {};",
         "var path = require('path'); var path = console.log('must not drop');",
         "exports.__proto__ = {};",
-        "exports.child = require('./data.json');",
+        "exports.child = require('./data' + '.json');",
         "var exports; console.log(exports === module.exports);",
         "var module; console.log(module.exports);",
         "if (console.log('effect')) console.log('truthy');",

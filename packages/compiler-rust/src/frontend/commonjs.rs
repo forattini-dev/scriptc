@@ -76,7 +76,7 @@ pub(super) fn require_calls(
                 return Err(refusal(
                     &source_file_info(get_source_file_of_node(node)).file_name,
                     node,
-                    "CommonJS requires a literal request in unconditional module initialization",
+                    "CommonJS requires a literal request in supported module initialization",
                 ));
             }
             out.push((node, args.get(0)));
@@ -94,13 +94,16 @@ pub(super) fn require_calls(
         let direct = direct
             && !matches!(
                 node.kind(),
-                SyntaxKind::IfStatement
-                    | SyntaxKind::ConditionalExpression
-                    | SyntaxKind::BinaryExpression
+                SyntaxKind::ConditionalExpression
                     | SyntaxKind::WhileStatement
+                    | SyntaxKind::DoStatement
                     | SyntaxKind::ForStatement
+                    | SyntaxKind::ForInStatement
+                    | SyntaxKind::ForOfStatement
                     | SyntaxKind::TryStatement
-            );
+            )
+            && (node.kind() != SyntaxKind::BinaryExpression
+                || node.operator_token().kind() == SyntaxKind::EqualsToken);
         let mut result = Ok(());
         node.for_each_child(&mut |child| {
             result = visit(checker, child, out, direct);
@@ -132,6 +135,47 @@ pub(super) struct Graph {
 }
 
 impl Lowerer<'_> {
+    // Require aliases may appear in the source-file alias table even when
+    // declared with block-scoped syntax. Resolve their storage from the
+    // nearest lexical declaration instead of a canonical export symbol.
+    pub(super) fn commonjs_lexical_symbol(
+        &mut self,
+        node: Node,
+    ) -> Option<source_frontend::prelude::SymbolId> {
+        let mut scope = node.parent();
+        while !scope.is_nil() {
+            if scope.kind() == SyntaxKind::Block {
+                for statement in scope.statements() {
+                    if statement.kind() != SyntaxKind::VariableStatement {
+                        continue;
+                    }
+                    let list = statement.declaration_list();
+                    if !list.flags().intersects(NodeFlags::LET | NodeFlags::CONST) {
+                        continue;
+                    }
+                    for declaration in list.declarations().nodes() {
+                        let name = declaration.name();
+                        if name.kind() == SyntaxKind::Identifier && name.text() == node.text() {
+                            return Some(self.checker.get_symbol_at_location(name, false));
+                        }
+                    }
+                }
+            }
+            let symbol = self.checker.symbols.get(scope.locals(), node.text());
+            if symbol.0 != 0
+                && self
+                    .checker
+                    .sym(symbol)
+                    .flags
+                    .intersects(SymbolFlags::VALUE)
+            {
+                return Some(symbol);
+            }
+            scope = scope.parent();
+        }
+        None
+    }
+
     fn commonjs_global(&mut self, name: &str, ty: Type) -> Local {
         let local = Local {
             id: format!("%g.{}", self.globals.len()),
@@ -226,25 +270,49 @@ impl Lowerer<'_> {
                     let ty = lowerer.checker.get_type_at_location(node);
                     lowerer.data_types.insert(ty);
                 }
-                if node.kind() == SyntaxKind::VariableDeclaration
-                    && node.name().kind() == SyntaxKind::Identifier
-                    && !node.initializer().is_nil()
-                    && (lowerer
+                let (name, value) = if node.kind() == SyntaxKind::VariableDeclaration {
+                    (node.name(), node.initializer())
+                } else if node.kind() == SyntaxKind::BinaryExpression
+                    && node.operator_token().kind() == SyntaxKind::EqualsToken
+                {
+                    (node.left(), node.right())
+                } else {
+                    (Node::NIL, Node::NIL)
+                };
+                let mut value = value;
+                while !value.is_nil() && value.kind() == SyntaxKind::ParenthesizedExpression {
+                    value = value.expression();
+                }
+                if !name.is_nil() && name.kind() == SyntaxKind::Identifier && !value.is_nil() {
+                    let source_symbol = if value.kind() == SyntaxKind::Identifier {
+                        lowerer.symbol(value)
+                    } else {
+                        0
+                    };
+                    if lowerer
                         .commonjs
                         .requires
-                        .contains_key(&declarations::Key::of(node.initializer()))
-                        || lowerer.commonjs_binding(node.initializer()).is_some())
-                {
-                    let symbol = lowerer.checker.get_symbol_at_location(node.name(), false).0;
-                    lowerer.commonjs.local_symbols.insert(symbol);
-                    lowerer.data_bindings.insert(symbol);
+                        .contains_key(&declarations::Key::of(value))
+                        || lowerer.commonjs_binding(value).is_some()
+                        || lowerer.data_bindings.contains(&source_symbol)
+                    {
+                        let symbol = lowerer.checker.get_symbol_at_location(name, false).0;
+                        lowerer.commonjs.local_symbols.insert(symbol);
+                        lowerer.data_bindings.insert(symbol);
+                    }
                 }
                 node.for_each_child(&mut |child| {
                     bindings(lowerer, child);
                     false
                 });
             }
-            bindings(self, *file);
+            loop {
+                let count = self.data_bindings.len();
+                bindings(self, *file);
+                if self.data_bindings.len() == count {
+                    break;
+                }
+            }
         }
         for binding in &plan.bindings {
             let modules::ImportBinding::CommonJs { node, target } = binding else {
