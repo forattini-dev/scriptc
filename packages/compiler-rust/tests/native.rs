@@ -167,6 +167,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/callbacks.ts",
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
+        "rust-native-json-require/objects.cjs",
+        "rust-native-json-require/roots.cjs",
+        "rust-native-json-require/numbers.cjs",
+        "rust-native-json-require/esm/consumer.ts",
     ]
     .into_iter()
     .enumerate()
@@ -410,10 +414,10 @@ fn commonjs_boundaries_preserve_previous_artifacts() {
         "var path = require('path'); path = {};",
         "var path = require('path'); var path = console.log('must not drop');",
         "exports.__proto__ = {};",
+        "exports.child = require('./data.json');",
         "var exports; console.log(exports === module.exports);",
         "var module; console.log(module.exports);",
         "if (console.log('effect')) console.log('truthy');",
-        "exports.child = require('./data.json');",
     ] {
         fs::write(&input, source).unwrap();
         fs::write(temp.path().join("data.json"), "{}").unwrap();
@@ -473,6 +477,87 @@ fn commonjs_boundaries_preserve_previous_artifacts() {
         ] {
             assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
         }
+    }
+}
+
+#[test]
+fn json_require_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("package.json"), r#"{"type":"commonjs"}"#).unwrap();
+    fs::write(temp.path().join("tsconfig.json"), r#"{"compilerOptions":{"module":"NodeNext","moduleResolution":"NodeNext","target":"ES2022","allowJs":true,"checkJs":false,"resolveJsonModule":true,"types":[],"lib":["ES2022","DOM"]}}"#).unwrap();
+    let input = temp.path().join("entry.cjs");
+    let data = temp.path().join("data.json");
+    let target = binary(temp.path(), "json-boundary");
+    fs::write(
+        &input,
+        "const data = require('./data.json'); console.log(data);",
+    )
+    .unwrap();
+    for bytes in [
+        r#"{"value":1,}"#,
+        "/* comment */ {}",
+        r#""\uD800""#,
+        r#"{"value":"\uDFFF"}"#,
+    ] {
+        fs::write(&data, bytes).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{bytes}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+    fs::write(&data, r#"{"value":1}"#).unwrap();
+    fs::write(
+        temp.path().join("bridge.cjs"),
+        "const data = require('./data.json'); exports.data = data;",
+    )
+    .unwrap();
+    fs::write(temp.path().join("package.json"), r#"{"type":"module"}"#).unwrap();
+    let input = temp.path().join("mixed.js");
+    fs::write(&input, "import data from './data.json' with { type: 'json' }; import bridge from './bridge.cjs'; console.log(data === bridge.data);").unwrap();
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .arg("--no-engine")
+        .arg("--out")
+        .arg(&target)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        !result.status.success()
+            && stderr.contains("SCN1001")
+            && stderr.contains("shared materialization"),
+        "{stderr}"
+    );
+    for path in [
+        &target,
+        &target.with_extension("ir.json"),
+        &target.with_extension("rs"),
+    ] {
+        assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
     }
 }
 

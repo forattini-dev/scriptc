@@ -118,6 +118,7 @@ pub(super) struct Instance {
     exports: Local,
     started: Local,
     name: String,
+    json: Option<json_modules::DataValue>,
 }
 
 #[derive(Default)]
@@ -149,10 +150,38 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn inventory_commonjs(&mut self, plan: &modules::ModulePlan) -> Result<(), String> {
-        for file in &plan.modules {
-            if !is_module(*file) {
-                continue;
-            }
+        let mut files = plan
+            .modules
+            .iter()
+            .copied()
+            .filter(|f| is_module(*f))
+            .collect::<Vec<_>>();
+        // JSON assets have no executable statements. Sort the lookup edges so
+        // their module identities never depend on hash-map iteration order.
+        let mut json_files = plan
+            .requires
+            .values()
+            .copied()
+            .filter(|f| source_file_info(*f).file_name.ends_with(".json"))
+            .collect::<Vec<_>>();
+        json_files.sort_by_key(|f| source_file_info(*f).file_name.to_string());
+        json_files.dedup();
+        files.extend(json_files);
+        for file in files {
+            let json = if source_file_info(file).file_name.ends_with(".json") {
+                let path = source_file_info(file).file_name.to_string();
+                let bytes = std::fs::read(&path)
+                    .map_err(|e| format!("SCN0001: JSON module {path}: {e}"))?;
+                Some(json_modules::parse(&bytes).map_err(|e| {
+                    refusal(
+                        &path,
+                        file,
+                        &format!("JSON module value is not representable: {e}"),
+                    )
+                })?)
+            } else {
+                None
+            };
             let shape_id = self.records.len();
             self.records.push(ir::Record {
                 id: shape_id,
@@ -170,13 +199,14 @@ impl Lowerer<'_> {
             let index = self.commonjs.instances.len();
             self.commonjs
                 .files
-                .insert(source_file_info(*file).file_name.to_string(), index);
+                .insert(source_file_info(file).file_name.to_string(), index);
             self.commonjs.instances.push(Instance {
-                file: *file,
+                file,
                 module,
                 exports,
                 started,
                 name: format!("cjs{index}"),
+                json,
             });
         }
         for (site, target) in &plan.requires {
@@ -186,6 +216,16 @@ impl Lowerer<'_> {
         for file in &plan.modules {
             self.file = source_file_info(*file).file_name.to_string();
             fn bindings(lowerer: &mut Lowerer<'_>, node: Node) {
+                if node.kind() == SyntaxKind::CallExpression
+                    && let Some(index) = lowerer.commonjs.requires.get(&declarations::Key::of(node))
+                    && matches!(
+                        lowerer.commonjs.instances[*index].json,
+                        Some(json_modules::DataValue::Object(_))
+                    )
+                {
+                    let ty = lowerer.checker.get_type_at_location(node);
+                    lowerer.data_types.insert(ty);
+                }
                 if node.kind() == SyntaxKind::VariableDeclaration
                     && node.name().kind() == SyntaxKind::Identifier
                     && !node.initializer().is_nil()
@@ -426,17 +466,22 @@ impl Lowerer<'_> {
                 else_: None,
                 loc: loc.clone(),
             }];
+            let initial_exports = if let Some(value) = &instance.json {
+                self.json_module_value(instance.file, value)?
+            } else {
+                Expr::DynObjLit {
+                    fields: vec![],
+                    r#type: Type::Dyn,
+                    loc: loc.clone(),
+                }
+            };
             body.push(Stmt::Assign {
                 local_id: instance.module.id.clone(),
                 initializes_global: true,
                 value: Expr::RecordLit {
                     fields: vec![ir::FieldInit {
                         name: "exports".into(),
-                        value: Expr::DynObjLit {
-                            fields: vec![],
-                            r#type: Type::Dyn,
-                            loc: loc.clone(),
-                        },
+                        value: initial_exports,
                         absent: false,
                         overflow: false,
                     }],
@@ -461,7 +506,9 @@ impl Lowerer<'_> {
                 },
                 loc: loc.clone(),
             });
-            body.extend(self.statements(instance.file.statements())?);
+            if instance.json.is_none() {
+                body.extend(self.statements(instance.file.statements())?);
+            }
             body.push(Stmt::Return {
                 value: Some(self.commonjs_exports(index, instance.file)),
                 loc: loc.clone(),

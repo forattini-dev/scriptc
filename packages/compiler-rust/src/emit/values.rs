@@ -394,7 +394,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             checked(r#type, &expr(value, function, module), module)
         }
         Expr::DynObjLit { fields, .. } => {
-            let fields = fields.iter().map(|f| format!("{{ let key = {}; let value = {}; js_dict_set(&mut entries, key, value); }}",expr(&f.key,function,module),expr(&f.value,function,module))).collect::<String>();
+            let fields = fields.iter().map(|f| format!("{{ let key = {}; let value = {}; js_data_set(&mut entries, key, value); }}",expr(&f.key,function,module),expr(&f.value,function,module))).collect::<String>();
             format!(
                 "{{ let mut entries = Vec::new(); {fields} NativeValue::Object(runtime::Gc::new(NativeMap {{ entries }})) }}"
             )

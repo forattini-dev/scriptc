@@ -25,6 +25,7 @@ mod declarations;
 mod enums;
 mod functions;
 mod helpers;
+mod json_modules;
 mod modules;
 mod parameters;
 mod pipeline;

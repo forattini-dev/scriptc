@@ -1,0 +1,11 @@
+console.log("before");
+const first = require('./data.json');
+const again = require('./data.json');
+const other = require('./other.json');
+console.log("identity", first === again, first === other);
+console.log("data", first.name === "schema", first.nested.answer === 42, first.active === true, first.none === null);
+console.log("arrays", first.rows[0].id === 1, first.rows[1] === null, first.rows[2][0] === true, first.rows[2][1] === "text");
+console.log("own", first.__proto__.own === 7, first.duplicate === 9, first.unicode === "😀", first.nul === "a\0b");
+const mutation = require('./mutate.js');
+console.log("shared", mutation.data === first, again.nested.answer === 51);
+console.log("after");

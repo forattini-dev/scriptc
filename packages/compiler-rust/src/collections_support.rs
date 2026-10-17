@@ -52,6 +52,10 @@ fn js_dict_set<V>(entries: &mut Vec<(String, V)>, key: String, value: V) {
     if key == "__proto__" {
         panic!("scriptc: dictionary prototype setters are not ported");
     }
+    js_data_set(entries, key, value);
+}
+// Own data creation (JSON and dynObjLit) never invokes a prototype setter.
+fn js_data_set<V>(entries: &mut Vec<(String, V)>, key: String, value: V) {
     if let Some((_, stored)) = entries.iter_mut().find(|(stored, _)| *stored == key) {
         *stored = value;
     } else {
