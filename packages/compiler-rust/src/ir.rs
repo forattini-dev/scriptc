@@ -58,6 +58,9 @@ pub enum Type {
     Bool,
     Regex,
     Symbol,
+    Bytes {
+        elem: String,
+    },
     // Owned native tagged value; never an embedded engine handle.
     Dyn,
     Caught,
@@ -95,6 +98,12 @@ pub enum Type {
         #[serde(rename = "unionId", serialize_with = "serialize_union_id")]
         union_id: usize,
     },
+}
+
+impl Type {
+    pub fn bytes() -> Self {
+        Self::Bytes { elem: "u8".into() }
+    }
 }
 
 fn record_id<S: serde::Serializer>(id: &usize, s: S) -> Result<S::Ok, S::Error> {
@@ -318,6 +327,18 @@ pub enum Expr {
     },
     NewValue {
         callee: Box<Expr>,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    BytesNew {
+        source: Option<Box<Expr>>,
+        r#type: Type,
+        loc: Loc,
+    },
+    BytesIntrinsic {
+        method: String,
+        receiver: Box<Expr>,
         args: Vec<Expr>,
         r#type: Type,
         loc: Loc,
@@ -589,6 +610,8 @@ impl Expr {
             | Self::DynScalarEq { r#type, .. }
             | Self::DynInvoke { r#type, .. }
             | Self::DynCall { r#type, .. }
+            | Self::BytesNew { r#type, .. }
+            | Self::BytesIntrinsic { r#type, .. }
             | Self::RegexLit { r#type, .. }
             | Self::RegexIntrinsic { r#type, .. }
             | Self::New { r#type, .. }
@@ -912,11 +935,13 @@ impl Module {
             Type::Array { elem } => {
                 !matches!(*elem, Type::Func { .. }) && self.valid_type(*elem, active)
             }
+            Type::Bytes { elem } => elem == "u8",
             Type::Promise { inner } => *inner == Type::Void || self.valid_type(*inner, active),
             Type::Set { elem } => matches!(*elem, Type::String | Type::F64),
             Type::Map { key, value } => {
                 matches!(*key, Type::F64 | Type::String | Type::Dyn)
                     && !matches!(*value, Type::Func { .. } | Type::Map { .. })
+                    && !matches!(*value, Type::Bytes { .. })
                     && self.valid_type(*value, active)
             }
             Type::Record { shape_id } => self.records.get(shape_id).is_some_and(|r| {
@@ -1338,6 +1363,64 @@ fn validate_function(
                     Ok(())
                 } else {
                     Err("invalid native regex constructor".into())
+                }
+            }
+            Expr::BytesNew { source, r#type, .. } => {
+                if *r#type != Type::bytes() {
+                    return Err("invalid native bytes type".into());
+                }
+                if let Some(source) = source {
+                    expr(source, locals, initialized, functions, module)?;
+                    if source.ty() != Type::F64
+                        && source.ty() != Type::bytes()
+                        && source.ty()
+                            != (Type::Array {
+                                elem: Box::new(Type::F64),
+                            })
+                    {
+                        return Err("invalid native bytes source".into());
+                    }
+                }
+                Ok(())
+            }
+            Expr::BytesIntrinsic {
+                method,
+                receiver,
+                args,
+                r#type,
+                ..
+            } => {
+                expr(receiver, locals, initialized, functions, module)?;
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let valid = receiver.ty() == Type::bytes()
+                    && match method.as_str() {
+                        "length" | "byteLength" | "byteOffset" => {
+                            args.is_empty() && *r#type == Type::F64
+                        }
+                        "join" => {
+                            args.len() == 1
+                                && args[0].ty() == Type::String
+                                && *r#type == Type::String
+                        }
+                        "slice" | "subarray" => {
+                            args.len() <= 2
+                                && args.iter().all(|a| a.ty() == Type::F64)
+                                && *r#type == Type::bytes()
+                        }
+                        "setFrom" => {
+                            (args.len() == 1 || args.len() == 2)
+                                && args[0].ty() == Type::bytes()
+                                && args.get(1).is_none_or(|a| a.ty() == Type::F64)
+                                && *r#type == Type::Void
+                        }
+                        _ => false,
+                    };
+                if valid {
+                    Ok(())
+                } else {
+                    Err("invalid native bytes operation".into())
                 }
             }
             Expr::RegexLit {
@@ -2032,6 +2115,23 @@ fn validate_function(
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } => {
+                if matches!(r#fn.as_str(), "buffer.fromStr" | "text.decode") {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = if r#fn == "buffer.fromStr" {
+                        args.len() == 2
+                            && args.iter().all(|a| a.ty() == Type::String)
+                            && *r#type == Type::bytes()
+                    } else {
+                        args.len() == 1 && args[0].ty() == Type::bytes() && *r#type == Type::String
+                    };
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native text codec operation".into())
+                    };
+                }
                 if r#fn == "dyn.keySet" {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
@@ -2116,6 +2216,7 @@ fn validate_function(
                                 | Type::Map { .. }
                                 | Type::Set { .. }
                                 | Type::Object { .. }
+                                | Type::Bytes { .. }
                                 | Type::Promise { .. }
                         )
                 } else {
@@ -4357,5 +4458,48 @@ mod tests {
             finally_body: None,
             loc
         }]));
+    }
+    #[test]
+    fn byte_operations_validate_owned_layouts_and_signatures() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let bytes = || Expr::BytesNew {
+            source: None,
+            r#type: Type::bytes(),
+            loc: loc.clone(),
+        };
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::BytesIntrinsic {
+                method: "length".into(),
+                receiver: Box::new(bytes()),
+                args: vec![],
+                r#type: Type::F64,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert!(validate(&module).is_ok());
+        if let Stmt::Expression {
+            expr: Expr::BytesIntrinsic { r#type, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        {
+            *r#type = Type::String;
+        }
+        assert!(validate(&module).is_err());
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::BytesNew {
+                source: Some(Box::new(Expr::StrLit {
+                    value: "bad".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                })),
+                r#type: Type::bytes(),
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert!(validate(&module).is_err());
+        assert!(!module.valid_type(Type::Bytes { elem: "u32".into() }, &mut vec![]));
     }
 }

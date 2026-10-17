@@ -8,6 +8,16 @@ impl Lowerer<'_> {
             return Ok(params.clone());
         }
         let definition = self.classes.definitions[index].clone();
+        if definition.name.starts_with("native_builtin_Text") {
+            let params = vec![Param {
+                local_id: "p0".into(),
+                name: "this".into(),
+                r#type: self.classes.object(index),
+            }];
+            self.classes.definitions[index].signature = Some(params.clone());
+            self.classes.pending.push_back(index);
+            return Ok(params);
+        }
         let constructors = definition
             .node
             .members()
@@ -154,6 +164,17 @@ impl Lowerer<'_> {
         index: usize,
     ) -> Result<Function, String> {
         let definition = self.classes.definitions[index].clone();
+        if definition.name.starts_with("native_builtin_Text") {
+            let mut function = helpers::Helper::new(
+                &format!("%{}.constructor", definition.name),
+                vec![self.classes.object(index)],
+                Type::Void,
+                self.classes.layouts[index].as_ref().unwrap().loc.clone(),
+            )
+            .function;
+            function.name = format!("%{}.constructor", definition.name);
+            return Ok(function);
+        }
         self.file = definition.file.clone();
         self.locals.clear();
         self.bindings.clear();

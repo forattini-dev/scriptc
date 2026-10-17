@@ -26,7 +26,13 @@ impl Lowerer<'_> {
             return None;
         }
         let key = self.type_id(args[0])?;
-        let value = self.type_id(args[1])?;
+        let mut value = self.type_id(args[1])?;
+        // The portable Map ABI accepts owning union values, but not a bare
+        // bytes slot. Keep u8 payloads typed and traced in the same optional
+        // union needed by Map.get; an absent entry still has no stored value.
+        if value == Type::bytes() {
+            value = self.intern_union(vec![value, Type::Undefined])?;
+        }
         if !matches!(key, Type::String | Type::F64 | Type::Dyn)
             || matches!(
                 value,

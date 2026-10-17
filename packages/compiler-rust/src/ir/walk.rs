@@ -111,6 +111,11 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
         | Expr::NewValue {
             callee: recv, args, ..
         }
+        | Expr::BytesIntrinsic {
+            receiver: recv,
+            args,
+            ..
+        }
         | Expr::RegexIntrinsic {
             receiver: recv,
             args,
@@ -167,7 +172,7 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
                 expression(&pair.value, visitor);
             }
         }
-        Expr::SetNew { seed, .. } => {
+        Expr::BytesNew { source: seed, .. } | Expr::SetNew { seed, .. } => {
             if let Some(seed) = seed {
                 expression(seed, visitor);
             }

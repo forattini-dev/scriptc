@@ -157,6 +157,50 @@ impl Lowerer<'_> {
         }
         let info = self.checker.sym(SymbolId(symbol));
         let name = info.name.to_string();
+        if matches!(name.as_str(), "TextEncoder" | "TextDecoder")
+            && self.standard_codec_symbol(symbol).is_some()
+        {
+            let ir_name = format!("native_builtin_{name}");
+            let index = self
+                .classes
+                .definitions
+                .iter()
+                .position(|d| d.name == ir_name)
+                .unwrap_or_else(|| {
+                    let index = self.classes.definitions.len();
+                    self.classes.definitions.push(Definition {
+                        node: Node::NIL,
+                        name: ir_name.clone(),
+                        file: "<builtin>".into(),
+                        base: None,
+                        resolved: true,
+                        resolving: false,
+                        signature: None,
+                        token: None,
+                    });
+                    self.classes.layouts.push(Some(ir::Class {
+                        name: ir_name,
+                        js_name: name.clone(),
+                        runtime: false,
+                        base: None,
+                        fields: vec![],
+                        methods: vec![],
+                        method_names: if name == "TextEncoder" {
+                            vec!["encode".into(), "encodeInto".into()]
+                        } else {
+                            vec!["decode".into()]
+                        },
+                        loc: Loc {
+                            file: "<builtin>".into(),
+                            start: 0,
+                            end: 0,
+                        },
+                    }));
+                    index
+                });
+            self.classes.symbols.insert(symbol, index);
+            return Some(index);
+        }
         if !matches!(
             name.as_str(),
             "Error" | "TypeError" | "RangeError" | "SyntaxError"
@@ -289,6 +333,12 @@ impl Lowerer<'_> {
                 })?);
         }
         if let Some(base) = base {
+            if self.classes.definitions[base]
+                .name
+                .starts_with("native_builtin_Text")
+            {
+                return Err(self.refuse(node, "text codec subclassing is not ported"));
+            }
             self.resolve_class(base)?;
         }
         for member in node.members() {

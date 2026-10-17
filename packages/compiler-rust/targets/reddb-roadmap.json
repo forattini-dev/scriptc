@@ -77,13 +77,13 @@
     },
     {
       "id": "binary-data-and-web-streams",
-      "status": "required",
+      "status": "partial",
       "work": "Represent TextEncoder/TextDecoder, byte buffers and the Web Streams contracts imported by the parser.",
       "dependsOn": [
         "inventory",
         "symbol-sentinels"
       ],
-      "evidence": "The next original release refusal after primitive symbols is module-initialization new TextEncoder() in @reddb-io/toon/dist/toonl.js; the following initializer constructs TextDecoder.",
+      "evidence": "Default nominal TextEncoder/TextDecoder allocation and typed UTF-8 encode/decode now use portable class/bytes IR and the shared Rust runtime; rust-native-codecs covers Unicode, BOM/replacement decoding, identity, views/copies, mutation, containers and evaluation order. The original release now passes both module initializers and refuses ToonlReader private fields at toonl.js:574. Streaming/options, ArrayBuffer and byte projections remain open.",
       "acceptanceAndRisks": [
         "Preserve UTF-8/UTF-16 conversion, lone surrogates, decoder streaming/fatal/BOM modes and owning buffer aliasing.",
         "Keep module-level codec allocation effects and identities; do not delete an initializer because its data path is unused.",
@@ -120,7 +120,7 @@
     {
       "id": "objects-and-values",
       "status": "required",
-      "work": "Broaden dependency object APIs, class accessors/static members, native callable receivers, unions and recursive handle layouts.",
+      "work": "Broaden dependency object APIs, class private fields/accessors/static members, native callable receivers, unions and recursive handle layouts.",
       "dependsOn": [
         "symbol-sentinels",
         "inventory"
@@ -128,8 +128,12 @@
       "acceptanceAndRisks": [
         "Cover Object.keys/entries/assign/fromEntries, descriptors/prototypes and symbol-keyed storage as separate contracts.",
         "Do not project nominal classes into structural records or invent an ABI for incompatible overrides.",
-        "Preserve absence versus undefined, GC ownership and object/function identity across public JS signatures."
-      ]
+        "Preserve absence versus undefined, GC ownership and object/function identity across public JS signatures.",
+        "Private instance slots need declaration-owned names and receiver brands; never expose #name as a public string key or conflate equal spelling in different classes.",
+        "Getter/setter reads and writes must evaluate the receiver once and invoke the correct accessor, including inheritance, super and exceptions.",
+        "Keep definition-time effects distinct from construction-time field initializers and demanded method/accessor bodies; deferring a body does not authorize deleting an executable initializer."
+      ],
+      "evidence": "The next original release boundary after module-level codec allocation is ToonlReader #source/#cursor/#state and get cursor in @reddb-io/toon/dist/toonl.js:573 onward; preserve private brands and accessor invocation rather than deleting the class declaration."
     },
     {
       "id": "iterator-protocol-and-generators",

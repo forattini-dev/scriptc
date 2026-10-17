@@ -115,6 +115,24 @@ impl Lowerer<'_> {
         let Some(index) = self.class_symbol(node.expression()) else {
             return Ok(None);
         };
+        if self.classes.definitions[index]
+            .name
+            .starts_with("native_builtin_Text")
+        {
+            if !node.arguments().is_empty() {
+                return Err(self.refuse(
+                    node,
+                    "text codec constructor arguments/options are not ported",
+                ));
+            }
+            self.request_constructor(index)?;
+            return Ok(Some(Expr::New {
+                class_name: self.classes.definitions[index].name.clone(),
+                args: vec![],
+                r#type: self.classes.object(index),
+                loc: self.loc(node),
+            }));
+        }
         if self.classes.definitions[index].node.is_nil() {
             let message = self.error_message(node)?;
             return Ok(Some(Expr::LibCall {

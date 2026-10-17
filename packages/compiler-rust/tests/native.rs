@@ -173,6 +173,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/callbacks.ts",
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
+        "rust-native-codecs/containers.ts",
+        "rust-native-codecs/shadows.ts",
+        "rust-native-codecs/utf8.ts",
+        "rust-native-codecs/identity.ts",
+        "rust-native-codecs/order.ts",
         "rust-native-symbols/sentinels.js",
         "rust-native-symbols/registry.ts",
         "rust-native-symbols/containers.ts",
@@ -2055,5 +2060,55 @@ fn symbol_boundaries_preserve_previous_artifacts() {
         ] {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
+    }
+}
+
+#[test]
+fn codec_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::copy(
+        root().join("tests/corpus/rust-native-codecs/tsconfig.json"),
+        temp.path().join("tsconfig.json"),
+    )
+    .unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "boundary");
+    for source in [
+        "const codec = new TextDecoder('utf-16le');",
+        "const codec = new TextDecoder('utf-8', { fatal: true });",
+        "const codec = new TextDecoder(); codec.decode(new Uint8Array(), { stream: true });",
+        "const codec = new TextEncoder(); codec.encodeInto('x', new Uint8Array(1));",
+        "const codec = new TextEncoder(); const encode = codec.encode;",
+        "const codec = new TextEncoder(); codec.encode(undefined);",
+        "class Custom extends TextEncoder {}",
+        "const bytes = new Uint8Array(1); console.log(bytes[99]);",
+        "const bytes = new Uint8Array(1); bytes[0] = 2;",
+        "const bytes = new Uint8Array(new ArrayBuffer(2));",
+    ] {
+        fs::write(&input, source).unwrap();
+        fs::write(&target, "preserve").unwrap();
+        let rust = target.with_extension("rs");
+        let ir = target.with_extension("ir.json");
+        fs::write(&rust, "preserve rust").unwrap();
+        fs::write(&ir, "preserve ir").unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001"),
+            "{source}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("panicked") && !stderr.contains("SCN9001"),
+            "{source}: {stderr}"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"preserve");
+        assert_eq!(fs::read(&rust).unwrap(), b"preserve rust");
+        assert_eq!(fs::read(&ir).unwrap(), b"preserve ir");
     }
 }

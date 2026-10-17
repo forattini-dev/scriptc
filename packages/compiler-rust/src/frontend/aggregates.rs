@@ -967,6 +967,7 @@ impl Lowerer<'_> {
                         | Type::Set { .. }
                         | Type::Object { .. }
                         | Type::Regex
+                        | Type::Bytes { .. }
                         | Type::Promise { .. }
                 )
         } else {

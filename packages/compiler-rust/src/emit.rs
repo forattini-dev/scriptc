@@ -1,4 +1,5 @@
 use crate::ir::{Expr, Function, Module, Stmt, Type};
+mod bytes;
 mod classes;
 mod collections;
 mod exceptions;
@@ -22,6 +23,7 @@ fn rust_type(ty: Type, module: &Module) -> String {
         Type::Bool => "bool",
         Type::Regex => "runtime::JsRegex",
         Type::Symbol => "runtime::JsSymbol",
+        Type::Bytes { .. } => "runtime::JsBytes<u8>",
         Type::Object { .. } => "runtime::Gc<NativeInstance>",
         Type::Classval { .. } => "NativeClass",
         Type::String => "String",
@@ -163,7 +165,10 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Expr::DynInvoke { .. }
             | Expr::DynCall { .. } => true,
             Expr::Intrinsic { name, .. } if name == "promise.resolve" => true,
-            Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => true,
+            Expr::BytesNew { .. }
+            | Expr::BytesIntrinsic { .. }
+            | Expr::RegexLit { .. }
+            | Expr::RegexIntrinsic { .. } => true,
             Expr::ClassRef { .. }
             | Expr::NewValue { .. }
             | Expr::New { .. }
@@ -230,7 +235,9 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Type::Record { .. }
             | Type::Union { .. }
             | Type::Object { .. } => true,
-            Type::Regex | Type::Symbol | Type::Dyn | Type::Promise { .. } => true,
+            Type::Regex | Type::Symbol | Type::Bytes { .. } | Type::Dyn | Type::Promise { .. } => {
+                true
+            }
             Type::Func { params, ret } => params.iter().any(ty) || ty(ret),
             _ => false,
         }
@@ -278,6 +285,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
     if let Some(code) = collections::expression(value, function, module) {
         return code;
     }
+    if let Some(code) = bytes::expression(value, function, module) {
+        return code;
+    }
     if let Some(code) = values::expression(value, function, module) {
         return code;
     }
@@ -294,6 +304,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         | Expr::DynScalarEq { .. }
         | Expr::DynInvoke { .. }
         | Expr::DynCall { .. } => unreachable!("native value expression"),
+        Expr::BytesNew { .. } | Expr::BytesIntrinsic { .. } => unreachable!("bytes expression"),
         Expr::RegexLit { .. } | Expr::RegexIntrinsic { .. } => unreachable!("regex expression"),
         Expr::ClassRef { .. }
         | Expr::NewValue { .. }
@@ -521,6 +532,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Func { .. }
                     | Type::Object { .. }
                     | Type::Regex
+                    | Type::Bytes { .. }
                     | Type::Symbol
                     | Type::Promise { .. }
             ) {
@@ -540,6 +552,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Set { .. }
                     | Type::Object { .. }
                     | Type::Func { .. }
+                    | Type::Bytes { .. }
             );
             let record = matches!(left.ty(), Type::Regex);
             let promise = matches!(left.ty(), Type::Promise { .. });
@@ -742,5 +755,56 @@ fn statement_in(
             }
             output.push_str("}\n");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn temporary_byte_values_require_the_runtime_without_typed_locals() {
+        let loc = crate::ir::Loc {
+            file: "temporary.ts".into(),
+            start: 0,
+            end: 1,
+        };
+        let module = Module {
+            ir_version: crate::ir::VERSION,
+            source_file: "temporary.ts".into(),
+            entry: "__main".into(),
+            records: vec![],
+            unions: vec![],
+            globals: vec![],
+            classes: vec![],
+            functions: vec![Function {
+                name: "__main".into(),
+                params: vec![],
+                captures: None,
+                return_type: Type::Void,
+                locals: vec![],
+                loc: loc.clone(),
+                body: vec![Stmt::Expression {
+                    expr: Expr::Intrinsic {
+                        name: "console.log".into(),
+                        args: vec![Expr::BytesIntrinsic {
+                            method: "length".into(),
+                            receiver: Box::new(Expr::BytesNew {
+                                source: None,
+                                r#type: Type::bytes(),
+                                loc: loc.clone(),
+                            }),
+                            args: vec![],
+                            r#type: Type::F64,
+                            loc: loc.clone(),
+                        }],
+                        r#type: Type::Void,
+                        loc: loc.clone(),
+                    },
+                    loc,
+                }],
+            }],
+        };
+        crate::ir::validate(&module).unwrap();
+        assert!(uses_runtime(&module));
     }
 }

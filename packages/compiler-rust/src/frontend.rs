@@ -18,6 +18,7 @@ mod arrays;
 mod callables;
 mod callbacks;
 mod classes;
+mod codecs;
 mod collections;
 mod commonjs;
 mod data_tables;
@@ -823,6 +824,12 @@ impl<'a> Lowerer<'a> {
         match node.kind() {
             SyntaxKind::ClassExpression => self.class_expression(node),
             SyntaxKind::NewExpression => {
+                if let Some(value) = self.bytes_new(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.codec_new(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.regex_new(node)? {
                     return Ok(value);
                 }
@@ -841,6 +848,12 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 let obj = self.expression(node.expression())?;
+                if obj.ty() == Type::bytes() {
+                    return Err(self.refuse(
+                        node,
+                        "Uint8Array indexed reads require an undefined-aware byte projection",
+                    ));
+                }
                 if obj.ty() == Type::Dyn {
                     let key = self.property_key_expression(node.argument_expression())?;
                     return Ok(self.dynamic_get(node, obj, key));
@@ -901,6 +914,9 @@ impl<'a> Lowerer<'a> {
             }
             SyntaxKind::PropertyAccessExpression => {
                 if let Some(value) = self.enum_get(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.codec_get(node)? {
                     return Ok(value);
                 }
                 if let Some(value) = self.symbol_get(node)? {
@@ -1052,6 +1068,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.codec_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.symbol_call(node)? {
                     return Ok(value);
                 }

@@ -115,6 +115,7 @@ fn specialized(ty: &Type) -> bool {
             | Type::Map { .. }
             | Type::Set { .. }
             | Type::Classval { .. }
+            | Type::Bytes { .. }
     )
 }
 fn boxed(ty: &Type, value: &str, module: &Module) -> String {
@@ -286,6 +287,9 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
     }
     out.push_str("NativeValue::Symbol(symbol) => { if key == \"description\" { runtime::symbol_description(&symbol).map(|s| NativeValue::String(s.to_string())).unwrap_or(NativeValue::Undefined) } else { native_value_missing_kind(&key, \"symbol\") } }, NativeValue::Regex(_) => native_value_missing_kind(&key, \"regex\"), NativeValue::Number(_) => native_value_missing_kind(&key, \"number\"),\n");
     for (i, t) in types.iter().enumerate() {
+        if matches!(t, Type::Bytes { .. }) {
+            writeln!(out, "NativeValue::V{i}(bytes) => {{ match key.as_str() {{ \"length\" | \"byteLength\" => NativeValue::Number(runtime::bytes_len(&bytes)), \"byteOffset\" => NativeValue::Number(runtime::bytes_byte_offset(&bytes)), _ => runtime::throw_type_error(\"scriptc: erased Uint8Array member requires a typed receiver\".into()), }} }},").unwrap();
+        }
         if matches!(t, Type::Func { .. } | Type::Classval { .. }) {
             writeln!(
                 out,
@@ -323,6 +327,9 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
         );
         for (i, c) in module.classes.iter().enumerate() {
             writeln!(out, "{i} => match key.as_str() {{").unwrap();
+            if c.name.starts_with("native_builtin_Text") {
+                out.push_str("\"encoding\" | \"fatal\" | \"ignoreBOM\" => runtime::throw_type_error(\"scriptc: erased codec properties require a typed receiver\".into()),\n");
+            }
             for f in c.fields.iter().filter(|f| !f.name.starts_with('%')) {
                 writeln!(
                     out,
