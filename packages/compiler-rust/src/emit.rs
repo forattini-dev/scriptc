@@ -20,7 +20,7 @@ fn rust_type(ty: Type, module: &Module) -> String {
         Type::F64 => "f64",
         Type::Bool => "bool",
         Type::Regex => "runtime::JsRegex",
-        Type::Object { .. } => "runtime::Gc<NativeError>",
+        Type::Object { .. } => "runtime::Gc<NativeInstance>",
         Type::Classval { .. } => "NativeClass",
         Type::String => "String",
         Type::Void => "()",
@@ -617,7 +617,7 @@ fn statement_in(
                 .unwrap();
             writeln!(
                 output,
-                "{{ let object = {}; let value = {}; error_set_{index}_{}(object, value); }}",
+                "{{ let object = {}; let value = {}; instance_set_{index}_{}(object, value); }}",
                 expr(obj, function, module),
                 expr(value, function, module),
                 field_name(field)

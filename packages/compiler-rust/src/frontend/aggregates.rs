@@ -74,6 +74,11 @@ impl Lowerer<'_> {
                 .ty(id)
                 .object_flags()
                 .intersects(ObjectFlags::CLASS)
+            // Instantiated generic classes carry REFERENCE rather than CLASS
+            // object flags. They still have nominal instance storage; a checked
+            // declaration snapshot must never project them into a plain record.
+            || (self.checker.ty(id).symbol().0 != 0
+                && self.checker.sym(self.checker.ty(id).symbol()).flags.intersects(SymbolFlags::CLASS))
             || !self
                 .checker
                 .get_signatures_of_type(id, SignatureKind::CALL)
@@ -819,13 +824,33 @@ impl Lowerer<'_> {
                     loc: self.loc(node),
                 });
             }
-            if matches!(left.ty(), Type::Object { .. }) && matches!(right.ty(), Type::Object { .. })
+            if matches!(left.ty(), Type::Object { .. })
+                && matches!(right.ty(), Type::Object { .. })
+                && left.ty() != right.ty()
             {
-                let root = Type::Object {
-                    class_name: "%Error".into(),
+                let (Type::Object { class_name: a }, Type::Object { class_name: b }) =
+                    (left.ty(), right.ty())
+                else {
+                    unreachable!()
                 };
-                left = self.coerce(left, root.clone(), node.left())?;
-                right = self.coerce(right, root, node.right())?;
+                let common = self.classes.layouts.iter().flatten().find(|class| {
+                    self.classes.subclass(&a, &class.name) && self.classes.subclass(&b, &class.name)
+                });
+                if let Some(common) = common {
+                    let root = Type::Object {
+                        class_name: common.name.clone(),
+                    };
+                    left = self.coerce(left, root.clone(), node.left())?;
+                    right = self.coerce(right, root, node.right())?;
+                } else {
+                    return Ok(Expr::DynScalarEq {
+                        left: Box::new(self.coerce(left, Type::Dyn, node.left())?),
+                        right: Box::new(self.coerce(right, Type::Dyn, node.right())?),
+                        negated: op == "!==",
+                        r#type: Type::Bool,
+                        loc: self.loc(node),
+                    });
+                }
             }
             if matches!(left, Expr::UnitLit { .. }) && matches!(right, Expr::UnitLit { .. }) {
                 return Ok(Expr::BoolLit {

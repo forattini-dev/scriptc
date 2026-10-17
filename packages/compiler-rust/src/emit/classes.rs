@@ -1,4 +1,4 @@
-//! One traced object identity across the Error inheritance chain.
+//! One traced instance identity across ordinary and Error class hierarchies.
 use super::*;
 use std::fmt::Write;
 
@@ -24,10 +24,10 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
     // Each supported definition executes once at module scope. Constructor
     // values cannot be widened across class identities in this ABI.
     output.push_str("#[derive(Clone, Copy, PartialEq)]\nstruct NativeClass(usize);\nimpl NativeTrace for NativeClass { fn trace_native(&self, _: &mut runtime::Tracer<'_>) {} }\nimpl runtime::ArrayElement for NativeClass {}\n");
-    output.push_str("struct NativeError { kind: usize, name: String, message: String, fields: NativeErrorFields }\nenum NativeErrorFields {\n");
+    output.push_str("struct NativeErrorData { name: String, message: String }\nstruct NativeInstance { kind: usize, error: Option<NativeErrorData>, fields: NativeInstanceFields }\nenum NativeInstanceFields {\n");
     for (index, class) in module.classes.iter().enumerate() {
         writeln!(output, "C{index} {{").unwrap();
-        for field in class.fields.iter().skip(5) {
+        for field in class.fields.iter().skip(module.class_header_len(class)) {
             writeln!(
                 output,
                 "{}: Option<{}>,",
@@ -38,17 +38,17 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
         }
         output.push_str("},\n");
     }
-    output.push_str("}\nimpl runtime::Trace for NativeError { fn trace(&self, tracer: &mut runtime::Tracer<'_>) { match &self.fields {\n");
+    output.push_str("}\nimpl runtime::Trace for NativeInstance { fn trace(&self, tracer: &mut runtime::Tracer<'_>) { match &self.fields {\n");
     for (index, class) in module.classes.iter().enumerate() {
         let names = class
             .fields
             .iter()
-            .skip(5)
+            .skip(module.class_header_len(class))
             .map(|f| field_name(&f.name))
             .collect::<Vec<_>>();
         writeln!(
             output,
-            "NativeErrorFields::C{index} {{ {} }} => {{",
+            "NativeInstanceFields::C{index} {{ {} }} => {{",
             names.join(", ")
         )
         .unwrap();
@@ -61,17 +61,17 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
         }
         output.push_str("},\n");
     }
-    output.push_str("} } }\nimpl runtime::ClearEdges for NativeError { fn clear_edges(&mut self) { match &mut self.fields {\n");
+    output.push_str("} } }\nimpl runtime::ClearEdges for NativeInstance { fn clear_edges(&mut self) { match &mut self.fields {\n");
     for (index, class) in module.classes.iter().enumerate() {
         let names = class
             .fields
             .iter()
-            .skip(5)
+            .skip(module.class_header_len(class))
             .map(|f| field_name(&f.name))
             .collect::<Vec<_>>();
         writeln!(
             output,
-            "NativeErrorFields::C{index} {{ {} }} => {{",
+            "NativeInstanceFields::C{index} {{ {} }} => {{",
             names.join(", ")
         )
         .unwrap();
@@ -81,20 +81,33 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
         output.push_str("},\n");
     }
     output.push_str("} } }\n");
-    output.push_str("fn error_string(object: runtime::Gc<NativeError>) -> String { object.with(|e| { if e.name.is_empty() { e.message.clone() } else if e.message.is_empty() { e.name.clone() } else { format!(\"{}: {}\", e.name, e.message) } }) }\n");
+    output.push_str("fn error_string(object: runtime::Gc<NativeInstance>) -> String { object.with(|object| { let e = object.error.as_ref().expect(\"validated Error receiver\"); if e.name.is_empty() { e.message.clone() } else if e.message.is_empty() { e.name.clone() } else { format!(\"{}: {}\", e.name, e.message) } }) }\n");
     for (index, class) in module.classes.iter().enumerate() {
         let mut builtin = class;
-        while !builtin.runtime {
-            builtin = module.class(builtin.base.as_ref().unwrap()).unwrap();
+        while let Some(base) = &builtin.base {
+            builtin = module.class(base).unwrap();
         }
+        let error = if builtin.runtime {
+            // Native subclasses inherit the builtin Error name, not their class name.
+            let mut native = class;
+            while !native.runtime {
+                native = module.class(native.base.as_ref().unwrap()).unwrap();
+            }
+            format!(
+                "Some(NativeErrorData {{ name: String::from({:?}), message: String::new() }})",
+                native.js_name
+            )
+        } else {
+            "None".into()
+        };
         let fields = class
             .fields
             .iter()
-            .skip(5)
+            .skip(module.class_header_len(class))
             .map(|f| format!("{}: None", field_name(&f.name)))
             .collect::<Vec<_>>()
             .join(", ");
-        writeln!(output, "fn error_allocate_{index}() -> runtime::Gc<NativeError> {{ runtime::Gc::new(NativeError {{ kind: {index}, name: String::from({:?}), message: String::new(), fields: NativeErrorFields::C{index} {{ {fields} }} }}) }}", builtin.js_name).unwrap();
+        writeln!(output, "fn instance_allocate_{index}() -> runtime::Gc<NativeInstance> {{ runtime::Gc::new(NativeInstance {{ kind: {index}, error: {error}, fields: NativeInstanceFields::C{index} {{ {fields} }} }}) }}").unwrap();
         let descendants = module
             .classes
             .iter()
@@ -107,32 +120,34 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             .map(usize::to_string)
             .collect::<Vec<_>>()
             .join(" | ");
-        writeln!(output, "fn error_is_{index}(object: runtime::Gc<NativeError>) -> bool {{ object.with(|object| matches!(object.kind, {kinds})) }}").unwrap();
+        writeln!(output, "fn instance_is_{index}(object: runtime::Gc<NativeInstance>) -> bool {{ object.with(|object| matches!(object.kind, {kinds})) }}").unwrap();
         for field in class
             .fields
             .iter()
-            .filter(|field| !matches!(field.name.as_str(), "%code" | "%hasCause" | "%cause"))
+            .filter(|field| !field.name.starts_with('%'))
         {
             let name = field_name(&field.name);
             let ty = rust_type(field.r#type.clone(), module);
-            if matches!(field.name.as_str(), "name" | "message") {
-                writeln!(output, "fn error_get_{index}_{name}(object: runtime::Gc<NativeError>) -> {ty} {{ object.with(|object| object.{}.clone()) }}\nfn error_set_{index}_{name}(object: runtime::Gc<NativeError>, value: {ty}) {{ object.with_mut(|object| object.{} = value); }}", field.name, field.name).unwrap();
+            if module.class_header_len(class) != 0
+                && matches!(field.name.as_str(), "name" | "message")
+            {
+                writeln!(output, "fn instance_get_{index}_{name}(object: runtime::Gc<NativeInstance>) -> {ty} {{ object.with(|object| object.error.as_ref().expect(\"validated Error receiver\").{}.clone()) }}\nfn instance_set_{index}_{name}(object: runtime::Gc<NativeInstance>, value: {ty}) {{ object.with_mut(|object| object.error.as_mut().expect(\"validated Error receiver\").{} = value); }}", field.name, field.name).unwrap();
                 continue;
             }
-            writeln!(output, "fn error_get_{index}_{name}(object: runtime::Gc<NativeError>) -> {ty} {{ object.with(|object| match &object.fields {{").unwrap();
+            writeln!(output, "fn instance_get_{index}_{name}(object: runtime::Gc<NativeInstance>) -> {ty} {{ object.with(|object| match &object.fields {{").unwrap();
             for descendant in &descendants {
-                writeln!(output, "NativeErrorFields::C{descendant} {{ {name}, .. }} => {name}.clone().unwrap_or_else(|| {}),", undefined(module, &field.r#type)).unwrap();
+                writeln!(output, "NativeInstanceFields::C{descendant} {{ {name}, .. }} => {name}.clone().unwrap_or_else(|| {}),", undefined(module, &field.r#type)).unwrap();
             }
-            output.push_str("_ => unreachable!(\"scriptc: invalid Error receiver\"), }) }\n");
-            writeln!(output, "fn error_set_{index}_{name}(object: runtime::Gc<NativeError>, value: {ty}) {{ object.with_mut(|object| match &mut object.fields {{").unwrap();
+            output.push_str("_ => unreachable!(\"scriptc: invalid class receiver\"), }) }\n");
+            writeln!(output, "fn instance_set_{index}_{name}(object: runtime::Gc<NativeInstance>, value: {ty}) {{ object.with_mut(|object| match &mut object.fields {{").unwrap();
             for descendant in &descendants {
                 writeln!(
                     output,
-                    "NativeErrorFields::C{descendant} {{ {name}, .. }} => *{name} = Some(value),"
+                    "NativeInstanceFields::C{descendant} {{ {name}, .. }} => *{name} = Some(value),"
                 )
                 .unwrap();
             }
-            output.push_str("_ => unreachable!(\"scriptc: invalid Error receiver\"), }); }\n");
+            output.push_str("_ => unreachable!(\"scriptc: invalid class receiver\"), }); }\n");
         }
     }
 }
@@ -168,7 +183,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                 .collect::<String>();
             let ctor = function_name(&format!("%{class_name}.constructor"));
             format!(
-                "{{ {callee} {evaluate} let object = error_allocate_{index}(); {ctor}(object.clone(){args}); object }}"
+                "{{ {callee} {evaluate} let object = instance_allocate_{index}(); {ctor}(object.clone(){args}); object }}"
             )
         }
         Expr::FieldGet {
@@ -177,7 +192,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             field,
             ..
         } => format!(
-            "error_get_{}_{}({})",
+            "instance_get_{}_{}({})",
             class_index(class_name),
             field_name(field),
             expr(obj, function, module)
@@ -188,17 +203,29 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             r#type: Type::Object { class_name },
             ..
         } => format!(
-            "{{ let object = {}; if !error_is_{}(object.clone()) {{ runtime::throw_type_error(\"invalid Error projection\".into()); }} object }}",
+            "{{ let object = {}; if !instance_is_{}(object.clone()) {{ runtime::throw_type_error(\"invalid class projection\".into()); }} object }}",
             expr(value, function, module),
             class_index(class_name)
         ),
         Expr::InstanceOf {
             value, class_name, ..
         } => format!(
-            "error_is_{}({})",
+            "instance_is_{}({})",
             class_index(class_name),
             expr(value, function, module)
         ),
+        Expr::LibCall { r#fn, args, .. }
+            if matches!(r#fn.as_str(), "dyn.classInstanceof" | "dyn.errInstanceof") =>
+        {
+            let Expr::StrLit { value, .. } = &args[1] else {
+                unreachable!("validated class identity")
+            };
+            format!(
+                "match {} {{ NativeValue::Instance(object) => instance_is_{}(object), _ => false }}",
+                expr(&args[0], function, module),
+                class_index(value)
+            )
+        }
         Expr::LibCall {
             r#fn, args, r#type, ..
         } if r#fn == "error.new" => {
@@ -207,12 +234,12 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             };
             let index = class_index(class_name);
             format!(
-                "{{ let message = {}; let object = error_allocate_{index}(); object.with_mut(|object| object.message = message); object }}",
+                "{{ let message = {}; let object = instance_allocate_{index}(); object.with_mut(|object| object.error.as_mut().expect(\"validated Error receiver\").message = message); object }}",
                 expr(&args[0], function, module)
             )
         }
         Expr::LibCall { r#fn, args, .. } if r#fn == "error.ctor" => format!(
-            "{{ let object = {}; let message = {}; object.with_mut(|object| object.message = message); }}",
+            "{{ let object = {}; let message = {}; object.with_mut(|object| object.error.as_mut().expect(\"validated Error receiver\").message = message); }}",
             expr(&args[0], function, module),
             expr(&args[1], function, module)
         ),

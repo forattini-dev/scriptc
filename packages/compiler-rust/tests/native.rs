@@ -173,6 +173,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/callbacks.ts",
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
+        "rust-native-classes/objects.ts",
+        "rust-native-classes/order.ts",
+        "rust-native-classes/exceptions.ts",
+        "rust-native-classes/contracts.ts",
+        "rust-native-classes/shadows.ts",
         "rust-native-exceptions/control.ts",
         "rust-native-exceptions/override.ts",
         "rust-native-exceptions/values.ts",
@@ -893,10 +898,6 @@ fn error_definitions_defer_instance_code_and_refuse_unported_effects() {
             "accessor",
             "class Fault extends Error { get field(): number { return 1; } }",
         ),
-        (
-            "shadow",
-            "export {}; class Error { message = 'user'; } new Error();",
-        ),
         ("generic", "class Fault<T> extends Error {}"),
         ("cause", "new Error('message', { cause: 1 });"),
         (
@@ -1345,6 +1346,18 @@ fn module_slots_check_tdz_on_reads_writes_defaults_and_cycles() {
             "",
             "Alias",
         ),
+        (
+            10,
+            "console.log('before'); make(); class Box { value = 1; } function make(): void { new Box(); }",
+            "",
+            "Box",
+        ),
+        (
+            11,
+            "console.log('before'); inspect({}); class Box {} function inspect(value: unknown): void { console.log(value instanceof Box); }",
+            "",
+            "Box",
+        ),
     ] {
         fs::write(&input, source).unwrap();
         fs::write(&dependency, other).unwrap();
@@ -1790,7 +1803,7 @@ fn exception_boundaries_preserve_previous_artifacts() {
         "try { throw {}; } catch ({ message }) { console.log(message); }",
         "try { throw 1; } catch (error) { error = 2; console.log(error); }",
         "try { throw 1; } catch (error) { const replace = () => { error = 2; }; replace(); }",
-        "class Ordinary {} try { throw new Ordinary(); } catch {}",
+        "class Ordinary { get value() { return 1; } } try { throw new Ordinary(); } catch {}",
     ] {
         fs::write(&input, source).unwrap();
         for artifact in [
@@ -1819,6 +1832,50 @@ fn exception_boundaries_preserve_previous_artifacts() {
             &target.with_extension("rs"),
             &target.with_extension("ir.json"),
         ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn ordinary_class_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "class-boundary");
+    for source in [
+        "class Box { static value = console.log('effect'); } new Box();",
+        "class Box { method() { return 1; } } new Box();",
+        "class Box { get value() { return 1; } } new Box();",
+        "class Box { ['value'] = 1; } new Box();",
+        "class Box { #value = 1; } new Box();",
+        "class Box { constructor(public value: number) {} } new Box(1);",
+        "class Box { constructor() { return {}; } } new Box();",
+        "class Box { '__proto__' = 1; } new Box();",
+        "class Box { constructor() { if (false) return; } } new Box();",
+        "class Base {} class Child extends Base { constructor() { if (true) super(); } } new Child();",
+    ] {
+        fs::write(&input, source).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!result.status.success(), "{source}");
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(stderr.contains("SCN1001"), "{source}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{source}: {stderr}");
+        for artifact in artifacts {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }

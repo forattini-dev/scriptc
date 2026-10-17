@@ -3669,8 +3669,8 @@ function validateFunction(
         if (e.type.kind !== "bool") err("caughtTest must be bool", e.loc);
         if (e.test === "instanceof") {
           if (!e.className) err("caughtTest instanceof without a class", e.loc);
-          else if (!hierarchy.has(e.className)) {
-            err(`caughtTest instanceof against non-hierarchy class "${e.className}"`, e.loc);
+          else if (!classes.has(e.className)) {
+            err(`caughtTest instanceof against unknown class "${e.className}"`, e.loc);
           }
         } else if (e.className !== undefined) {
           err(`caughtTest ${e.test} with a class name`, e.loc);
@@ -3703,9 +3703,9 @@ function validateFunction(
         const t = e.type;
         const ok =
           t.kind === "f64" || t.kind === "bool" || t.kind === "string" ||
-          (t.kind === "object" && hierarchy.has(t.className));
+          (t.kind === "object" && classes.has(t.className));
         if (!ok) {
-          err(`caughtNarrow to ${t.kind === "object" ? `non-hierarchy class "${t.className}"` : t.kind}`, e.loc);
+          err(`caughtNarrow to ${t.kind === "object" ? `unknown class "${t.className}"` : t.kind}`, e.loc);
         }
         break;
       }

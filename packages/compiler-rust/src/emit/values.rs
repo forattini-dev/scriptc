@@ -86,7 +86,7 @@ fn types(module: &Module) -> Vec<Type> {
             },
             &mut out,
         );
-        for f in c.fields.iter().skip(5) {
+        for f in c.fields.iter().skip(module.class_header_len(c)) {
             visit(&f.r#type, &mut out);
         }
     }
@@ -130,14 +130,14 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
     let types = types(module);
     out.push_str("#[derive(Clone)]\nenum NativeValue { Undefined, Null, Number(f64), Boolean(bool), String(String), Regex(runtime::JsRegex), Promise(runtime::JsPromise<NativeValue>), Object(runtime::Gc<NativeMap<String, NativeValue>>), Map(runtime::Gc<NativeMap<NativeValue, NativeValue>>), Array(runtime::JsArray<NativeValue>),\n");
     if !module.classes.is_empty() {
-        out.push_str("Error(runtime::Gc<NativeError>),\n");
+        out.push_str("Instance(runtime::Gc<NativeInstance>),\n");
     }
     for (i, ty) in types.iter().enumerate().filter(|(_, t)| specialized(t)) {
         writeln!(out, "V{i}({}),", rust_type(ty.clone(), module)).unwrap();
     }
     out.push_str("}\nimpl NativeTrace for NativeValue { fn trace_native(&self, tracer: &mut runtime::Tracer<'_>) { match self { Self::Promise(v) => v.trace_native(tracer), Self::Object(v) => v.trace_native(tracer), Self::Map(v) => v.trace_native(tracer), Self::Array(v) => v.trace_native(tracer),\n");
     if !module.classes.is_empty() {
-        out.push_str("Self::Error(v) => v.trace_native(tracer),\n");
+        out.push_str("Self::Instance(v) => v.trace_native(tracer),\n");
     }
     for (i, _) in types.iter().enumerate().filter(|(_, t)| specialized(t)) {
         writeln!(out, "Self::V{i}(v) => v.trace_native(tracer),").unwrap();
@@ -188,9 +188,9 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
                     .position(|c| c.name == *class_name)
                     .unwrap();
                 (
-                    "NativeValue::Error(value)".into(),
+                    "NativeValue::Instance(value)".into(),
                     format!(
-                        "if let NativeValue::Error(v) = value {{ if error_is_{ci}(v.clone()) {{ Some(v.clone()) }} else {{ None }} }} else {{ None }}"
+                        "if let NativeValue::Instance(v) = value {{ if instance_is_{ci}(v.clone()) {{ Some(v.clone()) }} else {{ None }} }} else {{ None }}"
                     ),
                 )
             }
@@ -233,7 +233,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
 "#);
     out.push_str("fn native_value_eq(left: &NativeValue, right: &NativeValue) -> bool { match (left, right) { (NativeValue::Undefined, NativeValue::Undefined) | (NativeValue::Null, NativeValue::Null) => true, (NativeValue::Number(a), NativeValue::Number(b)) => a == b, (NativeValue::Boolean(a), NativeValue::Boolean(b)) => a == b, (NativeValue::String(a), NativeValue::String(b)) => a == b, (NativeValue::Regex(a), NativeValue::Regex(b)) => std::rc::Rc::ptr_eq(a,b), (NativeValue::Object(a), NativeValue::Object(b)) => a.ptr_eq(b), (NativeValue::Map(a), NativeValue::Map(b)) => a.ptr_eq(b), (NativeValue::Promise(a), NativeValue::Promise(b)) => runtime::promise_view_identity(a) == runtime::promise_view_identity(b), (NativeValue::Array(a), NativeValue::Array(b)) => a.ptr_eq(b),\n");
     if !module.classes.is_empty() {
-        out.push_str("(NativeValue::Error(a), NativeValue::Error(b)) => a.ptr_eq(b),\n");
+        out.push_str("(NativeValue::Instance(a), NativeValue::Instance(b)) => a.ptr_eq(b),\n");
     }
     for (i, t) in types.iter().enumerate().filter(|(_, t)| specialized(t)) {
         let eq = if matches!(t, Type::Classval { .. }) {
@@ -316,7 +316,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
     }
     if !module.classes.is_empty() {
         out.push_str(
-            "NativeValue::Error(object) => { let kind = object.with(|o| o.kind); match kind {\n",
+            "NativeValue::Instance(object) => { let kind = object.with(|o| o.kind); match kind {\n",
         );
         for (i, c) in module.classes.iter().enumerate() {
             writeln!(out, "{i} => match key.as_str() {{").unwrap();
@@ -327,7 +327,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
                     f.name,
                     boxed(
                         &f.r#type,
-                        &format!("error_get_{i}_{}(object.clone())", field_name(&f.name)),
+                        &format!("instance_get_{i}_{}(object.clone())", field_name(&f.name)),
                         module
                     )
                 )
@@ -335,7 +335,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
             }
             out.push_str("_ => native_value_missing(&key), },\n");
         }
-        out.push_str("_ => unreachable!(\"validated native Error kind\") } },\n");
+        out.push_str("_ => unreachable!(\"validated native instance kind\") } },\n");
     }
     out.push_str("_ => native_value_missing(&key) } }\nfn native_value_call(callee: NativeValue, args: Vec<NativeValue>, name: &str) -> NativeValue { match callee {\n");
     for (i, t) in types.iter().enumerate() {

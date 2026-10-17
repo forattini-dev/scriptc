@@ -1,4 +1,4 @@
-//! Error identities, definition-time effects and demand-driven constructor bodies.
+//! Class identities, definition-time effects and demand-driven constructor bodies.
 use super::*;
 use source_frontend::prelude::{SignatureKind, SymbolId, get_source_file_of_node};
 use std::collections::VecDeque;
@@ -43,6 +43,13 @@ impl ClassGraph {
         Type::Object {
             class_name: self.definitions[index].name.clone(),
         }
+    }
+    pub fn hierarchy(&self, name: &str) -> bool {
+        self.definitions.iter().any(|d| {
+            (d.name == name && d.base.is_some())
+                || d.base
+                    .is_some_and(|base| self.definitions[base].name == name)
+        })
     }
 }
 
@@ -98,7 +105,7 @@ impl Lowerer<'_> {
                 }
                 self.classes.definitions.push(Definition {
                     node,
-                    name: format!("native_error_{index}"),
+                    name: format!("native_class_{index}"),
                     file: source_file_info(*file).file_name.to_string(),
                     base: None,
                     resolved: false,
@@ -251,7 +258,7 @@ impl Lowerer<'_> {
         {
             return Err(self.refuse(
                 node,
-                "only concrete non-generic undecorated Error classes are ported",
+                "only concrete non-generic undecorated classes are ported",
             ));
         }
         let mut base = None;
@@ -261,7 +268,7 @@ impl Lowerer<'_> {
             }
             let types = clause.types().nodes().into_iter().collect::<Vec<_>>();
             if types.len() != 1 {
-                return Err(self.refuse(node, "one Error base is required"));
+                return Err(self.refuse(node, "one class base is required"));
             }
             let expression = types[0].expression();
             if expression.kind() != SyntaxKind::Identifier
@@ -270,12 +277,14 @@ impl Lowerer<'_> {
             {
                 return Err(self.refuse(expression, "effectful class heritage is not ported"));
             }
-            base = self.class_symbol(expression);
+            base =
+                Some(self.class_symbol(expression).ok_or_else(|| {
+                    self.refuse(expression, "class heritage has no native identity")
+                })?);
         }
-        let base = base.ok_or_else(|| {
-            self.refuse(node, "only classes derived from native Error are ported")
-        })?;
-        self.resolve_class(base)?;
+        if let Some(base) = base {
+            self.resolve_class(base)?;
+        }
         for member in node.members() {
             if member.modifier_flags().intersects(ModifierFlags::STATIC)
                 || member
@@ -296,7 +305,7 @@ impl Lowerer<'_> {
                 ));
             }
         }
-        self.classes.definitions[index].base = Some(base);
+        self.classes.definitions[index].base = base;
         self.classes.definitions[index].resolved = true;
         self.classes.definitions[index].resolving = false;
         Ok(())
@@ -351,8 +360,10 @@ impl Lowerer<'_> {
     fn layout_class_inner(&mut self, index: usize) -> Result<(), String> {
         self.resolve_class(index)?;
         let definition = self.classes.definitions[index].clone();
-        let base = definition.base.unwrap();
-        self.layout_class(base)?;
+        if let Some(base) = definition.base {
+            self.layout_class(base)?;
+        }
+        let error = self.classes.subclass(&definition.name, "%Error");
         let mut layout = ir::Class {
             name: definition.name,
             js_name: if definition.node.name().is_nil() {
@@ -361,8 +372,13 @@ impl Lowerer<'_> {
                 definition.node.name().text().into()
             },
             runtime: false,
-            base: Some(self.classes.definitions[base].name.clone()),
-            fields: self.classes.layouts[base].as_ref().unwrap().fields.clone(),
+            base: definition
+                .base
+                .map(|base| self.classes.definitions[base].name.clone()),
+            fields: definition
+                .base
+                .map(|base| self.classes.layouts[base].as_ref().unwrap().fields.clone())
+                .unwrap_or_default(),
             loc: Loc {
                 file: definition.file,
                 start: definition.node.pos().max(0),
@@ -417,9 +433,10 @@ impl Lowerer<'_> {
         }
         let contract = self.class_contract(definition.node).cloned();
         for (name, field) in sources {
-            let ty = if matches!(name.as_str(), "name" | "message")
-                && field.kind() == SyntaxKind::PropertyAccessExpression
-            {
+            if name.starts_with('%') || name == "__proto__" {
+                return Err(self.refuse(field, "reserved class field names are not ported"));
+            }
+            let ty = if error && matches!(name.as_str(), "name" | "message") {
                 Type::String
             } else if let Some((_, ty)) = contract
                 .as_ref()
@@ -431,7 +448,7 @@ impl Lowerer<'_> {
             } else {
                 self.ty(field.name())?
             };
-            let ty = if matches!(name.as_str(), "name" | "message") {
+            let ty = if error && matches!(name.as_str(), "name" | "message") {
                 ty
             } else {
                 if matches!(
@@ -452,7 +469,8 @@ impl Lowerer<'_> {
             };
             if let Some(inherited) = layout.fields.iter().find(|f| f.name == name) {
                 if inherited.r#type != ty
-                    || (matches!(name.as_str(), "name" | "message")
+                    || (error
+                        && matches!(name.as_str(), "name" | "message")
                         && field.kind() == SyntaxKind::PropertyDeclaration
                         && field.initializer().is_nil()
                         && !field.modifier_flags().intersects(ModifierFlags::AMBIENT))

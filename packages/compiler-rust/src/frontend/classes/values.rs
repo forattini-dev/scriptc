@@ -274,7 +274,7 @@ impl Lowerer<'_> {
         let field = node.name().text().to_string();
         let ty = self
             .field_type(&class_name, &field)
-            .ok_or_else(|| self.refuse(node, "Error property is not ported"))?;
+            .ok_or_else(|| self.refuse(node, "class property is not ported"))?;
         let value = Expr::FieldGet {
             obj: Box::new(obj),
             class_name,
@@ -302,7 +302,7 @@ impl Lowerer<'_> {
         let field = member.name().text().to_string();
         let ty = self
             .field_type(&class_name, &field)
-            .ok_or_else(|| self.refuse(node, "Error property write is not ported"))?;
+            .ok_or_else(|| self.refuse(node, "class property write is not ported"))?;
         let value = self.expected_expression(node.right(), ty)?;
         Ok(Some(Stmt::FieldSet {
             obj,
@@ -326,20 +326,42 @@ impl Lowerer<'_> {
         } else {
             self.expression(node.left())?
         };
-        if !matches!(value.ty(), Type::Object { .. } | Type::Caught) {
-            return Err(self.refuse(node, "instanceof currently requires a native Error object"));
-        }
         let index = self
             .class_symbol(node.right())
-            .ok_or_else(|| self.refuse(node, "instanceof needs a resolved Error class"))?;
+            .ok_or_else(|| self.refuse(node, "instanceof needs a resolved class"))?;
         self.layout_class(index)?;
         let class_name = self.classes.definitions[index].name.clone();
+        let direct = matches!(value.ty(), Type::Object { class_name: left } if self.classes.hierarchy(&left) && self.classes.hierarchy(&class_name));
+        let value = if value.ty() == Type::Caught || direct {
+            value
+        } else {
+            self.coerce(value, Type::Dyn, node.left())?
+        };
+        let intrinsic = if self.classes.subclass(&class_name, "%Error") {
+            "dyn.errInstanceof"
+        } else {
+            "dyn.classInstanceof"
+        };
         let test = |value: Expr, loc: Loc| {
             if value.ty() == Type::Caught {
                 Expr::CaughtTest {
                     value: Box::new(value),
                     test: "instanceof".into(),
                     class_name: class_name.clone(),
+                    r#type: Type::Bool,
+                    loc,
+                }
+            } else if value.ty() == Type::Dyn {
+                Expr::LibCall {
+                    r#fn: intrinsic.into(),
+                    args: vec![
+                        value,
+                        Expr::StrLit {
+                            value: class_name.clone(),
+                            r#type: Type::String,
+                            loc: loc.clone(),
+                        },
+                    ],
                     r#type: Type::Bool,
                     loc,
                 }

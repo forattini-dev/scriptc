@@ -205,9 +205,6 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                             continue;
                         }
                         let name = info.name.to_string();
-                        if matches!(name.as_str(), "name" | "message" | "stack" | "cause") {
-                            continue;
-                        }
                         let id = lowerer.checker.get_type_of_symbol(property);
                         fields.push((
                             name,

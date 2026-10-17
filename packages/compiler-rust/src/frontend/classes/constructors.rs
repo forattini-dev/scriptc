@@ -170,8 +170,14 @@ impl Lowerer<'_> {
             .members()
             .into_iter()
             .find(|m| m.kind() == SyntaxKind::Constructor);
-        let base = definition.base.unwrap();
+        let base = definition.base;
         let mut body = Vec::new();
+        // Base fields run before parameter defaults. Derived fields run after
+        // the successful super call, before the following body statement.
+        if base.is_none() {
+            self.constructor_this = Some(this.clone());
+            body.extend(self.initialize_fields(index)?);
+        }
         if let Some(ctor) = ctor {
             fn has_return(node: Node) -> bool {
                 if node.kind() == SyntaxKind::ReturnStatement {
@@ -215,6 +221,8 @@ impl Lowerer<'_> {
                     if super_seen {
                         return Err(self.refuse(call, "multiple super calls are not ported"));
                     }
+                    let base =
+                        base.ok_or_else(|| self.refuse(call, "super requires a derived class"))?;
                     let args = if self.classes.definitions[base].node.is_nil() {
                         call.arguments()
                             .into_iter()
@@ -242,10 +250,10 @@ impl Lowerer<'_> {
                     body.extend(self.statement(statement)?);
                 }
             }
-            if !super_seen {
+            if base.is_some() && !super_seen {
                 return Err(self.refuse(ctor, "constructor requires one unconditional super call"));
             }
-        } else {
+        } else if let Some(base) = base {
             for param in params.iter().skip(1) {
                 self.bind_parameter(None, param)?;
             }

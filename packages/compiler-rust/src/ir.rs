@@ -883,6 +883,15 @@ impl Module {
         active.pop();
         valid
     }
+    /// Runtime Error headers are inherited only along the Error chain.
+    pub fn class_header_len(&self, class: &Class) -> usize {
+        if self.subclass(&class.name, "%Error") {
+            error_fields().len()
+        } else {
+            0
+        }
+    }
+
     fn validate_layouts(&self) -> Result<(), String> {
         let mut names = std::collections::HashSet::new();
         for class in &self.classes {
@@ -894,13 +903,13 @@ impl Module {
                 class.name.as_str(),
                 "%Error" | "%TypeError" | "%RangeError" | "%SyntaxError"
             );
-            if !class.fields.starts_with(&header) || class.runtime != builtin
-                || !self.subclass(&class.name, "%Error")
+            let header_len = self.class_header_len(class);
+            if (header_len != 0 && !class.fields.starts_with(&header)) || class.runtime != builtin
                 || (class.name == "%Error" && class.base.is_some())
                 || (builtin && class.name != "%Error" && class.base.as_deref() != Some("%Error"))
                 || (builtin && class.fields.len() != header.len())
-                || !class.fields.iter().skip(header.len()).all(|field| field.r#type == Type::Dyn || matches!(&field.r#type, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|u| u.arms.contains(&Type::Undefined)))) {
-                return Err("invalid native Error class/header/slot".into());
+                || !class.fields.iter().skip(header_len).all(|field| field.r#type == Type::Dyn || matches!(&field.r#type, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|u| u.arms.contains(&Type::Undefined)))) {
+                return Err("invalid native class/header/slot".into());
             }
             if let Some(base) = &class.base {
                 let base = self.class(base).ok_or("unknown class base")?;
@@ -912,8 +921,9 @@ impl Module {
             let mut fields = std::collections::HashSet::new();
             if !class.fields.iter().enumerate().all(|(i, field)| {
                 fields.insert(&field.name)
-                    && (i < header.len()
-                        || (!matches!(field.r#type, Type::Func { .. })
+                    && (i < header_len
+                        || (!field.name.starts_with('%')
+                            && !matches!(field.r#type, Type::Func { .. })
                             && self.valid_type(field.r#type.clone(), &mut vec![])))
             }) {
                 return Err("invalid class field layout".into());
@@ -1387,6 +1397,21 @@ fn validate_function(
                 if !matches!(value.ty(), Type::Object { .. }) || module.class(class_name).is_none()
                 {
                     return Err("invalid native instanceof".into());
+                }
+                Ok(())
+            }
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if matches!(r#fn.as_str(), "dyn.classInstanceof" | "dyn.errInstanceof") => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if *r#type != Type::Bool
+                    || args.len() != 2
+                    || args[0].ty() != Type::Dyn
+                    || !matches!(&args[1], Expr::StrLit { value, .. } if module.class(value).is_some() && (r#fn != "dyn.errInstanceof" || module.subclass(value, "%Error")))
+                {
+                    return Err("invalid native erased instanceof".into());
                 }
                 Ok(())
             }
@@ -2639,11 +2664,109 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_layouts_validate_headers_slots_and_ancestry_independently() {
+        let mut m = error_module();
+        let loc = m.functions[0].loc.clone();
+        m.unions.push(Union {
+            id: 0,
+            arms: vec![Type::F64, Type::Undefined],
+        });
+        let root = Class {
+            name: "Box".into(),
+            js_name: "Box".into(),
+            runtime: false,
+            base: None,
+            fields: vec![Field {
+                name: "name".into(),
+                r#type: Type::Union { union_id: 0 },
+            }],
+            loc: loc.clone(),
+        };
+        let child = Class {
+            name: "Child".into(),
+            js_name: "Child".into(),
+            base: Some(root.name.clone()),
+            ..root.clone()
+        };
+        m.classes.extend([root.clone(), child.clone()]);
+        validate(&m).unwrap();
+        assert_eq!(m.class_header_len(&root), 0);
+        assert_eq!(m.class_header_len(&m.classes[1]), error_fields().len());
+        for invalid in [
+            Class {
+                runtime: true,
+                ..root.clone()
+            },
+            Class {
+                base: Some("Missing".into()),
+                ..root.clone()
+            },
+            Class {
+                base: Some("Child".into()),
+                ..root.clone()
+            },
+            Class {
+                fields: vec![],
+                ..child.clone()
+            },
+            Class {
+                fields: vec![Field {
+                    name: "value".into(),
+                    r#type: Type::F64,
+                }],
+                ..root.clone()
+            },
+            Class {
+                fields: vec![Field {
+                    name: "%cause".into(),
+                    r#type: Type::Dyn,
+                }],
+                ..root.clone()
+            },
+        ] {
+            let index = if invalid.name == "Child" { 3 } else { 2 };
+            let previous = std::mem::replace(&mut m.classes[index], invalid);
+            assert!(validate(&m).is_err());
+            m.classes[index] = previous;
+        }
+        let test = Expr::LibCall {
+            r#fn: "dyn.classInstanceof".into(),
+            args: vec![
+                Expr::DynObjLit {
+                    fields: vec![],
+                    r#type: Type::Dyn,
+                    loc: loc.clone(),
+                },
+                Expr::StrLit {
+                    value: "Box".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                },
+            ],
+            r#type: Type::Bool,
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression { expr: test, loc }];
+        validate(&m).unwrap();
+        if let Stmt::Expression {
+            expr: Expr::LibCall { r#fn, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#fn = "dyn.errInstanceof".into();
+        }
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native erased instanceof"
+        );
+    }
+
+    #[test]
     fn error_layouts_validate_prefixes_roots_and_reserved_metadata() {
         let mut m = error_module();
         assert!(validate(&m).is_ok());
         m.classes[1].fields[0].r#type = Type::Bool;
-        assert!(validate(&m).unwrap_err().contains("Error class/header"));
+        assert!(validate(&m).unwrap_err().contains("class/header"));
         m = error_module();
         m.classes[1].base = Some("Detail".into());
         assert!(validate(&m).is_err());

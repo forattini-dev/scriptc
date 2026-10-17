@@ -42,7 +42,14 @@
     },
     {
       "id": "object-and-class-model",
-      "status": "required",
+      "status": "partial",
+      "evidence": "rust-native-classes fixtures: ordinary root/derived storage and constructors, field/default/super ordering, aliases, identity, instanceof, caught instances and public generic JS constructor payloads",
+      "remaining": [
+        "methods/accessors and lexical this captures",
+        "static/computed/private members, parameter properties and source generic classes",
+        "constructor return forms and conditional super",
+        "general prototype operations and dependency object APIs"
+      ],
       "scope": [
         "ordinary class layouts, constructors and this",
         "methods and accessors",
