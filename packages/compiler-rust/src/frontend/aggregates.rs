@@ -288,6 +288,24 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn narrowed(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
+        if value.ty() == Type::Caught {
+            let target = self.ty(node)?;
+            if matches!(
+                target,
+                Type::F64 | Type::String | Type::Bool | Type::Object { .. }
+            ) {
+                return Ok(Expr::CaughtNarrow {
+                    value: Box::new(value),
+                    r#type: target,
+                    loc: self.loc(node),
+                });
+            }
+            return Ok(Expr::CaughtToDyn {
+                value: Box::new(value),
+                r#type: Type::Dyn,
+                loc: self.loc(node),
+            });
+        }
         // A lowered value already carries a verified native representation.
         // Untyped JS doesn't supply additional control-flow evidence.
         if self.checker_any(node) {

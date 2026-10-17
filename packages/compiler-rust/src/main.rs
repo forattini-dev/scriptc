@@ -27,7 +27,7 @@ fn execute() -> Result<(), String> {
     let mut args = std::env::args_os().skip(1);
     let command = args
         .next()
-        .ok_or("usage: scriptc build <file.ts|file.js> [--project <tsconfig>] [--emit bin|ir|rust] --out <path>")?;
+        .ok_or("usage: scriptc build|inspect <file.ts|file.js> [--project <tsconfig>] [--emit bin|ir|rust] --out <path>")?;
     if command == "--version" {
         println!(
             "scriptc native 0.1.1-rust.0; frontend {}; IR {}; engine none",
@@ -36,8 +36,8 @@ fn execute() -> Result<(), String> {
         );
         return Ok(());
     }
-    if command != "build" {
-        return Err("SCN0001: only build is available in the first native executable".into());
+    if command != "build" && command != "inspect" {
+        return Err("SCN0001: expected build or inspect".into());
     }
     let input = fs::canonicalize(PathBuf::from(
         args.next().ok_or("SCN0001: missing input file")?,
@@ -54,6 +54,9 @@ fn execute() -> Result<(), String> {
     let mut project_path = None;
     while let Some(arg) = args.next() {
         if arg == "--emit" {
+            if command == "inspect" {
+                return Err("SCN0001: --emit is only for build".into());
+            }
             kind = args
                 .next()
                 .ok_or("SCN0001: missing --emit value")?
@@ -85,10 +88,14 @@ fn execute() -> Result<(), String> {
     if fs::canonicalize(&out).is_ok_and(|path| path == input) {
         return Err("SCN0001: output would overwrite the input".into());
     }
-    if kind == "bin" && (out.with_extension("rs") == out || out.with_extension("ir.json") == out) {
+    if command == "build"
+        && kind == "bin"
+        && (out.with_extension("rs") == out || out.with_extension("ir.json") == out)
+    {
         return Err("SCN0001: binary output collides with an IR/Rust sidecar".into());
     }
     if cfg!(windows)
+        && command == "build"
         && kind == "bin"
         && !out
             .extension()
@@ -103,6 +110,23 @@ fn execute() -> Result<(), String> {
         .tempdir()
         .map_err(|e| e.to_string())?;
     let project = project::discover(&input, project_path.as_deref())?;
+    if command == "inspect" {
+        if kind != "bin" {
+            return Err(
+                "SCN0001: inspect writes a JSON inventory; --emit is only for build".into(),
+            );
+        }
+        let report = frontend::inspect::inspect(&input, work.path(), project.as_deref())?;
+        atomic_write(
+            &out,
+            &serde_json::to_vec_pretty(&report).map_err(|e| e.to_string())?,
+        )?;
+        println!(
+            "{}",
+            serde_json::json!({"inspection": out, "engine": "none", "compiler": "rust"})
+        );
+        return Ok(());
+    }
     let module = frontend::lower(&input, work.path(), project.as_deref())?;
     ir::validate(&module).map_err(|e| format!("SCN9001: {e}"))?;
     let json = serde_json::to_vec_pretty(&module).map_err(|e| e.to_string())?;

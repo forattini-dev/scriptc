@@ -8,18 +8,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
     let (options, checked) = crate::project::load(input, work, project)?;
     let _checked_scope = source_frontend::core::enter_program(Some(checked));
     program::bind_all();
-    let mut diagnostics = program::get_config_file_parsing_diagnostics();
-    diagnostics.extend(program::get_program_diagnostics());
-    diagnostics.extend(program::get_syntactic_diagnostics(Node::NIL));
-    diagnostics.extend(program::get_semantic_diagnostics(Node::NIL));
-    diagnostics.extend(program::get_global_diagnostics());
-    if !diagnostics.is_empty() {
-        return Err(diagnostics
-            .iter()
-            .map(program::format_diagnostic)
-            .collect::<Vec<_>>()
-            .join("\n"));
-    }
+    check_program()?;
     let needs_execution = needs_execution_view();
     let execution = needs_execution.then(|| crate::project::execution_view(options.clone()));
     let _execution_scope =
@@ -144,4 +133,20 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             classes: lowerer.classes.layouts.into_iter().flatten().collect(),
         })
     })
+}
+
+pub(super) fn check_program() -> Result<(), String> {
+    let mut diagnostics = program::get_config_file_parsing_diagnostics();
+    diagnostics.extend(program::get_program_diagnostics());
+    diagnostics.extend(program::get_syntactic_diagnostics(Node::NIL));
+    diagnostics.extend(program::get_semantic_diagnostics(Node::NIL));
+    diagnostics.extend(program::get_global_diagnostics());
+    if !diagnostics.is_empty() {
+        return Err(diagnostics
+            .iter()
+            .map(program::format_diagnostic)
+            .collect::<Vec<_>>()
+            .join("\n"));
+    }
+    Ok(())
 }

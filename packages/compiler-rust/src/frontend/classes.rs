@@ -111,6 +111,34 @@ impl Lowerer<'_> {
         }
     }
 
+    pub(super) fn ensure_exception_classes(&mut self, site: Node) -> Result<(), String> {
+        // Use the bundled declaration directly: a lexical class named Error
+        // must not replace the runtime error hierarchy at the catch boundary.
+        for file in program::source_files() {
+            if !source_file_info(file).file_name.ends_with("/lib.es5.d.ts") {
+                continue;
+            }
+            for statement in file.statements() {
+                if statement.kind() != SyntaxKind::VariableStatement {
+                    continue;
+                }
+                for declaration in statement.declaration_list().declarations().nodes() {
+                    if declaration.name().kind() == SyntaxKind::Identifier
+                        && declaration.name().text() == "Error"
+                    {
+                        let symbol = self
+                            .checker
+                            .get_symbol_at_location(declaration.name(), false);
+                        if self.builtin_class(symbol.0).is_some() {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+        Err(self.refuse(site, "catch payloads require native Error declarations"))
+    }
+
     fn builtin_class(&mut self, symbol: u32) -> Option<usize> {
         if let Some(index) = self.classes.symbols.get(&symbol) {
             return Some(*index);

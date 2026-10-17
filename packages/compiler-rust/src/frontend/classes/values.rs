@@ -314,8 +314,19 @@ impl Lowerer<'_> {
     }
 
     pub(in crate::frontend) fn class_instanceof(&mut self, node: Node) -> Result<Expr, String> {
-        let value = self.expression(node.left())?;
-        if !matches!(value.ty(), Type::Object { .. }) {
+        let value = if node.left().kind() == SyntaxKind::Identifier
+            && let Ok(local) = self.binding(node.left())
+            && local.r#type == Type::Caught
+        {
+            Expr::VarRef {
+                local_id: local.id,
+                r#type: Type::Caught,
+                loc: self.loc(node.left()),
+            }
+        } else {
+            self.expression(node.left())?
+        };
+        if !matches!(value.ty(), Type::Object { .. } | Type::Caught) {
             return Err(self.refuse(node, "instanceof currently requires a native Error object"));
         }
         let index = self
@@ -323,11 +334,34 @@ impl Lowerer<'_> {
             .ok_or_else(|| self.refuse(node, "instanceof needs a resolved Error class"))?;
         self.layout_class(index)?;
         let class_name = self.classes.definitions[index].name.clone();
+        let test = |value: Expr, loc: Loc| {
+            if value.ty() == Type::Caught {
+                Expr::CaughtTest {
+                    value: Box::new(value),
+                    test: "instanceof".into(),
+                    class_name: class_name.clone(),
+                    r#type: Type::Bool,
+                    loc,
+                }
+            } else {
+                Expr::InstanceOf {
+                    value: Box::new(value),
+                    class_name: class_name.clone(),
+                    r#type: Type::Bool,
+                    loc,
+                }
+            }
+        };
         if !self.classes.definitions[index].node.is_nil() {
             let constructor = self.expression(node.right())?;
             if !matches!(constructor.ty(), Type::Classval { .. }) {
                 return Err(self.refuse(node.right(), "instanceof constructor may be undefined"));
             }
+            let value = if value.ty() == Type::Caught {
+                test(value, self.loc(node))
+            } else {
+                value
+            };
             let mut helper = helpers::Helper::new(
                 &format!("instanceof_{class_name}"),
                 vec![value.ty(), constructor.ty()],
@@ -335,11 +369,10 @@ impl Lowerer<'_> {
                 self.loc(node),
             );
             helper.function.body.push(Stmt::Return {
-                value: Some(Expr::InstanceOf {
-                    value: Box::new(helper.read(&helper.param(0))),
-                    class_name,
-                    r#type: Type::Bool,
-                    loc: helper.loc(),
+                value: Some(if value.ty() == Type::Bool {
+                    helper.read(&helper.param(0))
+                } else {
+                    test(helper.read(&helper.param(0)), helper.loc())
                 }),
                 loc: helper.loc(),
             });
@@ -351,12 +384,7 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             })
         } else {
-            Ok(Expr::InstanceOf {
-                value: Box::new(value),
-                class_name,
-                r#type: Type::Bool,
-                loc: self.loc(node),
-            })
+            Ok(test(value, self.loc(node)))
         }
     }
 

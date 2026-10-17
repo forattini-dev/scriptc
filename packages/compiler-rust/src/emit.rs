@@ -1,6 +1,7 @@
 use crate::ir::{Expr, Function, Module, Stmt, Type};
 mod classes;
 mod collections;
+mod exceptions;
 mod functions;
 mod layouts;
 mod process;
@@ -11,7 +12,7 @@ mod values;
 
 fn rust_type(ty: Type, module: &Module) -> String {
     match ty {
-        Type::Dyn => "NativeValue",
+        Type::Dyn | Type::Caught => "NativeValue",
         Type::Promise { .. } => "runtime::JsPromise<NativeValue>",
         ty @ Type::Func { .. } => {
             return format!("runtime::Gc<{}>", functions::type_name(&ty, module));
@@ -89,6 +90,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         classes::definitions(module, &mut output);
         functions::definitions(module, &mut output);
         values::definitions(module, &mut output);
+        exceptions::definitions(module, &mut output);
     }
     storage::definitions(module, &mut output);
     for function in &module.functions {
@@ -139,7 +141,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         output.push_str("}\n");
     }
     if uses_runtime(module) {
-        output.push_str(&format!("\nfn main() {{ runtime::init(); let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{ {}(); runtime::run_event_loop(); }})); clear_module_storage(); clear_function_storage(); let error = outcome.err().map(|payload| {{ let caught = runtime::caught_from_panic(payload); runtime::caught_to_string(&caught).to_string() }}); let failed = runtime::had_unhandled_rejection(); runtime::finish(); if let Some(error) = error {{ eprintln!(\"Uncaught {{error}}\"); std::process::exit(1); }} if failed {{ std::process::exit(1); }} }}\n", module.entry));
+        output.push_str(&format!("\nfn main() {{ runtime::init(); let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{ {}(); runtime::run_event_loop(); }})); clear_module_storage(); clear_function_storage(); let error = outcome.err().map(|payload| {{ let caught = runtime::caught_from_panic(payload); native_exception_string(&caught) }}); let failed = runtime::had_unhandled_rejection(); runtime::finish(); if let Some(error) = error {{ eprintln!(\"Uncaught {{error}}\"); std::process::exit(1); }} if failed {{ std::process::exit(1); }} }}\n", module.entry));
     } else {
         output.push_str(&format!("\nfn main() {{ {}(); }}\n", module.entry));
     }
@@ -199,7 +201,7 @@ pub fn uses_runtime(module: &Module) -> bool {
     }
     fn body(stmts: &[Stmt]) -> bool {
         stmts.iter().any(|stmt| match stmt {
-            Stmt::FieldSet { .. } => true,
+            Stmt::FieldSet { .. } | Stmt::Throw { .. } | Stmt::TryCatch { .. } => true,
             Stmt::RecordKeySet {
                 obj, key, value, ..
             } => expr(obj) || expr(key) || expr(value),
@@ -249,6 +251,9 @@ pub fn uses_runtime(module: &Module) -> bool {
 }
 
 fn expr(value: &Expr, function: &Function, module: &Module) -> String {
+    if let Some(value) = exceptions::expression(value, function, module) {
+        return value;
+    }
     if let Some(code) = process::expression(value, function, module) {
         return code;
     }
@@ -271,7 +276,10 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         return code;
     }
     match value {
-        Expr::DynFrom { .. }
+        Expr::CaughtToDyn { .. }
+        | Expr::CaughtNarrow { .. }
+        | Expr::CaughtTest { .. }
+        | Expr::DynFrom { .. }
         | Expr::DynCheck { .. }
         | Expr::DynObjLit { .. }
         | Expr::DynArrLit { .. }
@@ -497,6 +505,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 r#type,
                 Type::String
                     | Type::Dyn
+                    | Type::Caught
                     | Type::Array { .. }
                     | Type::Map { .. }
                     | Type::Set { .. }
@@ -574,8 +583,26 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
 }
 
 fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut String) {
+    statement_in(stmt, function, module, output, false);
+}
+fn statement_in(
+    stmt: &Stmt,
+    function: &Function,
+    module: &Module,
+    output: &mut String,
+    protected: bool,
+) {
     use std::fmt::Write;
     match stmt {
+        Stmt::Throw { value, .. } => {
+            writeln!(
+                output,
+                "runtime::throw_value({});",
+                values::box_value(&value.ty(), &expr(value, function, module), module)
+            )
+            .unwrap();
+        }
+        Stmt::TryCatch { .. } => exceptions::statement(stmt, function, module, output, protected),
         Stmt::FieldSet {
             obj,
             class_name,
@@ -666,28 +693,28 @@ fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut Str
             writeln!(output, "{};", expr(value, function, module)).unwrap();
         }
         Stmt::Return { value, .. } => {
-            writeln!(
-                output,
-                "return {};",
-                value
-                    .as_ref()
-                    .map(|v| expr(v, function, module))
-                    .unwrap_or_default()
-            )
-            .unwrap();
+            let value = value
+                .as_ref()
+                .map(|v| expr(v, function, module))
+                .unwrap_or_else(|| "()".into());
+            if protected {
+                writeln!(output, "return runtime::Completion::Return({value});").unwrap();
+            } else {
+                writeln!(output, "return {value};").unwrap();
+            }
         }
         Stmt::If {
             cond, then, else_, ..
         } => {
             writeln!(output, "if {} {{", expr(cond, function, module)).unwrap();
             for stmt in then {
-                statement(stmt, function, module, output);
+                statement_in(stmt, function, module, output, protected);
             }
             output.push('}');
             if let Some(other) = else_ {
                 output.push_str(" else {\n");
                 for stmt in other {
-                    statement(stmt, function, module, output);
+                    statement_in(stmt, function, module, output, protected);
                 }
                 output.push('}');
             }
@@ -696,14 +723,14 @@ fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut Str
         Stmt::While { cond, body, .. } => {
             writeln!(output, "while {} {{", expr(cond, function, module)).unwrap();
             for stmt in body {
-                statement(stmt, function, module, output);
+                statement_in(stmt, function, module, output, protected);
             }
             output.push_str("}\n");
         }
         Stmt::Block { body, .. } => {
             output.push_str("{\n");
             for stmt in body {
-                statement(stmt, function, module, output);
+                statement_in(stmt, function, module, output, protected);
             }
             output.push_str("}\n");
         }

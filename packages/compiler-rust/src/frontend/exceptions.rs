@@ -1,0 +1,88 @@
+//! Protected regions retain pending completions; finally may replace them.
+use super::*;
+impl Lowerer<'_> {
+    pub(super) fn try_statement(&mut self, node: Node) -> Result<Vec<Stmt>, String> {
+        let catch = node.catch_clause();
+        let before = self.var_defined.clone();
+        let bindings = self.bindings.clone();
+        let try_body = self.statements(node.try_block().statements())?;
+        self.bindings = bindings.clone();
+        self.var_defined = before.clone();
+        self.var_call_effects();
+        let mut catch_local_id = None;
+        let mut caught_symbol = None;
+        let catch_body = if catch.is_nil() {
+            None
+        } else {
+            let declaration = catch.variable_declaration();
+            if !declaration.is_nil() {
+                if declaration.name().kind() != SyntaxKind::Identifier {
+                    return Err(self.refuse(declaration, "catch destructuring is not ported"));
+                }
+                self.ensure_exception_classes(declaration)?;
+                let symbol = self.symbol(declaration.name());
+                let local = Local {
+                    id: format!("v{}", self.locals.len()),
+                    name: declaration.name().text().into(),
+                    r#type: Type::Caught,
+                    mutable: false,
+                    boxed: false,
+                };
+                catch_local_id = Some(local.id.clone());
+                self.locals.push(local.clone());
+                let alias = Local {
+                    id: format!("v{}", self.locals.len()),
+                    name: "caughtValue".into(),
+                    r#type: Type::Dyn,
+                    mutable: false,
+                    boxed: false,
+                };
+                self.locals.push(alias.clone());
+                self.caught_aliases.insert(symbol, alias);
+                caught_symbol = Some(symbol);
+                self.bindings.insert(symbol, local);
+            }
+            let mut body = Vec::new();
+            if let Some(symbol) = caught_symbol {
+                let local = self.bindings[&symbol].clone();
+                body.push(Stmt::VarDecl {
+                    local_id: self.caught_aliases[&symbol].id.clone(),
+                    init: Expr::CaughtToDyn {
+                        value: Box::new(Expr::VarRef {
+                            local_id: local.id,
+                            r#type: Type::Caught,
+                            loc: self.loc(catch),
+                        }),
+                        r#type: Type::Dyn,
+                        loc: self.loc(catch),
+                    },
+                    loc: self.loc(catch),
+                });
+            }
+            body.extend(self.statements(catch.block().statements())?);
+            Some(body)
+        };
+        if let Some(symbol) = caught_symbol {
+            self.caught_aliases.remove(&symbol);
+        }
+        self.bindings = bindings.clone();
+        self.var_defined = before.clone();
+        // A throw can interrupt any assignment, including a call in either
+        // body. Only facts established by the finalizer survive the region.
+        self.var_call_effects();
+        let finalizer = node.finally_block();
+        let finally_body = if finalizer.is_nil() {
+            None
+        } else {
+            Some(self.statements(finalizer.statements())?)
+        };
+        self.bindings = bindings;
+        Ok(vec![Stmt::TryCatch {
+            try_body,
+            catch_body,
+            catch_local_id,
+            finally_body,
+            loc: self.loc(node),
+        }])
+    }
+}

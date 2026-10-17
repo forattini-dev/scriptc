@@ -10,6 +10,21 @@ impl Module {
 fn statements(body: &[Stmt], visitor: &mut impl FnMut(&Expr)) {
     for statement in body {
         match statement {
+            Stmt::Throw { value, .. } => expression(value, visitor),
+            Stmt::TryCatch {
+                try_body,
+                catch_body,
+                finally_body,
+                ..
+            } => {
+                statements(try_body, visitor);
+                if let Some(body) = catch_body {
+                    statements(body, visitor);
+                }
+                if let Some(body) = finally_body {
+                    statements(body, visitor);
+                }
+            }
             Stmt::FieldSet { obj, value, .. } | Stmt::RecordSet { obj, value, .. } => {
                 expression(obj, visitor);
                 expression(value, visitor);
@@ -49,7 +64,10 @@ fn statements(body: &[Stmt], visitor: &mut impl FnMut(&Expr)) {
 fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
     visitor(value);
     match value {
-        Expr::DynFrom { value, .. }
+        Expr::CaughtToDyn { value, .. }
+        | Expr::CaughtNarrow { value, .. }
+        | Expr::CaughtTest { value, .. }
+        | Expr::DynFrom { value, .. }
         | Expr::DynCheck { value, .. }
         | Expr::DynTest { value, .. }
         | Expr::Upcast { value, .. }

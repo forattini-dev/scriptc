@@ -150,7 +150,7 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
                 "NativeValue::Promise(value)".into(),
                 "if let NativeValue::Promise(v) = value { Some(v.clone()) } else { None }".into(),
             ),
-            Type::Dyn => ("value".into(), "Some(value.clone())".into()),
+            Type::Dyn | Type::Caught => ("value".into(), "Some(value.clone())".into()),
             Type::Undefined => (
                 "{ let _ = value; NativeValue::Undefined }".into(),
                 "if matches!(value, NativeValue::Undefined) { Some(()) } else { None }".into(),
@@ -481,4 +481,12 @@ pub(super) fn promise_expression(
         "NativeValue::Undefined".into()
     };
     Some(format!("native_promise_resolved({value})"))
+}
+
+pub(super) fn box_value(ty: &Type, value: &str, module: &Module) -> String {
+    boxed(ty, value, module)
+}
+
+pub(super) fn checked_value(ty: &Type, value: &str, module: &Module) -> String {
+    checked(ty, value, module)
 }

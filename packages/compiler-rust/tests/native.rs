@@ -173,6 +173,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/callbacks.ts",
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
+        "rust-native-exceptions/control.ts",
+        "rust-native-exceptions/override.ts",
+        "rust-native-exceptions/values.ts",
+        "rust-native-exceptions/errors.ts",
+        "rust-native-exceptions/payloads.ts",
+        "rust-native-exceptions/wrapper.cjs",
         "rust-native-conditional-require/entry.cjs",
         "rust-native-conditional-require/assignments.cjs",
         "rust-native-conditional-require/blocks.cjs",
@@ -1711,4 +1717,138 @@ fn declaration_contracts_validate_js_bodies_and_refuse_ambiguous_abis() {
             assert!(!artifact.exists(), "{name}: {}", artifact.display());
         }
     }
+}
+
+#[test]
+fn inspection_includes_uncalled_bodies_and_keeps_outputs_atomic() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("tsconfig.json"), r#"{"compilerOptions":{"module":"NodeNext","moduleResolution":"NodeNext","target":"ES2022","strict":true,"types":["node"],"skipLibCheck":true}}"#).unwrap();
+    let project = root().join("tests/corpus/rust-native-process/tsconfig.json");
+    let input = temp.path().join("inspect.ts");
+    fs::write(&input, "import { readFileSync as read, existsSync } from 'node:fs'; async function unused() { for (const file of ['x']) { try { await Promise.resolve(read(file, 'utf8')); } catch {} } } console.log(existsSync('.')); ").unwrap();
+    let target = temp.path().join("inventory.json");
+    // Explicit project gives the same bundled declarations as the build command.
+    let result = Command::new(compiler())
+        .arg("inspect")
+        .arg(&input)
+        .arg("--project")
+        .arg(&project)
+        .arg("--out")
+        .arg(&target)
+        .output()
+        .unwrap();
+    success(&result);
+    let report: serde_json::Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["engine"], "none");
+    assert_eq!(
+        report["requirements"]["async-functions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(report["requirements"]["await"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        report["requirements"]["exception-handlers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        report["builtinCalls"]["fs.readFileSync"]["signatureAvailable"],
+        false
+    );
+    assert_eq!(
+        report["builtinCalls"]["fs.existsSync"]["signatureAvailable"],
+        true
+    );
+    assert!(!target.with_extension("rs").exists());
+    let original = fs::read(&target).unwrap();
+    fs::write(&input, "const invalid: number = 'wrong';").unwrap();
+    let result = Command::new(compiler())
+        .arg("inspect")
+        .arg(&input)
+        .arg("--project")
+        .arg(&project)
+        .arg("--out")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("TS2322"));
+    assert_eq!(fs::read(target).unwrap(), original);
+}
+
+#[test]
+fn exception_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "exception-boundary");
+    for source in [
+        "try { throw {}; } catch ({ message }) { console.log(message); }",
+        "try { throw 1; } catch (error) { error = 2; console.log(error); }",
+        "try { throw 1; } catch (error) { const replace = () => { error = 2; }; replace(); }",
+        "class Ordinary {} try { throw new Ordinary(); } catch {}",
+    ] {
+        fs::write(&input, source).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            stderr.contains("SCN1001") || stderr.contains("TS2339"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("panicked"), "{stderr}");
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn uncaught_exceptions_run_finalizers_and_release_native_storage() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "uncaught");
+    fs::write(&input, "const held = { value: 1 }; console.log('before'); try { throw new Error('stop'); } finally { console.log('cleanup', held.value); }").unwrap();
+    let build = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    success(&build);
+    let expected = Command::new(oracle()).arg(&input).output().unwrap();
+    let actual = Command::new(&target)
+        .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+        .output()
+        .unwrap();
+    assert_eq!(expected.status.code(), Some(1));
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    for stderr in [&expected.stderr, &actual.stderr] {
+        assert!(String::from_utf8_lossy(stderr).contains("Error: stop"));
+    }
+    assert!(!String::from_utf8_lossy(&actual.stderr).contains("heap audit"));
+    assert!(!String::from_utf8_lossy(&actual.stderr).contains("panicked"));
 }

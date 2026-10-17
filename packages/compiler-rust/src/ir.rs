@@ -59,6 +59,7 @@ pub enum Type {
     Regex,
     // Owned native tagged value; never an embedded engine handle.
     Dyn,
+    Caught,
     Object {
         #[serde(rename = "className")]
         class_name: String,
@@ -230,6 +231,23 @@ pub struct Local {
     rename_all_fields = "camelCase"
 )]
 pub enum Expr {
+    CaughtToDyn {
+        value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    CaughtNarrow {
+        value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    CaughtTest {
+        value: Box<Expr>,
+        test: String,
+        class_name: String,
+        r#type: Type,
+        loc: Loc,
+    },
     DynFrom {
         value: Box<Expr>,
         r#type: Type,
@@ -546,6 +564,9 @@ pub enum Expr {
 impl Expr {
     pub fn ty(&self) -> Type {
         match self {
+            Self::CaughtToDyn { r#type, .. }
+            | Self::CaughtNarrow { r#type, .. }
+            | Self::CaughtTest { r#type, .. } => r#type.clone(),
             Self::DynFrom { r#type, .. }
             | Self::DynCheck { r#type, .. }
             | Self::DynObjLit { r#type, .. }
@@ -606,6 +627,17 @@ impl Expr {
     rename_all_fields = "camelCase"
 )]
 pub enum Stmt {
+    Throw {
+        value: Expr,
+        loc: Loc,
+    },
+    TryCatch {
+        try_body: Vec<Stmt>,
+        catch_body: Option<Vec<Stmt>>,
+        catch_local_id: Option<String>,
+        finally_body: Option<Vec<Stmt>>,
+        loc: Loc,
+    },
     FieldSet {
         obj: Expr,
         class_name: String,
@@ -800,7 +832,7 @@ impl Module {
                 params.iter().all(|p| self.valid_type(p.clone(), active))
                     && (*ret == Type::Void || self.valid_type(*ret, active))
             }
-            Type::Void | Type::Null | Type::Undefined => false,
+            Type::Void | Type::Null | Type::Undefined | Type::Caught => false,
             Type::Array { elem } => {
                 !matches!(*elem, Type::Func { .. }) && self.valid_type(*elem, active)
             }
@@ -952,7 +984,8 @@ fn validate_function(
     }
     let mut locals = HashMap::new();
     for local in &f.locals {
-        let supported = module.valid_type(local.r#type.clone(), &mut vec![]);
+        let supported =
+            local.r#type == Type::Caught || module.valid_type(local.r#type.clone(), &mut vec![]);
         if !supported
             || module.global(&local.id).is_some()
             || locals.insert(local.id.as_str(), local).is_some()
@@ -962,6 +995,9 @@ fn validate_function(
     }
     let mut parameter_ids = std::collections::HashSet::new();
     for param in f.params.iter().chain(f.captures.iter().flatten()) {
+        if param.r#type == Type::Caught {
+            return Err("caught slots cannot cross the function ABI".into());
+        }
         if !parameter_ids.insert(&param.local_id)
             || !locals
                 .get(param.local_id.as_str())
@@ -983,6 +1019,46 @@ fn validate_function(
         module: &Module,
     ) -> Result<(), String> {
         match e {
+            Expr::CaughtToDyn {
+                value,
+                r#type: Type::Dyn,
+                ..
+            } => {
+                expr(value, locals, initialized, functions, module)?;
+                if value.ty() != Type::Caught {
+                    return Err("caught conversion needs caught storage".into());
+                }
+                Ok(())
+            }
+            Expr::CaughtNarrow { value, r#type, .. } => {
+                expr(value, locals, initialized, functions, module)?;
+                if value.ty() != Type::Caught
+                    || !matches!(
+                        r#type,
+                        Type::F64 | Type::String | Type::Bool | Type::Object { .. }
+                    )
+                    || !module.valid_type(r#type.clone(), &mut vec![])
+                {
+                    return Err("invalid caught extraction".into());
+                }
+                Ok(())
+            }
+            Expr::CaughtTest {
+                value,
+                test,
+                class_name,
+                r#type: Type::Bool,
+                ..
+            } => {
+                expr(value, locals, initialized, functions, module)?;
+                if value.ty() != Type::Caught
+                    || test != "instanceof"
+                    || module.class(class_name).is_none()
+                {
+                    return Err("invalid caught hierarchy test".into());
+                }
+                Ok(())
+            }
             Expr::DynFrom { value, r#type, .. } => {
                 if contains_set(&value.ty(), &module.records, &module.unions) {
                     return Err("Set erasure is not in the shared native value contract".into());
@@ -998,7 +1074,7 @@ fn validate_function(
                 if !matches!(&**value, Expr::UnitLit { .. }) {
                     expr(value, locals, initialized, functions, module)?;
                 }
-                if *r#type == Type::Dyn && value.ty() != Type::Void {
+                if *r#type == Type::Dyn && !matches!(value.ty(), Type::Void | Type::Caught) {
                     Ok(())
                 } else {
                     Err("invalid native value boxing".into())
@@ -1961,6 +2037,64 @@ fn validate_function(
     ) -> Result<(), String> {
         for stmt in stmts {
             match stmt {
+                Stmt::Throw { value, .. } => {
+                    expr(value, locals, initialized, functions, module)?;
+                    if matches!(value.ty(), Type::Void) {
+                        return Err("void throw payload".into());
+                    }
+                }
+                Stmt::TryCatch {
+                    try_body,
+                    catch_body,
+                    catch_local_id,
+                    finally_body,
+                    ..
+                } => {
+                    if catch_body.is_none() && (catch_local_id.is_some() || finally_body.is_none())
+                    {
+                        return Err("native try needs a handler or finalizer".into());
+                    }
+                    body(
+                        try_body,
+                        locals,
+                        &mut initialized.clone(),
+                        functions,
+                        return_type.clone(),
+                        module,
+                        function,
+                    )?;
+                    if let Some(region) = catch_body {
+                        let mut caught_initialized = initialized.clone();
+                        if let Some(id) = catch_local_id
+                            && (!locals
+                                .get(id.as_str())
+                                .is_some_and(|l| l.r#type == Type::Caught)
+                                || !caught_initialized.insert(id.clone()))
+                        {
+                            return Err("catch binding needs a fresh caught local".into());
+                        }
+                        body(
+                            region,
+                            locals,
+                            &mut caught_initialized,
+                            functions,
+                            return_type.clone(),
+                            module,
+                            function,
+                        )?;
+                    }
+                    if let Some(region) = finally_body {
+                        body(
+                            region,
+                            locals,
+                            &mut initialized.clone(),
+                            functions,
+                            return_type.clone(),
+                            module,
+                            function,
+                        )?;
+                    }
+                }
                 Stmt::FieldSet {
                     obj,
                     class_name,
@@ -2153,7 +2287,19 @@ fn validate_function(
 
 pub fn always_returns(stmts: &[Stmt]) -> bool {
     stmts.iter().any(|stmt| match stmt {
-        Stmt::Return { .. } => true,
+        Stmt::Return { .. } | Stmt::Throw { .. } => true,
+        Stmt::TryCatch {
+            try_body,
+            catch_body,
+            finally_body,
+            ..
+        } => {
+            finally_body
+                .as_ref()
+                .is_some_and(|body| always_returns(body))
+                || (always_returns(try_body)
+                    && catch_body.as_ref().is_none_or(|body| always_returns(body)))
+        }
         Stmt::Block { body, .. } => always_returns(body),
         Stmt::If {
             then,
@@ -3667,5 +3813,87 @@ mod tests {
             }],
         };
         assert!(validate(&m).is_err());
+    }
+    #[test]
+    fn protected_regions_validate_payload_slots_and_finally_completion() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        m.functions[0].locals.clear();
+        m.functions[0].params.clear();
+        m.functions[0].return_type = Type::Void;
+        m.functions[0].body = vec![Stmt::TryCatch {
+            try_body: vec![],
+            catch_body: None,
+            catch_local_id: None,
+            finally_body: None,
+            loc: loc.clone(),
+        }];
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "native try needs a handler or finalizer"
+        );
+        if let Stmt::TryCatch {
+            catch_body,
+            catch_local_id,
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *catch_body = Some(vec![]);
+            *catch_local_id = Some("missing".into());
+        }
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "catch binding needs a fresh caught local"
+        );
+        m.functions[0].locals.push(Local {
+            id: "missing".into(),
+            name: "error".into(),
+            r#type: Type::Caught,
+            mutable: false,
+            boxed: false,
+        });
+        assert!(validate(&m).is_ok());
+        m.functions.push(Function {
+            name: "invalid_caught_abi".into(),
+            params: vec![Param {
+                local_id: "payload".into(),
+                name: "payload".into(),
+                r#type: Type::Caught,
+            }],
+            captures: None,
+            return_type: Type::Void,
+            locals: vec![Local {
+                id: "payload".into(),
+                name: "payload".into(),
+                r#type: Type::Caught,
+                mutable: false,
+                boxed: false,
+            }],
+            body: vec![],
+            loc: loc.clone(),
+        });
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "caught slots cannot cross the function ABI"
+        );
+        m.functions.pop();
+        let returned = || Stmt::Return {
+            value: None,
+            loc: loc.clone(),
+        };
+        assert!(always_returns(&[Stmt::TryCatch {
+            try_body: vec![],
+            catch_body: None,
+            catch_local_id: None,
+            finally_body: Some(vec![returned()]),
+            loc: loc.clone()
+        }]));
+        assert!(!always_returns(&[Stmt::TryCatch {
+            try_body: vec![returned()],
+            catch_body: Some(vec![]),
+            catch_local_id: None,
+            finally_body: None,
+            loc
+        }]));
     }
 }

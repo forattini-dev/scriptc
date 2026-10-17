@@ -23,8 +23,10 @@ mod commonjs;
 mod data_tables;
 mod declarations;
 mod enums;
+mod exceptions;
 mod functions;
 mod helpers;
+pub mod inspect;
 mod json_modules;
 mod modules;
 mod parameters;
@@ -125,6 +127,7 @@ struct Lowerer<'a> {
     types: HashMap<TypeId, Option<Type>>,
     outer: Vec<HashMap<u32, Local>>,
     captures: Vec<(u32, Param)>,
+    caught_aliases: HashMap<u32, Local>,
     lifted: Vec<Function>,
     next_closure: usize,
     helpers: HashMap<(String, Vec<Type>, Type), String>,
@@ -163,6 +166,7 @@ impl<'a> Lowerer<'a> {
             types: HashMap::new(),
             outer: Vec::new(),
             captures: Vec::new(),
+            caught_aliases: HashMap::new(),
             lifted: Vec::new(),
             next_closure: 0,
             helpers: HashMap::new(),
@@ -571,6 +575,19 @@ impl<'a> Lowerer<'a> {
                 return Ok(vec![]);
             }
             SyntaxKind::ImportDeclaration | SyntaxKind::ExportDeclaration => return Ok(vec![]),
+            SyntaxKind::TryStatement => return self.try_statement(node),
+            SyntaxKind::ThrowStatement => {
+                let value = self.expression(node.expression())?;
+                let value = if matches!(value.ty(), Type::Null | Type::Undefined) {
+                    self.coerce(value, Type::Dyn, node)?
+                } else {
+                    value
+                };
+                if value.ty() == Type::Void {
+                    return Err(self.refuse(node, "void throw payload is not ported"));
+                }
+                Stmt::Throw { value, loc }
+            }
             SyntaxKind::ReturnStatement => {
                 let ret = self
                     .return_type
@@ -699,6 +716,11 @@ impl<'a> Lowerer<'a> {
                         ));
                     }
                     let local = self.binding(expression.left())?;
+                    if local.r#type == Type::Caught || self.caught_aliases.contains_key(&symbol) {
+                        return Err(
+                            self.refuse(expression, "catch binding reassignment is not ported")
+                        );
+                    }
                     let symbol = self.symbol(expression.left());
                     let target = self
                         .var_types

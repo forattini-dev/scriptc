@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "primaryTarget": {
+    "repository": "https://github.com/reddb-io/redskilled",
+    "revision": "dcc06b9c7839b4934d6dfa6efd3beedb68b6382d",
+    "entry": "apps/release/src/cli.ts",
+    "binary": "red-skills-release"
+  },
+  "selection": {
+    "basis": "smallest observed static linked module plan in native inspect; includes uncalled function bodies",
+    "baselineCompilerCommit": "7681acfe185ad944cd2eacd6dd4a9b9ac817fa91",
+    "linkedModuleCounts": {
+      "red-skills-release": 158,
+      "red-dev": 265,
+      "redskilled": 852
+    },
+    "warning": "Counts describe source graphs, not supported-code coverage, remaining errors, or completion estimates."
+  },
+  "constraints": {
+    "frontend": "Rust",
+    "ir": "scriptc-owned",
+    "backend": "Rust",
+    "engine": false,
+    "compilerFallback": false,
+    "modifyApplicationToMakeBuildPass": false
+  },
+  "milestones": [
+    {
+      "id": "whole-target-inventory",
+      "status": "implemented",
+      "evidence": "scriptc inspect; distinguishes linkedSources from all resolver sources; records prerequisites and direct builtin import calls"
+    },
+    {
+      "id": "protected-completions",
+      "status": "partial",
+      "evidence": "rust-native-exceptions fixtures: throw, bindingless/bound catch, nested finally, return/throw replacement, error hierarchy and escaped value captures",
+      "remaining": [
+        "catch reassignment/destructuring",
+        "abrupt loop targets and async suspension",
+        "resource-disposal suppression"
+      ]
+    },
+    {
+      "id": "object-and-class-model",
+      "status": "required",
+      "scope": [
+        "ordinary class layouts, constructors and this",
+        "methods and accessors",
+        "prototype/instanceof identity",
+        "dependency object operations"
+      ]
+    },
+    {
+      "id": "iteration-and-bindings",
+      "status": "required",
+      "scope": [
+        "source loops and switch",
+        "iterator/generator state",
+        "destructuring and rest/spread",
+        "collection operations used by the linked sources"
+      ]
+    },
+    {
+      "id": "async-completions",
+      "status": "required",
+      "scope": [
+        "async functions and await",
+        "rejection and try/finally across suspension",
+        "top-level await and entry completion",
+        "asynchronous Node interfaces"
+      ]
+    },
+    {
+      "id": "application-runtime",
+      "status": "required",
+      "scope": [
+        "process argv/stdout/stderr/exitCode and import.meta entry guard",
+        "JSON and Date behavior used by release",
+        "sync/async fs operations",
+        "subprocess execution and crypto operations",
+        "GitHub HTTP behavior and dependency contracts"
+      ]
+    },
+    {
+      "id": "original-entry-binary",
+      "status": "pending",
+      "acceptance": [
+        "unmodified pinned entry and dependencies compile to a native binary",
+        "no source interpreter, engine, TypeScript or Go fallback",
+        "native and reference Rust regression gates remain enabled",
+        "safe isolated application scenarios match Node; actual provisioning/release actions are not executed"
+      ]
+    }
+  ],
+  "reportingRule": "A new first diagnostic is an observation, not an application success. The primary milestone remains pending until the original entry emits a binary and its isolated scenarios pass."
+}

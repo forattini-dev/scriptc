@@ -151,7 +151,17 @@ impl Lowerer<'_> {
         let saved_this = self.constructor_this.take();
         let saved_var_types = self.var_types.clone();
         let saved_var_defined = std::mem::take(&mut self.var_defined);
-        self.outer.push(saved_bindings.clone());
+        let mut captured_scope = saved_bindings.clone();
+        for (symbol, local) in &mut captured_scope {
+            if local.r#type == Type::Caught {
+                *local = self
+                    .caught_aliases
+                    .get(symbol)
+                    .expect("catch snapshot")
+                    .clone();
+            }
+        }
+        self.outer.push(captured_scope);
         let nodes = node.parameters().into_iter().collect::<Vec<_>>();
         let mut params = Vec::new();
         let mut body = Vec::new();
@@ -212,13 +222,28 @@ impl Lowerer<'_> {
         self.outer.pop();
         let mut sources = Vec::new();
         for (symbol, _) in captures {
-            let source = self.resolve_binding(symbol, node)?;
+            let caught = self
+                .bindings
+                .get(&symbol)
+                .is_some_and(|local| local.r#type == Type::Caught);
+            let source = if caught {
+                self.caught_aliases[&symbol].clone()
+            } else {
+                self.resolve_binding(symbol, node)?
+            };
             self.locals
                 .iter_mut()
                 .find(|l| l.id == source.id)
                 .expect("binding local")
                 .boxed = true;
-            self.bindings.get_mut(&symbol).expect("binding").boxed = true;
+            if caught {
+                self.caught_aliases
+                    .get_mut(&symbol)
+                    .expect("catch snapshot")
+                    .boxed = true;
+            } else {
+                self.bindings.get_mut(&symbol).expect("binding").boxed = true;
+            }
             sources.push(source.id);
         }
         self.lifted.push(function);

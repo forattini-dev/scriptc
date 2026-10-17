@@ -41,6 +41,7 @@ pub(super) fn require_calls(
         direct: bool,
     ) -> Result<(), String> {
         if node.kind() == SyntaxKind::VariableDeclaration
+            && node.parent().kind() == SyntaxKind::VariableDeclarationList
             && node.name().kind() == SyntaxKind::Identifier
             && matches!(node.name().text(), "exports" | "module" | "require")
             && (!node
