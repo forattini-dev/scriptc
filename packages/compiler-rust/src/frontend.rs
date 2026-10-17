@@ -30,6 +30,7 @@ mod promises;
 mod property_keys;
 mod regex;
 mod storage;
+mod strings;
 mod tuples;
 mod types;
 mod union_literals;
@@ -836,6 +837,7 @@ impl<'a> Lowerer<'a> {
                     loc,
                 })
             }
+            SyntaxKind::TemplateExpression => self.template_expression(node),
             SyntaxKind::StringLiteral | SyntaxKind::NoSubstitutionTemplateLiteral => {
                 let bytes = source_frontend::scanner_util::go_string_bytes(node.text());
                 let value = std::str::from_utf8(&bytes)
@@ -975,6 +977,11 @@ impl<'a> Lowerer<'a> {
                         .or_else(|| self.ty(member.expression()).ok());
                     if matches!(receiver_type, Some(Type::Array { .. })) {
                         return self.array_call(node);
+                    }
+                    if matches!(receiver_type, Some(Type::Record { shape_id }) if self.records[shape_id].tuple)
+                        && member.name().text() == "join"
+                    {
+                        return self.array_join(node);
                     }
                     if matches!(receiver_type, Some(Type::Map { .. })) {
                         let receiver = self.expression(member.expression())?;

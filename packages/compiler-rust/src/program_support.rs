@@ -9,6 +9,10 @@ fn js_number(value: f64) -> String {
     }
 }
 
+fn js_string_number(value: f64) -> String {
+    if value == 0.0 { "0".into() } else { js_number(value) }
+}
+
 fn js_pow(base: f64, exponent: f64) -> f64 {
     // ECMAScript exponentiation differs from powf for ±1 ** ±Infinity.
     if exponent.is_nan() {

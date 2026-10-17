@@ -123,6 +123,7 @@ fn checked(ty: &Type, value: &str, module: &Module) -> String {
 }
 
 pub(super) fn definitions(module: &Module, out: &mut String) {
+    out.push_str("fn native_value_string(value: NativeValue) -> String { match value { NativeValue::Undefined => \"undefined\".into(), NativeValue::Null => \"null\".into(), NativeValue::Number(v) => js_string_number(v), NativeValue::Boolean(v) => v.to_string(), NativeValue::String(v) => v, _ => runtime::throw_type_error(\"scriptc: object string conversion requires native ToPrimitive support\".into()) } }\n");
     out.push_str(include_str!("../map_values_support.rs"));
     out.push_str(include_str!("../promise_values_support.rs"));
     let types = types(module);

@@ -358,6 +358,17 @@ pub enum Expr {
         r#type: Type,
         loc: Loc,
     },
+    StrConcat {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    ToString {
+        operand: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     UnionEq {
         union_id: String,
         negated: bool,
@@ -506,6 +517,8 @@ impl Expr {
             | Self::CallValue { r#type, .. }
             | Self::Logical { r#type, .. }
             | Self::StrEq { r#type, .. }
+            | Self::StrConcat { r#type, .. }
+            | Self::ToString { r#type, .. }
             | Self::UnionEq { r#type, .. }
             | Self::RecordLit { r#type, .. }
             | Self::RecordGet { r#type, .. }
@@ -1354,6 +1367,33 @@ fn validate_function(
                     || !module.lookup_result(value, r#type)
                 {
                     return Err("invalid keyed read".into());
+                }
+                Ok(())
+            }
+            Expr::StrConcat {
+                left,
+                right,
+                r#type,
+                ..
+            } => {
+                expr(left, locals, initialized, functions, module)?;
+                expr(right, locals, initialized, functions, module)?;
+                if left.ty() != Type::String
+                    || right.ty() != Type::String
+                    || *r#type != Type::String
+                {
+                    return Err("invalid string concatenation".into());
+                }
+                Ok(())
+            }
+            Expr::ToString {
+                operand, r#type, ..
+            } => {
+                expr(operand, locals, initialized, functions, module)?;
+                if !matches!(operand.ty(), Type::F64 | Type::Bool | Type::Dyn)
+                    || *r#type != Type::String
+                {
+                    return Err("invalid native string conversion".into());
                 }
                 Ok(())
             }
@@ -3099,6 +3139,82 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn string_operations_validate_and_visit_their_operands() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        module.functions.truncate(1);
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::StrConcat {
+                left: Box::new(Expr::StrLit {
+                    value: "value: ".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                }),
+                right: Box::new(Expr::ToString {
+                    operand: Box::new(Expr::NumLit {
+                        value: -0.0,
+                        spelling: None,
+                        r#type: Type::F64,
+                        loc: loc.clone(),
+                    }),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                }),
+                r#type: Type::String,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert!(validate(&module).is_ok());
+        let mut types = Vec::new();
+        module.visit_expressions(&mut |e| types.push(e.ty()));
+        assert_eq!(
+            types,
+            vec![Type::String, Type::String, Type::String, Type::F64]
+        );
+        let wire = serde_json::to_value(&module).unwrap();
+        assert_eq!(wire["functions"][0]["body"][0]["expr"]["kind"], "strConcat");
+        assert_eq!(
+            wire["functions"][0]["body"][0]["expr"]["right"]["kind"],
+            "toString"
+        );
+        if let Stmt::Expression {
+            expr: Expr::StrConcat { right, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        {
+            **right = Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc: loc.clone(),
+            };
+        }
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "invalid string concatenation"
+        );
+        if let Stmt::Expression {
+            expr: Expr::StrConcat { right, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        {
+            **right = Expr::ToString {
+                operand: Box::new(Expr::StrLit {
+                    value: "already a string".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                }),
+                r#type: Type::String,
+                loc,
+            };
+        }
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "invalid native string conversion"
+        );
     }
 
     #[test]

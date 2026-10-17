@@ -27,6 +27,9 @@ impl Lowerer<'_> {
         if member.name().text() == "map" {
             return self.array_map(node, None);
         }
+        if member.name().text() == "join" {
+            return self.array_join(node);
+        }
         if member.name().text() != "push" {
             return Err(self.refuse(node, "array method is not ported"));
         }

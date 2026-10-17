@@ -172,6 +172,8 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Expr::UnionEq { left, right, .. }
             | Expr::Logical { left, right, .. }
             | Expr::StrEq { left, right, .. } => expr(left) || expr(right),
+            Expr::StrConcat { left, right, .. } => expr(left) || expr(right),
+            Expr::ToString { operand, .. } => expr(operand),
             Expr::Unary { operand, .. } => expr(operand),
             Expr::Call { args, .. } | Expr::Intrinsic { args, .. } => args.iter().any(expr),
             Expr::Closure { .. } => false,
@@ -323,6 +325,20 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 expr(left, function, module),
                 expr(right, function, module)
             )
+        }
+        Expr::StrConcat { left, right, .. } => format!(
+            "{{ let mut left = {}; let right = {}; left.push_str(&right); left }}",
+            expr(left, function, module),
+            expr(right, function, module)
+        ),
+        Expr::ToString { operand, .. } => {
+            let value = expr(operand, function, module);
+            match operand.ty() {
+                Type::F64 => format!("js_string_number({value})"),
+                Type::Bool => format!("({value}).to_string()"),
+                Type::Dyn => format!("native_value_string({value})"),
+                _ => unreachable!("IR validated"),
+            }
         }
         Expr::UnitLit { .. } => "()".into(),
         Expr::RecordLit {

@@ -177,10 +177,18 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                 };
                 if constructors.len() == 1 {
                     let signature = constructors[0];
+                    // A polymorphic declaration has one implementation ABI.
+                    // Keep its payloads in owning native slots, just as for
+                    // generic exported functions, rather than specializing
+                    // the implementation to one consumer's type arguments.
+                    let erased = !lowerer.checker.sig(signature).type_parameters.is_empty();
                     let parameters = lowerer.checker.sig(signature).parameters.clone();
                     let params = parameters
                         .into_iter()
                         .map(|p| {
+                            if erased {
+                                return Some(Type::Dyn);
+                            }
                             let id = lowerer.checker.get_type_of_symbol(p);
                             lowerer.type_id(id)
                         })
@@ -201,7 +209,14 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                             continue;
                         }
                         let id = lowerer.checker.get_type_of_symbol(property);
-                        fields.push((name, lowerer.type_id(id)));
+                        fields.push((
+                            name,
+                            if erased {
+                                Some(Type::Dyn)
+                            } else {
+                                lowerer.type_id(id)
+                            },
+                        ));
                     }
                     hint.class = Some(ClassHint { params, fields });
                 } else if !signatures.is_empty() {

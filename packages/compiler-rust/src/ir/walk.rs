@@ -60,10 +60,12 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
         | Expr::UnionIsTag { value, .. }
         | Expr::FieldGet { obj: value, .. }
         | Expr::RecordGet { obj: value, .. }
-        | Expr::Unary { operand: value, .. } => expression(value, visitor),
+        | Expr::Unary { operand: value, .. }
+        | Expr::ToString { operand: value, .. } => expression(value, visitor),
         Expr::DynScalarEq { left, right, .. }
         | Expr::Logical { left, right, .. }
         | Expr::StrEq { left, right, .. }
+        | Expr::StrConcat { left, right, .. }
         | Expr::UnionEq { left, right, .. }
         | Expr::Bin { left, right, .. }
         | Expr::DynKeyGet {

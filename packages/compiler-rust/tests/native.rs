@@ -124,6 +124,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-promises/resolve-only.ts",
         "rust-native-union-literals/contracts.ts",
         "rust-native-union-literals/checked.ts",
+        "rust-native-generic-errors/contracts.ts",
+        "rust-native-strings/templates.ts",
+        "rust-native-strings/joins.ts",
+        "rust-native-strings/order.ts",
     ]
     .into_iter()
     .enumerate()
@@ -266,6 +270,65 @@ fn callable_and_compiled_enum_boundaries_preserve_previous_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve", "{name}");
         }
     }
+}
+
+#[test]
+fn template_boundaries_preserve_previous_native_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "strings");
+    for source in [
+        "console.log(`${{ value: 1 }}`);",
+        "const value = { toString: () => 'effect' }; console.log(`${value}`);",
+        "console.log([{ value: 1 }].join(','));",
+        "function tag(parts: TemplateStringsArray): string { return 'tag'; } console.log(tag`x`);",
+        "const values = ['x']; console.log(values.join(...values));",
+        "console.log([1, , 3].join(','));",
+    ] {
+        fs::write(&input, source).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+    fs::write(&input, format!("import {{ ResponseError }} from {:?}; new ResponseError<{{answer: number}}>({{url: '/'}}, {{data: 'wrong', errors: []}});", root().join("tests/corpus/rust-native-generic-errors/library.js").to_string_lossy().replace('\\', "/"))).unwrap();
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .arg("--out")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("TS2322"),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(fs::read_to_string(target).unwrap(), "preserve");
 }
 
 #[test]
