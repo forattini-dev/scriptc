@@ -48,8 +48,15 @@ impl Lowerer<'_> {
         let result = self
             .intern_union(fields.iter().map(|f| f.r#type.clone()).collect())
             .ok_or_else(|| self.refuse(node, "common union field has no native representation"))?;
+        // The field is part of the operation identity. Two members can have
+        // identical parameter/result types and still read different slots.
+        let member = name
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
         let mut helper = helpers::Helper::new(
-            "union_member",
+            &format!("union_member_{member}"),
             vec![obj.ty()],
             result.clone(),
             self.loc(node),

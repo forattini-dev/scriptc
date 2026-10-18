@@ -47,6 +47,7 @@ mod symbols;
 mod tuples;
 mod types;
 mod union_literals;
+mod union_spreads;
 mod values;
 mod vars;
 

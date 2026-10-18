@@ -174,6 +174,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
         "rust-native-spreads/providers.ts",
+        "rust-native-union-spreads/providers.ts",
+        "rust-native-union-spreads/order.ts",
+        "rust-native-union-spreads/identity.ts",
+        "rust-native-union-spreads/keys.ts",
+        "rust-native-union-spreads/collapsed.ts",
+        "rust-native-union-spreads/contracts.ts",
         "rust-native-record-build/builders.ts",
         "rust-native-record-build/order.ts",
         "rust-native-record-build/identity.ts",
@@ -2219,6 +2225,10 @@ fn object_spread_boundaries_preserve_artifacts() {
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "spread-boundary");
     for source in [
+        "type S = { kind: 'a'; value: string } | { kind: 'b'; count: number }; type O = S & { flag: boolean }; function f(s: S): O { return { flag: true, ...s }; } console.log(f({kind:'a',value:'x'}).kind);",
+        "type S = { kind: 'a'; value: string } | { kind: 'b'; count: number }; type O = S & { flag: boolean }; function f(s: S): O { return { ...s, ...{flag: true} }; } console.log(f({kind:'b',count:1}).kind);",
+        "type S = { kind: 'a'; value: string } | { kind: 'b'; count: number }; type O = { kind: 'a'; value: string; f?: boolean } | { kind: 'a'; value: string; g?: string } | { kind: 'b'; count: number; f?: boolean }; function f(s: S): O { return { ...s }; } console.log(f({kind:'a',value:'x'}).kind);",
+        "type S = { kind: 'a'; value: string } | { kind: 'b'; count: number }; type O = { kind: 'a'; value: number } | { kind: 'b'; count: number; value: number }; function f(s: S): O { return { ...s, value: 2 }; } console.log(f({kind:'a',value:'x'}).kind);",
         "const flag = false; const result: { a: string } = { ...(flag ? { a: 'a' } : ({} as { a: string })) }; console.log(result.a);",
         "function copy(source: { a: string; extra: string }): { a: string } { return { ...source }; } console.log(copy({ a: 'a', extra: 'x' }).a);",
         "function copy(source: Record<string, string>) { return { a: 'a', ...source }; } console.log(copy({ b: 'b' }).a);",

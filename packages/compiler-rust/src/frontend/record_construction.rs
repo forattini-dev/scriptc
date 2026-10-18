@@ -13,7 +13,7 @@ struct Plan {
 }
 
 impl Lowerer<'_> {
-    fn construction_local(&mut self, ty: Type, mutable: bool) -> Local {
+    pub(super) fn construction_local(&mut self, ty: Type, mutable: bool) -> Local {
         let local = Local {
             id: format!("construct{}", self.locals.len()),
             name: "record construction".into(),
@@ -24,7 +24,7 @@ impl Lowerer<'_> {
         self.locals.push(local.clone());
         local
     }
-    fn construction_read(&self, local: &Local, node: Node) -> Expr {
+    pub(super) fn construction_read(&self, local: &Local, node: Node) -> Expr {
         Expr::VarRef {
             local_id: local.id.clone(),
             r#type: local.r#type.clone(),
@@ -47,6 +47,16 @@ impl Lowerer<'_> {
         node: Node,
         target: Type,
         properties: Vec<Node>,
+    ) -> Result<Expr, String> {
+        self.construct_record_from(node, target, properties, None)
+    }
+
+    pub(super) fn construct_record_from(
+        &mut self,
+        node: Node,
+        target: Type,
+        properties: Vec<Node>,
+        source: Option<(Node, Expr)>,
     ) -> Result<Expr, String> {
         let Type::Record { shape_id } = target else {
             unreachable!()
@@ -105,6 +115,11 @@ impl Lowerer<'_> {
         }
         let plan = Plan { slots, keys };
         let mut definite = HashSet::new();
+        if let Some((source, value)) = source {
+            let (body, written) = self.construction_copy_value(source, &plan, value)?;
+            stmts.extend(body);
+            definite.extend(written);
+        }
         for property in properties {
             let (body, written) = self.construction_property(property, &plan)?;
             stmts.extend(body);
@@ -302,6 +317,14 @@ impl Lowerer<'_> {
         plan: &Plan,
     ) -> Result<(Vec<Stmt>, HashSet<String>), String> {
         let value = self.expression(source)?;
+        self.construction_copy_value(source, plan, value)
+    }
+    fn construction_copy_value(
+        &mut self,
+        source: Node,
+        plan: &Plan,
+        value: Expr,
+    ) -> Result<(Vec<Stmt>, HashSet<String>), String> {
         let Type::Record { shape_id } = value.ty() else {
             return Err(self.refuse(source, "spread source needs one closed native data record"));
         };

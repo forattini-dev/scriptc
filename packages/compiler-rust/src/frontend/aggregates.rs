@@ -522,6 +522,9 @@ impl Lowerer<'_> {
                     .cloned()
                     .collect::<Vec<_>>();
                 if matches.len() != 1 {
+                    if let Some(value) = self.union_spread(node, target.clone())? {
+                        return Ok(value);
+                    }
                     return Err(
                         self.refuse(node, "object literal needs one assignable native union arm")
                     );
