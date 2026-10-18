@@ -118,7 +118,7 @@
         "Keep function identity and module live bindings through aliases and destructuring.",
         "For the gh Provider case preserve an absent bin property versus a present undefined value, evaluate the condition once, and retain spread/property precedence and observable own-key order. Do not rewrite optional spreads to unconditional undefined fields."
       ],
-      "evidence": "Inline data-literal and conditional spreads use retained seqExpr/if/recordSet operations, including contextual Provider unions and public JS contracts. Six rust-native-spreads fixtures cover order, skipped branches, exceptions, aliases, keys and omission versus undefined. Typed array rest uses the retained rest:true/restAbi:array function type and fresh call-site packing, including aliases, captured/returned callbacks, public JS contracts, erased calls, nullable callee snapshots and bind of a fixed prefix. Six rust-native-array-rest fixtures cover these contracts against Node and both Rust backends. Original red-dev passes ghInstaller/installer rest parameters and stops at manifest.ts:406 aptrepo ({ kind: aptrepo, ...spec }); required fields supplied by an arbitrary source object remain unported. Generic source rest, instance/constructor rest, tuple-rest source binding, iterable call spreads, fixed builtin callback adaptation and binding rest elements retain explicit boundaries."
+      "evidence": "Inline data-literal and conditional spreads use retained seqExpr/if/recordSet operations, including contextual Provider unions and public JS contracts. Six rust-native-spreads fixtures cover order, skipped branches, exceptions, aliases, keys and omission versus undefined. Typed array rest uses the retained rest:true/restAbi:array function type and fresh call-site packing, including aliases, captured/returned callbacks, public JS contracts, erased calls, nullable callee snapshots and bind of a fixed prefix. Six rust-native-array-rest fixtures cover these contracts against Node and both Rust backends. Closed typed record sources now supply required fields through a private construction plan with a definite-write proof and ordered key/value snapshots. record.cloneOwn materializes a fresh, complete record without exposing partial typed storage. Six rust-native-record-build programs compare copying, order, own-key presence, callback/array/record identity, exceptions and public JS contracts with Node and both Rust backends. Original application retries are recorded with the checkpoint evidence; a later diagnostic is not an application acceptance milestone. Generic source rest, instance/constructor rest, tuple-rest source binding, iterable call spreads, fixed builtin callback adaptation and binding rest elements retain explicit boundaries."
     },
     {
       "id": "objects-and-values",
@@ -285,11 +285,11 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "088ddd2cd0745949aceaee317d2728bcf694e808",
-    "after": "typed array-rest ABI; native-reddb-array-rest-v62 compile-only attempts",
+    "compilerSourceBaseCommit": "6a5b96d865ac81fc7736c4ac94f5366a04ed6b35",
+    "after": "closed record construction; native-reddb-record-build-v63 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "src/manifest.ts:406 aptrepo object spread supplies required fields from spec",
+    "red-dev": "src/manifest.ts:439 sudoProvider spreads ProviderSpec into Provider; target union selection needs to preserve the source variant and inherited discriminator",
     "completedOriginalApplicationBinaries": 0
   }
 }

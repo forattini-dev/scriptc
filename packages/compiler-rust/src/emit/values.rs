@@ -127,6 +127,7 @@ fn checked(ty: &Type, value: &str, module: &Module) -> String {
 }
 
 pub(super) fn definitions(module: &Module, out: &mut String) {
+    record_construction::definitions(module, out);
     out.push_str("fn native_value_string(value: NativeValue) -> String { match value { NativeValue::Undefined => \"undefined\".into(), NativeValue::Null => \"null\".into(), NativeValue::Number(v) => js_string_number(v), NativeValue::Boolean(v) => v.to_string(), NativeValue::String(v) => v, NativeValue::Symbol(_) => runtime::throw_type_error(\"Cannot convert a Symbol value to a string\".into()), _ => runtime::throw_type_error(\"scriptc: object string conversion requires native ToPrimitive support\".into()) } }\n");
     out.push_str(include_str!("../map_values_support.rs"));
     out.push_str(include_str!("../promise_values_support.rs"));
@@ -235,6 +236,8 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
     if inherited || specialized { runtime::throw_type_error(format!("scriptc: native erased {} member {} is not supported yet", kind, key)) }
     NativeValue::Undefined
 }
+
+
 "#);
     out.push_str("fn native_value_eq(left: &NativeValue, right: &NativeValue) -> bool { match (left, right) { (NativeValue::Undefined, NativeValue::Undefined) | (NativeValue::Null, NativeValue::Null) => true, (NativeValue::Number(a), NativeValue::Number(b)) => a == b, (NativeValue::Boolean(a), NativeValue::Boolean(b)) => a == b, (NativeValue::String(a), NativeValue::String(b)) => a == b, (NativeValue::Symbol(a), NativeValue::Symbol(b)) => runtime::symbol_ptr_eq(a,b), (NativeValue::Regex(a), NativeValue::Regex(b)) => std::rc::Rc::ptr_eq(a,b), (NativeValue::Object(a), NativeValue::Object(b)) => a.ptr_eq(b), (NativeValue::Map(a), NativeValue::Map(b)) => a.ptr_eq(b), (NativeValue::Promise(a), NativeValue::Promise(b)) => runtime::promise_view_identity(a) == runtime::promise_view_identity(b), (NativeValue::Array(a), NativeValue::Array(b)) => a.ptr_eq(b),\n");
     if !module.classes.is_empty() {
@@ -432,6 +435,16 @@ fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
 
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     Some(match value {
+        Expr::LibCall {
+            r#fn,
+            args,
+            r#type: Type::Record { shape_id },
+            ..
+        } if r#fn == "record.cloneOwn" => format!(
+            "record_clone_own_{shape_id}({}, {})",
+            expr(&args[0], function, module),
+            expr(&args[1], function, module)
+        ),
         Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.hasOwn" => format!(
             "native_value_has_own({}, {})",
             expr(&args[0], function, module),

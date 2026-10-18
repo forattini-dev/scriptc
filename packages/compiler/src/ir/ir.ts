@@ -3830,6 +3830,10 @@ export type IrLibFn =
    * empty array; null/undefined throw Node's catchable TypeError
    * ("Cannot convert undefined or null to object"). */
   | "dyn.objKeys"
+  /** Fresh closed record from fully initialized field values and an ordered
+   * unique own-key plan. Omitted optional slots read undefined; required keys
+   * must be included. No source getter or prototype operation is performed. */
+  | "record.cloneOwn"
   /** Guard the currently supported ordinary-object slice of binding rest.
    * Borrows the source; throws a named SC1031 refusal for representations
    * whose own enumerable properties are not faithfully modeled. */
@@ -7952,6 +7956,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.cloneMissing",
   "dyn.cloneTransferFail",
   "dyn.objKeys",
+  "record.cloneOwn",
   "dyn.objectRestCheck",
   "dyn.objectAssignSourceCheck",
   "dyn.hasOwn",

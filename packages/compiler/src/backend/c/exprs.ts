@@ -4,6 +4,7 @@ import { emitNumericCoercion, isNumericCoercionFn } from "./emit-numeric-coercio
 import { regexCaptureLayout } from "../../ir/regex-captures.js";
 import { emitReadlineNextLine } from "./emit-readline.js";
 import { InternalCompilerError } from "../../errors.js";
+import { CUnsupportedError } from "./unsupported.js";
 /* Expression C emission: the whole IrExpr dispatch (emitExpr) — every IR
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
@@ -8346,6 +8347,7 @@ function emitIoLibCall(state: LibCallState): Temp {
 }
 
 function emitLibCallExpr(emitter: CEmitter, e: LibCallExpr): Temp {
+  if (e.fn === "record.cloneOwn") throw new CUnsupportedError("record.cloneOwn", e.loc);
         const packed = e.args[0];
         if (e.fn === "string.fromCharCode" && packed?.kind === "arrayLit" &&
             packed.elems.length === 1 && !packed.spreads?.length) {
@@ -8482,6 +8484,8 @@ function emitLibCallExpr(emitter: CEmitter, e: LibCallExpr): Temp {
     case "rl":
     case "strdec":
       return emitIoLibCall(state);
+    case "record":
+      throw new CUnsupportedError("record.cloneOwn", e.loc);
     default: {
       const _exhaustive: never = prefix;
       void _exhaustive;

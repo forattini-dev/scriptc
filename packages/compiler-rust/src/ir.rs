@@ -1192,6 +1192,11 @@ fn validate_function(
                             allowed(then) && else_.as_ref().is_none_or(|other| allowed(other))
                         }
                         Stmt::Block { body, .. } => allowed(body),
+                        Stmt::Assign {
+                            initializes_global: false,
+                            ..
+                        } => true,
+                        Stmt::While { body, .. } => allowed(body),
                         _ => false,
                     })
                 }
@@ -2190,6 +2195,23 @@ fn validate_function(
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } => {
+                if r#fn == "record.cloneOwn" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = args.len() == 2
+                        && args[0].ty() == *r#type
+                        && args[1].ty()
+                            == (Type::Array {
+                                elem: Box::new(Type::String),
+                            })
+                        && matches!(r#type, Type::Record { shape_id } if module.records.get(*shape_id).is_some_and(|r| !r.tuple && r.index_value.is_none()));
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native record own-key construction".into())
+                    };
+                }
                 if matches!(r#fn.as_str(), "dyn.hasOwn" | "dyn.objKeys") {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
@@ -4272,6 +4294,125 @@ mod tests {
             fields[0].absent = true;
         }
         assert_eq!(validate(&m).unwrap_err(), "invalid absent field");
+    }
+
+    #[test]
+    fn own_key_construction_validates_the_closed_record_and_key_array() {
+        for mode in ["valid", "wrong-keys", "wrong-result", "tuple", "arity"] {
+            let mut m = record_module();
+            let loc = m.functions[0].loc.clone();
+            let Stmt::Expression { expr: source, .. } = m.functions[0].body.remove(0) else {
+                unreachable!()
+            };
+            let keys = Expr::ArrayLit {
+                elems: vec![Expr::StrLit {
+                    value: "count".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                }],
+                r#type: Type::Array {
+                    elem: Box::new(Type::String),
+                },
+                loc: loc.clone(),
+            };
+            let mut args = vec![source, keys];
+            if mode == "wrong-keys" {
+                args[1] = Expr::BoolLit {
+                    value: false,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                };
+            }
+            if mode == "arity" {
+                args.pop();
+            }
+            if mode == "tuple" {
+                m.records[0].tuple = true;
+            }
+            m.functions[0].body.push(Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: "record.cloneOwn".into(),
+                    args,
+                    r#type: if mode == "wrong-result" {
+                        Type::Dyn
+                    } else {
+                        Type::Record { shape_id: 0 }
+                    },
+                    loc: loc.clone(),
+                },
+                loc,
+            });
+            if mode == "valid" {
+                validate(&m).unwrap();
+                assert!(
+                    serde_json::to_string(&m)
+                        .unwrap()
+                        .contains("record.cloneOwn")
+                );
+            } else {
+                assert!(validate(&m).is_err(), "{mode}");
+            }
+        }
+    }
+
+    #[test]
+    fn sequence_loops_validate_mutation_without_permitting_abrupt_completion() {
+        for mode in ["valid", "return", "immutable", "uninitialized"] {
+            let mut m = callable_module();
+            let loc = m.functions[0].loc.clone();
+            let num = || Expr::NumLit {
+                value: 0.0,
+                spelling: None,
+                r#type: Type::F64,
+                loc: loc.clone(),
+            };
+            m.functions[0].locals.push(Local {
+                id: "counter".into(),
+                name: "counter".into(),
+                r#type: Type::F64,
+                mutable: mode != "immutable",
+                boxed: false,
+            });
+            let mut stmts = Vec::new();
+            if mode != "uninitialized" {
+                stmts.push(Stmt::VarDecl {
+                    local_id: "counter".into(),
+                    init: num(),
+                    loc: loc.clone(),
+                });
+            }
+            stmts.push(Stmt::While {
+                cond: Expr::BoolLit {
+                    value: false,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                },
+                body: vec![if mode == "return" {
+                    Stmt::Return {
+                        value: None,
+                        loc: loc.clone(),
+                    }
+                } else {
+                    Stmt::Assign {
+                        local_id: "counter".into(),
+                        value: num(),
+                        initializes_global: false,
+                        loc: loc.clone(),
+                    }
+                }],
+                loc: loc.clone(),
+            });
+            m.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::Sequence {
+                    stmts,
+                    result: Box::new(num()),
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                },
+                loc,
+            }];
+            assert_eq!(validate(&m).is_ok(), mode == "valid", "{mode}");
+        }
     }
 
     #[test]

@@ -6,6 +6,7 @@ mod exceptions;
 mod functions;
 mod layouts;
 mod process;
+mod record_construction;
 mod regex;
 mod sets;
 mod storage;

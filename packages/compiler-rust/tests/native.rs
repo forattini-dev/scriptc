@@ -174,6 +174,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
         "rust-native-spreads/providers.ts",
+        "rust-native-record-build/builders.ts",
+        "rust-native-record-build/order.ts",
+        "rust-native-record-build/identity.ts",
+        "rust-native-record-build/keys.ts",
+        "rust-native-record-build/exceptions.ts",
+        "rust-native-record-build/contracts.ts",
         "rust-native-array-rest/builders.ts",
         "rust-native-array-rest/calls.ts",
         "rust-native-array-rest/ownership.ts",
@@ -2213,9 +2219,11 @@ fn object_spread_boundaries_preserve_artifacts() {
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "spread-boundary");
     for source in [
-        "const source = { b: 'b' }; const result: { a: string; b?: string } = { a: 'a', ...source }; console.log(result.a);",
+        "const flag = false; const result: { a: string } = { ...(flag ? { a: 'a' } : ({} as { a: string })) }; console.log(result.a);",
+        "function copy(source: { a: string; extra: string }): { a: string } { return { ...source }; } console.log(copy({ a: 'a', extra: 'x' }).a);",
+        "function copy(source: Record<string, string>) { return { a: 'a', ...source }; } console.log(copy({ b: 'b' }).a);",
         "const result: { a: string; b?: string } = { a: 'a', ...{ get b() { return 'b'; } } }; console.log(result.a);",
-        "const result: { a: string } = { ...{ a: 'a' } }; console.log(result.a);",
+        "class C { a: string = 'a'; } const source = new C(); const result = { ...source }; console.log(result.a);",
         "const flag = true; const result: { a: string; b?: string } = { a: 'a', ...(flag && { b: 'b' }) }; console.log(result.a);",
         "const result: { a: string } = { a: 'a', ...{ __proto__: null } }; console.log(result.a);",
         "function key(): string { return 'b'; } const result: { a: string; b?: string } = { a: 'a', ...{ [key()]: 'b' } }; console.log(result.a);",

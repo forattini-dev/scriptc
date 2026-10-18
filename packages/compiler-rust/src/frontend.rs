@@ -36,6 +36,7 @@ mod pipeline;
 mod process;
 mod promises;
 mod property_keys;
+mod record_construction;
 mod reflection;
 mod regex;
 mod sets;

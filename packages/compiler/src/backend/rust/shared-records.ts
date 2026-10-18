@@ -62,6 +62,7 @@ export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordSh
     if (iterable?.kind === "array") mark(iterable.elem);
     if ((node.kind === "dynFrom" || node.kind === "jsMarshal") && node.value) mark(node.value.type);
     if ((node.kind === "dynCheck" || node.kind === "jsExit") && node.type) mark(node.type);
+    if (node.kind === "libCall" && node.fn === "record.cloneOwn" && node.type) mark(node.type);
     // Structural shape identity does not include an instance's key order.
     // Keep the ordered native object when a literal differs from the shape's
     // canonical writer; typed field access and function boundaries share it.

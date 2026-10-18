@@ -1086,6 +1086,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.errInstanceof": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.classInstanceof": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.objKeys": { argTypes: [DYN], result: DYN },
+  "record.cloneOwn": { argTypes: [], result: DYN }, // structural signature below
   "dyn.objectRestCheck": { argTypes: [DYN], result: VOID },
   "dyn.objectAssignSourceCheck": { argTypes: [DYN], result: VOID },
   "dyn.hasOwn": { argTypes: [DYN, STRING], result: BOOL },
@@ -2168,7 +2169,7 @@ function validateFunction(
         // but a local state branch is valid: optional array stores must
         // choose ARRAY_VALUE versus ARRAY_UNDEFINED before the final result
         // is evaluated. Nested blocks/ifs are checked recursively below.
-        const allowed = new Set(["varDecl", "assign", "exprStmt", "fieldSet", "recordSet", "recordKeySet", "arraySet", "arraySetLength", "arraySetUndefined", "arrayDelete", "bytesSet", "block", "if"]);
+        const allowed = new Set(["varDecl", "assign", "exprStmt", "fieldSet", "recordSet", "recordKeySet", "arraySet", "arraySetLength", "arraySetUndefined", "arrayDelete", "bytesSet", "block", "if", "while"]);
         const flat = (ss: IrStmt[]): void => {
           for (const s of ss) {
             if (!allowed.has(s.kind)) {
@@ -2183,6 +2184,12 @@ function validateFunction(
               flat(s.then);
               if (s.else_) flat(s.else_);
               checkExpr(s.cond);
+              continue;
+            }
+            if (s.kind === "while") {
+              checkExpr(s.cond);
+              expectType(s.cond, BOOL, "seqExpr while condition");
+              flat(s.body);
               continue;
             }
             checkStmt(s);
@@ -3943,6 +3950,15 @@ function validateFunction(
         if (e.type.kind !== "void") err(`${e.name} must be void`, e.loc);
         break;
       case "libCall": {
+        if (e.fn === "record.cloneOwn") {
+          e.args.forEach(checkExpr);
+          const shape = e.type.kind === "record" ? records.get(e.type.shapeId) : undefined;
+          if (e.args.length !== 2 || !shape || shape.tuple || shape.indexValue ||
+              fieldIndex.records.get(shape.id)!.hasAccessorSlots ||
+              !typeEquals(e.args[0]?.type ?? VOID, e.type) ||
+              !typeEquals(e.args[1]?.type ?? VOID, arrayOf(STRING))) err("record.cloneOwn requires a closed record and a string-array own-key plan", e.loc);
+          break;
+        }
         const sig = LIB_FN_SIGS[e.fn];
         if (!sig) {
           err(`libCall of unknown library function "${e.fn as string}"`, e.loc);

@@ -14,6 +14,11 @@ impl Lowerer<'_> {
         if self.records[shape_id].index_value.is_some() {
             return Err(self.refuse(node, "indexed object spreads are not ported"));
         }
+        if properties.iter().any(|p| {
+            p.kind() == SyntaxKind::SpreadAssignment && !Self::inline_spread(p.expression())
+        }) {
+            return self.construct_record(node, target, properties);
+        }
         let first = properties
             .iter()
             .position(|p| p.kind() == SyntaxKind::SpreadAssignment)
@@ -26,10 +31,7 @@ impl Lowerer<'_> {
                     self.data_property_name(p.name()).as_deref() == Some(field.name.as_str())
                 })
             {
-                return Err(self.refuse(
-                    node,
-                    "required record fields must be initialized before the first object spread",
-                ));
+                return self.construct_record(node, target, properties);
             }
         }
         // The initial record must already satisfy its required slots. Later
@@ -59,6 +61,19 @@ impl Lowerer<'_> {
             r#type: target,
             loc: self.loc(node),
         })
+    }
+
+    fn inline_spread(source: Node) -> bool {
+        match source.kind() {
+            SyntaxKind::ParenthesizedExpression => Self::inline_spread(source.expression()),
+            SyntaxKind::ObjectLiteralExpression => source.properties().into_iter().all(|p| {
+                p.kind() != SyntaxKind::SpreadAssignment || Self::inline_spread(p.expression())
+            }),
+            SyntaxKind::ConditionalExpression => {
+                Self::inline_spread(source.when_true()) && Self::inline_spread(source.when_false())
+            }
+            _ => false,
+        }
     }
 
     fn spread_read(&self, local: &Local, node: Node) -> Expr {
