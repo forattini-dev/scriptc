@@ -115,7 +115,7 @@ fn edges(checker: &mut Checker, files: &[Node]) -> Vec<Edge> {
     edges
 }
 
-pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
+pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<Catalog, String> {
     let files = program::source_files();
     let entry = files
         .iter()
@@ -145,7 +145,7 @@ pub(super) fn snapshot(source: &str) -> Result<Catalog, String> {
                 break;
             }
         }
-        let mut lowerer = Lowerer::new(checker, source);
+        let mut lowerer = Lowerer::new(checker, source, console_prelude);
         let mut exports = Vec::new();
         for file in &files {
             let file = *file;

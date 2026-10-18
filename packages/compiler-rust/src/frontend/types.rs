@@ -30,6 +30,9 @@ impl Lowerer<'_> {
         if let Some(ty) = self.primitive_type(self.checker.ty(id).flags) {
             return Some(ty);
         }
+        if self.standard_console_type(id) {
+            return Some(console::text_sink_type());
+        }
         if self.standard_byte_type(id) {
             return Some(Type::bytes());
         }

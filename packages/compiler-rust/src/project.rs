@@ -52,18 +52,23 @@ pub fn discover(input: &Path, explicit: Option<&Path>) -> Result<Option<PathBuf>
     Ok(None)
 }
 
-pub fn load(
-    input: &Path,
-    work: &Path,
-    project: Option<&Path>,
-) -> Result<(ProgramOptions, &'static source_frontend::core::GoProgram), String> {
+pub struct Loaded {
+    pub options: ProgramOptions,
+    pub checked: &'static source_frontend::core::GoProgram,
+    /// Only the loader can designate its generated ambient declarations.
+    pub console_prelude: Option<String>,
+}
+
+pub fn load(input: &Path, work: &Path, project: Option<&Path>) -> Result<Loaded, String> {
     let source = path_for_frontend(input);
+    let mut console_prelude = None;
     let config_path = if let Some(project) = project {
         project.to_path_buf()
     } else {
         let prelude = work.join("native-console.d.ts");
+        console_prelude = Some(path_for_frontend(&prelude));
         // Compatible with global Console declarations brought in by type references.
-        std::fs::write(&prelude, "interface Console { log(...values: unknown[]): void; error(...values: unknown[]): void; }\ndeclare var console: Console;\n").map_err(|e| e.to_string())?;
+        std::fs::write(&prelude, "interface Console { log(...values: unknown[]): void; info(...values: unknown[]): void; debug(...values: unknown[]): void; warn(...values: unknown[]): void; error(...values: unknown[]): void; }\ndeclare var console: Console;\n").map_err(|e| e.to_string())?;
         let config = work.join("tsconfig.json");
         let json = serde_json::json!({ "compilerOptions": {
             "target": "es2022", "lib": ["es2022"], "strict": true, "types": [],
@@ -136,7 +141,11 @@ pub fn load(
         skip_module_resolution: false,
     };
     let program = version(options.clone());
-    Ok((options, program))
+    Ok(Loaded {
+        options,
+        checked: program,
+        console_prelude,
+    })
 }
 
 /// The typed program has already passed diagnostics. Resolve package runtime

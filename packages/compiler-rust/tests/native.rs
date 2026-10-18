@@ -173,6 +173,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/callbacks.ts",
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
+        "rust-native-console/node-types/contracts.ts",
+        "rust-native-console/declaration-types.ts",
+        "rust-native-console/callbacks.ts",
+        "rust-native-console/identity.ts",
+        "rust-native-console/order.ts",
+        "rust-native-console/shadows.ts",
+        "rust-native-console/contracts.ts",
         "rust-native-codecs/containers.ts",
         "rust-native-codecs/shadows.ts",
         "rust-native-codecs/utf8.ts",
@@ -2111,4 +2118,101 @@ fn codec_boundaries_preserve_artifacts() {
         assert_eq!(fs::read(&rust).unwrap(), b"preserve rust");
         assert_eq!(fs::read(&ir).unwrap(), b"preserve ir");
     }
+}
+
+#[test]
+fn console_value_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::copy(
+        root().join("tests/corpus/rust-native-console/tsconfig.json"),
+        temp.path().join("tsconfig.json"),
+    )
+    .unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "console-boundary");
+    for source in [
+        "const print = console.log; print();",
+        "const print = console.log; print(1);",
+        "const print = console.log; print('one', 'two');",
+        "const print = console.log; print({ value: 1 });",
+        "const print: (n: number) => void = console.log; print(1);",
+        "const print = console.log; console.log(print.length);",
+        "const print = console.log; console.log(print.name);",
+        "console.log('%s', 'formatted');",
+        "console.log({ value: 1 });",
+        "const instance = console; instance.log('object alias');",
+        "console.log = (message: string): void => {};",
+        "export {}; declare global { interface Console { log(message: string): number; } } const value = console.log('custom overload'); console.log(value);",
+    ] {
+        fs::write(&input, source).unwrap();
+        fs::write(&target, "preserve").unwrap();
+        let rust = target.with_extension("rs");
+        let ir = target.with_extension("ir.json");
+        fs::write(&rust, "preserve rust").unwrap();
+        fs::write(&ir, "preserve ir").unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001"),
+            "{source}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("panicked") && !stderr.contains("SCN9001"),
+            "{source}: {stderr}"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"preserve");
+        assert_eq!(fs::read(&rust).unwrap(), b"preserve rust");
+        assert_eq!(fs::read(&ir).unwrap(), b"preserve ir");
+    }
+    fs::write(
+        temp.path().join("lib.dom.d.ts"),
+        "interface Console { log(message: string): number; } declare var console: Console;",
+    )
+    .unwrap();
+    fs::write(temp.path().join("tsconfig.json"), r#"{"compilerOptions":{"target":"ES2022","lib":["ES2022"],"types":[],"strict":true},"files":["main.ts","lib.dom.d.ts"]}"#).unwrap();
+    fs::write(&input, "const print = console.log; print('fake library');").unwrap();
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(
+        !result.status.success() && String::from_utf8_lossy(&result.stderr).contains("SCN1001")
+    );
+    assert_eq!(fs::read(&target).unwrap(), b"preserve");
+}
+
+#[test]
+fn owned_console_prelude_supports_standalone_callbacks() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("standalone.mts");
+    fs::write(&input, "const print = console.log; function use(sink: (line: string) => void): void { sink('standalone callback'); } use(print); console.warn('standalone warning'); console.log('identity', print === console.log);").unwrap();
+    let target = binary(temp.path(), "standalone");
+    success(
+        &Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap(),
+    );
+    let expected = Command::new(oracle()).arg(&input).output().unwrap();
+    let actual = Command::new(&target)
+        .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+        .output()
+        .unwrap();
+    success(&expected);
+    success(&actual);
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(actual.stderr, expected.stderr);
 }

@@ -31,7 +31,9 @@ struct LibraryRequirement {
 type Imports = HashMap<u32, (&'static str, Option<String>)>;
 
 pub fn inspect(input: &Path, work: &Path, project: Option<&Path>) -> Result<Report, String> {
-    let (options, checked) = crate::project::load(input, work, project)?;
+    let crate::project::Loaded {
+        options, checked, ..
+    } = crate::project::load(input, work, project)?;
     let _checked = source_frontend::core::enter_program(Some(checked));
     program::bind_all();
     pipeline::check_program()?;

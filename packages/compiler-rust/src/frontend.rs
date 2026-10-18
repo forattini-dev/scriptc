@@ -21,6 +21,7 @@ mod classes;
 mod codecs;
 mod collections;
 mod commonjs;
+mod console;
 mod data_tables;
 mod declarations;
 mod enums;
@@ -113,6 +114,7 @@ struct Signature {
 
 struct Lowerer<'a> {
     checker: &'a mut Checker,
+    console_prelude: Option<String>,
     file: String,
     locals: Vec<Local>,
     bindings: HashMap<u32, Local>,
@@ -150,9 +152,10 @@ struct Lowerer<'a> {
 }
 
 impl<'a> Lowerer<'a> {
-    fn new(checker: &'a mut Checker, file: String) -> Self {
+    fn new(checker: &'a mut Checker, file: String, console_prelude: Option<String>) -> Self {
         Self {
             checker,
+            console_prelude,
             file,
             locals: Vec::new(),
             bindings: HashMap::new(),
@@ -913,6 +916,9 @@ impl<'a> Lowerer<'a> {
                 self.expression(node.name())
             }
             SyntaxKind::PropertyAccessExpression => {
+                if let Some(value) = self.console_value(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.enum_get(node)? {
                     return Ok(value);
                 }
@@ -1068,6 +1074,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.console_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.codec_call(node)? {
                     return Ok(value);
                 }
@@ -1241,48 +1250,7 @@ impl<'a> Lowerer<'a> {
                         });
                     }
                 }
-                if member.kind() != SyntaxKind::PropertyAccessExpression
-                    || member.expression().kind() != SyntaxKind::Identifier
-                    || member.expression().text() != "console"
-                    || !matches!(member.name().text(), "log" | "error")
-                {
-                    return Err(
-                        self.refuse(node, "only ambient console.log/error calls are ported")
-                    );
-                }
-                let symbol = self
-                    .checker
-                    .get_symbol_at_location(member.expression(), false);
-                if self.bindings.contains_key(&symbol.0)
-                    || self.module_bindings.contains_key(&symbol.0)
-                    || self.functions.contains(symbol.0)
-                {
-                    return Err(self.refuse(node, "shadowed console is not ambient"));
-                }
-                let mut args = Vec::new();
-                for arg in node.arguments() {
-                    args.push(self.expression(arg)?);
-                }
-                if args
-                    .iter()
-                    .any(|arg| !matches!(arg.ty(), Type::F64 | Type::String | Type::Bool))
-                {
-                    return Err(
-                        self.refuse(node, "non-primitive console argument values are not ported")
-                    );
-                }
-                if args.len() > 1
-                    && args[0].ty() == Type::String
-                    && !matches!(&args[0], Expr::StrLit { value, .. } if !value.contains('%'))
-                {
-                    return Err(self.refuse(node, "Node console format substitution is not ported"));
-                }
-                Ok(Expr::Intrinsic {
-                    name: format!("console.{}", member.name().text()),
-                    args,
-                    r#type: Type::Void,
-                    loc,
-                })
+                Err(self.refuse(node, "call target has no native representation"))
             }
             _ => Err(self.refuse(node, "expression is not ported")),
         }

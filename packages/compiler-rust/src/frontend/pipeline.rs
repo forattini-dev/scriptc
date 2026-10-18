@@ -5,7 +5,11 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         return Err("SCN0001: non-Unicode input paths are not ported".into());
     }
     let source = path_for_frontend(input);
-    let (options, checked) = crate::project::load(input, work, project)?;
+    let crate::project::Loaded {
+        options,
+        checked,
+        console_prelude,
+    } = crate::project::load(input, work, project)?;
     let _checked_scope = source_frontend::core::enter_program(Some(checked));
     program::bind_all();
     check_program()?;
@@ -31,7 +35,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         let contracts = crate::project::contract_view(options, roots);
         let _contracts_scope = source_frontend::core::enter_program(Some(contracts));
         program::bind_all();
-        Some(declarations::snapshot(&source)?)
+        Some(declarations::snapshot(&source, console_prelude.clone())?)
     } else {
         None
     };
@@ -41,7 +45,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         .ok_or_else(|| "SCN0002: frontend did not return the input source file".to_string())?;
     program::with_type_checker_for_file(file, move |checker| {
         let linked = catalog.map(|catalog| catalog.link(checker));
-        let mut lowerer = Lowerer::new(checker, source.clone());
+        let mut lowerer = Lowerer::new(checker, source.clone(), console_prelude);
         if let Some(linked) = linked {
             lowerer.records = linked.records;
             lowerer.unions = linked.unions;

@@ -65,7 +65,7 @@
     },
     {
       "id": "console-function-values",
-      "status": "required",
+      "status": "partial",
       "work": "Represent console.log/error as first-class native callbacks, including aliases and dependency declaration signatures.",
       "dependsOn": [
         "inventory"
@@ -73,7 +73,8 @@
       "acceptanceAndRisks": [
         "Preserve function identity, argument evaluation, stdout/stderr selection and callback return type.",
         "Exercise the red-dev log.ts shape; distinguish simple messages from format-string and object-inspection semantics."
-      ]
+      ],
+      "evidence": "The native frontend now represents ambient log/info/debug/warn/error as stable portable closure values with one string argument, including aliases, scopes, captures, Node/DOM declaration variants and JS declaration contracts. rust-native-console has seven differential fixtures plus a standalone prelude integration; broader variadic/object formatting and alternate first-class signatures remain explicit boundaries."
     },
     {
       "id": "binary-data-and-web-streams",
@@ -114,8 +115,10 @@
       "acceptanceAndRisks": [
         "Evaluate sources and computed keys once, in source order; apply defaults only for undefined.",
         "Preserve holes, argument arity, own enumerable property ordering, accessors and symbol keys.",
-        "Keep function identity and module live bindings through aliases and destructuring."
-      ]
+        "Keep function identity and module live bindings through aliases and destructuring.",
+        "For the gh Provider case preserve an absent bin property versus a present undefined value, evaluate the condition once, and retain spread/property precedence and observable own-key order. Do not rewrite optional spreads to unconditional undefined fields."
+      ],
+      "evidence": "The next original red-dev refusal after console text callbacks is src/manifest.ts:360, the gh Provider helper spreading ...(bin ? { bin } : {}) into a contextual tagged record union."
     },
     {
       "id": "objects-and-values",
