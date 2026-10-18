@@ -107,6 +107,7 @@ fn refusal(file: &str, node: Node, detail: &str) -> String {
 
 #[derive(Clone)]
 struct Signature {
+    rest: bool,
     node: Node,
     file: String,
     name: String,
@@ -432,7 +433,24 @@ impl<'a> Lowerer<'a> {
             return Err(self.refuse(node, "only named synchronous function bodies are ported"));
         }
         let declared = self.declared(node).cloned();
+        let rest = node
+            .parameters()
+            .iter()
+            .last()
+            .is_some_and(|p| !p.dot_dot_dot_token().is_nil());
+        if rest && !node.type_parameters().is_empty() {
+            return Err(self.refuse(node, "generic source rest parameters are not ported"));
+        }
+        if rest && node.kind() == SyntaxKind::MethodDeclaration {
+            return Err(self.refuse(node, "array-rest instance methods are not ported"));
+        }
         if let Some(hint) = &declared {
+            if hint.rest != rest {
+                return Err(self.refuse(
+                    node,
+                    "public JavaScript contract/implementation rest ABI differs",
+                ));
+            }
             if let Some(reason) = &hint.reason {
                 return Err(self.refuse(node, reason));
             }
@@ -447,7 +465,7 @@ impl<'a> Lowerer<'a> {
         for (index, param) in node.parameters().into_iter().enumerate() {
             if param.name().kind() != SyntaxKind::Identifier
                 || param.name().text() == "this"
-                || !param.dot_dot_dot_token().is_nil()
+                || (!param.dot_dot_dot_token().is_nil() && index + 1 != node.parameters().len())
             {
                 return Err(self.refuse(
                     param,
@@ -464,6 +482,9 @@ impl<'a> Lowerer<'a> {
             } else {
                 self.storage_type(param.name())?
             };
+            if !param.dot_dot_dot_token().is_nil() && !matches!(ty, Type::Array { .. }) {
+                return Err(self.refuse(param, "rest parameter needs a native array ABI"));
+            }
             params.push(Param {
                 local_id: format!("p{index}"),
                 name: param.name().text().into(),
@@ -507,6 +528,7 @@ impl<'a> Lowerer<'a> {
             return Err(self.refuse(node, "function declaration has no resolved native symbol"));
         }
         Ok(Signature {
+            rest,
             node,
             file: self.file.clone(),
             name: format!("f{ordinal}"),
@@ -548,6 +570,7 @@ impl<'a> Lowerer<'a> {
         }
         self.instance_this = None;
         Ok(Function {
+            rest: signature.rest,
             name: signature.name,
             params: signature.params,
             captures: None,
@@ -981,6 +1004,7 @@ impl<'a> Lowerer<'a> {
                         fn_name: signature.name.clone(),
                         captures: vec![],
                         r#type: Type::Func {
+                            rest: signature.rest,
                             params: signature.params.iter().map(|p| p.r#type.clone()).collect(),
                             ret: Box::new(signature.return_type.clone()),
                         },
@@ -1246,7 +1270,7 @@ impl<'a> Lowerer<'a> {
                             .iter()
                             .map(|p| p.r#type.clone())
                             .collect::<Vec<_>>();
-                        let args = self.call_arguments(node, &types)?;
+                        let args = self.rest_call_arguments(node, &types, signature.rest)?;
                         return Ok(Expr::Call {
                             callee: signature.name,
                             args,

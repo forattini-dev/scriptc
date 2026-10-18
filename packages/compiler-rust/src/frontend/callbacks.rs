@@ -17,14 +17,25 @@ impl Lowerer<'_> {
             return None;
         }
         let rest = sig.has_rest_parameter();
+        let generic = !sig.type_parameters.is_empty();
         let symbols = sig.parameters.clone();
         let count = symbols.len();
         let mut params = Vec::new();
+        let mut array_rest = false;
         for (index, symbol) in symbols.into_iter().enumerate() {
             let id = self.checker.get_type_of_symbol(symbol);
             if rest && index + 1 == count {
                 if !self.checker.is_tuple_type(id) {
-                    return None;
+                    if generic {
+                        return None;
+                    }
+                    let ty = self.type_id(id)?;
+                    if !matches!(ty, Type::Array { .. }) {
+                        return None;
+                    }
+                    params.push(ty);
+                    array_rest = true;
+                    continue;
                 }
                 let target = self.checker.ty(id).target();
                 let flags = self.checker.ty(target).as_tuple_type().element_flags();
@@ -72,6 +83,7 @@ impl Lowerer<'_> {
             return None;
         }
         Some(Type::Func {
+            rest: array_rest,
             params,
             ret: Box::new(ret),
         })
@@ -128,7 +140,12 @@ impl Lowerer<'_> {
             Some(ty) => ty,
             None => self.ty(node)?,
         };
-        let Type::Func { params: types, ret } = &ty else {
+        let Type::Func {
+            params: types,
+            ret,
+            rest,
+        } = &ty
+        else {
             return Err(self.refuse(node, "callback needs a native function signature"));
         };
         if node.parameters().len() > types.len() {
@@ -137,9 +154,17 @@ impl Lowerer<'_> {
                 "callback requires more parameters than its native signature",
             ));
         }
-        for param in node.parameters() {
+        let parameters = node.parameters();
+        let source_rest = parameters
+            .iter()
+            .last()
+            .is_some_and(|p| !p.dot_dot_dot_token().is_nil());
+        if source_rest != *rest {
+            return Err(self.refuse(node, "callback rest ABI differs from its native target"));
+        }
+        for (index, param) in parameters.into_iter().enumerate() {
             if param.name().kind() != SyntaxKind::Identifier
-                || !param.dot_dot_dot_token().is_nil()
+                || (!param.dot_dot_dot_token().is_nil() && (!*rest || index + 1 != types.len()))
                 || param.name().text() == "this"
             {
                 return Err(self.refuse(param, "callback parameter form is not ported"));
@@ -209,6 +234,7 @@ impl Lowerer<'_> {
         }
         let captures = std::mem::replace(&mut self.captures, saved_captures);
         let function = Function {
+            rest: *rest,
             name: name.clone(),
             params,
             captures: Some(captures.iter().map(|(_, p)| p.clone()).collect()),
@@ -281,7 +307,8 @@ impl Lowerer<'_> {
         {
             return Ok(None);
         }
-        let Type::Func { params, ret } = functions[0].clone() else {
+        let ty = functions[0].clone();
+        let Type::Func { params, ret, rest } = ty.clone() else {
             unreachable!()
         };
         let mut types = vec![local.r#type.clone()];
@@ -293,17 +320,30 @@ impl Lowerer<'_> {
             self.loc(node),
         );
         let callee = self.coerce(helper.read(&helper.param(0)), Type::Dyn, name)?;
-        let args = params
-            .iter()
-            .enumerate()
-            .map(|(i, _)| self.coerce(helper.read(&helper.param(i + 1)), Type::Dyn, node))
-            .collect::<Result<Vec<_>, _>>()?;
-        let call = Expr::DynCall {
-            callee: Box::new(callee),
-            callee_name: name.text().into(),
-            args,
-            r#type: Type::Dyn,
-            loc: self.loc(node),
+        let call = if rest {
+            Expr::CallValue {
+                callee: Box::new(self.coerce(callee, ty, name)?),
+                args: params
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| helper.read(&helper.param(i + 1)))
+                    .collect(),
+                r#type: (*ret).clone(),
+                loc: self.loc(node),
+            }
+        } else {
+            let args = params
+                .iter()
+                .enumerate()
+                .map(|(i, _)| self.coerce(helper.read(&helper.param(i + 1)), Type::Dyn, node))
+                .collect::<Result<Vec<_>, _>>()?;
+            Expr::DynCall {
+                callee: Box::new(callee),
+                callee_name: name.text().into(),
+                args,
+                r#type: Type::Dyn,
+                loc: self.loc(node),
+            }
         };
         if *ret == Type::Void {
             helper.function.body.push(Stmt::Expression {
@@ -322,7 +362,7 @@ impl Lowerer<'_> {
             r#type: local.r#type,
             loc: self.loc(name),
         }];
-        args.extend(self.call_arguments(node, &params)?);
+        args.extend(self.rest_call_arguments(node, &params, rest)?);
         Ok(Some(Expr::Call {
             callee,
             args,
@@ -351,10 +391,10 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             });
         }
-        let Type::Func { params, ret } = callee.ty() else {
+        let Type::Func { params, ret, rest } = callee.ty() else {
             return Err(self.refuse(node, "callee has no native function representation"));
         };
-        let args = self.call_arguments(node, &params)?;
+        let args = self.rest_call_arguments(node, &params, rest)?;
         Ok(Expr::CallValue {
             callee: Box::new(callee),
             args,

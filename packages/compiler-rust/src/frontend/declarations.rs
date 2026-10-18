@@ -31,6 +31,7 @@ pub(super) struct ClassHint {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Hint {
+    pub rest: bool,
     pub params: Vec<Option<Type>>,
     pub ret: Option<Type>,
     pub reason: Option<String>,
@@ -44,6 +45,7 @@ impl Hint {
             return None;
         }
         Some(Type::Func {
+            rest: self.rest,
             params: self.params.iter().cloned().collect::<Option<Vec<_>>>()?,
             ret: Box::new(self.ret.clone()?),
         })
@@ -170,6 +172,7 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
                     .checker
                     .get_signatures_of_type(ty, SignatureKind::CONSTRUCT);
                 let mut hint = Hint {
+                    rest: false,
                     params: vec![],
                     ret: None,
                     reason: None,
@@ -247,7 +250,8 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
                     } else {
                         // Use the same signature adapter as first-class calls:
                         // a fixed tuple rest is a finite list of ABI slots.
-                        if let Some(Type::Func { params, ret }) = lowerer.function_type(ty) {
+                        if let Some(Type::Func { params, ret, rest }) = lowerer.function_type(ty) {
+                            hint.rest = rest;
                             hint.params = params.into_iter().map(Some).collect();
                             hint.ret = Some(*ret);
                         } else {
@@ -290,7 +294,7 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
             }
             match t {
                 Type::Object { .. } | Type::Classval { .. } => false,
-                Type::Func { params, ret } => {
+                Type::Func { params, ret, .. } => {
                     params.iter().all(|p| portable(p, records, unions, seen))
                         && portable(ret, records, unions, seen)
                 }

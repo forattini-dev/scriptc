@@ -190,6 +190,7 @@ impl Lowerer<'_> {
         };
         if let Some(signature) = self.functions.signature(symbol) {
             let actual = Type::Func {
+                rest: signature.rest,
                 params: signature.params.iter().map(|p| p.r#type.clone()).collect(),
                 ret: Box::new(signature.return_type.clone()),
             };
@@ -221,7 +222,13 @@ impl Lowerer<'_> {
         let contextual = (signature.file.ends_with(".js") || signature.file.ends_with(".mjs"))
             && self.declared(signature.node).is_none();
         if contextual {
-            let (slots, ret) = if let Some(Type::Func { params, ret }) = abi {
+            let (slots, ret) = if let Some(Type::Func { params, ret, rest }) = abi {
+                if rest != signature.rest {
+                    return Err(self.refuse(
+                        site,
+                        "JavaScript function rest ABI conflicts with contextual native ABI",
+                    ));
+                }
                 (Some(params), Some(*ret))
             } else {
                 (None, result)
@@ -274,6 +281,7 @@ mod tests {
     }
     fn signature(name: &str) -> Signature {
         Signature {
+            rest: false,
             node: Node::NIL,
             file: "functions.ts".into(),
             name: name.into(),

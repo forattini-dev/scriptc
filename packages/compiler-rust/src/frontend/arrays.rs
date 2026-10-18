@@ -95,6 +95,7 @@ impl Lowerer<'_> {
             self.closure(
                 callback_node,
                 Some(Type::Func {
+                    rest: false,
                     params,
                     ret: result.clone(),
                 }),
@@ -102,9 +103,15 @@ impl Lowerer<'_> {
         } else {
             self.expression(callback_node)?
         };
-        let Type::Func { params, ret } = callback.ty() else {
+        let Type::Func { params, ret, rest } = callback.ty() else {
             return Err(self.refuse(callback_node, "array.map callback is not a native function"));
         };
+        if rest {
+            return Err(self.refuse(
+                callback_node,
+                "array.map rest callbacks need native callback argument completion",
+            ));
+        }
         if params.len() > 3 {
             return Err(self.refuse(
                 callback_node,

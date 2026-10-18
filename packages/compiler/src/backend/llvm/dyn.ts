@@ -3068,6 +3068,7 @@ export class LlDyn {
    * into the declared param type, call through the closure, convert the
    * result back to a dyn value (+1). */
   dynFuncThunkHelper(t: IrType & { kind: "func" }): string {
+    if (t.restAbi === "array") throw new LlvmUnsupportedError("dynFunc:typed-array-rest");
     const key = typeKey(t);
     const existing = this.dynFuncThunks.get(key);
     if (existing) return existing;
@@ -3270,6 +3271,7 @@ export class LlDyn {
   /** The adapter closure body for one TARGET signature: caps[0] is an
    * untraced obj-box owning the dyn function value. */
   dynFuncAdapterHelper(t: IrType & { kind: "func" }): string {
+    if (t.restAbi === "array") throw new LlvmUnsupportedError("dynFunc:typed-array-rest");
     const key = typeKey(t);
     const existing = this.dynFuncAdapters.get(key);
     if (existing) return existing;

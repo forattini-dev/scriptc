@@ -12,7 +12,7 @@ test("caught tests and trusted extraction admit standalone classes and reject un
     classes: [{ name: "Box", jsName: "Box", fields: [], loc }],
     functions: [{
       name: "main", params: [], locals: [{ id: "e", name: "e", type: { kind: "caught" }, mutable: false }], returnType: VOID,
-      body: [{ kind: "tryCatch", tryBody: [{ kind: "throw", value: { kind: "numLit", value: 1, type: F64, loc }, loc }], catchLocalId: "e", catchBody: [{ kind: "exprStmt", expr: check, loc }, { kind: "exprStmt", expr: narrow, loc }], loc }],
+      body: [{ kind: "tryCatch", tryBody: [{ kind: "throw", value: { kind: "numLit", value: 1, type: F64, loc }, loc }], catchLocalId: "e", catchBody: [{ kind: "exprStmt", expr: check, loc }, { kind: "exprStmt", expr: narrow, loc }], finallyBody: null, loc }],
       loc,
     }],
   };

@@ -77,7 +77,7 @@ impl Lowerer<'_> {
                                 .iter()
                                 .any(|f| refers(&f.r#type, shape, records, seen)))
                 }
-                Type::Func { params, ret } => {
+                Type::Func { params, ret, .. } => {
                     params.iter().any(|p| refers(p, shape, records, seen))
                         || refers(ret, shape, records, seen)
                 }
@@ -403,7 +403,7 @@ impl Lowerer<'_> {
             return Ok(None);
         }
         let arguments = node.arguments().into_iter().collect::<Vec<_>>();
-        let value = if let Some(Type::Func { params, ret }) = expected {
+        let value = if let Some(Type::Func { params, ret, rest }) = expected {
             let prefix = arguments.len().saturating_sub(1);
             let mut slots = Vec::new();
             for argument in arguments.iter().skip(1).take(prefix) {
@@ -418,19 +418,28 @@ impl Lowerer<'_> {
                 slots.push(ty);
             }
             slots.extend(params);
-            self.expected_expression(member.expression(), Type::Func { params: slots, ret })?
+            self.expected_expression(
+                member.expression(),
+                Type::Func {
+                    rest,
+                    params: slots,
+                    ret,
+                },
+            )?
         } else {
             self.expression(member.expression())?
         };
         let target = self.callable_body(value, node)?;
-        let Type::Func { params, ret } = target.ty() else {
+        let Type::Func { params, ret, rest } = target.ty() else {
             return Err(self.refuse(member, "bind requires a native function"));
         };
 
-        if arguments.is_empty() || arguments.len() - 1 > params.len() {
+        if arguments.is_empty()
+            || arguments.len() - 1 > params.len().saturating_sub(usize::from(rest))
+        {
             return Err(self.refuse(
                 node,
-                "bind needs a this argument and a fixed native argument prefix",
+                "bind needs a this argument and a fixed prefix before the rest array",
             ));
         }
         let this = self.expression(arguments[0])?;
@@ -449,6 +458,7 @@ impl Lowerer<'_> {
         }
         let prefix = arguments.len() - 1;
         let result = Type::Func {
+            rest,
             params: params[prefix..].to_vec(),
             ret: ret.clone(),
         };
@@ -486,6 +496,7 @@ impl Lowerer<'_> {
             (*ret).clone(),
             self.loc(node),
         );
+        body.function.rest = rest;
         for capture in &captures {
             body.function.locals.push(Local {
                 id: capture.local_id.clone(),

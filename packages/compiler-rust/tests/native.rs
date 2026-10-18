@@ -174,6 +174,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
         "rust-native-spreads/providers.ts",
+        "rust-native-array-rest/builders.ts",
+        "rust-native-array-rest/calls.ts",
+        "rust-native-array-rest/ownership.ts",
+        "rust-native-array-rest/erasure-bind.ts",
+        "rust-native-array-rest/contracts.ts",
+        "rust-native-array-rest/order.ts",
         "rust-native-spreads/order.ts",
         "rust-native-spreads/presence.ts",
         "rust-native-spreads/keys.ts",
@@ -1138,8 +1144,8 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         (
-            "rest-param",
-            "function f(...n: number[]) { return 1; } console.log(f());",
+            "variadic-tuple-param",
+            "function f(...n: [number, ...number[]]) { return 1; } console.log(f(1));",
             "SCN1001",
         ),
         (
@@ -2244,6 +2250,96 @@ fn object_spread_boundaries_preserve_artifacts() {
         assert_eq!(fs::read(&target).unwrap(), b"preserve");
         assert_eq!(fs::read(&rust).unwrap(), b"preserve rust");
         assert_eq!(fs::read(&ir).unwrap(), b"preserve ir");
+    }
+}
+
+#[test]
+fn array_rest_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::copy(
+        root().join("tests/corpus/rust-native-array-rest/tsconfig.json"),
+        temp.path().join("tsconfig.json"),
+    )
+    .unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "array-rest-boundary");
+    for source in [
+        "class C { method(...items: string[]): number { return items.length; } } console.log(new C().method('x'));",
+        "const f = (...items: [string, ...string[]]) => items.length; console.log(f('a'));",
+        "function f(prefix: string, ...items: string[]): string { return prefix; } const bound = f.bind(null, 'prefix', 'tail'); console.log(bound());",
+        "const callback = (...items: any[]) => 1; console.log([1].map(callback).length);",
+        "function f(...items: string[]): number { return items.length; } const source = ['a']; console.log(f(...source));",
+        "const callback: (item: string) => string = (...items: string[]) => items.join('|'); console.log(callback('x'));",
+        "const f = (...items: string[]) => items.join('|'); const ordinary = f as unknown as (items: string[]) => string; console.log(ordinary(['a']));",
+        "class C { constructor(...items: string[]) {} } new C('x');",
+        "function first<T>(...items: T[]) { return items[0]; } console.log(first<number>() === undefined);",
+        "function first<T>(...items: T[]) { return items[0]; } const alias = first; console.log(alias(1));",
+    ] {
+        fs::write(&input, source).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001"),
+            "{source}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("panicked") && !stderr.contains("SCN9001"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            assert_eq!(fs::read(path).unwrap(), b"preserve");
+        }
+    }
+    fs::write(
+        temp.path().join("bridge.d.ts"),
+        "export function f(...items: string[]): string;",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("bridge.js"),
+        "export function f(items) { return items[0]; }",
+    )
+    .unwrap();
+    fs::write(
+        &input,
+        "import { f } from './bridge.js'; console.log(f('x'));",
+    )
+    .unwrap();
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        !result.status.success() && stderr.contains("rest ABI differs"),
+        "{stderr}"
+    );
+    for path in [
+        &target,
+        &target.with_extension("rs"),
+        &target.with_extension("ir.json"),
+    ] {
+        assert_eq!(fs::read(path).unwrap(), b"preserve");
     }
 }
 

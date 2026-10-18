@@ -9,7 +9,7 @@ fn types(module: &Module) -> Vec<Type> {
         }
         out.push(ty.clone());
         match ty {
-            Type::Func { params, ret } => {
+            Type::Func { params, ret, .. } => {
                 for p in params {
                     visit(p, out);
                 }
@@ -42,6 +42,7 @@ fn types(module: &Module) -> Vec<Type> {
         if f.name != module.entry {
             visit(
                 &Type::Func {
+                    rest: f.rest,
                     params: f.params.iter().map(|p| p.r#type.clone()).collect(),
                     ret: Box::new(f.return_type.clone()),
                 },
@@ -363,11 +364,17 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
     }
     out.push_str("_ => native_value_missing(&key) } }\nfn native_value_call(callee: NativeValue, args: Vec<NativeValue>, name: &str) -> NativeValue { match callee {\n");
     for (i, t) in types.iter().enumerate() {
-        if let Type::Func { params, ret } = t {
+        if let Type::Func { params, ret, rest } = t {
             let args = params
                 .iter()
                 .enumerate()
                 .map(|(j, t)| {
+                    if *rest && j + 1 == params.len() {
+                        let Type::Array { elem } = t else { unreachable!("validated rest ABI"); };
+                        let value = checked(elem, "item.clone()", module);
+                        let value = if **elem == Type::String { format!("runtime::JsString::from({value})") } else { value };
+                        return format!(", runtime::array_new(args.iter().skip({j}).map(|item| {value}).collect())");
+                    }
                     format!(
                         ", {}",
                         checked(

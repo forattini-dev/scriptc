@@ -188,6 +188,7 @@ impl Lowerer<'_> {
                 let callback = self.closure(
                     arg,
                     Some(Type::Func {
+                        rest: false,
                         params: vec![param],
                         ret: Box::new(ret),
                     }),

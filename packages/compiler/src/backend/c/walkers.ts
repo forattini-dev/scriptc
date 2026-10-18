@@ -1851,6 +1851,7 @@ export function jsonWriteHelper(emitter: CEmitter, t: IrType): string {
 
 /** The call thunk for one closure signature (see the block comment). */
   function dynFuncThunkHelper(emitter: CEmitter, t: IrType & { kind: "func" }): string {
+    if (t.restAbi === "array") throw new CUnsupportedError("dynFunc:typed-array-rest");
     const key = typeKey(t);
     const existing = emitter.dynFuncThunks.get(key);
     if (existing) return existing;
@@ -1965,6 +1966,7 @@ export function jsonWriteHelper(emitter: CEmitter, t: IrType): string {
    * signature in. caps[0] is an untraced obj-box owning the dyn function
    * value. */
   function dynFuncAdapterHelper(emitter: CEmitter, t: IrType & { kind: "func" }): string {
+    if (t.restAbi === "array") throw new CUnsupportedError("dynFunc:typed-array-rest");
     const key = typeKey(t);
     const existing = emitter.dynFuncAdapters.get(key);
     if (existing) return existing;

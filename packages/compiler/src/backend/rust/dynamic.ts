@@ -883,7 +883,8 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("calling a kernel reference as a function"),`);
     for (const shape of boxedShapes) {
-      const fixedParams = shape.type.restAbi === "jsval" ? shape.type.params.slice(0, -1) : shape.type.params;
+      const typedRest = shape.type.rest === true && shape.type.restAbi === "array";
+      const fixedParams = typedRest || shape.type.restAbi === "jsval" ? shape.type.params.slice(0, -1) : shape.type.params;
       const typedArgs = fixedParams.map((param, index) => {
         let value = `args.get(${index}).cloned().unwrap_or(${name}::Undefined)`;
         if (usesEmbeddedModules && (param.kind === "array" || param.kind === "record" || param.kind === "union") &&
@@ -891,7 +892,10 @@ export class RustDynamicEmitter {
         return this.emitDynCheckValue(param, value);
       });
       if (shape.type.rest === true) {
-        typedArgs.push(`${name}::Array(runtime::array_new(args.iter().skip(${fixedParams.length}).cloned().collect()))`);
+        const packed = `${name}::Array(runtime::array_new(args.iter().skip(${fixedParams.length}).cloned().collect()))`;
+        const rest = shape.type.params.at(-1);
+        if (typedRest && rest?.kind !== "array") this.context.unsupported("typed rest array slot");
+        typedArgs.push(typedRest ? this.emitDynCheckValue(rest!, packed) : packed);
       }
       const loc = this.context.module().functions[0]?.loc;
       if (loc === undefined) this.context.unsupported("dynamic call without a source location");

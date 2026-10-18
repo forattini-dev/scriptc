@@ -118,7 +118,7 @@
         "Keep function identity and module live bindings through aliases and destructuring.",
         "For the gh Provider case preserve an absent bin property versus a present undefined value, evaluate the condition once, and retain spread/property precedence and observable own-key order. Do not rewrite optional spreads to unconditional undefined fields."
       ],
-      "evidence": "Inline data-literal and conditional spreads now use retained seqExpr/if/recordSet operations, including contextual Provider unions and public JS contracts. Six rust-native-spreads fixtures cover source-order evaluation, skipped branches, exceptions, aliases, key order and omission versus undefined. Required slots must be initialized before the first spread; arbitrary source objects, short-circuit operands, index signatures, getters and symbol keys remain explicit boundaries. Original red-dev retries now pass the gh/mise conditional spreads and stop at manifest.ts:388, the ghInstaller arrow with a variadic string-array parameter."
+      "evidence": "Inline data-literal and conditional spreads use retained seqExpr/if/recordSet operations, including contextual Provider unions and public JS contracts. Six rust-native-spreads fixtures cover order, skipped branches, exceptions, aliases, keys and omission versus undefined. Typed array rest uses the retained rest:true/restAbi:array function type and fresh call-site packing, including aliases, captured/returned callbacks, public JS contracts, erased calls, nullable callee snapshots and bind of a fixed prefix. Six rust-native-array-rest fixtures cover these contracts against Node and both Rust backends. Original red-dev passes ghInstaller/installer rest parameters and stops at manifest.ts:406 aptrepo ({ kind: aptrepo, ...spec }); required fields supplied by an arbitrary source object remain unported. Generic source rest, instance/constructor rest, tuple-rest source binding, iterable call spreads, fixed builtin callback adaptation and binding rest elements retain explicit boundaries."
     },
     {
       "id": "objects-and-values",
@@ -280,16 +280,16 @@
     "Platform/environment-specific package branches, native addons, eval/Function constructors and dynamic require paths.",
     "Data-dependent generic/recursive layouts, hidden prototype effects and implicit coercion.",
     "Application behavior after a successful build: emitted code alone does not establish Node parity.",
-    "Other source operators, optional chains, rest parameters and implicit coercion paths need semantic demand checks beyond the current structural syntax categories.",
+    "Other source operators, optional chains, remaining rest binding forms and implicit coercion paths need semantic demand checks beyond the current structural syntax categories.",
     "GlobalThis/member aliases and builtin values used as callbacks are only partially visible to direct global-syntax inventory."
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "64056ba8981e36db65256396776da99e425eec63",
-    "after": "primitive Symbol support",
-    "red-skills-release": "@reddb-io/toon/dist/toonl.js module initializer new TextEncoder()",
-    "redskilled": "@reddb-io/toon/dist/toonl.js module initializer new TextEncoder()",
-    "red-dev": "src/log.ts console.log used as a callback value",
+    "compilerSourceBaseCommit": "088ddd2cd0745949aceaee317d2728bcf694e808",
+    "after": "typed array-rest ABI; native-reddb-array-rest-v62 compile-only attempts",
+    "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
+    "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
+    "red-dev": "src/manifest.ts:406 aptrepo object spread supplies required fields from spec",
     "completedOriginalApplicationBinaries": 0
   }
 }

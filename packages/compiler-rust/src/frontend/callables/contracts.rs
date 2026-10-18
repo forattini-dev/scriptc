@@ -32,6 +32,7 @@ impl Lowerer<'_> {
             .cloned()
             .unwrap_or(Type::Dyn);
         Some(Type::Func {
+            rest: false,
             params: vec![Type::Dyn; arity],
             ret: Box::new(result),
         })
@@ -114,6 +115,7 @@ impl Lowerer<'_> {
                         fn_name: signature.name,
                         captures: vec![],
                         r#type: Type::Func {
+                            rest: signature.rest,
                             params: signature.params.into_iter().map(|p| p.r#type).collect(),
                             ret: Box::new(signature.return_type),
                         },

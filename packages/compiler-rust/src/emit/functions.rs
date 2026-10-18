@@ -4,6 +4,7 @@ use std::fmt::Write;
 
 fn signature(function: &Function) -> Type {
     Type::Func {
+        rest: function.rest,
         params: function.params.iter().map(|p| p.r#type.clone()).collect(),
         ret: Box::new(function.return_type.clone()),
     }
@@ -11,7 +12,7 @@ fn signature(function: &Function) -> Type {
 fn types(module: &Module) -> Vec<Type> {
     fn visit(ty: &Type, found: &mut Vec<Type>) {
         match ty {
-            Type::Func { params, ret } => {
+            Type::Func { params, ret, .. } => {
                 if found.contains(ty) {
                     return;
                 }
@@ -69,7 +70,7 @@ pub(super) fn type_name(ty: &Type, module: &Module) -> String {
 }
 pub(super) fn definitions(module: &Module, output: &mut String) {
     for ty in types(module) {
-        let Type::Func { params, ret } = &ty else {
+        let Type::Func { params, ret, .. } = &ty else {
             unreachable!()
         };
         let name = type_name(&ty, module);

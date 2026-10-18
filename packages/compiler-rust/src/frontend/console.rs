@@ -4,6 +4,7 @@ use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
 pub(super) fn text_sink_type() -> Type {
     Type::Func {
+        rest: false,
         params: vec![Type::String],
         ret: Box::new(Type::Void),
     }

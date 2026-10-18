@@ -35,7 +35,16 @@ impl Lowerer<'_> {
         node: Node,
         types: &[Type],
     ) -> Result<Vec<Expr>, String> {
-        self.call_arguments_in(node, types, false)
+        self.call_arguments_in(node, types, false, false)
+    }
+
+    pub(super) fn rest_call_arguments(
+        &mut self,
+        node: Node,
+        types: &[Type],
+        rest: bool,
+    ) -> Result<Vec<Expr>, String> {
+        self.call_arguments_in(node, types, false, rest)
     }
 
     pub(super) fn method_arguments(
@@ -43,7 +52,7 @@ impl Lowerer<'_> {
         node: Node,
         types: &[Type],
     ) -> Result<Vec<Expr>, String> {
-        self.call_arguments_in(node, types, true)
+        self.call_arguments_in(node, types, true, false)
     }
 
     fn call_arguments_in(
@@ -51,15 +60,37 @@ impl Lowerer<'_> {
         node: Node,
         types: &[Type],
         preserve_values: bool,
+        rest: bool,
     ) -> Result<Vec<Expr>, String> {
         let arguments = node.arguments().into_iter().collect::<Vec<_>>();
-        if arguments.len() > types.len() {
+        if arguments
+            .iter()
+            .any(|arg| arg.kind() == SyntaxKind::SpreadElement)
+        {
+            return Err(self.refuse(node, "iterable call spreads are not ported"));
+        }
+        if !rest && arguments.len() > types.len() {
             return Err(self.refuse(node, "extra native call arguments are not ported"));
         }
         types
             .iter()
             .enumerate()
             .map(|(index, ty)| {
+                if rest && index + 1 == types.len() {
+                    let Type::Array { elem } = ty else {
+                        return Err(self.refuse(node, "rest ABI needs a trailing native array"));
+                    };
+                    let elems = arguments
+                        .iter()
+                        .skip(index)
+                        .map(|arg| self.expected_expression(*arg, (**elem).clone()))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return Ok(Expr::ArrayLit {
+                        elems,
+                        r#type: ty.clone(),
+                        loc: self.loc(node),
+                    });
+                }
                 if let Some(arg) = arguments.get(index) {
                     if preserve_values
                         && *ty == Type::Dyn

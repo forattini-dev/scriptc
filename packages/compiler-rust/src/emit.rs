@@ -239,7 +239,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             Type::Regex | Type::Symbol | Type::Bytes { .. } | Type::Dyn | Type::Promise { .. } => {
                 true
             }
-            Type::Func { params, ret } => params.iter().any(ty) || ty(ret),
+            Type::Func { params, ret, .. } => params.iter().any(ty) || ty(ret),
             _ => false,
         }
     }
@@ -793,6 +793,7 @@ mod tests {
             globals: vec![],
             classes: vec![],
             functions: vec![Function {
+                rest: false,
                 name: "__main".into(),
                 params: vec![],
                 captures: None,

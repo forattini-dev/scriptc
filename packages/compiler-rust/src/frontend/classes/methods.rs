@@ -52,12 +52,18 @@ impl Lowerer<'_> {
             .and_then(|hint| hint.methods.iter().find(|(method, _)| method == name))
             .cloned()
         {
-            let Some(Type::Func { params, ret }) = hint.1 else {
+            let Some(Type::Func {
+                params,
+                ret,
+                rest: false,
+            }) = hint.1
+            else {
                 return Err(self.refuse(node, "public method has no native call signature"));
             };
             self.declarations.insert(
                 declarations::Key::of(node),
                 declarations::Hint {
+                    rest: false,
                     params: params.into_iter().map(Some).collect(),
                     ret: Some(*ret),
                     reason: None,

@@ -186,7 +186,9 @@ export class RustFunctionValueEmitter {
       }
     }
     if (this.context.dynAdapterShapes.has(typeKey(shape.type))) {
-      const dynamicArgs = shape.type.params.map((param, index) => {
+      const typedRest = shape.type.rest === true && shape.type.restAbi === "array";
+      const fixedParams = typedRest ? shape.type.params.slice(0, -1) : shape.type.params;
+      const dynamicArgs = fixedParams.map((param, index) => {
         const arg = args[index];
         if (arg === undefined) this.context.unsupported("dynamic adapter argument arity", loc);
         return this.context.emitDynFromValue(param, arg, loc);
@@ -198,7 +200,15 @@ export class RustFunctionValueEmitter {
       } else {
         result = this.context.emitDynCheckValue(shape.type.ret, call, loc);
       }
-      arms.push(`${this.context.closureName(shape)}::DynAdapter { value } => { let sc_dyn_args = [${dynamicArgs}]; ${result} }`);
+      let pack = `let sc_dyn_args = [${dynamicArgs}];`;
+      if (typedRest) {
+        const rest = shape.type.params.at(-1);
+        const array = args.at(-1);
+        if (rest?.kind !== "array" || array === undefined) this.context.unsupported("typed rest adapter array slot", loc);
+        const item = this.context.emitDynFromValue(rest.elem, "runtime::array_get(&sc_rest, sc_index)", loc);
+        pack = `let mut sc_dyn_args = vec![${dynamicArgs}]; let sc_rest = ${array}; let mut sc_index = 0.0; while sc_index < runtime::array_len(&sc_rest) { sc_dyn_args.push(${item}); sc_index += 1.0; }`;
+      }
+      arms.push(`${this.context.closureName(shape)}::DynAdapter { value } => { ${pack} ${result} }`);
     }
     if (this.context.emitterSnapshotShapes.has(typeKey(shape.type))) {
       const passed = [`listener.as_ref().expect("scriptc: cleared live EventEmitter listener adapter")`, ...args];

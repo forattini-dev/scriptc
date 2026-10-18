@@ -1,0 +1,15 @@
+type Item = { value: string };
+const collect = (...items: Item[]): Item[] => items;
+const left = collect();
+const right = collect();
+console.log(left === right, left.length, right.length);
+const item: Item = { value: "before" };
+const values = collect(item, item);
+item.value = "after";
+console.log(values[0] === item, values[0] === values[1], values.map(value => value.value).join("|"));
+left.push(item);
+console.log(left.length, right.length);
+const all = (label: string = "default", ...items: Item[]) => ({ label, items });
+const a = all(undefined, item);
+const b = all();
+console.log("owner", a.label, a.items[0] === item, b.items.length, a.items === b.items);

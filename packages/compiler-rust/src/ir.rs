@@ -25,7 +25,7 @@ pub fn contains_set(ty: &Type, records: &[Record], unions: &[Union]) -> bool {
             Type::Map { key, value } => {
                 visit(key, records, unions, seen) || visit(value, records, unions, seen)
             }
-            Type::Func { params, ret } => {
+            Type::Func { params, ret, .. } => {
                 params.iter().any(|t| visit(t, records, unions, seen))
                     || visit(ret, records, unions, seen)
             }
@@ -50,6 +50,8 @@ pub fn contains_set(ty: &Type, records: &[Record], unions: &[Union]) -> bool {
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Type {
     Func {
+        #[serde(flatten, serialize_with = "serialize_function_rest")]
+        rest: bool,
         params: Vec<Type>,
         ret: Box<Type>,
     },
@@ -104,6 +106,19 @@ impl Type {
     pub fn bytes() -> Self {
         Self::Bytes { elem: "u8".into() }
     }
+}
+
+fn serialize_function_rest<S: serde::Serializer>(
+    rest: &bool,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeMap;
+    let mut map = serializer.serialize_map(Some(if *rest { 2 } else { 0 }))?;
+    if *rest {
+        map.serialize_entry("rest", &true)?;
+        map.serialize_entry("restAbi", "array")?;
+    }
+    map.end()
 }
 
 fn record_id<S: serde::Serializer>(id: &usize, s: S) -> Result<S::Ok, S::Error> {
@@ -211,6 +226,8 @@ pub struct Global {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Function {
+    #[serde(skip)]
+    pub rest: bool,
     pub name: String,
     pub params: Vec<Param>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -935,8 +952,12 @@ impl Module {
         let valid = match ty {
             Type::Object { class_name } => self.class(&class_name).is_some(),
             Type::Classval { class_name } => self.class(&class_name).is_some_and(|c| !c.runtime),
-            Type::Func { params, ret } => {
-                params.iter().all(|p| self.valid_type(p.clone(), active))
+            Type::Func { params, ret, rest } => {
+                (!rest
+                    || params
+                        .last()
+                        .is_some_and(|p| matches!(p, Type::Array { .. })))
+                    && params.iter().all(|p| self.valid_type(p.clone(), active))
                     && (*ret == Type::Void || self.valid_type(*ret, active))
             }
             Type::Void | Type::Null | Type::Undefined | Type::Caught => false,
@@ -1108,6 +1129,14 @@ fn validate_function(
     functions: &HashMap<&str, &Function>,
     module: &Module,
 ) -> Result<(), String> {
+    if f.rest
+        && !f
+            .params
+            .last()
+            .is_some_and(|p| matches!(p.r#type, Type::Array { .. }))
+    {
+        return Err("rest function needs a trailing native array".into());
+    }
     if f.return_type != Type::Void && !module.valid_type(f.return_type.clone(), &mut vec![]) {
         return Err("invalid return layout".into());
     }
@@ -1917,6 +1946,7 @@ fn validate_function(
                     .get(fn_name.as_str())
                     .ok_or("unknown closure function")?;
                 let expected = Type::Func {
+                    rest: target.rest,
                     params: target.params.iter().map(|p| p.r#type.clone()).collect(),
                     ret: Box::new(target.return_type.clone()),
                 };
@@ -1942,7 +1972,7 @@ fn validate_function(
                 ..
             } => {
                 expr(callee, locals, initialized, functions, module)?;
-                let Type::Func { params, ret } = callee.ty() else {
+                let Type::Func { params, ret, .. } = callee.ty() else {
                     return Err("non-function indirect call".into());
                 };
                 if params.len() != args.len() || *r#type != *ret {
@@ -2650,6 +2680,84 @@ mod tests {
     use super::*;
 
     #[test]
+    fn array_rest_closures_preserve_the_wire_abi_and_type_identity() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        let array = Type::Array {
+            elem: Box::new(Type::F64),
+        };
+        m.functions[1].rest = true;
+        m.functions[1].params[0].r#type = array.clone();
+        m.functions[1].locals[0].r#type = array.clone();
+        m.functions[1].return_type = array.clone();
+        m.functions[1].body = vec![Stmt::Return {
+            value: Some(Expr::VarRef {
+                local_id: "p0".into(),
+                r#type: array.clone(),
+                loc: loc.clone(),
+            }),
+            loc: loc.clone(),
+        }];
+        let variadic = Type::Func {
+            rest: true,
+            params: vec![array.clone()],
+            ret: Box::new(array.clone()),
+        };
+        let ordinary = Type::Func {
+            rest: false,
+            params: vec![array.clone()],
+            ret: Box::new(array),
+        };
+        assert_ne!(variadic, ordinary);
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::Closure {
+                fn_name: "f0".into(),
+                captures: vec![],
+                r#type: variadic.clone(),
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        validate(&m).unwrap();
+        let wire = serde_json::to_value(&m).unwrap();
+        let ty = &wire["functions"][0]["body"][0]["expr"]["type"];
+        assert_eq!(ty["rest"], true);
+        assert_eq!(ty["restAbi"], "array");
+        assert!(wire["functions"][1].get("rest").is_none());
+        let ordinary_wire = serde_json::to_value(&ordinary).unwrap();
+        assert!(ordinary_wire.get("rest").is_none() && ordinary_wire.get("restAbi").is_none());
+        if let Stmt::Expression {
+            expr: Expr::Closure { r#type, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = ordinary;
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid closure signature");
+    }
+
+    #[test]
+    fn array_rest_rejects_missing_or_untyped_pack_slots() {
+        let mut m = callable_module();
+        for params in [vec![], vec![Type::String]] {
+            assert!(!m.valid_type(
+                Type::Func {
+                    rest: true,
+                    params,
+                    ret: Box::new(Type::String)
+                },
+                &mut vec![]
+            ));
+        }
+        m.functions[0].body.clear();
+        m.functions[1].rest = true;
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "rest function needs a trailing native array"
+        );
+    }
+
+    #[test]
     fn expression_sequences_validate_scope_results_and_control_flow() {
         for mode in ["valid", "return", "result", "branch", "escape"] {
             let mut m = callable_module();
@@ -3187,6 +3295,7 @@ mod tests {
                 loc: loc.clone(),
             });
             m.functions.push(Function {
+                rest: false,
                 name: format!("%{name}.value"),
                 captures: None,
                 params: vec![Param {
@@ -3215,6 +3324,7 @@ mod tests {
             });
         }
         m.functions.push(Function {
+            rest: false,
             name: "dispatch".into(),
             captures: None,
             params: vec![Param {
@@ -3461,6 +3571,7 @@ mod tests {
         }];
         assert_eq!(validate(&m).unwrap_err(), "invalid native class value");
         m.functions.push(Function {
+            rest: false,
             name: "%Detail.constructor".into(),
             params: vec![Param {
                 local_id: "p0".into(),
@@ -3679,6 +3790,7 @@ mod tests {
         assert!(!m.valid_type(
             Type::Array {
                 elem: Box::new(Type::Func {
+                    rest: false,
                     params: vec![],
                     ret: Box::new(Type::Void)
                 })
@@ -3804,6 +3916,7 @@ mod tests {
             loc: loc.clone(),
         };
         m.functions.push(Function {
+            rest: false,
             name: "module_thunk".into(),
             params: vec![],
             captures: None,
@@ -3941,6 +4054,7 @@ mod tests {
         m.records[0].index_value = Some(Type::Record { shape_id: 0 });
         assert_eq!(validate(&m).unwrap_err(), "invalid/recursive record layout");
         m.records[0].index_value = Some(Type::Func {
+            rest: false,
             params: vec![],
             ret: Box::new(Type::F64),
         });
@@ -4006,6 +4120,7 @@ mod tests {
                     fn_name: "f0".into(),
                     captures: vec!["v0".into()],
                     r#type: Type::Func {
+                        rest: false,
                         params: vec![],
                         ret: Box::new(Type::F64),
                     },
@@ -4043,6 +4158,7 @@ mod tests {
     fn callable_signature_cycles_are_distinct_from_inline_layout_cycles() {
         let mut m = record_module();
         m.records[0].fields[0].r#type = Type::Func {
+            rest: false,
             params: vec![],
             ret: Box::new(Type::Record { shape_id: 0 }),
         };
@@ -4073,6 +4189,7 @@ mod tests {
             fn_name: "f0".into(),
             captures: vec![],
             r#type: Type::Func {
+                rest: false,
                 params: vec![Type::F64],
                 ret: Box::new(Type::F64),
             },
@@ -4243,6 +4360,7 @@ mod tests {
             classes: vec![],
             functions: vec![
                 Function {
+                    rest: false,
                     captures: None,
                     name: "__main".into(),
                     params: vec![],
@@ -4265,6 +4383,7 @@ mod tests {
                     }],
                 },
                 Function {
+                    rest: false,
                     captures: None,
                     name: "f0".into(),
                     params: vec![Param {
@@ -4553,6 +4672,7 @@ mod tests {
             source_file: loc.file.clone(),
             entry: "main".into(),
             functions: vec![Function {
+                rest: false,
                 captures: None,
                 name: "main".into(),
                 params: vec![],
@@ -4617,6 +4737,7 @@ mod tests {
         });
         assert!(validate(&m).is_ok());
         m.functions.push(Function {
+            rest: false,
             name: "invalid_caught_abi".into(),
             params: vec![Param {
                 local_id: "payload".into(),

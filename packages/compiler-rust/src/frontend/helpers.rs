@@ -28,6 +28,7 @@ impl Helper {
             .collect();
         Self {
             function: Function {
+                rest: false,
                 name: kind.into(),
                 params,
                 captures: None,

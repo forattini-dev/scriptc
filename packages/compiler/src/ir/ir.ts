@@ -6315,10 +6315,10 @@ export function canBoxFuncIntoDyn(
 ): boolean {
   return (
     t.kind === "func" &&
-    // Only the legacy hidden-dyn rest ABI has a checked-dynamic call thunk.
-    // Typed rest stays static (its trailing array is compiler-packed), and
-    // island rest has its separate engine host-callback adapter.
-    (t.rest !== true || t.restAbi === undefined) &&
+    // Native typed rest packs surplus checked values into its trailing array.
+    // Island rest keeps its separate engine host-callback adapter.
+    (t.rest !== true || t.restAbi === undefined ||
+      t.restAbi === "array" && t.params.at(-1)?.kind === "array") &&
     // A jsval (island) param converts through scr_jsval_from_dyn in the
     // thunk (wrapped cells unwrap by reference, dyn data deep-copies) —
     // the checker-'any' callback params of the routed-dispatch lane
@@ -6342,10 +6342,9 @@ export function canAdaptDynFuncTo(
 ): boolean {
   return (
     t.kind === "func" &&
-    // A variadic (rest-marked) target would need the trailing rest-array
-    // param synthesized by the adapter — no adapter models that; variadic
-    // values live boxed and are called through their own thunks.
-    t.rest !== true &&
+    // Typed rest adapters flatten their final array into dynamic arguments.
+    // Hidden-dyn and engine rest targets retain their separate boundaries.
+    (t.rest !== true || t.restAbi === "array" && t.params.at(-1)?.kind === "array") &&
     t.params.every((p) => p.kind === "dyn" || canConvertToDyn(p, getRecord, getUnion)) &&
     (t.ret.kind === "void" || t.ret.kind === "dyn" || canDynCheckTo(t.ret, getRecord, getUnion))
   );

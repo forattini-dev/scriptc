@@ -98,6 +98,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             }
         }
         let mut functions = vec![Function {
+            rest: false,
             name: "__main".into(),
             params: vec![],
             captures: None,

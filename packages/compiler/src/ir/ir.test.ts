@@ -126,11 +126,19 @@ describe("typed rest function ABI", () => {
     expect(typeEquals(rest, structuredClone(rest))).toBe(true);
   });
 
-  test("unimplemented dynamic and engine adapters refuse typed rest closures", () => {
-    expect(canBoxFuncIntoDyn(rest, () => undefined, () => undefined)).toBe(false);
-    expect(canAdaptDynFuncTo(rest, () => undefined, () => undefined)).toBe(false);
+  test("native dynamic adapters accept typed rest while engine adapters remain fenced", () => {
+    expect(canBoxFuncIntoDyn(rest, () => undefined, () => undefined)).toBe(true);
+    expect(canAdaptDynFuncTo(rest, () => undefined, () => undefined)).toBe(true);
     expect(canMarshalTypedFuncIntoIsland(rest, () => undefined, () => undefined)).toBe(false);
     expect(canBoxFuncIntoDyn(fixed, () => undefined, () => undefined)).toBe(true);
+  });
+
+  test("dynamic rest adapters require a real typed array slot", () => {
+    for (const type of [{ ...rest, params: [] }, { ...rest, params: [F64] }]) {
+      expect(canBoxFuncIntoDyn(type, () => undefined, () => undefined)).toBe(false);
+      expect(canAdaptDynFuncTo(type, () => undefined, () => undefined)).toBe(false);
+    }
+    expect(canAdaptDynFuncTo(dynamic, () => undefined, () => undefined)).toBe(false);
   });
 
   test("completed closure slots validate and survive serialization", () => {
