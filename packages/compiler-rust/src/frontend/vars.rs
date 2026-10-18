@@ -202,7 +202,7 @@ impl Lowerer<'_> {
         Ok(body)
     }
 
-    fn guarded_var(&mut self, node: Node, truth: bool) -> Option<u32> {
+    pub(super) fn guarded_var(&mut self, node: Node, truth: bool) -> Option<u32> {
         if node.kind() == SyntaxKind::ParenthesizedExpression {
             return self.guarded_var(node.expression(), truth);
         }

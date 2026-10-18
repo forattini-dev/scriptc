@@ -558,6 +558,22 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn record_literal(&mut self, node: Node, target: Type) -> Result<Expr, String> {
+        let properties = node.properties().into_iter().collect::<Vec<_>>();
+        if properties
+            .iter()
+            .any(|p| p.kind() == SyntaxKind::SpreadAssignment)
+        {
+            return self.record_spread_literal(node, target, properties);
+        }
+        self.record_literal_fields(node, target, properties)
+    }
+
+    pub(super) fn record_literal_fields(
+        &mut self,
+        node: Node,
+        target: Type,
+        properties: Vec<Node>,
+    ) -> Result<Expr, String> {
         let Type::Record { shape_id } = target else {
             return Err(self.refuse(node, "record literal needs a closed shape"));
         };
@@ -573,7 +589,7 @@ impl Lowerer<'_> {
         }
         let mut seen = HashSet::new();
         let mut fields = Vec::new();
-        for property in node.properties() {
+        for property in properties {
             if !matches!(
                 property.kind(),
                 SyntaxKind::PropertyAssignment | SyntaxKind::ShorthandPropertyAssignment
@@ -710,6 +726,9 @@ impl Lowerer<'_> {
 
     pub(super) fn record_set(&mut self, node: Node) -> Result<Stmt, String> {
         let member = node.left();
+        if member.name().text() == "__proto__" {
+            return Err(self.refuse(member, "ordinary prototype writes are not ported"));
+        }
         let obj = self.expression(member.expression())?;
         if obj.ty() == Type::Dyn {
             let key = member.name().text();

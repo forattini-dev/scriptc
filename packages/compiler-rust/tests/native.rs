@@ -173,6 +173,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditions/callbacks.ts",
         "rust-native-conditions/live.js",
         "rust-native-conditions/values.ts",
+        "rust-native-spreads/providers.ts",
+        "rust-native-spreads/order.ts",
+        "rust-native-spreads/presence.ts",
+        "rust-native-spreads/keys.ts",
+        "rust-native-spreads/contracts.ts",
+        "rust-native-spreads/exceptions.ts",
         "rust-native-console/node-types/contracts.ts",
         "rust-native-console/declaration-types.ts",
         "rust-native-console/callbacks.ts",
@@ -2188,6 +2194,57 @@ fn console_value_boundaries_preserve_artifacts() {
         !result.status.success() && String::from_utf8_lossy(&result.stderr).contains("SCN1001")
     );
     assert_eq!(fs::read(&target).unwrap(), b"preserve");
+}
+
+#[test]
+fn object_spread_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::copy(
+        root().join("tests/corpus/rust-native-spreads/tsconfig.json"),
+        temp.path().join("tsconfig.json"),
+    )
+    .unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "spread-boundary");
+    for source in [
+        "const source = { b: 'b' }; const result: { a: string; b?: string } = { a: 'a', ...source }; console.log(result.a);",
+        "const result: { a: string; b?: string } = { a: 'a', ...{ get b() { return 'b'; } } }; console.log(result.a);",
+        "const result: { a: string } = { ...{ a: 'a' } }; console.log(result.a);",
+        "const flag = true; const result: { a: string; b?: string } = { a: 'a', ...(flag && { b: 'b' }) }; console.log(result.a);",
+        "const result: { a: string } = { a: 'a', ...{ __proto__: null } }; console.log(result.a);",
+        "function key(): string { return 'b'; } const result: { a: string; b?: string } = { a: 'a', ...{ [key()]: 'b' } }; console.log(result.a);",
+        "const key = Symbol('b'); const result = { a: 'a', ...{ [key]: 'b' } }; console.log(result.a);",
+        "console.log(Object.keys(['a']).length);",
+        "console.log(Object.hasOwn({ a: 'a' }, Symbol('a')));",
+        "const value: { a: string; __proto__?: string } = { a: 'a' }; value.__proto__ = 'ignored'; console.log(Object.hasOwn(value, '__proto__'));",
+        "const value: { a: string; __proto__?: string } = { a: 'a' }; value['__proto__'] = 'ignored'; console.log(Object.keys(value).length);",
+    ] {
+        fs::write(&input, source).unwrap();
+        let rust = target.with_extension("rs");
+        let ir = target.with_extension("ir.json");
+        fs::write(&target, b"preserve").unwrap();
+        fs::write(&rust, b"preserve rust").unwrap();
+        fs::write(&ir, b"preserve ir").unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001"),
+            "{source}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("panicked") && !stderr.contains("SCN9001"),
+            "{source}: {stderr}"
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"preserve");
+        assert_eq!(fs::read(&rust).unwrap(), b"preserve rust");
+        assert_eq!(fs::read(&ir).unwrap(), b"preserve ir");
+    }
 }
 
 #[test]

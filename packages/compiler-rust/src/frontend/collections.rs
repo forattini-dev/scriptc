@@ -252,6 +252,9 @@ impl Lowerer<'_> {
                         "closed record indexed writes require a literal property key",
                     )
                 })?;
+            if name == "__proto__" {
+                return Err(self.refuse(member, "ordinary prototype writes are not ported"));
+            }
             let field = self.records[shape_id]
                 .fields
                 .iter()

@@ -197,6 +197,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             Expr::Closure { .. } => false,
             Expr::CallValue { callee, args, .. } => expr(callee) || args.iter().any(expr),
             Expr::RecordLit { fields, .. } => fields.iter().any(|f| expr(&f.value)),
+            Expr::Sequence { stmts, result, .. } => body(stmts) || expr(result),
             Expr::RecordGet { obj: value, .. }
             | Expr::UnionWrap { value, .. }
             | Expr::UnionNarrow { value, .. }
@@ -383,6 +384,15 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             }
         }
         Expr::UnitLit { .. } => "()".into(),
+        Expr::Sequence { stmts, result, .. } => {
+            let mut output = String::from("{\n");
+            for stmt in stmts {
+                statement_in(stmt, function, module, &mut output, false);
+            }
+            output.push_str(&expr(result, function, module));
+            output.push('}');
+            output
+        }
         Expr::RecordLit {
             fields,
             r#type: Type::Record { shape_id },
@@ -403,6 +413,12 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     "{{ let mut entries = Vec::new(); {entries} runtime::Gc::new(R{shape_id} {{ overflow: entries }}) }}"
                 );
             }
+            let keys = fields
+                .iter()
+                .filter(|f| !f.absent)
+                .map(|f| format!("{:?}.into()", f.name))
+                .collect::<Vec<_>>()
+                .join(", ");
             let fields = fields
                 .iter()
                 .map(|f| {
@@ -414,7 +430,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("runtime::Gc::new(R{shape_id} {{ {fields} }})")
+            format!("runtime::Gc::new(R{shape_id} {{ own_keys: vec![{keys}], {fields} }})")
         }
         Expr::RecordLit { .. } => unreachable!("IR validated"),
         Expr::RecordGet { obj, field, .. } => format!(
@@ -655,10 +671,10 @@ fn statement_in(
         } => {
             writeln!(
                 output,
-                "{{ let object = {}; let value = {}; object.with_mut(|object| object.{} = Some(value)); }}",
+                "{{ let object = {}; let value = {}; object.with_mut(|object| {{ object.{} = Some(value); if !object.own_keys.iter().any(|key| key == {:?}) {{ object.own_keys.push({:?}.into()); }} }}); }}",
                 expr(obj, function, module),
                 expr(value, function, module),
-                field_name(field)
+                field_name(field), field, field
             )
             .unwrap();
         }

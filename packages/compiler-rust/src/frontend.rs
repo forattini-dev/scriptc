@@ -36,8 +36,10 @@ mod pipeline;
 mod process;
 mod promises;
 mod property_keys;
+mod reflection;
 mod regex;
 mod sets;
+mod spreads;
 mod storage;
 mod strings;
 mod symbols;
@@ -1074,6 +1076,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.object_reflection(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.console_call(node)? {
                     return Ok(value);
                 }

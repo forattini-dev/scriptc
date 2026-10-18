@@ -161,6 +161,10 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
                 expression(&field.value, visitor);
             }
         }
+        Expr::Sequence { stmts, result, .. } => {
+            statements(stmts, visitor);
+            expression(result, visitor);
+        }
         Expr::RecordLit { fields, .. } => {
             for field in fields {
                 expression(&field.value, visitor);

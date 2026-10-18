@@ -16,6 +16,8 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                 "overflow: Vec<(String, {})>,\n",
                 rust_type(value.clone(), module)
             ));
+        } else {
+            output.push_str("own_keys: Vec<String>,\n");
         }
         output.push_str("}\n");
         let trace = record
@@ -39,7 +41,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                 "self.overflow.clear();",
             )
         } else {
-            ("", "")
+            ("", "self.own_keys.clear();")
         };
         output.push_str(&format!("impl runtime::Trace for R{} {{ fn trace(&self, tracer: &mut runtime::Tracer<'_>) {{ {trace} {trace_dict} }} }}\nimpl runtime::ClearEdges for R{} {{ fn clear_edges(&mut self) {{ {clear} {clear_dict} }} }}\n", record.id, record.id));
     }

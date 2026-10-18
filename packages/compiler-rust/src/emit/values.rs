@@ -255,6 +255,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
     }
     out.push_str("_ => false }, \"object\" => !matches!(value, NativeValue::Undefined | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::String(_) | NativeValue::Symbol(_)) && !native_value_test(value, \"function\"), _ => false } }\n");
     out.push_str("fn native_value_set(value: NativeValue, key: String, field: NativeValue) { match value { NativeValue::Object(object) => object.with_mut(|o| { if let Some((_, current)) = o.entries.iter_mut().find(|(k,_)| *k == key) { *current = field; } else { o.entries.push((key, field)); } }), _ => runtime::throw_type_error(\"scriptc: property writes require a native plain object\".into()) } }\n");
+    own_key_definitions(&types, module, out);
     out.push_str("fn native_value_get(value: NativeValue, key: String) -> NativeValue { match value { NativeValue::Undefined => runtime::throw_type_error(format!(\"Cannot read properties of undefined (reading '{}')\", key)), NativeValue::Null => runtime::throw_type_error(format!(\"Cannot read properties of null (reading '{}')\", key)), NativeValue::Promise(_) => native_value_missing_kind(&key, \"promise\"), NativeValue::Map(map) => { if key == \"size\" { NativeValue::Number(map.with(|m| m.entries.len() as f64)) } else { native_value_missing_kind(&key, \"map\") } }, NativeValue::Object(object) => object.with(|o| o.entries.iter().find(|(k,_)| *k == key).map(|(_,v)| v.clone()).unwrap_or_else(|| native_value_missing(&key))), NativeValue::Array(array) => { if key == \"length\" { NativeValue::Number(runtime::array_len(&array)) } else if let Ok(i) = key.parse::<usize>() { if i.to_string() == key && (i as f64) < runtime::array_len(&array) { runtime::array_get(&array, i as f64) } else { NativeValue::Undefined } } else { native_value_missing_kind(&key, \"array\") } }, NativeValue::String(s) => { if key == \"length\" { NativeValue::Number(s.encode_utf16().count() as f64) } else if let Ok(index) = key.parse::<usize>() { if index.to_string() == key { s.encode_utf16().nth(index).map(|unit| NativeValue::String(String::from_utf16(&[unit]).unwrap_or_else(|_| runtime::throw_type_error(\"scriptc: lone UTF-16 surrogates are not ported\".into())))).unwrap_or(NativeValue::Undefined) } else { NativeValue::Undefined } } else { native_value_missing_kind(&key, \"string\") } },\n");
     for (i, t) in types.iter().enumerate() {
         if let Type::Record { shape_id } = t {
@@ -403,8 +404,35 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
     out.push_str("_ => runtime::throw_type_error(format!(\"{} is not a function\", name)) } }\n");
 }
 
+fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
+    out.push_str("fn native_value_own_keys(value: &NativeValue) -> Vec<String> { match value { NativeValue::Object(object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()),\n");
+    for (i, ty) in types.iter().enumerate() {
+        if let Type::Record { shape_id } = ty {
+            let record = &module.records[*shape_id];
+            let keys = if record.index_value.is_some() {
+                "o.overflow.iter().map(|(k,_)| k.clone()).collect()"
+            } else {
+                "o.own_keys.clone()"
+            };
+            writeln!(out, "NativeValue::V{i}(object) => object.with(|o| {keys}),").unwrap();
+        }
+    }
+    out.push_str("_ => runtime::throw_type_error(\"scriptc: own-key reflection requires a native data record\".into()) } }\nfn native_value_has_own(value: NativeValue, key: String) -> bool { native_value_own_keys(&value).iter().any(|k| k == &key) }\n");
+    // Stable sorting leaves non-index string keys in insertion order. 2^32-1
+    // and noncanonical numeric spellings are ordinary string keys.
+    out.push_str("fn native_value_keys(value: NativeValue) -> NativeValue { let mut keys = native_value_own_keys(&value); keys.sort_by_key(|key| key.parse::<u32>().ok().filter(|i| *i != u32::MAX && i.to_string() == *key).map(|i| (0, i)).unwrap_or((1, 0))); NativeValue::Array(runtime::array_new(keys.into_iter().map(NativeValue::String).collect())) }\n");
+}
+
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     Some(match value {
+        Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.hasOwn" => format!(
+            "native_value_has_own({}, {})",
+            expr(&args[0], function, module),
+            expr(&args[1], function, module)
+        ),
+        Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.objKeys" => {
+            format!("native_value_keys({})", expr(&args[0], function, module))
+        }
         Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.keySet" => format!(
             "native_value_set({}, {}, {})",
             expr(&args[0], function, module),

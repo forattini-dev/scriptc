@@ -246,6 +246,13 @@ pub struct Local {
     rename_all_fields = "camelCase"
 )]
 pub enum Expr {
+    #[serde(rename = "seqExpr")]
+    Sequence {
+        stmts: Vec<Stmt>,
+        result: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     CaughtToDyn {
         value: Box<Expr>,
         r#type: Type,
@@ -637,6 +644,7 @@ impl Expr {
             | Self::StrConcat { r#type, .. }
             | Self::ToString { r#type, .. }
             | Self::UnionEq { r#type, .. }
+            | Self::Sequence { r#type, .. }
             | Self::RecordLit { r#type, .. }
             | Self::RecordGet { r#type, .. }
             | Self::UnionWrap { r#type, .. }
@@ -1140,6 +1148,43 @@ fn validate_function(
         module: &Module,
     ) -> Result<(), String> {
         match e {
+            Expr::Sequence {
+                stmts,
+                result,
+                r#type,
+                ..
+            } => {
+                fn allowed(stmts: &[Stmt]) -> bool {
+                    stmts.iter().all(|stmt| match stmt {
+                        Stmt::VarDecl { .. } | Stmt::RecordSet { .. } | Stmt::Expression { .. } => {
+                            true
+                        }
+                        Stmt::If { then, else_, .. } => {
+                            allowed(then) && else_.as_ref().is_none_or(|other| allowed(other))
+                        }
+                        Stmt::Block { body, .. } => allowed(body),
+                        _ => false,
+                    })
+                }
+                if !allowed(stmts) {
+                    return Err("invalid expression sequence statement".into());
+                }
+                let mut scope = initialized.clone();
+                body(
+                    stmts,
+                    locals,
+                    &mut scope,
+                    functions,
+                    Type::Void,
+                    module,
+                    None,
+                )?;
+                expr(result, locals, &scope, functions, module)?;
+                if result.ty() != *r#type {
+                    return Err("invalid expression sequence result".into());
+                }
+                Ok(())
+            }
             Expr::CaughtToDyn {
                 value,
                 r#type: Type::Dyn,
@@ -2115,6 +2160,24 @@ fn validate_function(
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } => {
+                if matches!(r#fn.as_str(), "dyn.hasOwn" | "dyn.objKeys") {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = if r#fn == "dyn.hasOwn" {
+                        args.len() == 2
+                            && args[0].ty() == Type::Dyn
+                            && args[1].ty() == Type::String
+                            && *r#type == Type::Bool
+                    } else {
+                        args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::Dyn
+                    };
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native own-key reflection".into())
+                    };
+                }
                 if matches!(r#fn.as_str(), "buffer.fromStr" | "text.decode") {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
@@ -2304,7 +2367,7 @@ fn validate_function(
         functions: &HashMap<&str, &Function>,
         return_type: Type,
         module: &Module,
-        function: &Function,
+        function: Option<&Function>,
     ) -> Result<(), String> {
         for stmt in stmts {
             match stmt {
@@ -2451,8 +2514,9 @@ fn validate_function(
                     if let Some(global) = module.global(local_id) {
                         if global.r#type != value.ty()
                             || (*initializes_global
-                                && !module.initializes(stmt, function, local_id))
-                            || (!global.mutable && !module.initializes(stmt, function, local_id))
+                                && !function.is_some_and(|f| module.initializes(stmt, f, local_id)))
+                            || (!global.mutable
+                                && !function.is_some_and(|f| module.initializes(stmt, f, local_id)))
                         {
                             return Err("invalid global assignment".into());
                         }
@@ -2552,7 +2616,7 @@ fn validate_function(
         functions,
         f.return_type.clone(),
         module,
-        f,
+        Some(f),
     )
 }
 
@@ -2584,6 +2648,142 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expression_sequences_validate_scope_results_and_control_flow() {
+        for mode in ["valid", "return", "result", "branch", "escape"] {
+            let mut m = callable_module();
+            let loc = m.functions[0].loc.clone();
+            let value = || Expr::NumLit {
+                value: 1.0,
+                spelling: None,
+                r#type: Type::F64,
+                loc: loc.clone(),
+            };
+            let read = || Expr::VarRef {
+                local_id: "seq".into(),
+                r#type: Type::F64,
+                loc: loc.clone(),
+            };
+            m.functions[0].locals.push(Local {
+                id: "seq".into(),
+                name: "sequence temp".into(),
+                r#type: Type::F64,
+                mutable: false,
+                boxed: false,
+            });
+            let declaration = Stmt::VarDecl {
+                local_id: "seq".into(),
+                init: value(),
+                loc: loc.clone(),
+            };
+            let stmts = match mode {
+                "return" => vec![Stmt::Return {
+                    value: None,
+                    loc: loc.clone(),
+                }],
+                "branch" => vec![Stmt::If {
+                    cond: Expr::BoolLit {
+                        value: true,
+                        r#type: Type::Bool,
+                        loc: loc.clone(),
+                    },
+                    then: vec![declaration],
+                    else_: None,
+                    loc: loc.clone(),
+                }],
+                _ => vec![declaration],
+            };
+            m.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::Sequence {
+                    stmts,
+                    result: Box::new(if mode == "return" { value() } else { read() }),
+                    r#type: if mode == "result" {
+                        Type::String
+                    } else {
+                        Type::F64
+                    },
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            if mode == "escape" {
+                m.functions[0].body.push(Stmt::Expression {
+                    expr: read(),
+                    loc: loc.clone(),
+                });
+            }
+            let result = validate(&m);
+            if mode == "valid" {
+                result.unwrap();
+                let wire = serde_json::to_value(&m).unwrap();
+                assert_eq!(wire["functions"][0]["body"][0]["expr"]["kind"], "seqExpr");
+                let mut visits = 0;
+                m.visit_expressions(&mut |_| visits += 1);
+                assert!(visits >= 3);
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    error.contains(if mode == "return" {
+                        "sequence statement"
+                    } else if mode == "result" {
+                        "sequence result"
+                    } else {
+                        "invalid native expression"
+                    }),
+                    "{mode}: {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn own_key_reflection_validates_the_portable_abi() {
+        for (name, valid_args, valid_result) in [
+            ("dyn.hasOwn", true, true),
+            ("dyn.objKeys", true, true),
+            ("dyn.hasOwn", false, true),
+            ("dyn.objKeys", true, false),
+        ] {
+            let mut m = callable_module();
+            let loc = m.functions[0].loc.clone();
+            let mut args = vec![Expr::DynObjLit {
+                fields: vec![],
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            }];
+            if name == "dyn.hasOwn" && valid_args {
+                args.push(Expr::StrLit {
+                    value: "key".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                });
+            }
+            m.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: name.into(),
+                    args,
+                    r#type: if !valid_result {
+                        Type::String
+                    } else if name == "dyn.hasOwn" {
+                        Type::Bool
+                    } else {
+                        Type::Dyn
+                    },
+                    loc: loc.clone(),
+                },
+                loc,
+            }];
+            if valid_args && valid_result {
+                validate(&m).unwrap();
+            } else {
+                assert_eq!(
+                    validate(&m).unwrap_err(),
+                    "invalid native own-key reflection"
+                );
+            }
+        }
+    }
 
     #[test]
     fn symbols_validate_owning_operands_results_and_wire_contract() {

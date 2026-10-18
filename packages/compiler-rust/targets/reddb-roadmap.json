@@ -107,7 +107,7 @@
     },
     {
       "id": "bindings-and-spread",
-      "status": "required",
+      "status": "partial",
       "work": "Add dependency destructuring, defaults, rest/spread and parameter binding without losing callable identities.",
       "dependsOn": [
         "source-control-flow"
@@ -118,7 +118,7 @@
         "Keep function identity and module live bindings through aliases and destructuring.",
         "For the gh Provider case preserve an absent bin property versus a present undefined value, evaluate the condition once, and retain spread/property precedence and observable own-key order. Do not rewrite optional spreads to unconditional undefined fields."
       ],
-      "evidence": "The next original red-dev refusal after console text callbacks is src/manifest.ts:360, the gh Provider helper spreading ...(bin ? { bin } : {}) into a contextual tagged record union."
+      "evidence": "Inline data-literal and conditional spreads now use retained seqExpr/if/recordSet operations, including contextual Provider unions and public JS contracts. Six rust-native-spreads fixtures cover source-order evaluation, skipped branches, exceptions, aliases, key order and omission versus undefined. Required slots must be initialized before the first spread; arbitrary source objects, short-circuit operands, index signatures, getters and symbol keys remain explicit boundaries. Original red-dev retries now pass the gh/mise conditional spreads and stop at manifest.ts:388, the ghInstaller arrow with a variadic string-array parameter."
     },
     {
       "id": "objects-and-values",
