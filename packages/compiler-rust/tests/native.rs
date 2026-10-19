@@ -168,6 +168,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-namespaces/order.ts",
         "rust-native-namespaces/cycles.ts",
         "rust-native-namespaces/tdz.ts",
+        "rust-native-lexicals/values.ts",
+        "rust-native-lexicals/order.ts",
+        "rust-native-lexicals/cycles.ts",
+        "rust-native-lexicals/plain.js",
         "rust-native-async/prefix.ts",
         "rust-native-async/exceptions.ts",
         "rust-native-async/closures.ts",
@@ -2542,6 +2546,59 @@ fn async_suspension_boundaries_preserve_existing_artifacts() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn lexical_initialization_refuses_storage_without_undefined_and_preserves_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "lexical-boundary");
+    for (source, expected) in [
+        (
+            "let value!: number; console.log(value);",
+            "uninitialized lexical storage must represent undefined",
+        ),
+        (
+            "let callback!: () => number; callback();",
+            "uninitialized lexical storage must represent undefined",
+        ),
+        (
+            "declare let value: string | undefined; console.log(value === undefined);",
+            "ambient lexical declarations have no native storage",
+        ),
+    ] {
+        fs::write(&input, source).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains(expected)
+                && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );
         for artifact in [

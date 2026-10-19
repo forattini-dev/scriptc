@@ -681,6 +681,11 @@ impl<'a> Lowerer<'a> {
                 if !flags.intersects(NodeFlags::LET | NodeFlags::CONST) {
                     return self.var_statement(node);
                 }
+                if node.modifier_flags().intersects(ModifierFlags::AMBIENT) {
+                    return Err(
+                        self.refuse(node, "ambient lexical declarations have no native storage")
+                    );
+                }
                 let mut out = Vec::new();
                 for declaration in list.declarations().nodes() {
                     let name = declaration.name();
@@ -688,14 +693,31 @@ impl<'a> Lowerer<'a> {
                     if self.native_namespaces.contains_key(&symbol) {
                         continue;
                     }
-                    if name.kind() != SyntaxKind::Identifier || declaration.initializer().is_nil() {
-                        return Err(self.refuse(
-                            declaration,
-                            "initialized identifier declarations are required",
-                        ));
+                    if name.kind() != SyntaxKind::Identifier {
+                        return Err(self
+                            .refuse(declaration, "identifier lexical declarations are required"));
                     }
                     let storage = self.storage_type(name);
-                    let (ty, init) = if self.declared(declaration).is_none() && storage.is_err() {
+                    let (ty, init) = if declaration.initializer().is_nil() {
+                        let ty = storage?;
+                        let init = self
+                            .coerce(
+                                Expr::UnitLit {
+                                    unit: "undefined",
+                                    r#type: Type::Undefined,
+                                    loc: self.loc(declaration),
+                                },
+                                ty.clone(),
+                                declaration,
+                            )
+                            .map_err(|_| {
+                                self.refuse(
+                                    declaration,
+                                    "uninitialized lexical storage must represent undefined",
+                                )
+                            })?;
+                        (ty, init)
+                    } else if self.declared(declaration).is_none() && storage.is_err() {
                         let init = self.expression(declaration.initializer())?;
                         if matches!(init.ty(), Type::Void | Type::Null | Type::Undefined) {
                             return Err(

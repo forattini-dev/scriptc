@@ -108,6 +108,7 @@ impl Lowerer<'_> {
         let ty = self.ty(node)?;
         if ty == Type::Dyn
             && node.parent().kind() == SyntaxKind::VariableDeclaration
+            && !node.parent().initializer().is_nil()
             && (self.file.ends_with(".js")
                 || self.file.ends_with(".mjs")
                 || self.file.ends_with(".cjs"))

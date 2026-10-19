@@ -190,7 +190,8 @@
           "Direct async Promise return adoption after finalizers",
           "Async iteration and top-level entry completion",
           "Bun subprocess/stream API adapter and pinned harmless oracle"
-        ]
+        ],
+        "returnAdoptionBoundary": "Direct Promise returns remain unsupported even without await, including erased Promise<unknown> contracts. A harmless audit built successfully but reached the existing native erased promise.then runtime boundary when resolving its return; Node fulfilled with a number. Treat this as refusal evidence, not successful support, and include it in adoption acceptance."
       }
     },
     {
@@ -219,6 +220,19 @@
         ],
         "status": "partial",
         "evidence": "Four rust-native-namespaces programs cover nullable caches, aliases and typed containers/callbacks, current mutable exports, reexports, receiver/argument order, callee snapshots, cycles and read/write TDZ. Module handles lower to private empty owning capsules; values are read from the module binding table after receiver evaluation. In the reference Rust backend, explicit initializesGlobal markers track lexical readiness separately from physical scalar/heap slots, including suspended assignments. Old unmarked producers retain their previous storage contract. Namespace descriptors and lazy ESM require are not implied."
+      },
+      "nativeLexicalInitializers": {
+        "implementation": "Initialize uninitialized lexical identifiers with undefined at their declaration site through existing owning slots and initializesGlobal markers. Preserve module read/write TDZ, RHS effects, cyclic imports, captures and optional containers. Untyped JS declarations without an initializer use native owning Dyn storage.",
+        "fixtures": [
+          "rust-native-lexicals/values.ts",
+          "rust-native-lexicals/order.ts",
+          "rust-native-lexicals/cycles.ts",
+          "rust-native-lexicals/plain.js"
+        ],
+        "boundaries": [
+          "Ambient lexical declarations have no native runtime binding.",
+          "Storage without an undefined representation is refused; definite-assignment assertions never authorize an invented zero."
+        ]
       }
     },
     {
@@ -323,13 +337,13 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "c5456b14154f1ae4707d29a364da876f9c270314",
-    "after": "unsuspended native async functions with owning Promise ABI and queued fulfillment/rejection reactions; native-reddb-async-v71 compile-only attempts",
+    "compilerSourceBaseCommit": "2bfa260e28db6dcc74ec6f1a47dc4f35cab403cd",
+    "after": "native lexical declaration-site undefined initialization with owning local/module storage and TDZ; native-reddb-lexicals-v72 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "src/github-token.ts:1662..1694 uninitialized module lexical declaration: let memo: string | null | undefined. Initialize at the declaration site with undefined while retaining TDZ before it; do not hoist let initialization like var. This is the new first refusal, not proof that all queued async bodies or the Bun I/O path have compiled.",
+    "red-dev": "src/providers.ts:2140..2160 process.stdin.isTTY in the default initializer of providerStdinMode(_stdinIsTTY: boolean | undefined = process.stdin.isTTY). Native stream reads already return boolean | undefined, but bind_parameter removes undefined from the body target before lowering the default. Preserve the default result instead of coercing it to a guaranteed boolean.",
     "completedOriginalApplicationBinaries": 0,
-    "nextCoercionConstraint": "Keep invariant typed views aliasing the original backing store and retain all extra own properties in subsequent spreads. Do not replace them with field-dropping clones or guessed union tags.",
-    "nextModuleConstraint": "Preserve the owning namespace/live-export contract, lexical initialization and explicit descriptor/Bun-require boundaries. Suspending async bodies, direct Promise return adoption, Bun.spawn/Response streams and async iteration remain outstanding."
+    "nextCoercionConstraint": "Defaulted call slots and the post-default body value are separate contracts. A default may still produce undefined, including native stream isTTY reads in a non-TTY process; retain that tag and initializer evaluation order instead of assuming every default defines its parameter.",
+    "nextModuleConstraint": "The github-token.ts uninitialized lexical declaration has been passed. Keep declaration-site initialization and module TDZ. Async suspension, direct Promise return adoption, Bun subprocess/Response streams, native namespace descriptors and async iteration remain outstanding."
   }
 }
