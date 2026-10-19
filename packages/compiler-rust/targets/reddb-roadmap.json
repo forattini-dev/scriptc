@@ -181,7 +181,18 @@
         "Respect conditional package exports, module cache identity, cycles, top-level effects and dynamic-import completion.",
         "Match argv/env/platform/cwd/exitCode/stdout/stderr and entry guards; do not skip dependency initialization.",
         "No runtime source evaluation, TS/Go fallback or replacement application entry."
-      ]
+      ],
+      "namespaceMilestone": {
+        "trigger": "red-dev manifest.ts:1512 stores typeof import(\"./machine-profile.ts\") | null; the next function uses lazy require with ??=.",
+        "investigation": "A harmless two-export namespace stored through an alias reproduces an unlowered namespace value independently of the application. The real red-dev package has type:module and dev/build scripts using Bun. Import namespace identity and source-runtime require semantics need separate contracts.",
+        "acceptance": [
+          "Owning canonical namespace identity in locals, module storage, aliases and nullable containers; do not eagerly lower every exported generic signature just to store a namespace handle.",
+          "Read demanded exports through the module binding table and preserve live values, TDZ, reexports and cycles; do not copy mutable exports into ordinary data fields.",
+          "Keep namespace mutation, dynamic keys, own-key order and toStringTag either correctly represented or explicitly refused.",
+          "Preserve the default Node ambient-require refusal for ESM; Bun source-runtime behavior requires an explicit adapter/profile and isolated oracle evidence, never a production Bun fallback.",
+          "Lazy requests initialize once at the original call site, preserving errors, partially initialized cycles and synchronous/asynchronous module boundaries."
+        ]
+      }
     },
     {
       "id": "application-io",
@@ -285,12 +296,13 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "70af02117c41aa31479756454391621705441919",
-    "after": "owning record storage and invariant structural views; native-reddb-record-views-v67 compile-only attempts",
+    "compilerSourceBaseCommit": "0896f14f5f22fea171ca1b651ea9383846bbe3dc",
+    "after": "native process.arch property lowering and imported property identity; native-reddb-process-arch-v68 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "src/manifest.ts:1025 process.arch reports an unlowered process binding; Provider to ProviderSpec coercion at line 567 has been passed",
+    "red-dev": "src/manifest.ts:1512 nullable typeof import(\"./machine-profile.ts\") cache initializer has no native storage type; process.arch at line 1025 has been passed",
     "completedOriginalApplicationBinaries": 0,
-    "nextCoercionConstraint": "Keep invariant typed views aliasing the original backing store and retain all extra own properties in subsequent spreads. Do not replace them with field-dropping clones or guessed union tags."
+    "nextCoercionConstraint": "Keep invariant typed views aliasing the original backing store and retain all extra own properties in subsequent spreads. Do not replace them with field-dropping clones or guessed union tags.",
+    "nextModuleConstraint": "Represent module namespace storage with the execution resolver and preserve live export bindings and lazy evaluation. require() inside the application uses its actual source runtime contract; do not turn an ESM/Bun require into eagerly initialized copies or a compiler fallback."
   }
 }

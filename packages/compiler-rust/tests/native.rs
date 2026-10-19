@@ -162,6 +162,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-process/reads.ts",
         "rust-native-process/imports.ts",
         "rust-native-process/shadows.ts",
+        "rust-native-process/architecture.ts",
+        "rust-native-process/architecture.cjs",
         "rust-native-commonjs/order.ts",
         "rust-native-commonjs/cycles.ts",
         "rust-native-commonjs/replacement.ts",
@@ -323,6 +325,14 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         let ir: serde_json::Value =
             serde_json::from_slice(&fs::read(target.with_extension("ir.json")).unwrap()).unwrap();
         assert_eq!(ir["irVersion"], 13);
+        if name.starts_with("rust-native-process/architecture.") {
+            assert!(ir.to_string().contains("process.arch"));
+            let generated = fs::read_to_string(target.with_extension("rs")).unwrap();
+            assert!(
+                generated.contains("runtime::process_arch()"),
+                "architecture must come from the output runtime, not the compiler host"
+            );
+        }
         assert_eq!(ir["functions"][0]["name"], ir["entry"]);
         if name.contains("functions") || name.contains("modules") {
             let functions = ir["functions"].as_array().unwrap();
@@ -470,6 +480,8 @@ fn data_table_and_process_boundaries_preserve_previous_artifacts() {
     let input = temp.path().join("main.ts");
     for source in [
         "process.env.SCRIPTC_NATIVE_UNSUPPORTED_WRITE = 'x';",
+        "// @ts-nocheck\nprocess.arch = 'arm64';",
+        "const saved = process; console.log(saved.arch);",
         "const saved = process.env; console.log(saved.SCRIPTC_NATIVE_PROCESS_VALUE);",
         "const output = process.stdout; console.log(output.isTTY === true);",
     ] {

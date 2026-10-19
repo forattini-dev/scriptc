@@ -3,8 +3,16 @@ use super::*;
 
 impl Lowerer<'_> {
     fn process_member(&mut self, node: Node, name: &str) -> bool {
-        if node.kind() == SyntaxKind::PropertyAccessExpression
-            && node.name().text() == name
+        let member = match node.kind() {
+            SyntaxKind::PropertyAccessExpression => Some(node.name()),
+            SyntaxKind::ElementAccessExpression
+                if node.argument_expression().kind() == SyntaxKind::StringLiteral =>
+            {
+                Some(node.argument_expression())
+            }
+            _ => None,
+        };
+        if member.is_some_and(|member| member.text() == name)
             && self.native_namespace(node.expression()) == Some("process")
         {
             return true;
@@ -20,6 +28,18 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn process_read(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        for name in ["arch", "platform"] {
+            if self.process_member(node, name) {
+                let property =
+                    builtins::property("process", name).expect("registered process property");
+                return Ok(Some(Expr::LibCall {
+                    r#fn: property.ir.into(),
+                    args: vec![],
+                    r#type: property.result,
+                    loc: self.loc(node),
+                }));
+            }
+        }
         if !matches!(
             node.kind(),
             SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression

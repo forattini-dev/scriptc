@@ -923,17 +923,6 @@ impl<'a> Lowerer<'a> {
                 let ty = self.ty(node)?;
                 self.expected_expression(node, ty)
             }
-            SyntaxKind::PropertyAccessExpression
-                if node.name().text() == "platform"
-                    && self.native_namespace(node.expression()) == Some("process") =>
-            {
-                Ok(Expr::LibCall {
-                    r#fn: "process.platform".into(),
-                    args: vec![],
-                    r#type: Type::String,
-                    loc,
-                })
-            }
             SyntaxKind::AsExpression | SyntaxKind::TypeAssertionExpression => {
                 let target = self.ty(node)?;
                 self.expected_expression(node.expression(), target)

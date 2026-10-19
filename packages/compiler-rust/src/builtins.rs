@@ -249,6 +249,58 @@ pub fn get(module: &str, member: &str) -> Option<Builtin> {
         .cloned()
 }
 
+// Properties have zero-argument IR calls but must never become source callables.
+fn properties() -> &'static [Builtin] {
+    static PROPERTIES: std::sync::OnceLock<Vec<Builtin>> = std::sync::OnceLock::new();
+    PROPERTIES.get_or_init(|| {
+        vec![
+            call!(
+                "process",
+                "arch",
+                "process.arch",
+                [],
+                String,
+                "process_arch"
+            ),
+            call!(
+                "process",
+                "platform",
+                "process.platform",
+                [],
+                String,
+                "process_platform"
+            ),
+        ]
+    })
+}
+
+pub fn property(module: &str, member: &str) -> Option<Builtin> {
+    properties()
+        .iter()
+        .find(|item| item.module == module && item.member == member)
+        .cloned()
+}
+
 pub fn by_ir(name: &str) -> Option<Builtin> {
-    calls().iter().find(|call| call.ir == name).cloned()
+    calls()
+        .iter()
+        .chain(properties())
+        .find(|call| call.ir == name)
+        .cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_properties_are_not_source_functions() {
+        for name in ["arch", "platform"] {
+            let item = property("process", name).unwrap();
+            assert_eq!(item.result, Type::String);
+            assert!(item.args.is_empty());
+            assert_eq!(by_ir(item.ir).unwrap().runtime, item.runtime);
+            assert!(get("process", name).is_none());
+        }
+    }
 }
