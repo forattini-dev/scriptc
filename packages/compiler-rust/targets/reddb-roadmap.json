@@ -211,6 +211,17 @@
           "Bun subprocess/stream API adapter and pinned harmless oracle"
         ],
         "returnAdoptionBoundary": "Direct Promise returns remain unsupported even without await, including erased Promise<unknown> contracts. A harmless audit built successfully but reached the existing native erased promise.then runtime boundary when resolving its return; Node fulfilled with a number. Treat this as refusal evidence, not successful support, and include it in adoption acceptance."
+      },
+      "nativeAsyncContextMilestone": {
+        "trigger": "red-dev node_modules/tuiuiu.js/dist/core/runtime-scope.js:782..806 constructs new AsyncLocalStorage() at module initialization.",
+        "runtimeAvailable": "The shared Rust runtime already has async_local_new/get/run/exit/enter_with/disable and context capture/install used by promise reactions and event-loop registrations. The reference IR/backend already uses als.* library operations. The Rust frontend, native IR validation and emitter still need an owned representation and lowering.",
+        "acceptance": [
+          "Keep independent store identity and the real store value, including stored undefined versus an absent context where observable; do not substitute one mutable global scope.",
+          "Restore nested run/exit scopes after normal returns and throws, evaluate receiver/store/callback/arguments in source order and preserve callback return identity.",
+          "Capture context at reaction/job registration and prove isolation across interleaved promise chains, with Node differential fixtures.",
+          "Trace owning store values and queued context captures; exercise record/function cycles and finish cleanup rather than relying only on existing scalar runtime tests.",
+          "Connect the existing native runtime contract without an engine or compiler fallback; unsupported options, bind/snapshot and broader async_hooks APIs remain explicit boundaries until implemented."
+        ]
       }
     },
     {
@@ -251,6 +262,26 @@
         "boundaries": [
           "Ambient lexical declarations have no native runtime binding.",
           "Storage without an undefined representation is refused; definite-assignment assertions never authorize an invented zero."
+        ]
+      },
+      "nativeJavaScriptUnitStorage": {
+        "implementation": "Unannotated JS lexical declarations with null/undefined initializers reserve owning native value storage when the checker supplies an erased or unit-only type. Initialization remains at the source site through existing initialization markers; subsequent writes keep tags, identities and traced captures. Public JS declaration contracts continue to select typed call and return ABIs.",
+        "fixtures": [
+          "rust-native-unit-caches/values.js",
+          "rust-native-unit-caches/ownership.js",
+          "rust-native-unit-caches/order.js",
+          "rust-native-unit-caches/cycles.js",
+          "rust-native-unit-caches/contracts.ts"
+        ],
+        "coverage": [
+          "Null, undefined, string, boolean and numeric transitions, falsy values, constant units and a shadowed undefined identifier.",
+          "Records, arrays, functions, snapshots, independent captured cells and an owning cycle under heap audit.",
+          "Read/write TDZ, RHS-before-write effects and live module bindings through import cycles.",
+          "Typed .d.ts return and parameter contracts over a JS dependency with a private null/string cache."
+        ],
+        "boundaries": [
+          "TypeScript unit-only storage and source unit-only function returns retain their existing refusals.",
+          "No changes to the shared runtime, IR version or caller ABI."
         ]
       }
     },
@@ -356,14 +387,15 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "3e6643adf3aabd6ab837d798b82ba132d78439c6",
-    "after": "native defaults preserving undefined, defined-default projection and var parameter redeclaration facts; native-reddb-default-values-v75 compile-only attempts",
+    "compilerSourceBaseCommit": "417fa8f9c96ec429376d6c853d86bfa58d711ec8",
+    "after": "native owning storage for JS null/undefined lexical initializers; native-reddb-unit-caches-v76 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "node_modules/tuiuiu.js/dist/version.js:774..790 let _version = null. This JavaScript cache is subsequently assigned strings, including the injected VERSION value. The default process.stdin.isTTY initializer in providers.ts has been passed.",
+    "red-dev": "node_modules/tuiuiu.js/dist/core/runtime-scope.js:782..806 new AsyncLocalStorage() from node:async_hooks. The tuiuiu version.js null/string cache has been passed.",
     "completedOriginalApplicationBinaries": 0,
     "nextCoercionConstraint": "Keep the native undefined fact established by default lowering across body var redeclarations and captures; do not replace it with the checker declaration-file narrowing.",
     "nextModuleConstraint": "The github-token.ts uninitialized lexical declaration has been passed. Keep declaration-site initialization and module TDZ. Async suspension, direct Promise return adoption, Bun subprocess/Response streams, native namespace descriptors and async iteration remain outstanding.",
-    "nextStorageConstraint": "An unannotated mutable JavaScript cache initialized to null needs owning storage that represents later values as well. Preserve null/string transitions, truthiness, typed public return projections, module TDZ and aliases; do not infer permanent unit-only storage or invent an empty-string initializer."
+    "nextStorageConstraint": "Keep null/undefined JS lexical initialization separate from the permanent storage representation and from public typed call/return contracts. Preserve declaration-site initialization, captures and module TDZ.",
+    "nextAsyncContextConstraint": "Connect the existing Rust async context/runtime operations through owned native frontend/IR/emitter contracts, preserving nested restoration, queued registration contexts, store identity and traced values."
   }
 }

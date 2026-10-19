@@ -106,7 +106,7 @@ impl Lowerer<'_> {
             });
         }
         let ty = self.ty(node)?;
-        if ty == Type::Dyn
+        if matches!(ty, Type::Dyn | Type::Null | Type::Undefined)
             && node.parent().kind() == SyntaxKind::VariableDeclaration
             && !node.parent().initializer().is_nil()
             && (self.file.ends_with(".js")
@@ -118,6 +118,20 @@ impl Lowerer<'_> {
                 .flags()
                 .intersects(NodeFlags::LET | NodeFlags::CONST)
         {
+            let initial = self
+                .checker
+                .get_type_at_location(node.parent().initializer());
+            if self
+                .checker
+                .ty(initial)
+                .flags
+                .intersects(TypeFlags::NULL | TypeFlags::UNDEFINED)
+            {
+                // An untyped JS unit initializer says nothing about later
+                // assignments. Reserve owning value storage before module
+                // lowering; initialization still occurs at the source site.
+                return Ok(Type::Dyn);
+            }
             return Err(self.refuse(
                 node,
                 "infer unannotated JavaScript lexical storage from its native initializer",
