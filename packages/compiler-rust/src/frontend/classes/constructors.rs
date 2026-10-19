@@ -296,6 +296,7 @@ impl Lowerer<'_> {
         }
         self.instance_this = None;
         Ok(Function {
+            is_async: false,
             rest: false,
             name: format!("%{}.constructor", definition.name),
             params,

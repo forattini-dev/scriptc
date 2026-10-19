@@ -127,8 +127,11 @@ pub fn rust(module: &Module) -> Result<String, String> {
         output.push_str(&format!(
             "\nfn {}({captures}{params}) -> {} {{\n",
             function_name(&function.name),
-            rust_type(function.return_type.clone(), module)
+            rust_type(function.call_result(), module)
         ));
+        if function.is_async {
+            output.push_str("let result = runtime::promise_new(); let target = result.clone(); runtime::promise_run_segment(&target, || { let value = (|| {\n");
+        }
         for param in &function.params {
             if function
                 .locals
@@ -144,6 +147,15 @@ pub fn rust(module: &Module) -> Result<String, String> {
         for stmt in &function.body {
             statement(stmt, function, module, &mut output);
         }
+        if function.is_async {
+            output.push_str("})();\n");
+            let boxed = if function.return_type == Type::Void {
+                "NativeValue::Undefined".into()
+            } else {
+                values::box_value(&function.return_type, "value", module)
+            };
+            output.push_str(&format!("let value = {boxed}; native_promise_plain(&value); let _ = runtime::promise_fulfill(&result, value); }}); result\n"));
+        }
         output.push_str("}\n");
     }
     if uses_runtime(module) {
@@ -155,6 +167,9 @@ pub fn rust(module: &Module) -> Result<String, String> {
 }
 
 pub fn uses_runtime(module: &Module) -> bool {
+    if module.functions.iter().any(|f| f.is_async) {
+        return true;
+    }
     fn expr(value: &Expr) -> bool {
         match value {
             Expr::DynFrom { .. }
@@ -824,6 +839,7 @@ mod tests {
             globals: vec![],
             classes: vec![],
             functions: vec![Function {
+                is_async: false,
                 rest: false,
                 name: "__main".into(),
                 params: vec![],

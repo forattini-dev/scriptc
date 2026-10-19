@@ -281,6 +281,7 @@ mod tests {
     }
     fn signature(name: &str) -> Signature {
         Signature {
+            is_async: false,
             rest: false,
             node: Node::NIL,
             file: "functions.ts".into(),

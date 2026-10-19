@@ -6,7 +6,7 @@ fn signature(function: &Function) -> Type {
     Type::Func {
         rest: function.rest,
         params: function.params.iter().map(|p| p.r#type.clone()).collect(),
-        ret: Box::new(function.return_type.clone()),
+        ret: Box::new(function.call_result()),
     }
 }
 fn types(module: &Module) -> Vec<Type> {

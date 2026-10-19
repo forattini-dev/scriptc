@@ -110,6 +110,7 @@ fn refusal(file: &str, node: Node, detail: &str) -> String {
 
 #[derive(Clone)]
 struct Signature {
+    is_async: bool,
     rest: bool,
     node: Node,
     file: String,
@@ -430,12 +431,8 @@ impl<'a> Lowerer<'a> {
     }
 
     fn function_signature(&mut self, node: Node, ordinal: usize) -> Result<Signature, String> {
-        if node.name().is_nil()
-            || node.body().is_nil()
-            || !node.asterisk_token().is_nil()
-            || node.modifier_flags().intersects(ModifierFlags::ASYNC)
-        {
-            return Err(self.refuse(node, "only named synchronous function bodies are ported"));
+        if node.name().is_nil() || node.body().is_nil() || !node.asterisk_token().is_nil() {
+            return Err(self.refuse(node, "only named non-generator function bodies are ported"));
         }
         let declared = self.declared(node).cloned();
         let rest = node
@@ -533,6 +530,7 @@ impl<'a> Lowerer<'a> {
             return Err(self.refuse(node, "function declaration has no resolved native symbol"));
         }
         Ok(Signature {
+            is_async: node.modifier_flags().intersects(ModifierFlags::ASYNC),
             rest,
             node,
             file: self.file.clone(),
@@ -549,7 +547,21 @@ impl<'a> Lowerer<'a> {
         self.captures.clear();
         self.var_types = self.module_vars.clone();
         self.var_defined.clear();
-        self.return_type = Some(signature.return_type.clone());
+        let body_return = if signature.is_async {
+            let Type::Promise { inner } = &signature.return_type else {
+                return Err(self.refuse(
+                    signature.node,
+                    "async function requires a native Promise result",
+                ));
+            };
+            (**inner).clone()
+        } else {
+            signature.return_type.clone()
+        };
+        if signature.is_async {
+            self.refuse_thenable(&body_return, signature.node)?;
+        }
+        self.return_type = Some(body_return.clone());
         self.instance_this = None;
         let mut body = Vec::new();
         let method = signature.node.kind() == SyntaxKind::MethodDeclaration;
@@ -567,7 +579,7 @@ impl<'a> Lowerer<'a> {
         }
         body.extend(self.hoist_local_vars(signature.node.body())?);
         body.extend(self.statements(signature.node.body().statements())?);
-        if signature.return_type != Type::Void && !ir::always_returns(&body) {
+        if body_return != Type::Void && !ir::always_returns(&body) {
             return Err(self.refuse(
                 signature.node,
                 "non-void function fallthrough is not ported",
@@ -575,11 +587,12 @@ impl<'a> Lowerer<'a> {
         }
         self.instance_this = None;
         Ok(Function {
+            is_async: signature.is_async,
             rest: signature.rest,
             name: signature.name,
             params: signature.params,
             captures: None,
-            return_type: signature.return_type,
+            return_type: body_return,
             locals: std::mem::take(&mut self.locals),
             body,
             loc: self.loc(signature.node),
@@ -861,6 +874,9 @@ impl<'a> Lowerer<'a> {
         }
         let loc = self.loc(node);
         match node.kind() {
+            SyntaxKind::AwaitExpression => {
+                Err(self.refuse(node, "native async suspension is not ported"))
+            }
             SyntaxKind::ClassExpression => self.class_expression(node),
             SyntaxKind::NewExpression => {
                 if let Some(value) = self.bytes_new(node)? {

@@ -155,7 +155,7 @@
     },
     {
       "id": "async-state-and-completions",
-      "status": "required",
+      "status": "partial",
       "work": "Compile async functions, await and async iteration with pending completions across suspension.",
       "dependsOn": [
         "source-control-flow",
@@ -175,6 +175,21 @@
           "Run the prefix at call time; suspend await continuations on the job queue with owning traced cells and preserve pending return/throw/finally through try/catch. Do not implement await by blocking until completion.",
           "Port the demanded Bun.spawn argv/options contract and stdout stream ownership to native Rust subprocess/stream APIs. Response.text() must drain through the async stream contract and proc.exited must settle independently with correct errors/status.",
           "Keep the source-runtime Bun contract explicit and compare harmless child-process fixtures with its pinned oracle; Node remains the independent oracle for shared language behavior. No Bun/Node/TS/Go production fallback and no original provisioning/release execution."
+        ]
+      },
+      "nativeUnsuspendedContract": {
+        "implementation": "Portable async function flag; body T versus callable Promise<T>; eager defaults/body, exception-to-rejection conversion, protected completions and queued fulfillment/rejection reactions. Named declarations, anonymous closures and source methods share the ABI.",
+        "fixtures": [
+          "rust-native-async/prefix.ts",
+          "rust-native-async/exceptions.ts",
+          "rust-native-async/closures.ts",
+          "rust-native-async/reactions.ts"
+        ],
+        "remaining": [
+          "Await continuations and traced suspension frames",
+          "Direct async Promise return adoption after finalizers",
+          "Async iteration and top-level entry completion",
+          "Bun subprocess/stream API adapter and pinned harmless oracle"
         ]
       }
     },
@@ -308,13 +323,13 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "e83b35083f5208ab8cc6b205011d21b4f447634f",
-    "after": "checked satisfies erasure with operand identity and destination-context lowering; native-reddb-satisfies-v70 compile-only attempts",
+    "compilerSourceBaseCommit": "c5456b14154f1ae4707d29a364da876f9c270314",
+    "after": "unsuspended native async functions with owning Promise ABI and queued fulfillment/rejection reactions; native-reddb-async-v71 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "src/agents.ts:953 cliNamesRedSkills is async; its body combines try/catch, Bun.spawn piped stdout, (await new Response(proc.stdout).text()).toLowerCase(), await proc.exited and string includes. The earlier satisfies wrapper in unattended.ts has been passed.",
+    "red-dev": "src/github-token.ts:1662..1694 uninitialized module lexical declaration: let memo: string | null | undefined. Initialize at the declaration site with undefined while retaining TDZ before it; do not hoist let initialization like var. This is the new first refusal, not proof that all queued async bodies or the Bun I/O path have compiled.",
     "completedOriginalApplicationBinaries": 0,
     "nextCoercionConstraint": "Keep invariant typed views aliasing the original backing store and retain all extra own properties in subsequent spreads. Do not replace them with field-dropping clones or guessed union tags.",
-    "nextModuleConstraint": "Preserve the owning namespace/live-export contract and explicit descriptor/Bun-require boundaries. The next observed red-dev path needs asynchronous source functions and suspended completions plus native subprocess/stream integration, without blocking await or a production runtime fallback."
+    "nextModuleConstraint": "Preserve the owning namespace/live-export contract, lexical initialization and explicit descriptor/Bun-require boundaries. Suspending async bodies, direct Promise return adoption, Bun.spawn/Response streams and async iteration remain outstanding."
   }
 }

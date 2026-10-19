@@ -168,6 +168,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-namespaces/order.ts",
         "rust-native-namespaces/cycles.ts",
         "rust-native-namespaces/tdz.ts",
+        "rust-native-async/prefix.ts",
+        "rust-native-async/exceptions.ts",
+        "rust-native-async/closures.ts",
+        "rust-native-async/reactions.ts",
         "rust-native-satisfies/values.ts",
         "rust-native-satisfies/context.ts",
         "rust-native-satisfies/order.ts",
@@ -825,7 +829,7 @@ fn promise_boundaries_preserve_previous_native_artifacts() {
     for source in [
         "Promise.all([]);",
         "Promise.resolve().catch(() => {});",
-        "Promise.resolve(1).then(() => 1, () => 2);",
+        "Promise.resolve(1).then(() => 1, async () => await Promise.resolve(2));",
         "new Promise<void>((resolve) => resolve());",
         "const value = { then: (resolve: (n: number) => unknown) => { resolve(1); } }; Promise.resolve(value);",
         "type A = { kind: 'a'; value: string } | { kind: 'b' }; const value: A = { kind: 'c' } as any;",
@@ -962,7 +966,7 @@ fn error_definitions_defer_instance_code_and_refuse_unported_effects() {
         ),
         (
             "method",
-            "class Fault extends Error { async method(): Promise<number> { return 1; } } new Fault().method();",
+            "class Fault extends Error { async method(): Promise<number> { return await Promise.resolve(1); } } new Fault().method();",
         ),
         (
             "accessor",
@@ -1043,12 +1047,12 @@ fn function_demand_keeps_type_checks_effects_and_escaping_values() {
         ),
         (
             "reachable-chain",
-            "async function unsupported(): Promise<number> { return 1; } function root(): void { unsupported(); } root();",
+            "async function unsupported(): Promise<number> { return await Promise.resolve(1); } function root(): void { unsupported(); } root();",
             "call 'unsupported'",
         ),
         (
             "escaping-value",
-            "async function unsupported(): Promise<number> { return 1; } const alias = unsupported;",
+            "async function unsupported(): Promise<number> { return await Promise.resolve(1); } const alias = unsupported;",
             "function value 'unsupported'",
         ),
         (
@@ -1195,7 +1199,11 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "function f(a: number = a) { return a; } console.log(f());",
             "TS2372",
         ),
-        ("async", "async function f() { return 1; } f();", "SCN1001"),
+        (
+            "async",
+            "async function f() { return await Promise.resolve(1); } f();",
+            "SCN1001",
+        ),
         (
             "readonly-map-write",
             "function f(map: ReadonlyMap<string, number>): void { map.set('x', 1); }",
@@ -1970,7 +1978,7 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
         "class Base {} class Child extends Base { constructor() { if (true) super(); } } new Child();",
         "class Box { method(): () => number { return () => this.value; } value = 1; } new Box().method();",
         "class Box { *method(): Generator<number> { yield 1; } } new Box().method();",
-        "class Box { async method(): Promise<number> { return 1; } } new Box().method();",
+        "class Box { async method(): Promise<number> { return await Promise.resolve(1); } } new Box().method();",
         "class Base { method(value: number): number { return value; } } class Child extends Base { method(value: number | undefined): number { return 1; } } const value: Base = new Child(); value.method(1);",
         "class Fault extends Error { toString(): string { return 'custom'; } } new Fault();",
     ] {
@@ -2492,6 +2500,48 @@ fn satisfies_checks_unused_bodies_and_preserves_previous_artifacts() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             !output.status.success() && stderr.contains("TS1360") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn async_suspension_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "async-boundary");
+    for source in [
+        "async function f(): Promise<number> { return await Promise.resolve(1); } f();",
+        "const f = async (): Promise<number> => await Promise.resolve(1); f();",
+        "async function f(): Promise<number> { return Promise.resolve(1); } f();",
+        "async function* f() { yield 1; } f();",
+    ] {
+        fs::write(&input, source).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );
         for artifact in [

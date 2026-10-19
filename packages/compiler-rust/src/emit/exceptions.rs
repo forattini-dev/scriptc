@@ -24,6 +24,8 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             .position(|c| c.name == "%Error")
             .unwrap();
         writeln!(output, "_ => instance_allocate_{root}(), }}; object.with_mut(|object| {{ let error = object.error.as_mut().expect(\"validated Error receiver\"); error.name = name; error.message = message; }}); return NativeValue::Instance(object); }} runtime::throw_type_error(\"scriptc: unknown native exception payload\".into()) }}").unwrap();
+    } else {
+        output.push_str("fn native_caught(caught: runtime::Caught) -> NativeValue { if runtime::caught_is::<NativeValue>(&caught) { return runtime::caught_narrow::<NativeValue>(&caught); } runtime::throw_type_error(\"scriptc: native exception conversion requires Error classes\".into()) }\n");
     }
 }
 fn region(body: &[Stmt], function: &Function, module: &Module, output: &mut String) {

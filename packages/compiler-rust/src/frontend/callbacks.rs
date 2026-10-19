@@ -1,4 +1,4 @@
-//! First-class synchronous functions and lexical capture boxes.
+//! First-class functions and lexical capture boxes.
 use super::*;
 use source_frontend::prelude::SignatureKind;
 
@@ -129,11 +129,10 @@ impl Lowerer<'_> {
         if !node.name().is_nil()
             || !node.asterisk_token().is_nil()
             || !node.type_parameters().is_empty()
-            || node.modifier_flags().intersects(ModifierFlags::ASYNC)
         {
             return Err(self.refuse(
                 node,
-                "only anonymous synchronous non-generic function expressions are ported",
+                "only anonymous non-generator non-generic function expressions are ported",
             ));
         }
         let ty = match expected {
@@ -148,6 +147,18 @@ impl Lowerer<'_> {
         else {
             return Err(self.refuse(node, "callback needs a native function signature"));
         };
+        let is_async = node.modifier_flags().intersects(ModifierFlags::ASYNC);
+        let body_return = if is_async {
+            let Type::Promise { inner } = &**ret else {
+                return Err(self.refuse(node, "async callback requires a native Promise result"));
+            };
+            (**inner).clone()
+        } else {
+            (**ret).clone()
+        };
+        if is_async {
+            self.refuse_thenable(&body_return, node)?;
+        }
         if node.parameters().len() > types.len() {
             return Err(self.refuse(
                 node,
@@ -175,7 +186,7 @@ impl Lowerer<'_> {
         let saved_locals = std::mem::take(&mut self.locals);
         let saved_bindings = std::mem::take(&mut self.bindings);
         let saved_captures = std::mem::take(&mut self.captures);
-        let saved_return = self.return_type.replace((**ret).clone());
+        let saved_return = self.return_type.replace(body_return.clone());
         let saved_this = self.instance_this.take();
         let saved_var_types = self.var_types.clone();
         let saved_var_defined = std::mem::take(&mut self.var_defined);
@@ -212,7 +223,7 @@ impl Lowerer<'_> {
         }
         body.extend(if node.body().kind() == SyntaxKind::Block {
             self.statements(node.body().statements())?
-        } else if **ret == Type::Void {
+        } else if body_return == Type::Void {
             vec![
                 Stmt::Expression {
                     expr: self.expression(node.body())?,
@@ -225,20 +236,21 @@ impl Lowerer<'_> {
             ]
         } else {
             vec![Stmt::Return {
-                value: Some(self.expected_expression(node.body(), (**ret).clone())?),
+                value: Some(self.expected_expression(node.body(), body_return.clone())?),
                 loc: self.loc(node.body()),
             }]
         });
-        if **ret != Type::Void && !ir::always_returns(&body) {
+        if body_return != Type::Void && !ir::always_returns(&body) {
             return Err(self.refuse(node, "callback can fall through"));
         }
         let captures = std::mem::replace(&mut self.captures, saved_captures);
         let function = Function {
+            is_async,
             rest: *rest,
             name: name.clone(),
             params,
             captures: Some(captures.iter().map(|(_, p)| p.clone()).collect()),
-            return_type: (**ret).clone(),
+            return_type: body_return,
             locals: std::mem::replace(&mut self.locals, saved_locals),
             body,
             loc: loc.clone(),

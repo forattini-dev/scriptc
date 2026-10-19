@@ -25,23 +25,29 @@ fn native_promise_then(
     source: runtime::JsPromise<NativeValue>,
     args: Vec<NativeValue>,
 ) -> runtime::JsPromise<NativeValue> {
-    if args.len() > 1 {
+    if args.len() > 2 {
         runtime::throw_type_error(
-            "scriptc: native Promise rejection callbacks are not ported".into(),
+            "scriptc: native Promise.then extra arguments are not ported".into(),
         );
     }
     let callback = args.first().cloned().unwrap_or(NativeValue::Undefined);
+    let rejected = args.get(1).cloned().unwrap_or(NativeValue::Undefined);
     let target = runtime::promise_new();
     let result = target.clone();
     runtime::promise_then(
         &source,
         Box::new(move |outcome| {
             let destination = target.clone();
-            runtime::promise_run_segment(&destination, move || match outcome {
-                Err(reason) => {
-                    let _ = runtime::promise_reject(&target, reason);
-                }
-                Ok(value) => {
+            runtime::promise_run_segment(&destination, move || {
+                let (callback, value) = match outcome {
+                    Err(reason) if !native_value_test(&rejected, "function") => {
+                        let _ = runtime::promise_reject(&target, reason);
+                        return;
+                    }
+                    Err(reason) => (rejected, native_caught(reason)),
+                    Ok(value) => (callback, value),
+                };
+                {
                     let value = if native_value_test(&callback, "function") {
                         native_value_call(callback, vec![value], "Promise reaction")
                     } else {

@@ -28,6 +28,7 @@ impl Helper {
             .collect();
         Self {
             function: Function {
+                is_async: false,
                 rest: false,
                 name: kind.into(),
                 params,

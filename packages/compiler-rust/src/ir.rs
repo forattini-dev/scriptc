@@ -227,6 +227,8 @@ pub struct Global {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Function {
+    #[serde(rename = "async", skip_serializing_if = "std::ops::Not::not")]
+    pub is_async: bool,
     #[serde(skip)]
     pub rest: bool,
     pub name: String,
@@ -237,6 +239,19 @@ pub struct Function {
     pub locals: Vec<Local>,
     pub body: Vec<Stmt>,
     pub loc: Loc,
+}
+
+impl Function {
+    /// Caller-visible result; return statements inside an async body still use T.
+    pub fn call_result(&self) -> Type {
+        if self.is_async {
+            Type::Promise {
+                inner: Box::new(self.return_type.clone()),
+            }
+        } else {
+            self.return_type.clone()
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -840,7 +855,7 @@ pub fn validate(module: &Module) -> Result<(), String> {
                     .iter()
                     .skip(1)
                     .map(|p| &p.r#type))
-                    || base.return_type != method.return_type)
+                    || base.call_result() != method.call_result())
             {
                 return Err("incompatible native method override".into());
             }
@@ -849,7 +864,7 @@ pub fn validate(module: &Module) -> Result<(), String> {
     let entry = functions
         .get(module.entry.as_str())
         .ok_or("missing entry")?;
-    if entry.return_type != Type::Void || !entry.params.is_empty() {
+    if entry.is_async || entry.return_type != Type::Void || !entry.params.is_empty() {
         return Err("invalid native entry".into());
     }
     let mut global_ids = std::collections::HashSet::new();
@@ -1137,6 +1152,9 @@ fn validate_function(
             .is_some_and(|p| matches!(p.r#type, Type::Array { .. }))
     {
         return Err("rest function needs a trailing native array".into());
+    }
+    if f.is_async && matches!(f.return_type, Type::Promise { .. }) {
+        return Err("nested async body Promise return requires adoption lowering".into());
     }
     if f.return_type != Type::Void && !module.valid_type(f.return_type.clone(), &mut vec![]) {
         return Err("invalid return layout".into());
@@ -1559,7 +1577,8 @@ fn validate_function(
                         .class(class_name)
                         .is_some_and(|c| !c.runtime && !c.js_name.is_empty())
                     || !ctor.is_some_and(|f| {
-                        f.return_type == Type::Void
+                        !f.is_async
+                            && f.return_type == Type::Void
                             && f.captures.is_none()
                             && f.params.first().map(|p| &p.r#type)
                                 == Some(&Type::Object {
@@ -1599,6 +1618,7 @@ fn validate_function(
                 };
                 if module.class(class_name).is_none()
                     || *r#type != object
+                    || ctor.is_async
                     || ctor.return_type != Type::Void
                     || ctor.captures.is_some()
                     || ctor.params.len() != args.len() + 1
@@ -1679,7 +1699,7 @@ fn validate_function(
                         class_name: class_name.clone(),
                     })
                     || args.len() != target.params.len()
-                    || *r#type != target.return_type
+                    || *r#type != target.call_result()
                     || args.iter().skip(1).map(Expr::ty).ne(target
                         .params
                         .iter()
@@ -1954,7 +1974,7 @@ fn validate_function(
                 let expected = Type::Func {
                     rest: target.rest,
                     params: target.params.iter().map(|p| p.r#type.clone()).collect(),
-                    ret: Box::new(target.return_type.clone()),
+                    ret: Box::new(target.call_result()),
                 };
                 let want = target.captures.as_deref().unwrap_or(&[]);
                 if *r#type != expected || captures.len() != want.len() {
@@ -2445,7 +2465,7 @@ fn validate_function(
                 let target = functions.get(callee.as_str()).ok_or("unknown callee")?;
                 if target.captures.is_some()
                     || args.len() != target.params.len()
-                    || *r#type != target.return_type
+                    || *r#type != target.call_result()
                 {
                     return Err("invalid call signature".into());
                 }
@@ -2748,6 +2768,60 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn async_calls_and_closures_separate_body_and_caller_results() {
+        let mut m = callable_module();
+        m.functions[1].is_async = true;
+        let promise = Type::Promise {
+            inner: Box::new(Type::F64),
+        };
+        assert_eq!(m.functions[1].call_result(), promise);
+        assert_eq!(validate(&m).unwrap_err(), "invalid call signature");
+        let Stmt::Expression {
+            expr: Expr::Call { r#type, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        else {
+            unreachable!()
+        };
+        *r#type = promise.clone();
+        validate(&m).unwrap();
+        let json = serde_json::to_value(&m).unwrap();
+        assert_eq!(json["functions"][1]["async"], true);
+        assert_eq!(json["functions"][1]["returnType"]["kind"], "f64");
+        assert!(json["functions"][0].get("async").is_none());
+        let loc = m.functions[0].loc.clone();
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::Closure {
+                fn_name: "f0".into(),
+                captures: vec![],
+                r#type: Type::Func {
+                    rest: false,
+                    params: vec![Type::F64],
+                    ret: Box::new(promise),
+                },
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        validate(&m).unwrap();
+        let Stmt::Expression {
+            expr:
+                Expr::Closure {
+                    r#type: Type::Func { ret, .. },
+                    ..
+                },
+            ..
+        } = &mut m.functions[0].body[0]
+        else {
+            unreachable!()
+        };
+        **ret = Type::F64;
+        assert_eq!(validate(&m).unwrap_err(), "invalid closure signature");
+        m.functions[0].is_async = true;
+        assert_eq!(validate(&m).unwrap_err(), "invalid native entry");
+    }
 
     #[test]
     fn array_rest_closures_preserve_the_wire_abi_and_type_identity() {
@@ -3365,6 +3439,7 @@ mod tests {
                 loc: loc.clone(),
             });
             m.functions.push(Function {
+                is_async: false,
                 rest: false,
                 name: format!("%{name}.value"),
                 captures: None,
@@ -3394,6 +3469,7 @@ mod tests {
             });
         }
         m.functions.push(Function {
+            is_async: false,
             rest: false,
             name: "dispatch".into(),
             captures: None,
@@ -3641,6 +3717,7 @@ mod tests {
         }];
         assert_eq!(validate(&m).unwrap_err(), "invalid native class value");
         m.functions.push(Function {
+            is_async: false,
             rest: false,
             name: "%Detail.constructor".into(),
             params: vec![Param {
@@ -3986,6 +4063,7 @@ mod tests {
             loc: loc.clone(),
         };
         m.functions.push(Function {
+            is_async: false,
             rest: false,
             name: "module_thunk".into(),
             params: vec![],
@@ -4549,6 +4627,7 @@ mod tests {
             classes: vec![],
             functions: vec![
                 Function {
+                    is_async: false,
                     rest: false,
                     captures: None,
                     name: "__main".into(),
@@ -4572,6 +4651,7 @@ mod tests {
                     }],
                 },
                 Function {
+                    is_async: false,
                     rest: false,
                     captures: None,
                     name: "f0".into(),
@@ -4861,6 +4941,7 @@ mod tests {
             source_file: loc.file.clone(),
             entry: "main".into(),
             functions: vec![Function {
+                is_async: false,
                 rest: false,
                 captures: None,
                 name: "main".into(),
@@ -4926,6 +5007,7 @@ mod tests {
         });
         assert!(validate(&m).is_ok());
         m.functions.push(Function {
+            is_async: false,
             rest: false,
             name: "invalid_caught_abi".into(),
             params: vec![Param {

@@ -44,7 +44,7 @@ fn types(module: &Module) -> Vec<Type> {
                 &Type::Func {
                     rest: f.rest,
                     params: f.params.iter().map(|p| p.r#type.clone()).collect(),
-                    ret: Box::new(f.return_type.clone()),
+                    ret: Box::new(f.call_result()),
                 },
                 &mut out,
             );

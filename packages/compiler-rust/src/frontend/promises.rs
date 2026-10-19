@@ -39,7 +39,7 @@ impl Lowerer<'_> {
             _ => false,
         }
     }
-    fn refuse_thenable(&self, ty: &Type, node: Node) -> Result<(), String> {
+    pub(super) fn refuse_thenable(&self, ty: &Type, node: Node) -> Result<(), String> {
         if self.namespace_capsule(ty)
             || matches!(ty, Type::Union { union_id } if self.unions[*union_id].arms.iter().any(|arm| self.namespace_capsule(arm)))
         {
@@ -151,13 +151,16 @@ impl Lowerer<'_> {
             return Err(self.refuse(node, "Promise method is not ported"));
         }
         let args = node.arguments().into_iter().collect::<Vec<_>>();
-        if args.len() > 1 {
-            return Err(self.refuse(node, "Promise rejection callbacks are not ported"));
+        if args.len() > 2 {
+            return Err(self.refuse(node, "Promise.then extra arguments are not ported"));
+        }
+        if args.len() == 2 {
+            self.ensure_exception_classes(node)?;
         }
         let recv = self.expression(receiver)?;
         let recv = self.coerce(recv, Type::Dyn, receiver)?;
         let mut values = Vec::new();
-        for arg in args {
+        for (index, arg) in args.into_iter().enumerate() {
             // A Promise<void> callback still receives the JavaScript undefined value.
             if matches!(
                 arg.kind(),
@@ -169,7 +172,12 @@ impl Lowerer<'_> {
                     return Err(self.refuse(arg, "Promise reaction signature is not ported"));
                 }
                 let ret = self.checker.get_return_type_of_signature(signatures[0]);
-                let ret = if self.checker.ty(ret).flags.intersects(TypeFlags::VOID) {
+                let ret = if self
+                    .checker
+                    .ty(ret)
+                    .flags
+                    .intersects(TypeFlags::VOID | TypeFlags::NEVER)
+                {
                     Type::Void
                 } else {
                     let ty = self.type_id(ret).ok_or_else(|| {
@@ -185,11 +193,12 @@ impl Lowerer<'_> {
                 let Type::Promise { inner } = self.ty(receiver)? else {
                     unreachable!()
                 };
-                let param = if matches!(*inner, Type::Void | Type::Null | Type::Undefined) {
-                    Type::Dyn
-                } else {
-                    *inner
-                };
+                let param =
+                    if index == 1 || matches!(*inner, Type::Void | Type::Null | Type::Undefined) {
+                        Type::Dyn
+                    } else {
+                        *inner
+                    };
                 let callback = self.closure(
                     arg,
                     Some(Type::Func {

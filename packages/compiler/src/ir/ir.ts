@@ -6181,10 +6181,10 @@ export function canConvertToDyn(
   // fold extends the JSON-safe core.
   if (canBoxDynComposite(t, getRecord, getUnion, visiting)) return true;
   if (t.kind === "effect" || t.kind === "date" || t.kind === "regex" || t.kind === "url" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
-  // %Error converts as the checked-dynamic tree's error encoding ({%error, name, message,
+  // Runtime Error subclasses share the checked-dynamic error encoding ({%error, name, message,
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
-  if (t.kind === "object" && t.className === "%Error") return true;
+  if (t.kind === "object" && RUNTIME_ERROR_CLASSES.has(t.className)) return true;
   if (isDynTypedRefType(t)) return true;
   if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;

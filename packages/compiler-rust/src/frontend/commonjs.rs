@@ -583,6 +583,7 @@ impl Lowerer<'_> {
                 loc: loc.clone(),
             });
             functions.push(Function {
+                is_async: false,
                 rest: false,
                 name: instance.name,
                 params: vec![],
