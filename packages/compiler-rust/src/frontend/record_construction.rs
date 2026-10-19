@@ -5,11 +5,10 @@ struct Slot {
     name: String,
     ty: Type,
     value: Local,
-    present: Local,
 }
 struct Plan {
     slots: Vec<Slot>,
-    keys: Local,
+    own: Local,
 }
 
 impl Lowerer<'_> {
@@ -73,17 +72,12 @@ impl Lowerer<'_> {
                 "record construction needs a closed native data layout",
             ));
         }
-        let keys = self.construction_local(
-            Type::Array {
-                elem: Box::new(Type::String),
-            },
-            false,
-        );
+        let own = self.construction_local(Type::Dyn, false);
         let mut stmts = vec![Stmt::VarDecl {
-            local_id: keys.id.clone(),
-            init: Expr::ArrayLit {
-                elems: vec![],
-                r#type: keys.r#type.clone(),
+            local_id: own.id.clone(),
+            init: Expr::DynObjLit {
+                fields: vec![],
+                r#type: Type::Dyn,
                 loc: self.loc(node),
             },
             loc: self.loc(node),
@@ -91,29 +85,18 @@ impl Lowerer<'_> {
         let mut slots = Vec::new();
         for field in record.fields {
             let value = self.construction_local(Type::Dyn, true);
-            let present = self.construction_local(Type::Bool, true);
             stmts.push(Stmt::VarDecl {
                 local_id: value.id.clone(),
                 init: self.coerce(self.construction_undefined(node), Type::Dyn, node)?,
-                loc: self.loc(node),
-            });
-            stmts.push(Stmt::VarDecl {
-                local_id: present.id.clone(),
-                init: Expr::BoolLit {
-                    value: false,
-                    r#type: Type::Bool,
-                    loc: self.loc(node),
-                },
                 loc: self.loc(node),
             });
             slots.push(Slot {
                 name: field.name,
                 ty: field.r#type,
                 value,
-                present,
             });
         }
-        let plan = Plan { slots, keys };
+        let plan = Plan { slots, own };
         let mut definite = HashSet::new();
         if let Some((source, value)) = source {
             let (body, written) = self.construction_copy_value(source, &plan, value)?;
@@ -152,14 +135,14 @@ impl Lowerer<'_> {
         Ok(Expr::Sequence {
             stmts,
             result: Box::new(Expr::LibCall {
-                r#fn: "record.cloneOwn".into(),
+                r#fn: "record.fromOwn".into(),
                 args: vec![
                     Expr::RecordLit {
                         fields,
                         r#type: target.clone(),
                         loc: self.loc(node),
                     },
-                    self.construction_read(&plan.keys, node),
+                    self.construction_read(&plan.own, node),
                 ],
                 r#type: target.clone(),
                 loc: self.loc(node),
@@ -183,43 +166,28 @@ impl Lowerer<'_> {
                 initializes_global: false,
                 loc: self.loc(node),
             },
-            Stmt::If {
-                cond: Expr::Unary {
-                    op: "!".into(),
-                    operand: Box::new(self.construction_read(&slot.present, node)),
-                    r#type: Type::Bool,
+            self.construction_set_own(
+                node,
+                plan,
+                Expr::StrLit {
+                    value: slot.name.clone(),
+                    r#type: Type::String,
                     loc: self.loc(node),
                 },
-                then: vec![
-                    Stmt::Expression {
-                        expr: Expr::ArrayIntrinsic {
-                            method: "push".into(),
-                            receiver: Box::new(self.construction_read(&plan.keys, node)),
-                            args: vec![Expr::StrLit {
-                                value: slot.name.clone(),
-                                r#type: Type::String,
-                                loc: self.loc(node),
-                            }],
-                            r#type: Type::F64,
-                            loc: self.loc(node),
-                        },
-                        loc: self.loc(node),
-                    },
-                    Stmt::Assign {
-                        local_id: slot.present.id.clone(),
-                        value: Expr::BoolLit {
-                            value: true,
-                            r#type: Type::Bool,
-                            loc: self.loc(node),
-                        },
-                        initializes_global: false,
-                        loc: self.loc(node),
-                    },
-                ],
-                else_: None,
+                self.construction_read(&slot.value, node),
+            ),
+        ])
+    }
+    fn construction_set_own(&self, node: Node, plan: &Plan, key: Expr, value: Expr) -> Stmt {
+        Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "record.setOwn".into(),
+                args: vec![self.construction_read(&plan.own, node), key, value],
+                r#type: Type::Void,
                 loc: self.loc(node),
             },
-        ])
+            loc: self.loc(node),
+        }
     }
     fn construction_property(
         &mut self,
@@ -398,15 +366,25 @@ impl Lowerer<'_> {
             initializes_global: false,
             loc: self.loc(source),
         }];
+        // Preserve every own entry, including fields hidden by a narrower
+        // static view. Known target slots are also checked below for the typed
+        // initialization proof; unknown entries never disappear in a spread.
+        let raw = self.dynamic_get(
+            source,
+            self.coerce(self.construction_read(&object, source), Type::Dyn, source)?,
+            self.construction_read(&key, source),
+        );
+        iteration.push(self.construction_set_own(
+            source,
+            plan,
+            self.construction_read(&key, source),
+            raw,
+        ));
         let mut definite = HashSet::new();
         for field in record.fields {
-            let slot = plan
-                .slots
-                .iter()
-                .find(|s| s.name == field.name)
-                .ok_or_else(|| {
-                    self.refuse(source, "spread source has keys outside its target layout")
-                })?;
+            let Some(slot) = plan.slots.iter().find(|s| s.name == field.name) else {
+                continue;
+            };
             let value = Expr::RecordGet {
                 obj: Box::new(self.construction_read(&object, source)),
                 shape_id: format!("r{shape_id}"),

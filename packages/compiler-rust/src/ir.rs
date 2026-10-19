@@ -1,5 +1,6 @@
 //! The first native subset of the existing scriptc IR v13 wire contract.
 use serde::Serialize;
+pub mod record_views;
 mod walk;
 use std::collections::HashMap;
 
@@ -2195,6 +2196,53 @@ fn validate_function(
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } => {
+                if r#fn == "record.setOwn" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 3
+                        && args[0].ty() == Type::Dyn
+                        && args[1].ty() == Type::String
+                        && args[2].ty() == Type::Dyn
+                        && *r#type == Type::Void
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native record own-value write".into())
+                    };
+                }
+                if r#fn == "record.view" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1
+                        && record_views::view_pairs(
+                            &args[0].ty(),
+                            r#type,
+                            &module.records,
+                            &module.unions,
+                        )
+                        .is_some()
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid or ambiguous native record view".into())
+                    };
+                }
+                if r#fn == "record.fromOwn" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 2
+                        && args[0].ty() == *r#type
+                        && args[1].ty() == Type::Dyn
+                        && matches!(r#type, Type::Record{shape_id} if !module.records[*shape_id].tuple && module.records[*shape_id].index_value.is_none())
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native record own-value construction".into())
+                    };
+                }
                 if r#fn == "record.cloneOwn" {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;

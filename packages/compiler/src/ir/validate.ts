@@ -1,3 +1,4 @@
+import { recordViewPairs } from "./record-views.js";
 import { validationFields, type ValidationFields } from "./validation-fields.js";
 import { BUN_WHICH_SIG, validateBunWhich } from "./bun-which.js";
 import { validateBunSpawn } from "./bun-spawn.js";
@@ -1086,6 +1087,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.errInstanceof": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.classInstanceof": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.objKeys": { argTypes: [DYN], result: DYN },
+  "record.view": { argTypes: [], result: DYN },
+  "record.fromOwn": { argTypes: [], result: DYN },
+  "record.setOwn": { argTypes: [DYN, STRING, DYN], result: VOID },
   "record.cloneOwn": { argTypes: [], result: DYN }, // structural signature below
   "dyn.objectRestCheck": { argTypes: [DYN], result: VOID },
   "dyn.objectAssignSourceCheck": { argTypes: [DYN], result: VOID },
@@ -3950,6 +3954,17 @@ function validateFunction(
         if (e.type.kind !== "void") err(`${e.name} must be void`, e.loc);
         break;
       case "libCall": {
+        if (e.fn === "record.view") {
+          e.args.forEach(checkExpr);
+          if (e.args.length !== 1 || !recordViewPairs(e.args[0]!.type, e.type, records, unions)) err("record.view requires one unambiguous invariant closed-record projection per source arm", e.loc);
+          break;
+        }
+        if (e.fn === "record.fromOwn") {
+          e.args.forEach(checkExpr);
+          const shape = e.type.kind === "record" ? records.get(e.type.shapeId) : undefined;
+          if (e.args.length !== 2 || !shape || shape.tuple || shape.indexValue || fieldIndex.records.get(shape.id)!.hasAccessorSlots || !typeEquals(e.args[0]?.type ?? VOID, e.type) || e.args[1]?.type.kind !== "dyn") err("record.fromOwn requires a complete closed record and a native own-value object", e.loc);
+          break;
+        }
         if (e.fn === "record.cloneOwn") {
           e.args.forEach(checkExpr);
           const shape = e.type.kind === "record" ? records.get(e.type.shapeId) : undefined;

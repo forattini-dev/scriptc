@@ -8347,7 +8347,7 @@ function emitIoLibCall(state: LibCallState): Temp {
 }
 
 function emitLibCallExpr(emitter: CEmitter, e: LibCallExpr): Temp {
-  if (e.fn === "record.cloneOwn") throw new CUnsupportedError("record.cloneOwn", e.loc);
+  if (["record.cloneOwn", "record.view", "record.fromOwn", "record.setOwn"].includes(e.fn)) throw new CUnsupportedError(e.fn, e.loc);
         const packed = e.args[0];
         if (e.fn === "string.fromCharCode" && packed?.kind === "arrayLit" &&
             packed.elems.length === 1 && !packed.spreads?.length) {
@@ -8485,7 +8485,7 @@ function emitLibCallExpr(emitter: CEmitter, e: LibCallExpr): Temp {
     case "strdec":
       return emitIoLibCall(state);
     case "record":
-      throw new CUnsupportedError("record.cloneOwn", e.loc);
+      throw new CUnsupportedError(e.fn, e.loc);
     default: {
       const _exhaustive: never = prefix;
       void _exhaustive;

@@ -2,7 +2,12 @@
 use super::*;
 
 pub(super) fn definitions(module: &Module, output: &mut String) {
+    record_storage::definitions(output);
     for record in &module.records {
+        if record_storage::shared(record) {
+            output.push_str(&format!("type R{} = NativeRecordData;\n", record.id));
+            continue;
+        }
         output.push_str(&format!("\nstruct R{} {{\n", record.id));
         for field in &record.fields {
             output.push_str(&format!(
@@ -94,6 +99,8 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        output.push_str(&format!("fn union_eq_{}(left: U{}, right: U{}) -> bool {{ match (left, right) {{ {cases} _ => false }} }}\n", union.id, union.id, union.id));
+        let left = values::box_value(&Type::Union { union_id: union.id }, "left", module);
+        let right = values::box_value(&Type::Union { union_id: union.id }, "right", module);
+        output.push_str(&format!("fn union_eq_{}(left: U{}, right: U{}) -> bool {{ match (left, right) {{ {cases} (left,right) => native_value_eq(&({left}), &({right})) }} }}\n", union.id, union.id, union.id));
     }
 }

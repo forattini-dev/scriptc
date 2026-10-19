@@ -7,6 +7,7 @@ mod functions;
 mod layouts;
 mod process;
 mod record_construction;
+mod record_storage;
 mod regex;
 mod sets;
 mod storage;
@@ -414,6 +415,17 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     "{{ let mut entries = Vec::new(); {entries} runtime::Gc::new(R{shape_id} {{ overflow: entries }}) }}"
                 );
             }
+            if record_storage::shared(&module.records[*shape_id]) {
+                let entries = fields.iter().map(|f| {
+                    let value = expr(&f.value, function, module);
+                    if f.absent { format!("let _ = {value};") } else {
+                        format!("{{ let value = {value}; native_record_define(&mut entries, {:?}.into(), {}); }}", f.name, values::box_value(&f.value.ty(), "value", module))
+                    }
+                }).collect::<String>();
+                return format!(
+                    "{{ let mut entries = Vec::new(); {entries} runtime::Gc::new(NativeRecordData {{ entries }}) }}"
+                );
+            }
             let keys = fields
                 .iter()
                 .filter(|f| !f.absent)
@@ -434,11 +446,22 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             format!("runtime::Gc::new(R{shape_id} {{ own_keys: vec![{keys}], {fields} }})")
         }
         Expr::RecordLit { .. } => unreachable!("IR validated"),
-        Expr::RecordGet { obj, field, .. } => format!(
-            "{{ let object = {}; let value = object.with(|object| object.{}.as_ref().expect(\"scriptc: cleared record\").clone()); value }}",
-            expr(obj, function, module),
-            field_name(field)
-        ),
+        Expr::RecordGet {
+            obj, field, r#type, ..
+        } => {
+            let Type::Record { shape_id } = obj.ty() else {
+                unreachable!("IR validated")
+            };
+            if record_storage::shared(&module.records[shape_id]) {
+                record_storage::read(r#type, &expr(obj, function, module), field, module)
+            } else {
+                format!(
+                    "{{ let object = {}; let value = object.with(|object| object.{}.as_ref().expect(\"scriptc: cleared record\").clone()); value }}",
+                    expr(obj, function, module),
+                    field_name(field)
+                )
+            }
+        }
         Expr::UnionWrap {
             tag,
             value,
@@ -670,6 +693,13 @@ fn statement_in(
         Stmt::RecordSet {
             obj, field, value, ..
         } => {
+            let Type::Record { shape_id } = obj.ty() else {
+                unreachable!("IR validated")
+            };
+            if record_storage::shared(&module.records[shape_id]) {
+                writeln!(output, "{{ let object = {}; let value = {}; native_record_set(&object, {:?}.into(), {}); }}", expr(obj, function, module), expr(value, function, module), field, values::box_value(&value.ty(), "value", module)).unwrap();
+                return;
+            }
             writeln!(
                 output,
                 "{{ let object = {}; let value = {}; object.with_mut(|object| {{ object.{} = Some(value); if !object.own_keys.iter().any(|key| key == {:?}) {{ object.own_keys.push({:?}.into()); }} }}); }}",

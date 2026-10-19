@@ -1,3 +1,4 @@
+import { emitRecordView } from "./record-views.js";
 import { borrowedRustBytesLocal } from "./bytes-borrow.js";
 import { emitRustDynamicKeyRead } from "./dynamic-key-read.js";
 import { rustJsString } from "./string-literals.js";
@@ -29,7 +30,7 @@ import { emitRustFfiCall } from "./ffi.js";
 import { emitEffectCauseDynamic } from "./effect-dynamic.js";
 import type { RustExpressionContext } from "./expression-context.js";
 import { emitRustDirectCall } from "./call-receiver.js";
-import { emitRecordOwnConstruction } from "./record-construction.js";
+import { emitRecordOwnConstruction, emitRecordOwnValues } from "./record-construction.js";
 export type { RustExpressionContext } from "./expression-context.js";
 
 export class RustExpressionEmitter {
@@ -1004,6 +1005,8 @@ export class RustExpressionEmitter {
         }
         return this.emitExpr(expr.value);
       case "libCall":
+        if (expr.fn === "record.view") return emitRecordView(expr, this.context, value => this.emitExpr(value));
+        if (["record.fromOwn", "record.setOwn"].includes(expr.fn)) return emitRecordOwnValues(expr, this.context, value => this.emitExpr(value));
         if (expr.fn === "record.cloneOwn") return emitRecordOwnConstruction(expr, this.context, value => this.emitExpr(value));
         return emitRustLibCall(expr, rustLibCallContext(this.context, value => this.emitExpr(value)));
       case "ffiCall": return emitRustFfiCall(expr, this.context.ffiImports(), this.context.libraryCallbacks(), this.context, (value) => this.emitExpr(value));

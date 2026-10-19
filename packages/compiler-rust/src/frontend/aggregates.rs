@@ -289,6 +289,15 @@ impl Lowerer<'_> {
                 });
             }
         }
+        if ir::record_views::view_pairs(&value.ty(), &target, &self.records, &self.unions).is_some()
+        {
+            return Ok(Expr::LibCall {
+                r#fn: "record.view".into(),
+                args: vec![value],
+                r#type: target,
+                loc: self.loc(node),
+            });
+        }
         Err(self.refuse(node, "native representation coercion is not ported"))
     }
 
@@ -827,6 +836,22 @@ impl Lowerer<'_> {
             let left = self.string_value(left, node.left(), strings::Context::Template)?;
             let right = self.string_value(right, node.right(), strings::Context::Template)?;
             return Ok(self.string_concat(left, right, node));
+        }
+        let data_records = |ty: Type| {
+            let arms = match ty.clone() {
+                Type::Union { union_id } => self.unions[union_id].arms.clone(),
+                ty => vec![ty],
+            };
+            !ir::contains_set(&ty, &self.records, &self.unions) && arms.iter().all(|ty| matches!(ty, Type::Record { shape_id } if !self.records[*shape_id].tuple && self.records[*shape_id].index_value.is_none() && !self.records[*shape_id].fields.iter().any(|f| f.name == callables::CALL_FIELD)))
+        };
+        if matches!(op, "===" | "!==") && data_records(left.ty()) && data_records(right.ty()) {
+            return Ok(Expr::DynScalarEq {
+                left: Box::new(self.coerce(left, Type::Dyn, node.left())?),
+                right: Box::new(self.coerce(right, Type::Dyn, node.right())?),
+                negated: op == "!==",
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            });
         }
         if matches!(op, "===" | "!==") && (left.ty() == Type::Dyn || right.ty() == Type::Dyn) {
             return Ok(Expr::DynScalarEq {

@@ -296,7 +296,7 @@ export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
       case "http2":
         return host.emitGenericLibCall(e);
       case "record":
-        throw new LlvmUnsupportedError("record.cloneOwn", e.loc);
+        throw new LlvmUnsupportedError(e.fn, e.loc);
       default: {
         const _exhaustive: never = prefix;
         void _exhaustive;

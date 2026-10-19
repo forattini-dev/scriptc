@@ -10,13 +10,28 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
             r#type: Type::Record { shape_id },
             ..
         } = expr
-            && r#fn == "record.cloneOwn"
+            && matches!(r#fn.as_str(), "record.cloneOwn" | "record.fromOwn")
         {
             demanded.insert(*shape_id);
         }
     });
     for record in module.records.iter().filter(|r| demanded.contains(&r.id)) {
         let id = record.id;
+        writeln!(out, "fn record_from_own_{id}(template: runtime::Gc<R{id}>, own: NativeValue) -> runtime::Gc<R{id}> {{ let _ = template; let NativeValue::Object(own) = own else {{ runtime::throw_type_error(\"scriptc: own-value plan must be a native object\".into()) }}; let data = runtime::Gc::new(NativeRecordData {{ entries: own.with(|object| object.entries.clone()) }});").unwrap();
+        for field in &record.fields {
+            let optional = field.r#type == Type::Undefined
+                || matches!(&field.r#type, Type::Union{union_id} if module.unions[*union_id].arms.contains(&Type::Undefined));
+            if !optional {
+                writeln!(out, "if !data.with(|o| o.entries.iter().any(|(k,_)| k == {:?})) {{ runtime::throw_type_error(\"scriptc: missing required record own key\".into()); }}", field.name).unwrap();
+            }
+            writeln!(
+                out,
+                "let _ = {};",
+                record_storage::read(&field.r#type, "data.clone()", &field.name, module)
+            )
+            .unwrap();
+        }
+        out.push_str("data }\n");
         let allowed = record
             .fields
             .iter()
@@ -31,18 +46,6 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
                 writeln!(out, "if !keys.iter().any(|key| key == {:?}) {{ runtime::throw_type_error(\"scriptc: missing required record own key\".into()); }}", field.name).unwrap();
             }
         }
-        let fields = record.fields.iter().map(|f| {
-            let name = field_name(&f.name);
-            let read = format!("source.with(|object| object.{name}.as_ref().expect(\"scriptc: cleared record\").clone())");
-            let optional = f.r#type == Type::Undefined || matches!(&f.r#type, Type::Union { union_id } if module.unions[*union_id].arms.contains(&Type::Undefined));
-            let value = if optional { format!("if keys.iter().any(|key| key == {:?}) {{ {read} }} else {{ {} }}", f.name, values::checked_value(&f.r#type, "NativeValue::Undefined", module)) } else { read };
-            format!("{name}: Some({value})")
-        }).collect::<Vec<_>>().join(",");
-        writeln!(
-            out,
-            "runtime::Gc::new(R{id} {{ {fields}{} own_keys: keys }}) }}",
-            if fields.is_empty() { "" } else { "," }
-        )
-        .unwrap();
+        writeln!(out, "let entries = keys.into_iter().map(|key| {{ let value = native_record_get(&source, &key); (key, value) }}).collect(); runtime::Gc::new(NativeRecordData {{ entries }}) }}").unwrap();
     }
 }

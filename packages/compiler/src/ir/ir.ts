@@ -3833,6 +3833,9 @@ export type IrLibFn =
   /** Fresh closed record from fully initialized field values and an ordered
    * unique own-key plan. Omitted optional slots read undefined; required keys
    * must be included. No source getter or prototype operation is performed. */
+  | "record.view"
+  | "record.fromOwn"
+  | "record.setOwn"
   | "record.cloneOwn"
   /** Guard the currently supported ordinary-object slice of binding rest.
    * Borrows the source; throws a named SC1031 refusal for representations
@@ -7956,6 +7959,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.cloneMissing",
   "dyn.cloneTransferFail",
   "dyn.objKeys",
+  "record.view",
+  "record.fromOwn",
+  "record.setOwn",
   "record.cloneOwn",
   "dyn.objectRestCheck",
   "dyn.objectAssignSourceCheck",
