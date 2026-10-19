@@ -8,7 +8,9 @@ impl Lowerer<'_> {
             return Ok(params.clone());
         }
         let definition = self.classes.definitions[index].clone();
-        if definition.name.starts_with("native_builtin_Text") {
+        if definition.name.starts_with("native_builtin_Text")
+            || definition.name == async_context::CLASS
+        {
             let params = vec![Param {
                 local_id: "p0".into(),
                 name: "this".into(),
@@ -164,7 +166,9 @@ impl Lowerer<'_> {
         index: usize,
     ) -> Result<Function, String> {
         let definition = self.classes.definitions[index].clone();
-        if definition.name.starts_with("native_builtin_Text") {
+        if definition.name.starts_with("native_builtin_Text")
+            || definition.name == async_context::CLASS
+        {
             let mut function = helpers::Helper::new(
                 &format!("%{}.constructor", definition.name),
                 vec![self.classes.object(index)],
@@ -173,6 +177,28 @@ impl Lowerer<'_> {
             )
             .function;
             function.name = format!("%{}.constructor", definition.name);
+            if definition.name == async_context::CLASS {
+                function.body.push(Stmt::FieldSet {
+                    obj: Expr::VarRef {
+                        local_id: "p0".into(),
+                        r#type: self.classes.object(index),
+                        loc: function.loc.clone(),
+                    },
+                    class_name: definition.name.clone(),
+                    field: async_context::HANDLE.into(),
+                    value: Expr::DynFrom {
+                        value: Box::new(Expr::LibCall {
+                            r#fn: "als.new".into(),
+                            args: vec![],
+                            r#type: Type::F64,
+                            loc: function.loc.clone(),
+                        }),
+                        r#type: Type::Dyn,
+                        loc: function.loc.clone(),
+                    },
+                    loc: function.loc.clone(),
+                });
+            }
             return Ok(function);
         }
         self.file = definition.file.clone();

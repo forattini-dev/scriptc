@@ -1,4 +1,5 @@
 use crate::ir::{Expr, Function, Module, Stmt, Type};
+mod async_context;
 mod bytes;
 mod classes;
 mod collections;
@@ -304,6 +305,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         return code;
     }
     if let Some(code) = bytes::expression(value, function, module) {
+        return code;
+    }
+    if let Some(code) = async_context::expression(value, function, module) {
         return code;
     }
     if let Some(code) = values::expression(value, function, module) {

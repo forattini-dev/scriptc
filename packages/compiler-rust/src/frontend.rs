@@ -15,6 +15,7 @@ use std::{
 };
 mod aggregates;
 mod arrays;
+mod async_context;
 mod callables;
 mod callbacks;
 mod classes;
@@ -46,6 +47,7 @@ mod storage;
 mod strings;
 mod symbols;
 mod tuples;
+mod type_graph;
 mod types;
 mod union_literals;
 mod union_spreads;
@@ -501,7 +503,10 @@ impl<'a> Lowerer<'a> {
         let method_void = if node.kind() == SyntaxKind::MethodDeclaration && declared.is_none() {
             let signature = self.checker.get_signature_from_declaration(node);
             let result = self.checker.get_return_type_of_signature(signature);
-            self.checker.ty(result).flags.intersects(TypeFlags::VOID)
+            self.checker
+                .ty(result)
+                .flags
+                .intersects(TypeFlags::VOID | TypeFlags::NEVER)
         } else {
             false
         };
@@ -522,7 +527,11 @@ impl<'a> Lowerer<'a> {
             let flags = self.checker.ty(ret).flags;
             self.type_id(ret)
                 .filter(|ty| !matches!(ty, Type::Null | Type::Undefined))
-                .or_else(|| flags.intersects(TypeFlags::VOID).then_some(Type::Void))
+                .or_else(|| {
+                    flags
+                        .intersects(TypeFlags::VOID | TypeFlags::NEVER)
+                        .then_some(Type::Void)
+                })
                 .ok_or_else(|| self.refuse(node, "function return type is not ported"))?
         };
         let symbol = self.symbol(node.name());
@@ -1131,6 +1140,21 @@ impl<'a> Lowerer<'a> {
             }
             SyntaxKind::TypeOfExpression => {
                 let value = self.expression(node.expression())?;
+                if async_context::instance(&value.ty()) {
+                    return Ok(Expr::Sequence {
+                        stmts: vec![Stmt::Expression {
+                            expr: value,
+                            loc: loc.clone(),
+                        }],
+                        result: Box::new(Expr::StrLit {
+                            value: "object".into(),
+                            r#type: Type::String,
+                            loc: loc.clone(),
+                        }),
+                        r#type: Type::String,
+                        loc,
+                    });
+                }
                 let value = self.coerce(value, Type::Dyn, node)?;
                 Ok(Expr::LibCall {
                     r#fn: "dyn.typeof".into(),
@@ -1140,6 +1164,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.async_context_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.object_reflection(node)? {
                     return Ok(value);
                 }

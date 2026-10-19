@@ -177,6 +177,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-unit-caches/order.js",
         "rust-native-unit-caches/cycles.js",
         "rust-native-unit-caches/contracts.ts",
+        "rust-native-async-context/scalars.ts",
+        "rust-native-async-context/order.ts",
+        "rust-native-async-context/exceptions.ts",
+        "rust-native-async-context/promises.ts",
+        "rust-native-async-context/ownership.ts",
+        "rust-native-async-context/shadows.ts",
+        "rust-native-async-context/untyped.js",
         "rust-native-lexicals/values.ts",
         "rust-native-lexicals/order.ts",
         "rust-native-lexicals/cycles.ts",
@@ -2615,6 +2622,67 @@ fn lexical_initialization_refuses_storage_without_undefined_and_preserves_artifa
             &target.with_extension("ir.json"),
             &target.with_extension("rs"),
         ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn async_context_boundaries_preserve_existing_artifacts() {
+    let parent = root().join(".scriptc");
+    fs::create_dir_all(&parent).unwrap();
+    let temp = tempfile::Builder::new()
+        .prefix("async-context-boundary-")
+        .tempdir_in(parent)
+        .unwrap();
+    fs::copy(
+        root().join("tests/corpus/rust-native-async-context/tsconfig.json"),
+        temp.path().join("tsconfig.json"),
+    )
+    .unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "boundary");
+    for source in [
+        "new AsyncLocalStorage<string>({ name: 'scope' });",
+        "const store = new AsyncLocalStorage<string>(); store.enterWith('value');",
+        "const store = new AsyncLocalStorage<string>(); store.disable();",
+        "const store = new AsyncLocalStorage<string>(); store.exit(() => 1);",
+        "const store = new AsyncLocalStorage<string>(); const run = store.run; run('value', () => 1);",
+        "const value: unknown = new AsyncLocalStorage<string>();",
+        "const value: unknown = { store: new AsyncLocalStorage<string>() };",
+        "const value: unknown = [new AsyncLocalStorage<string>()];",
+        "const store = new AsyncLocalStorage<string>(); const value: unknown = () => store;",
+        "class Derived extends AsyncLocalStorage<string> {}",
+    ] {
+        fs::write(
+            &input,
+            format!("import {{ AsyncLocalStorage }} from 'node:async_hooks'; {source}"),
+        )
+        .unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }

@@ -74,7 +74,14 @@ impl Lowerer<'_> {
             params.push(ty);
         }
         let result = self.checker.get_return_type_of_signature(signature);
-        let ret = if self.checker.ty(result).flags.intersects(TypeFlags::VOID) {
+        // A non-returning body transports no normal value. Its throw/abrupt
+        // completion remains in IR; the callable can use the unit return ABI.
+        let ret = if self
+            .checker
+            .ty(result)
+            .flags
+            .intersects(TypeFlags::VOID | TypeFlags::NEVER)
+        {
             Type::Void
         } else {
             self.type_id(result)?

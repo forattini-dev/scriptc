@@ -2216,6 +2216,29 @@ fn validate_function(
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } => {
+                if matches!(r#fn.as_str(), "als.new" | "als.get" | "als.run") {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = match r#fn.as_str() {
+                        "als.new" => args.is_empty() && *r#type == Type::F64,
+                        "als.get" => {
+                            args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::Dyn
+                        }
+                        "als.run" => {
+                            args.len() == 4
+                                && args[0].ty() == Type::F64
+                                && args[1..].iter().all(|arg| arg.ty() == Type::Dyn)
+                                && *r#type == Type::Dyn
+                        }
+                        _ => unreachable!(),
+                    };
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native async context operation".into())
+                    };
+                }
                 if r#fn == "record.setOwn" {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
@@ -2768,6 +2791,65 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn async_context_library_calls_preserve_handle_and_value_contracts() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        for operation in ["als.new", "als.get", "als.run"] {
+            for defect in ["none", "arity", "result", "handle"] {
+                if operation == "als.new" && defect == "handle" {
+                    continue;
+                }
+                let number = || Expr::NumLit {
+                    value: 1.0,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                };
+                let dynamic = || Expr::DynFrom {
+                    value: Box::new(number()),
+                    r#type: Type::Dyn,
+                    loc: loc.clone(),
+                };
+                let mut args = match operation {
+                    "als.new" => vec![],
+                    "als.get" => vec![number()],
+                    _ => vec![number(), dynamic(), dynamic(), dynamic()],
+                };
+                if defect == "arity" {
+                    args.push(number());
+                }
+                if defect == "handle" {
+                    args[0] = dynamic();
+                }
+                let result = if operation == "als.new" {
+                    Type::F64
+                } else {
+                    Type::Dyn
+                };
+                let result = if defect == "result" {
+                    Type::String
+                } else {
+                    result
+                };
+                module.functions[0].body = vec![Stmt::Expression {
+                    expr: Expr::LibCall {
+                        r#fn: operation.into(),
+                        args,
+                        r#type: result,
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                }];
+                assert_eq!(
+                    validate(&module).is_ok(),
+                    defect == "none",
+                    "{operation}/{defect}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn async_calls_and_closures_separate_body_and_caller_results() {

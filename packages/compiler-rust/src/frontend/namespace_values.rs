@@ -70,49 +70,7 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn contains_namespace(&self, ty: &Type) -> bool {
-        fn visit(lowerer: &Lowerer<'_>, ty: &Type, seen: &mut HashSet<Type>) -> bool {
-            if !seen.insert(ty.clone()) {
-                return false;
-            }
-            if lowerer.namespace_capsule(ty) {
-                return true;
-            }
-            match ty {
-                Type::Array { elem } | Type::Set { elem } | Type::Promise { inner: elem } => {
-                    visit(lowerer, elem, seen)
-                }
-                Type::Map { key, value } => {
-                    visit(lowerer, key, seen) || visit(lowerer, value, seen)
-                }
-                Type::Func { params, ret, .. } => {
-                    params.iter().any(|t| visit(lowerer, t, seen)) || visit(lowerer, ret, seen)
-                }
-                Type::Union { union_id } => lowerer.unions[*union_id]
-                    .arms
-                    .iter()
-                    .any(|t| visit(lowerer, t, seen)),
-                Type::Object { class_name } => lowerer
-                    .classes
-                    .layouts
-                    .iter()
-                    .flatten()
-                    .find(|c| c.name == *class_name)
-                    .is_some_and(|c| c.fields.iter().any(|f| visit(lowerer, &f.r#type, seen))),
-                Type::Record { shape_id } => {
-                    let record = &lowerer.records[*shape_id];
-                    record
-                        .fields
-                        .iter()
-                        .any(|f| visit(lowerer, &f.r#type, seen))
-                        || record
-                            .index_value
-                            .as_ref()
-                            .is_some_and(|t| visit(lowerer, t, seen))
-                }
-                _ => false,
-            }
-        }
-        visit(self, ty, &mut HashSet::new())
+        self.native_type_contains(ty, |ty| self.namespace_capsule(ty))
     }
 
     pub(super) fn namespace_reference(&mut self, node: Node) -> Result<Option<Expr>, String> {

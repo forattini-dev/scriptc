@@ -215,6 +215,12 @@ impl Lowerer<'_> {
             return self.coerce(value, target, node);
         }
         if target == Type::Dyn {
+            if self.native_type_contains(&value.ty(), async_context::instance) {
+                return Err(self.refuse(
+                    node,
+                    "erasing AsyncLocalStorage requires a native property descriptor contract",
+                ));
+            }
             if self.contains_namespace(&value.ty()) {
                 return Err(self.refuse(
                     node,

@@ -157,6 +157,46 @@ impl Lowerer<'_> {
         }
         let info = self.checker.sym(SymbolId(symbol));
         let name = info.name.to_string();
+        if self.standard_async_context(symbol) {
+            let index = self
+                .classes
+                .definitions
+                .iter()
+                .position(|d| d.name == async_context::CLASS)
+                .unwrap_or_else(|| {
+                    let index = self.classes.definitions.len();
+                    self.classes.definitions.push(Definition {
+                        node: Node::NIL,
+                        name: async_context::CLASS.into(),
+                        file: "<builtin>".into(),
+                        base: None,
+                        resolved: true,
+                        resolving: false,
+                        signature: None,
+                        token: None,
+                    });
+                    self.classes.layouts.push(Some(ir::Class {
+                        name: async_context::CLASS.into(),
+                        js_name: "AsyncLocalStorage".into(),
+                        runtime: false,
+                        base: None,
+                        fields: vec![ir::Field {
+                            name: async_context::HANDLE.into(),
+                            r#type: Type::Dyn,
+                        }],
+                        methods: vec![],
+                        method_names: vec!["run".into(), "getStore".into()],
+                        loc: Loc {
+                            file: "<builtin>".into(),
+                            start: 0,
+                            end: 0,
+                        },
+                    }));
+                    index
+                });
+            self.classes.symbols.insert(symbol, index);
+            return Some(index);
+        }
         if matches!(name.as_str(), "TextEncoder" | "TextDecoder")
             && self.standard_codec_symbol(symbol).is_some()
         {
@@ -333,6 +373,9 @@ impl Lowerer<'_> {
                 })?);
         }
         if let Some(base) = base {
+            if self.classes.definitions[base].name == async_context::CLASS {
+                return Err(self.refuse(node, "AsyncLocalStorage subclassing is not ported"));
+            }
             if self.classes.definitions[base]
                 .name
                 .starts_with("native_builtin_Text")

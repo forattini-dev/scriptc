@@ -214,14 +214,31 @@
       },
       "nativeAsyncContextMilestone": {
         "trigger": "red-dev node_modules/tuiuiu.js/dist/core/runtime-scope.js:782..806 constructs new AsyncLocalStorage() at module initialization.",
-        "runtimeAvailable": "The shared Rust runtime already has async_local_new/get/run/exit/enter_with/disable and context capture/install used by promise reactions and event-loop registrations. The reference IR/backend already uses als.* library operations. The Rust frontend, native IR validation and emitter still need an owned representation and lowering.",
+        "runtimeAvailable": "The Rust frontend, native IR validator and emitter now connect nominal AsyncLocalStorage instances to the existing shared Rust runtime through portable IR v13 als.new/get/run operations. The runtime itself is unchanged.",
         "acceptance": [
           "Keep independent store identity and the real store value, including stored undefined versus an absent context where observable; do not substitute one mutable global scope.",
           "Restore nested run/exit scopes after normal returns and throws, evaluate receiver/store/callback/arguments in source order and preserve callback return identity.",
           "Capture context at reaction/job registration and prove isolation across interleaved promise chains, with Node differential fixtures.",
           "Trace owning store values and queued context captures; exercise record/function cycles and finish cleanup rather than relying only on existing scalar runtime tests.",
           "Connect the existing native runtime contract without an engine or compiler fallback; unsupported options, bind/snapshot and broader async_hooks APIs remain explicit boundaries until implemented."
-        ]
+        ],
+        "status": "partial",
+        "implementation": "Default constructor, run(value, callback, ...fixedArguments), getStore(), independent owning identity, caller-side argument snapshots, RAII restoration after normal/exceptional returns and promise-reaction registration contexts. Never-returning callbacks preserve abrupt completion through a unit ABI.",
+        "fixtures": [
+          "rust-native-async-context/scalars.ts",
+          "rust-native-async-context/order.ts",
+          "rust-native-async-context/exceptions.ts",
+          "rust-native-async-context/promises.ts",
+          "rust-native-async-context/ownership.ts",
+          "rust-native-async-context/shadows.ts",
+          "rust-native-async-context/untyped.js"
+        ],
+        "boundaries": [
+          "Constructor options, enterWith/exit/disable, bind/snapshot and broader async_hooks APIs.",
+          "Extracted methods, subclasses, instance erasure/reflection, including erasure through containers and function return types.",
+          "General suspension and Promise return adoption retain their separate milestones."
+        ],
+        "evidence": "Seven harmless programs match Node 24.15 through the native Rust compiler and reference Rust backend, including interleaved contexts, throws, callback argument effects, records/functions/Promises and queued owning cycles. Boundary integration preserves preexisting artifacts. The original red-dev compile now passes the AsyncLocalStorage initializer and refuses registeredScopes = new Set() at runtime-scope.js:832..842."
       }
     },
     {
@@ -387,15 +404,16 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "417fa8f9c96ec429376d6c853d86bfa58d711ec8",
-    "after": "native owning storage for JS null/undefined lexical initializers; native-reddb-unit-caches-v76 compile-only attempts",
+    "compilerSourceBaseCommit": "a7eb8bcb334456174d266be6b8b2c8de44d06e0b",
+    "after": "native AsyncLocalStorage constructor/run/getStore; native-reddb-async-context-v77 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "node_modules/tuiuiu.js/dist/core/runtime-scope.js:782..806 new AsyncLocalStorage() from node:async_hooks. The tuiuiu version.js null/string cache has been passed.",
+    "red-dev": "node_modules/tuiuiu.js/dist/core/runtime-scope.js:832..842 new Set() for registeredScopes. The AsyncLocalStorage module initializer has been passed.",
     "completedOriginalApplicationBinaries": 0,
     "nextCoercionConstraint": "Keep the native undefined fact established by default lowering across body var redeclarations and captures; do not replace it with the checker declaration-file narrowing.",
     "nextModuleConstraint": "The github-token.ts uninitialized lexical declaration has been passed. Keep declaration-site initialization and module TDZ. Async suspension, direct Promise return adoption, Bun subprocess/Response streams, native namespace descriptors and async iteration remain outstanding.",
     "nextStorageConstraint": "Keep null/undefined JS lexical initialization separate from the permanent storage representation and from public typed call/return contracts. Preserve declaration-site initialization, captures and module TDZ.",
-    "nextAsyncContextConstraint": "Connect the existing Rust async context/runtime operations through owned native frontend/IR/emitter contracts, preserving nested restoration, queued registration contexts, store identity and traced values."
+    "nextAsyncContextConstraint": "Keep the implemented run/getStore subset explicit; additional methods need their own context propagation and error contracts, especially disable across previously captured contexts.",
+    "nextCollectionConstraint": "Represent untyped Sets of owning record/function values with SameValueZero membership and traced cycles. Preserve insertion order, duplicate identity, delete/re-add and clear; test aliases, seed evaluation and existing scalar Sets. Iteration/values().next(), mutation during iteration and iterator closure are separate demanded contracts, not implied by accepting new Set()."
   }
 }
