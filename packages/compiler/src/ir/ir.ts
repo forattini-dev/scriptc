@@ -4364,6 +4364,12 @@ export type IrLibFn =
    * NON-promise value — JS awaits non-thenables through exactly one
    * microtask turn and yields the value itself. Never throws. */
   | "async.hop"
+  /** Rust-native record-key weak maps. The nominal owner and weak key
+   * conditionally retain owning values through the shared heap collector. */
+  | "weakmap.get"
+  | "weakmap.set"
+  | "weakmap.has"
+  | "weakmap.delete"
   | "als.new"
   | "als.get"
   | "als.run"
@@ -7668,6 +7674,7 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
+  "weakmap.get", "weakmap.set", "weakmap.has", "weakmap.delete",
   "bun.spawn",
   "bun.which",
   "bun.filePath",

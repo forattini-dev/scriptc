@@ -177,6 +177,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-unit-caches/order.js",
         "rust-native-unit-caches/cycles.js",
         "rust-native-unit-caches/contracts.ts",
+        "rust-native-weak-maps/identity.ts",
+        "rust-native-weak-maps/order.ts",
+        "rust-native-weak-maps/values.ts",
+        "rust-native-weak-maps/untyped.js",
+        "rust-native-weak-maps/shadows.ts",
+        "rust-native-weak-maps/modules.ts",
         "rust-native-set-values/identity.ts",
         "rust-native-set-values/callbacks.ts",
         "rust-native-set-values/dynamic.ts",
@@ -2735,6 +2741,53 @@ fn owning_set_boundaries_preserve_existing_artifacts() {
         );
         for artifact in artifacts {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn weak_map_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "weak-map-boundary");
+    for source in [
+        "const map = new WeakMap<object, number>([]);",
+        "const map = new WeakMap<object, number>(); const get = map.get;",
+        "const value: unknown = new WeakMap<object, number>();",
+        "const value: unknown = { map: new WeakMap<object, number>() };",
+        "class Derived extends WeakMap<object, number> {}",
+        "const map = new WeakMap<object, number>(); map.set([], 1);",
+        "const map = new WeakMap<object, number>(); map.set(() => 1, 1);",
+        "const map = new WeakMap<object, number>(); map.set(/key/, 1);",
+        "const map = new WeakMap<object, number>(); class Key {} map.set(new Key(), 1);",
+        "const map = new WeakMap<object, number>(); map.get(...[{}] as [{}]);",
+    ] {
+        fs::write(&input, source).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ];
+        for path in artifacts {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in artifacts {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
         }
     }
 }

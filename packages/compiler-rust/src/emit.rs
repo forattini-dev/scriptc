@@ -14,6 +14,7 @@ mod sets;
 mod storage;
 mod symbols;
 mod values;
+mod weak_maps;
 
 fn rust_type(ty: Type, module: &Module) -> String {
     match ty {
@@ -305,6 +306,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         return code;
     }
     if let Some(code) = bytes::expression(value, function, module) {
+        return code;
+    }
+    if let Some(code) = weak_maps::expression(value, function, module) {
         return code;
     }
     if let Some(code) = async_context::expression(value, function, module) {

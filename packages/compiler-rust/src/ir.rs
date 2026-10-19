@@ -2228,6 +2228,19 @@ fn validate_function(
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } => {
+                if let Some(operation) = r#fn.strip_prefix("weakmap.") {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let expected = match operation {
+                        "get" => Some((2, Type::Dyn)),
+                        "has" | "delete" => Some((2, Type::Bool)),
+                        "set" => Some((3, Type::Void)),
+                        _ => None,
+                    };
+                    if !expected.is_some_and(|(arity, result)| args.len() == arity && *r#type == result && matches!(args[0].ty(), Type::Object { class_name } if class_name == "native_builtin_WeakMap") && args[1..].iter().all(|arg| arg.ty() == Type::Dyn)) { return Err("invalid native weak map operation".into()); }
+                    return Ok(());
+                }
                 if matches!(r#fn.as_str(), "als.new" | "als.get" | "als.run") {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
@@ -2857,7 +2870,8 @@ mod tests {
                 assert_eq!(
                     validate(&module).is_ok(),
                     defect == "none",
-                    "{operation}/{defect}"
+                    "{operation}/{defect}: {:?}",
+                    validate(&module)
                 );
             }
         }
@@ -4810,6 +4824,108 @@ mod tests {
             validate(&module).unwrap_err(),
             "invalid native environment read"
         );
+    }
+
+    #[test]
+    fn weak_map_operations_validate_nominal_receivers_and_payload_abis() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        module.classes.push(Class {
+            name: "native_builtin_WeakMap".into(),
+            js_name: "WeakMap".into(),
+            runtime: false,
+            base: None,
+            fields: vec![],
+            methods: vec![],
+            method_names: vec![],
+            loc: loc.clone(),
+        });
+        let owner_type = Type::Object {
+            class_name: "native_builtin_WeakMap".into(),
+        };
+        module.functions.push(Function {
+            name: "%native_builtin_WeakMap.constructor".into(),
+            params: vec![Param {
+                local_id: "p0".into(),
+                name: "this".into(),
+                r#type: owner_type.clone(),
+            }],
+            locals: vec![Local {
+                id: "p0".into(),
+                name: "this".into(),
+                r#type: owner_type,
+                mutable: false,
+                boxed: false,
+            }],
+            return_type: Type::Void,
+            body: vec![],
+            captures: None,
+            rest: false,
+            is_async: false,
+            loc: loc.clone(),
+        });
+        for operation in ["get", "has", "delete", "set"] {
+            for defect in ["none", "arity", "owner", "payload", "result"] {
+                let owner_type = Type::Object {
+                    class_name: "native_builtin_WeakMap".into(),
+                };
+                let owner = Expr::New {
+                    class_name: "native_builtin_WeakMap".into(),
+                    args: vec![],
+                    r#type: owner_type,
+                    loc: loc.clone(),
+                };
+                let dynamic = || Expr::DynObjLit {
+                    fields: vec![],
+                    r#type: Type::Dyn,
+                    loc: loc.clone(),
+                };
+                let mut args = vec![owner, dynamic()];
+                if operation == "set" {
+                    args.push(dynamic());
+                }
+                let result = match operation {
+                    "set" => Type::Void,
+                    "get" => Type::Dyn,
+                    _ => Type::Bool,
+                };
+                if defect == "arity" {
+                    args.push(dynamic());
+                }
+                if defect == "owner" {
+                    args[0] = dynamic();
+                }
+                if defect == "payload" {
+                    args[1] = Expr::NumLit {
+                        value: 1.0,
+                        spelling: None,
+                        r#type: Type::F64,
+                        loc: loc.clone(),
+                    };
+                }
+                let result = if defect == "result" {
+                    Type::String
+                } else {
+                    result
+                };
+                module.functions[0].body = vec![Stmt::Expression {
+                    expr: Expr::LibCall {
+                        r#fn: format!("weakmap.{operation}"),
+                        args,
+                        r#type: result,
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                }];
+                assert_eq!(
+                    validate(&module).is_ok(),
+                    defect == "none",
+                    "{operation}/{defect}: {:?}",
+                    validate(&module)
+                );
+            }
+        }
     }
 
     #[test]

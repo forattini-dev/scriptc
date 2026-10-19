@@ -28,6 +28,7 @@ include!("regex.rs");
 include!("clock_and_date.rs");
 include!("date_components.rs");
 include!("heap.rs");
+include!("weak_maps.rs");
 include!("live_refs.rs");
 include!("diagnostics_channel.rs");
 include!("async_local_storage.rs");

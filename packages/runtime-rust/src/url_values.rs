@@ -1,9 +1,9 @@
+#[cfg(not(windows))]
+use crate::path_resolve;
 use crate::{
     JsArray, JsString, array_get, array_len, array_new, empty_string, string,
     string_to_well_formed, throw_type_error, throw_type_error_code,
 };
-#[cfg(not(windows))]
-use crate::path_resolve;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 

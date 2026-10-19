@@ -8485,6 +8485,7 @@ function emitLibCallExpr(emitter: CEmitter, e: LibCallExpr): Temp {
     case "strdec":
       return emitIoLibCall(state);
     case "record":
+    case "weakmap":
       throw new CUnsupportedError(e.fn, e.loc);
     default: {
       const _exhaustive: never = prefix;

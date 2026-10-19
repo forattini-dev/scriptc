@@ -1,3 +1,4 @@
+import { emitRustWeakMapCall } from "./weak-maps.js";
 import { emitRustBigIntCall } from "./bigint.js";
 import { emitRustBunWhich } from "./bun-which.js";
 import { emitRustBunFile } from "./bun-file.js";
@@ -153,6 +154,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (filesystemCall !== null) return filesystemCall;
   const diagnosticsChannelCall = emitRustDiagnosticsChannelCall(expr, context);
   if (diagnosticsChannelCall !== null) return diagnosticsChannelCall;
+  const weakMapCall = emitRustWeakMapCall(expr, context);
+  if (weakMapCall !== null) return weakMapCall;
   const asyncLocalStorageCall = emitRustAsyncLocalStorageCall(expr, context);
   if (asyncLocalStorageCall !== null) return asyncLocalStorageCall;
   const arg = expr.args[0];

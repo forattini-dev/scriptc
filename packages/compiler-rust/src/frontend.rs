@@ -53,6 +53,7 @@ mod union_literals;
 mod union_spreads;
 mod values;
 mod vars;
+mod weak_maps;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
 
@@ -1140,7 +1141,7 @@ impl<'a> Lowerer<'a> {
             }
             SyntaxKind::TypeOfExpression => {
                 let value = self.expression(node.expression())?;
-                if async_context::instance(&value.ty()) {
+                if async_context::instance(&value.ty()) || weak_maps::instance(&value.ty()) {
                     return Ok(Expr::Sequence {
                         stmts: vec![Stmt::Expression {
                             expr: value,
@@ -1164,6 +1165,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.weak_map_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.async_context_call(node)? {
                     return Ok(value);
                 }

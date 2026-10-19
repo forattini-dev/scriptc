@@ -174,8 +174,23 @@
         "evidence": "Six new harmless programs match Node 24.15 through the Rust frontend and both Rust emitters. New reference API tests observe NaN collapse, stored positive zero and delete/reinsert order. The prior record-seed refusal is now a positive differential case; artifact-preserving iteration refusal remains tested. Original red-dev passes the registeredScopes Set and hook-warning Set initializers."
       },
       "nativeWeakMapMilestone": {
-        "status": "required",
+        "status": "partial",
         "trigger": "red-dev node_modules/tuiuiu.js/dist/hooks/context.js:864..878 constructs appRuntimeScopes = new WeakMap(). Source uses get(appContext), set(ctx, resolvedScope) and delete(previous).",
+        "implementation": "Default nominal owning identities lower get/set/has/delete through validated weakmap.* operations in IR v13. Closed data-record keys retain identity through typed views. Owning values use conditional registry edges: collector reference-count accounting excludes those edges from outside roots, then fixed-point marking activates them only when both map owner and key are live. Inactive entries are removed before garbage edges are cleared.",
+        "fixtures": [
+          "rust-native-weak-maps/identity.ts",
+          "rust-native-weak-maps/order.ts",
+          "rust-native-weak-maps/values.ts",
+          "rust-native-weak-maps/untyped.js",
+          "rust-native-weak-maps/shadows.ts",
+          "rust-native-weak-maps/modules.ts"
+        ],
+        "boundaries": [
+          "Constructor iterables, extracted methods, subclasses and WeakMap erasure/reflection remain refused.",
+          "Other key representations, including arrays, functions, class instances and symbols, remain explicit boundaries; the record-key subset does not imply general weak-key support.",
+          "WeakSet, finalization callbacks and source-visible GC APIs require separate contracts."
+        ],
+        "evidence": "Six harmless programs compare identity, typed record views, overwrites, stored undefined, argument/error order, owning values, queued/captured cycles, module storage and source shadows with Node 24.15 through both Rust emitters. Six deterministic runtime tests prove dead key/owner cleanup, conditional chain activation, mutually dependent keys and scalar-only entry pruning. Artifact-preserving boundary tests keep unsupported forms explicit; reference API assertions validate serialized signatures and C/LLVM refusal. The original red-dev now passes the WeakMap initializer and refuses url.fileURLToPath in core/dev-warnings.js.",
         "acceptanceAndRisks": [
           "Retain per-instance identity and object-key identity through get/set/has/delete, aliases and declaration/runtime boundaries; preserve absent versus stored undefined and chaining.",
           "Keys must not become ordinary strong roots. Values may refer back to keys through runtime scopes and hook state; account for ephemeron reachability rather than replacing WeakMap with Map or relying only on Rc weak keys while strongly rooting every value.",
@@ -432,16 +447,16 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "b75906133645c76079b694605a187dacb5bbbb1a",
-    "after": "native Set owning element identities and SameValueZero; native-reddb-set-values-v78 compile-only attempts",
+    "compilerSourceBaseCommit": "bb85ddd31b287ac838bc7d53d0a1fb8ea997a261",
+    "after": "native record-key WeakMap operations and ephemeron collection; native-reddb-weak-maps-v79 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "node_modules/tuiuiu.js/dist/hooks/context.js:864..878 new WeakMap() for appRuntimeScopes. The runtime scope Set and hook warning Set initializers have been passed.",
+    "red-dev": "node_modules/tuiuiu.js/dist/core/dev-warnings.js:283..313 url.fileURLToPath(import.meta.url), nested in path.normalize during module initialization. The runtime scope Set, hook warning Set and WeakMap initializers have been passed.",
     "completedOriginalApplicationBinaries": 0,
     "nextCoercionConstraint": "Keep the native undefined fact established by default lowering across body var redeclarations and captures; do not replace it with the checker declaration-file narrowing.",
-    "nextModuleConstraint": "The github-token.ts uninitialized lexical declaration has been passed. Keep declaration-site initialization and module TDZ. Async suspension, direct Promise return adoption, Bun subprocess/Response streams, native namespace descriptors and async iteration remain outstanding.",
+    "nextModuleConstraint": "The github-token.ts uninitialized lexical declaration has been passed. Keep declaration-site initialization and module TDZ. Port fileURLToPath together with source-module import.meta.url provenance, URL decoding/error behavior and platform path semantics; do not substitute the compiled executable path. Async suspension, direct Promise return adoption, Bun subprocess/Response streams, native namespace descriptors and async iteration remain outstanding.",
     "nextStorageConstraint": "Keep null/undefined JS lexical initialization separate from the permanent storage representation and from public typed call/return contracts. Preserve declaration-site initialization, captures and module TDZ.",
     "nextAsyncContextConstraint": "Keep the implemented run/getStore subset explicit; additional methods need their own context propagation and error contracts, especially disable across previously captured contexts.",
-    "nextCollectionConstraint": "Implement the demanded WeakMap object-key get/set/delete contract with conditional value reachability and dead-key cleanup, including value-to-key cycles through hook state. Native Set iteration/values().next() remains a separate outstanding contract."
+    "nextCollectionConstraint": "Keep conditional WeakMap reachability and dead-entry cleanup for record keys, including value-to-key and value-to-owner cycles. Other weak-key domains and iterable constructors remain explicit boundaries. Native Set iteration/values().next() is a separate outstanding contract."
   }
 }

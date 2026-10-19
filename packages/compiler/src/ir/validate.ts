@@ -94,6 +94,10 @@ export const REGEX_INTRINSIC_SIGS: Record<
  * surface has no optionals. readFileSync's second argument is the (always-"utf8") encoding: evaluated for JS-exact side-effect
  * order and ignored by the runtime. A `null` slot is program-dependent (a builtin-error receiver) — the libCall case checks it specially, like process.envGet's result. Exported for lib-boundary.ts. */
 export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result: IrType }> = {
+  "weakmap.get": { argTypes: [{ kind: "object", className: "native_builtin_WeakMap" }, DYN], result: DYN },
+  "weakmap.set": { argTypes: [{ kind: "object", className: "native_builtin_WeakMap" }, DYN, DYN], result: VOID },
+  "weakmap.has": { argTypes: [{ kind: "object", className: "native_builtin_WeakMap" }, DYN], result: BOOL },
+  "weakmap.delete": { argTypes: [{ kind: "object", className: "native_builtin_WeakMap" }, DYN], result: BOOL },
   "bun.spawn": { argTypes: [arrayOf(STRING), F64, F64, F64, BOOL, arrayOf(STRING), STRING], result: CHILD_T },
   "bun.exited": { argTypes: [CHILD_T], result: { kind: "promise", inner: F64 } },
   "bun.pid": { argTypes: [CHILD_T], result: F64 },
@@ -3954,6 +3958,13 @@ function validateFunction(
         if (e.type.kind !== "void") err(`${e.name} must be void`, e.loc);
         break;
       case "libCall": {
+        if (e.fn.startsWith("weakmap.")) {
+          e.args.forEach(checkExpr);
+          const signature = e.fn === "weakmap.get" ? [2, DYN] as const : e.fn === "weakmap.set" ? [3, VOID] as const : e.fn === "weakmap.has" || e.fn === "weakmap.delete" ? [2, BOOL] as const : undefined;
+          const owner = e.args[0]?.type;
+          if (!signature || e.args.length !== signature[0] || !typeEquals(e.type, signature[1]) || owner?.kind !== "object" || owner.className !== "native_builtin_WeakMap" || e.args.slice(1).some(arg => arg.type.kind !== "dyn")) err("invalid native weak map operation", e.loc);
+          break;
+        }
         if (e.fn === "record.view") {
           e.args.forEach(checkExpr);
           if (e.args.length !== 1 || !recordViewPairs(e.args[0]!.type, e.type, records, unions)) err("record.view requires one unambiguous invariant closed-record projection per source arm", e.loc);

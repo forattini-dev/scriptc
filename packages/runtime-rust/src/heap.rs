@@ -168,6 +168,9 @@ where
             return;
         };
         if Rc::strong_count(&node) == 1 {
+            if Rc::weak_count(&node) != 0 {
+                let _ = CYCLE_DROPS.try_with(|count| count.set(count.get().saturating_add(1)));
+            }
             return;
         }
         let _ = CYCLE_DROPS.try_with(|count| count.set(count.get().saturating_add(1)));
@@ -223,10 +226,18 @@ pub fn collect_cycles() -> usize {
     let mut positions = HashMap::<usize, usize>::new();
     let mut queue = VecDeque::<DynNodeRc>::new();
 
-    for candidate in candidates {
+    let ephemerons = weak_map_snapshot();
+    let weak_edges = ephemerons.iter().flat_map(|entry| {
+        [entry.owner.node.clone(), entry.key.node.clone()]
+            .into_iter()
+            .chain(entry.edges.iter().cloned())
+    });
+    for candidate in candidates.into_iter().chain(weak_edges) {
         if let Some(node) = candidate.upgrade() {
             node.clear_candidate();
-            if positions.contains_key(&node.id()) { continue; }
+            if positions.contains_key(&node.id()) {
+                continue;
+            }
             positions.insert(node.id(), nodes.len());
             nodes.push(node.clone());
             queue.push_back(node);
@@ -250,6 +261,7 @@ pub fn collect_cycles() -> usize {
     }
 
     if nodes.is_empty() {
+        weak_map_retain_live(&HashSet::new());
         return 0;
     }
 
@@ -266,6 +278,18 @@ pub fn collect_cycles() -> usize {
         });
     }
 
+    // Registry values physically own these edges, but they are not outside
+    // roots. Their reachability is conditional on both owner and weak key.
+    for entry in &ephemerons {
+        for edge in &entry.edges {
+            if let Some(child) = edge.upgrade()
+                && let Some(index) = positions.get(&child.id())
+            {
+                incoming[*index] += 1;
+            }
+        }
+    }
+
     let mut live = HashSet::<usize>::new();
     let mut live_queue = VecDeque::<usize>::new();
     for (index, node) in nodes.iter().enumerate() {
@@ -277,21 +301,42 @@ pub fn collect_cycles() -> usize {
         }
     }
 
-    while let Some(index) = live_queue.pop_front() {
-        nodes[index].trace(&mut Tracer {
-            visit: &mut |child| {
-                let Some(child) = child.upgrade() else {
-                    return;
-                };
-                let Some(child_index) = positions.get(&child.id()).copied() else {
-                    return;
-                };
-                if live.insert(child.id()) {
-                    live_queue.push_back(child_index);
+    loop {
+        while let Some(index) = live_queue.pop_front() {
+            nodes[index].trace(&mut Tracer {
+                visit: &mut |child| {
+                    let Some(child) = child.upgrade() else {
+                        return;
+                    };
+                    let Some(child_index) = positions.get(&child.id()).copied() else {
+                        return;
+                    };
+                    if live.insert(child.id()) {
+                        live_queue.push_back(child_index);
+                    }
+                },
+            });
+        }
+
+        for entry in &ephemerons {
+            if live.contains(&entry.owner.id) && live.contains(&entry.key.id) {
+                for edge in &entry.edges {
+                    if let Some(child) = edge.upgrade()
+                        && let Some(index) = positions.get(&child.id()).copied()
+                        && live.insert(child.id())
+                    {
+                        live_queue.push_back(index);
+                    }
                 }
-            },
-        });
+            }
+        }
+        if live_queue.is_empty() {
+            break;
+        }
     }
+    // Drop inactive values while the collector still owns every snapshotted
+    // node. A dead value cannot keep its own weak key or map owner alive.
+    weak_map_retain_live(&live);
 
     let garbage: Vec<_> = nodes
         .iter()

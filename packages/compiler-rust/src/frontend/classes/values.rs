@@ -115,6 +115,18 @@ impl Lowerer<'_> {
         let Some(index) = self.class_symbol(node.expression()) else {
             return Ok(None);
         };
+        if self.classes.definitions[index].name == weak_maps::CLASS {
+            if !node.arguments().is_empty() {
+                return Err(self.refuse(node, "WeakMap constructor iterables are not ported"));
+            }
+            self.request_constructor(index)?;
+            return Ok(Some(Expr::New {
+                class_name: weak_maps::CLASS.into(),
+                args: vec![],
+                r#type: self.classes.object(index),
+                loc: self.loc(node),
+            }));
+        }
         if self.classes.definitions[index].name == async_context::CLASS {
             if !node.arguments().is_empty() {
                 return Err(
@@ -304,6 +316,12 @@ impl Lowerer<'_> {
             return Err(self.refuse(node, "class receiver has no object representation"));
         };
         let field = node.name().text().to_string();
+        if class_name == weak_maps::CLASS {
+            return Err(self.refuse(
+                node,
+                "WeakMap property access and extracted methods are not ported",
+            ));
+        }
         if class_name == async_context::CLASS {
             return Err(self.refuse(
                 node,
@@ -357,6 +375,12 @@ impl Lowerer<'_> {
             return Err(self.refuse(node, "class write needs an object"));
         };
         let field = member.name().text().to_string();
+        if class_name == weak_maps::CLASS {
+            return Err(self.refuse(
+                node,
+                "WeakMap property access and extracted methods are not ported",
+            ));
+        }
         if class_name == async_context::CLASS {
             return Err(self.refuse(node, "AsyncLocalStorage property writes are not ported"));
         }

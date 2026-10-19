@@ -10,6 +10,7 @@ impl Lowerer<'_> {
         let definition = self.classes.definitions[index].clone();
         if definition.name.starts_with("native_builtin_Text")
             || definition.name == async_context::CLASS
+            || definition.name == weak_maps::CLASS
         {
             let params = vec![Param {
                 local_id: "p0".into(),
@@ -168,6 +169,7 @@ impl Lowerer<'_> {
         let definition = self.classes.definitions[index].clone();
         if definition.name.starts_with("native_builtin_Text")
             || definition.name == async_context::CLASS
+            || definition.name == weak_maps::CLASS
         {
             let mut function = helpers::Helper::new(
                 &format!("%{}.constructor", definition.name),

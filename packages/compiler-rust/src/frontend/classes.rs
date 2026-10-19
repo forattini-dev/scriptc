@@ -157,17 +157,23 @@ impl Lowerer<'_> {
         }
         let info = self.checker.sym(SymbolId(symbol));
         let name = info.name.to_string();
-        if self.standard_async_context(symbol) {
+        if self.standard_async_context(symbol) || self.standard_weak_map(symbol) {
+            let weak = self.standard_weak_map(symbol);
+            let class_name = if weak {
+                weak_maps::CLASS
+            } else {
+                async_context::CLASS
+            };
             let index = self
                 .classes
                 .definitions
                 .iter()
-                .position(|d| d.name == async_context::CLASS)
+                .position(|d| d.name == class_name)
                 .unwrap_or_else(|| {
                     let index = self.classes.definitions.len();
                     self.classes.definitions.push(Definition {
                         node: Node::NIL,
-                        name: async_context::CLASS.into(),
+                        name: class_name.into(),
                         file: "<builtin>".into(),
                         base: None,
                         resolved: true,
@@ -176,16 +182,24 @@ impl Lowerer<'_> {
                         token: None,
                     });
                     self.classes.layouts.push(Some(ir::Class {
-                        name: async_context::CLASS.into(),
-                        js_name: "AsyncLocalStorage".into(),
+                        name: class_name.into(),
+                        js_name: if weak { "WeakMap" } else { "AsyncLocalStorage" }.into(),
                         runtime: false,
                         base: None,
-                        fields: vec![ir::Field {
-                            name: async_context::HANDLE.into(),
-                            r#type: Type::Dyn,
-                        }],
+                        fields: if weak {
+                            vec![]
+                        } else {
+                            vec![ir::Field {
+                                name: async_context::HANDLE.into(),
+                                r#type: Type::Dyn,
+                            }]
+                        },
                         methods: vec![],
-                        method_names: vec!["run".into(), "getStore".into()],
+                        method_names: if weak {
+                            vec!["get".into(), "set".into(), "has".into(), "delete".into()]
+                        } else {
+                            vec!["run".into(), "getStore".into()]
+                        },
                         loc: Loc {
                             file: "<builtin>".into(),
                             start: 0,
@@ -373,6 +387,9 @@ impl Lowerer<'_> {
                 })?);
         }
         if let Some(base) = base {
+            if self.classes.definitions[base].name == weak_maps::CLASS {
+                return Err(self.refuse(node, "WeakMap subclassing is not ported"));
+            }
             if self.classes.definitions[base].name == async_context::CLASS {
                 return Err(self.refuse(node, "AsyncLocalStorage subclassing is not ported"));
             }
