@@ -166,7 +166,17 @@
         "Preserve microtask order, rejected awaits, adoption, thenables and return/throw replacement by finally.",
         "Include rejection handlers, Promise.all heterogeneous results, top-level await and entry completion.",
         "Async iteration must close on abrupt exits and preserve cleanup failures."
-      ]
+      ],
+      "observedNativeMilestone": {
+        "source": "src/agents.ts:953 cliNamesRedSkills(cmd: string[]): Promise<boolean>",
+        "entryDemand": "The native reachability report traces the function from a call at agents.ts:41322..41385; body compilation does not execute the original probe.",
+        "contracts": [
+          "Keep call signatures returning Promise<T> separate from async function body return type T in owned IR and native validation.",
+          "Run the prefix at call time; suspend await continuations on the job queue with owning traced cells and preserve pending return/throw/finally through try/catch. Do not implement await by blocking until completion.",
+          "Port the demanded Bun.spawn argv/options contract and stdout stream ownership to native Rust subprocess/stream APIs. Response.text() must drain through the async stream contract and proc.exited must settle independently with correct errors/status.",
+          "Keep the source-runtime Bun contract explicit and compare harmless child-process fixtures with its pinned oracle; Node remains the independent oracle for shared language behavior. No Bun/Node/TS/Go production fallback and no original provisioning/release execution."
+        ]
+      }
     },
     {
       "id": "module-runtime-and-entry",
@@ -298,13 +308,13 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "e3fe0c56ca25520d363d478298b47e09ee79aef7",
-    "after": "owning module namespace identities, live named export reads, portable lexical-global initialization guards; native-reddb-namespaces-v69 compile-only attempts",
+    "compilerSourceBaseCommit": "e83b35083f5208ab8cc6b205011d21b4f447634f",
+    "after": "checked satisfies erasure with operand identity and destination-context lowering; native-reddb-satisfies-v70 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "src/unattended.ts:14 UNATTENDED_ENV uses an unported SatisfiesExpression (bytes 514..2687); nullable namespace caches at manifest.ts:1512 have been passed",
+    "red-dev": "src/agents.ts:953 cliNamesRedSkills is async; its body combines try/catch, Bun.spawn piped stdout, (await new Response(proc.stdout).text()).toLowerCase(), await proc.exited and string includes. The earlier satisfies wrapper in unattended.ts has been passed.",
     "completedOriginalApplicationBinaries": 0,
     "nextCoercionConstraint": "Keep invariant typed views aliasing the original backing store and retain all extra own properties in subsequent spreads. Do not replace them with field-dropping clones or guessed union tags.",
-    "nextModuleConstraint": "Keep namespace identity separate from the live export table. Reflection, erasure, indexed access, thenable assimilation and Bun lazy require remain explicit boundaries. The immediate observed red-dev syntax gap is satisfies, which must retain its operand runtime semantics and checked contextual typing."
+    "nextModuleConstraint": "Preserve the owning namespace/live-export contract and explicit descriptor/Bun-require boundaries. The next observed red-dev path needs asynchronous source functions and suspended completions plus native subprocess/stream integration, without blocking await or a production runtime fallback."
   }
 }

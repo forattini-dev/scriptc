@@ -168,6 +168,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-namespaces/order.ts",
         "rust-native-namespaces/cycles.ts",
         "rust-native-namespaces/tdz.ts",
+        "rust-native-satisfies/values.ts",
+        "rust-native-satisfies/context.ts",
+        "rust-native-satisfies/order.ts",
         "rust-native-commonjs/order.ts",
         "rust-native-commonjs/cycles.ts",
         "rust-native-commonjs/replacement.ts",
@@ -2449,6 +2452,46 @@ fn namespace_boundaries_preserve_previous_artifacts() {
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(
             !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn satisfies_checks_unused_bodies_and_preserves_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "satisfies-boundary");
+    for source in [
+        "const invalid = 42 satisfies string;",
+        "function unused() { return 42 satisfies string; }",
+    ] {
+        fs::write(&input, source).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("TS1360") && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );
         for artifact in [

@@ -936,7 +936,9 @@ impl<'a> Lowerer<'a> {
                 let target = self.ty(node)?;
                 self.expected_expression(node.expression(), target)
             }
-            SyntaxKind::ParenthesizedExpression => self.expression(node.expression()),
+            SyntaxKind::ParenthesizedExpression | SyntaxKind::SatisfiesExpression => {
+                self.expression(node.expression())
+            }
             SyntaxKind::PropertyAccessExpression if self.module_namespace(node.expression()) => {
                 self.expression(node.name())
             }

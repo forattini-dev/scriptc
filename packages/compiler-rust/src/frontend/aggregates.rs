@@ -550,7 +550,7 @@ impl Lowerer<'_> {
             SyntaxKind::ObjectLiteralExpression if matches!(target, Type::Record { .. }) => {
                 self.record_literal(node, target)
             }
-            SyntaxKind::ParenthesizedExpression => {
+            SyntaxKind::ParenthesizedExpression | SyntaxKind::SatisfiesExpression => {
                 self.expected_expression(node.expression(), target)
             }
             SyntaxKind::ConditionalExpression => {
