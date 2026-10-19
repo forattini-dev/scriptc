@@ -168,6 +168,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-namespaces/order.ts",
         "rust-native-namespaces/cycles.ts",
         "rust-native-namespaces/tdz.ts",
+        "rust-native-default-values/values.ts",
+        "rust-native-default-values/order.ts",
+        "rust-native-default-values/captures.ts",
+        "rust-native-default-values/process.ts",
         "rust-native-lexicals/values.ts",
         "rust-native-lexicals/order.ts",
         "rust-native-lexicals/cycles.ts",
@@ -1180,7 +1184,7 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
         ),
         (
             "default-unit-param",
-            "function f(n: number | undefined = undefined) { return 1; } console.log(f());",
+            "function f(n: undefined = undefined) { return 1; } console.log(f());",
             "SCN1001",
         ),
         (

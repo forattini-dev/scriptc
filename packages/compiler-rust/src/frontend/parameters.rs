@@ -180,15 +180,26 @@ impl Lowerer<'_> {
             .filter(|a| **a != Type::Undefined)
             .cloned()
             .collect::<Vec<_>>();
-        let target = self
-            .intern_union(arms.clone())
-            .ok_or_else(|| self.refuse(node, "default parameter body type is not ported"))?;
+        // Lower exactly once against the complete call contract. Native builtin
+        // result types can be wider than the checker declaration's default type.
+        let default = self.expected_expression(node.initializer(), param.r#type.clone())?;
+        let maybe_undefined = self.default_may_be_undefined(&default);
+        let target = if maybe_undefined {
+            param.r#type.clone()
+        } else {
+            self.intern_union(arms.clone())
+                .ok_or_else(|| self.refuse(node, "default parameter body type is not ported"))?
+        };
         if matches!(target, Type::Null | Type::Undefined) {
             return Err(self.refuse(node, "default parameter needs a non-unit body type"));
         }
         // Bind only after lowering the initializer: earlier parameters are visible;
         // self/later parameters and body declarations remain in their TDZ.
-        let default = self.expected_expression(node.initializer(), target.clone())?;
+        let default = if maybe_undefined {
+            default
+        } else {
+            self.project_defined_default(default, target.clone(), node)?
+        };
         let value = || Expr::VarRef {
             local_id: local.id.clone(),
             r#type: param.r#type.clone(),
@@ -196,8 +207,8 @@ impl Lowerer<'_> {
         };
         // Projection only reads the immutable incoming slot. Never duplicate a
         // source expression with side effects when translating union tags.
-        let mut supplied = None;
-        for arm in arms {
+        let mut supplied = if maybe_undefined { Some(value()) } else { None };
+        for arm in arms.into_iter().filter(|_| !maybe_undefined) {
             let arm_tag = self.unions[union_id]
                 .arms
                 .iter()
@@ -260,10 +271,70 @@ impl Lowerer<'_> {
         };
         self.locals.push(binding.clone());
         self.bindings.insert(symbol, binding.clone());
+        if maybe_undefined {
+            // Preserve native uncertainty across reads/captures until a live
+            // presence test or assignment establishes a defined value.
+            self.var_types.insert(symbol, binding.r#type.clone());
+            self.var_defined.remove(&symbol);
+        }
         Ok(vec![Stmt::VarDecl {
             local_id: binding.id,
             init,
             loc: self.loc(node),
         }])
+    }
+    fn project_defined_default(
+        &self,
+        value: Expr,
+        target: Type,
+        node: Node,
+    ) -> Result<Expr, String> {
+        Ok(match value {
+            Expr::UnionWrap { value, .. } => self.coerce(*value, target, node)?,
+            Expr::Sequence {
+                stmts, result, loc, ..
+            } => Expr::Sequence {
+                stmts,
+                result: Box::new(self.project_defined_default(*result, target.clone(), node)?),
+                r#type: target,
+                loc,
+            },
+            Expr::Ternary {
+                cond,
+                then,
+                else_,
+                loc,
+                ..
+            } => Expr::Ternary {
+                cond,
+                then: Box::new(self.project_defined_default(*then, target.clone(), node)?),
+                else_: Box::new(self.project_defined_default(*else_, target.clone(), node)?),
+                r#type: target,
+                loc,
+            },
+            value => self.coerce(value, target, node)?,
+        })
+    }
+
+    fn default_may_be_undefined(&self, value: &Expr) -> bool {
+        match value {
+            Expr::UnionWrap { value, .. } => self.default_may_be_undefined(value),
+            Expr::Sequence { result, .. } => self.default_may_be_undefined(result),
+            Expr::Ternary { then, else_, .. } => {
+                self.default_may_be_undefined(then) || self.default_may_be_undefined(else_)
+            }
+            _ => self.default_type_may_be_undefined(&value.ty()),
+        }
+    }
+
+    fn default_type_may_be_undefined(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Undefined | Type::Dyn => true,
+            Type::Union { union_id } => self.unions[*union_id]
+                .arms
+                .iter()
+                .any(|arm| self.default_type_may_be_undefined(arm)),
+            _ => false,
+        }
     }
 }

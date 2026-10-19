@@ -140,8 +140,14 @@ impl Lowerer<'_> {
                 continue;
             }
             if let Some(param) = self.bindings.get(&symbol) {
-                self.var_types.insert(symbol, param.r#type.clone());
-                self.var_defined.insert(symbol);
+                // A default can retain undefined even when checker flow assumes
+                // a defined body value. Redeclaration preserves that native fact.
+                if let std::collections::hash_map::Entry::Vacant(entry) =
+                    self.var_types.entry(symbol)
+                {
+                    entry.insert(param.r#type.clone());
+                    self.var_defined.insert(symbol);
+                }
                 continue;
             }
             let ty = self.var_value_type(declaration)?;
