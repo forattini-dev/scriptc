@@ -40,6 +40,11 @@ impl Lowerer<'_> {
         }
     }
     fn refuse_thenable(&self, ty: &Type, node: Node) -> Result<(), String> {
+        if self.namespace_capsule(ty)
+            || matches!(ty, Type::Union { union_id } if self.unions[*union_id].arms.iter().any(|arm| self.namespace_capsule(arm)))
+        {
+            return Err(self.refuse(node, "module namespace thenable assimilation requires a native namespace descriptor contract"));
+        }
         if let Type::Record { shape_id } = ty
             && self.records[*shape_id]
                 .fields

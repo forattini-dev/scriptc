@@ -6,6 +6,7 @@ export interface RustLibraryEntryOptions {
   readonly entryName: string;
   readonly hasErrorClasses: boolean;
   readonly globals: readonly IrGlobal[];
+  readonly tdzGlobals?: ReadonlySet<string>;
   readonly internedClosureNames: readonly string[];
   readonly unsupported: (kind: string) => never;
 }
@@ -363,6 +364,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `    let sc_was_initialized = SC_LIBRARY_INITIALIZED.with(|slot| slot.replace(true));`,
     ...(hasResults ? [`    sc_library_results_reset();`] : []),
     ...options.globals.map((global) => `    ${resetGlobal(global, unsupported)}`),
+    ...[...(options.tdzGlobals ?? [])].map(id => `    ${mangleGlobal(id)}_initialized.with(|slot| slot.set(false));`),
     ...options.internedClosureNames.map(
       (name) => `    ${mangleFnClosure(name)}.with(|slot| *slot.borrow_mut() = None);`,
     ),

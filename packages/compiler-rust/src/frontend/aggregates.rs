@@ -215,6 +215,12 @@ impl Lowerer<'_> {
             return self.coerce(value, target, node);
         }
         if target == Type::Dyn {
+            if self.contains_namespace(&value.ty()) {
+                return Err(self.refuse(
+                    node,
+                    "erasing module namespaces requires a native namespace descriptor contract",
+                ));
+            }
             if ir::contains_set(&value.ty(), &self.records, &self.unions) {
                 return Err(self.refuse(
                     node,

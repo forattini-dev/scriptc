@@ -12,6 +12,7 @@ export interface RustValueContext {
   familyTargetOf(name: string): IrFamily | undefined;
   readonly classes: ReadonlyMap<string, IrClassDef>;
   readonly globals: ReadonlyMap<string, IrGlobal>;
+  readonly tdzGlobals?: ReadonlySet<string>;
   readonly records: ReadonlyMap<string, IrRecordShape>;
   readonly unions: ReadonlyMap<string, IrUnionDef>;
   currentFunction(): IrFunction | null;
@@ -145,6 +146,10 @@ export class RustValueEmitter {
     const global = this.context.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
+      if (this.context.tdzGlobals?.has(id)) {
+        const message = this.context.rustString(`Cannot access '${global.name}' before initialization`);
+        return `{ if !${name}_initialized.with(Cell::get) { runtime::throw_reference_error("${message}".to_owned()); } ${this.uncheckedGlobalRead(id, type, loc)} }`;
+      }
       if (type.kind === "func" && !global.mutable) {
         const message = this.context.rustString(`Cannot access '${global.name}' before initialization`);
         return `${name}.with(|slot| slot.borrow().as_ref().cloned().unwrap_or_else(|| runtime::throw_reference_error("${message}".to_owned())))`;
@@ -166,14 +171,31 @@ export class RustValueEmitter {
     return this.needsClone(local.type) ? `${mangleLocal(id)}.clone()` : mangleLocal(id);
   }
 
-  emitAssignment(id: string, value: string, loc: SrcLoc): void {
-    this.context.line(`${this.assignmentExpr(id, value, loc)}`);
+  private uncheckedGlobalRead(id: string, type: IrType, loc: SrcLoc): string {
+    const name = mangleGlobal(id);
+    if (this.isHeapRoot(type) || ["regex", "symbol", "url", "searchParams", "generator"].includes(type.kind)) return `${name}.with(|slot| slot.borrow().as_ref().expect("scriptc: initialized global storage").clone())`;
+    if (this.needsClone(type)) return `${name}.with(|slot| slot.borrow().clone())`;
+    if (type.kind === "f64" || type.kind === "bool" || type.kind === "classval") return `${name}.with(Cell::get)`;
+    this.context.unsupported(`global read type '${type.kind}'`, loc);
   }
 
-  assignmentExpr(id: string, value: string, loc: SrcLoc): string {
+  emitAssignment(id: string, value: string, loc: SrcLoc, initializesGlobal = false): void {
+    this.context.line(`${this.assignmentExpr(id, value, loc, initializesGlobal)}`);
+  }
+
+  assignmentExpr(id: string, value: string, loc: SrcLoc, initializesGlobal = false): string {
     const global = this.context.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
+      if (this.context.tdzGlobals?.has(id)) {
+        const message = this.context.rustString(`Cannot access '${global.name}' before initialization`);
+        const check = initializesGlobal ? "" : `if !${name}_initialized.with(Cell::get) { runtime::throw_reference_error("${message}".to_owned()); }`;
+        const store = this.isHeapRoot(global.type) || ["regex", "symbol", "url", "searchParams", "generator"].includes(global.type.kind)
+          ? `${name}.with(|slot| *slot.borrow_mut() = Some(sc_global_value));`
+          : this.needsClone(global.type) ? `${name}.with(|slot| *slot.borrow_mut() = sc_global_value);`
+          : `${name}.with(|slot| slot.set(sc_global_value));`;
+        return `{ let sc_global_value = ${value}; ${check} ${store} ${initializesGlobal ? `${name}_initialized.with(|slot| slot.set(true));` : ""} };`;
+      }
       if (this.isHeapRoot(global.type) || global.type.kind === "regex" || global.type.kind === "symbol" || global.type.kind === "url" || global.type.kind === "searchParams" || global.type.kind === "generator") return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
       if (this.needsClone(global.type)) return `${name}.with(|slot| *slot.borrow_mut() = ${value});`;
       if (global.type.kind === "f64" || global.type.kind === "bool" || global.type.kind === "classval") return `${name}.with(|slot| slot.set(${value}));`;

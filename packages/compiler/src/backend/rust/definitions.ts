@@ -36,6 +36,7 @@ export interface RustDefinitionContext {
   readonly dynAdapterShapes: ReadonlySet<string>;
   readonly emitterSnapshotShapes: ReadonlyMap<string, RustClosureShape>;
   readonly globals: ReadonlyMap<string, IrGlobal>;
+  readonly tdzGlobals?: ReadonlySet<string>;
   readonly internedClosureTargets: ReadonlySet<string>;
   readonly promiseRejectorTypes: ReadonlyMap<string, IrType[]>;
   readonly promiseResolverTypes: ReadonlyMap<string, IrType>;
@@ -956,6 +957,7 @@ export class RustDefinitionEmitter {
     this.context.pushIndent();
     for (const global of this.context.globals.values()) {
       const name = mangleGlobal(global.id);
+      if (this.context.tdzGlobals?.has(global.id)) slot(`static ${name}_initialized: Cell<bool> = const { Cell::new(false) };`);
       switch (global.type.kind) {
         case "f64":
           slot(`static ${name}: Cell<f64> = const { Cell::new(0.0) };`);

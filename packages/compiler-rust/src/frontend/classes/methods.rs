@@ -112,6 +112,9 @@ impl Lowerer<'_> {
             return Ok(None);
         }
         let receiver = member.expression();
+        if self.module_namespace(receiver) {
+            return Ok(None);
+        }
         let is_super = receiver.kind() == SyntaxKind::SuperKeyword;
         let ty = if is_super || receiver.kind() == SyntaxKind::ThisKeyword {
             self.instance_this

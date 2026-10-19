@@ -40,7 +40,7 @@ export interface RustStatementContext {
   emitExpr(expr: IrExpr): string;
   borrowBytesReceiver(expr: IrExpr, later: readonly IrExpr[]): string | null;
   emitRead(id: string, type: IrType, loc: SrcLoc): string;
-  emitAssignment(id: string, value: string, loc: SrcLoc): void;
+  emitAssignment(id: string, value: string, loc: SrcLoc, initializesGlobal?: boolean): void;
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
   local(id: string, loc: SrcLoc): IrFunction["locals"][number];
   localIsBoxed(local: IrFunction["locals"][number]): boolean;
@@ -201,7 +201,7 @@ class RustStatementEmitter {
         return;
       }
       case "assign":
-        this.context.emitAssignment(stmt.localId, this.context.emitExpr(stmt.value), stmt.loc);
+        this.context.emitAssignment(stmt.localId, this.context.emitExpr(stmt.value), stmt.loc, stmt.initializesGlobal);
         return;
       case "exprStmt":
         // A discarded `yield*` runs its effect but never reads the success value, so no representation check applies.

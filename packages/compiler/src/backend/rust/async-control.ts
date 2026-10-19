@@ -51,7 +51,7 @@ export interface RustAsyncControlContext {
   emitExpr(expr: IrExpr): string;
   emitExprWithValues(expr: IrExpr, values: readonly (readonly [IrExpr, string])[]): string;
   emitStatement(statement: IrStmt): void;
-  emitAssignment(id: string, value: string, loc: SrcLoc): void;
+  emitAssignment(id: string, value: string, loc: SrcLoc, initializesGlobal?: boolean): void;
   emitAsyncValue(expr: IrExpr, consume: (value: string) => void): void;
   emitAsyncContinuation(
     dependencyExpr: string,
@@ -236,7 +236,7 @@ export class RustAsyncControlEmitter {
             this.context.line(`let _ = ${rawValue};`);
             const value = this.context.emitExpr(hop.result);
             if (stmt.kind === "assign") {
-              this.context.emitAssignment(stmt.localId, value, stmt.loc);
+              this.context.emitAssignment(stmt.localId, value, stmt.loc, stmt.initializesGlobal);
             } else if (stmt.kind === "varDecl") {
               const local = this.context.local(stmt.localId, stmt.loc);
               this.context.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
@@ -281,7 +281,7 @@ export class RustAsyncControlEmitter {
           this.containsAsyncSuspension(nested)) {
           this.context.emitAsyncValue(nested, (value) => {
             if (stmt.kind === "assign") {
-              this.context.emitAssignment(stmt.localId, value, stmt.loc);
+              this.context.emitAssignment(stmt.localId, value, stmt.loc, stmt.initializesGlobal);
               this.emitAsyncStatements(statements.slice(index + 1), onComplete);
             } else if (stmt.kind === "varDecl") {
               const local = this.context.local(stmt.localId, stmt.loc);
@@ -311,7 +311,7 @@ export class RustAsyncControlEmitter {
         (rawValue) => {
           const value = awaited.wrap(rawValue);
           if (stmt.kind === "assign") {
-            this.context.emitAssignment(stmt.localId, value, stmt.loc);
+            this.context.emitAssignment(stmt.localId, value, stmt.loc, stmt.initializesGlobal);
           } else if (stmt.kind === "varDecl") {
             const local = this.context.local(stmt.localId, stmt.loc);
             this.context.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);

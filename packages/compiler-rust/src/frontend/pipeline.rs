@@ -130,6 +130,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             lowerer.functions.finish(symbol);
             functions.push(function);
         }
+        functions[0].body.splice(0..0, lowerer.namespace_prelude());
         functions.extend(lowerer.lifted);
         Ok(Module {
             ir_version: ir::VERSION,
@@ -139,7 +140,13 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             records: lowerer.records,
             unions: lowerer.unions,
             globals: lowerer.globals,
-            classes: lowerer.classes.layouts.into_iter().flatten().collect(),
+            classes: lowerer
+                .classes
+                .layouts
+                .into_iter()
+                .flatten()
+                .chain(lowerer.namespace_values.layouts)
+                .collect(),
         })
     })
 }

@@ -9,6 +9,7 @@ export interface RustModuleEntryOptions {
   readonly entryCommonJs: boolean;
   readonly hasErrorClasses: boolean;
   readonly globals: readonly IrGlobal[];
+  readonly tdzGlobals?: ReadonlySet<string>;
   readonly internedClosureNames: readonly string[];
   readonly usesDyn: boolean;
   readonly usesDynamicInvoke: boolean;
@@ -36,6 +37,7 @@ export function emitRustModuleEntry(options: RustModuleEntryOptions): string[] {
       entryName: entry.name,
       hasErrorClasses: options.hasErrorClasses,
       globals: options.globals,
+      ...(options.tdzGlobals === undefined ? {} : { tdzGlobals: options.tdzGlobals }),
       internedClosureNames: options.internedClosureNames,
       unsupported: options.unsupported,
     });
@@ -46,6 +48,7 @@ export function emitRustModuleEntry(options: RustModuleEntryOptions): string[] {
     entryCommonJs: options.entryCommonJs,
     hasErrorClasses: options.hasErrorClasses,
     heapGlobalIds: options.globals.filter(options.isHeapGlobal).map((global) => global.id),
+    ...(options.tdzGlobals === undefined ? {} : { tdzGlobals: options.tdzGlobals }),
     internedClosureNames: options.internedClosureNames,
     usesDyn: options.usesDyn,
     usesDynamicInvoke: options.usesDynamicInvoke,

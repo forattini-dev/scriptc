@@ -164,6 +164,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-process/shadows.ts",
         "rust-native-process/architecture.ts",
         "rust-native-process/architecture.cjs",
+        "rust-native-namespaces/storage.ts",
+        "rust-native-namespaces/order.ts",
+        "rust-native-namespaces/cycles.ts",
+        "rust-native-namespaces/tdz.ts",
         "rust-native-commonjs/order.ts",
         "rust-native-commonjs/cycles.ts",
         "rust-native-commonjs/replacement.ts",
@@ -2404,4 +2408,55 @@ fn owned_console_prelude_supports_standalone_callbacks() {
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(actual.stdout, expected.stdout);
     assert_eq!(actual.stderr, expected.stderr);
+}
+
+#[test]
+fn namespace_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("dep.ts"),
+        "export let value: number = 1; export function read(): number { return value; }",
+    )
+    .unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "namespace-boundary");
+    for source in [
+        "import * as ns from './dep.ts'; const alias = ns; const erased: unknown = alias;",
+        "import * as ns from './dep.ts'; const alias = ns; console.log(Object.keys(alias));",
+        "import * as ns from './dep.ts'; const alias = ns; console.log(alias['value']);",
+        "import * as ns from './dep.ts'; const alias = ns; alias.value = 2;",
+        "import * as ns from './dep.ts'; Promise.resolve(ns);",
+        "import * as ns from './dep.ts'; const alias = ns; const record = { alias }; const erased: unknown = record;",
+        "import * as ns from './dep.ts'; class Box { value: typeof ns = ns; } const erased: unknown = new Box();",
+        "import * as ns from './dep.ts'; const callback = (): typeof ns => ns; const erased: unknown = callback;",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
 }

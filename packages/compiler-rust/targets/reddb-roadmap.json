@@ -191,7 +191,9 @@
           "Keep namespace mutation, dynamic keys, own-key order and toStringTag either correctly represented or explicitly refused.",
           "Preserve the default Node ambient-require refusal for ESM; Bun source-runtime behavior requires an explicit adapter/profile and isolated oracle evidence, never a production Bun fallback.",
           "Lazy requests initialize once at the original call site, preserving errors, partially initialized cycles and synchronous/asynchronous module boundaries."
-        ]
+        ],
+        "status": "partial",
+        "evidence": "Four rust-native-namespaces programs cover nullable caches, aliases and typed containers/callbacks, current mutable exports, reexports, receiver/argument order, callee snapshots, cycles and read/write TDZ. Module handles lower to private empty owning capsules; values are read from the module binding table after receiver evaluation. In the reference Rust backend, explicit initializesGlobal markers track lexical readiness separately from physical scalar/heap slots, including suspended assignments. Old unmarked producers retain their previous storage contract. Namespace descriptors and lazy ESM require are not implied."
       }
     },
     {
@@ -296,13 +298,13 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "0896f14f5f22fea171ca1b651ea9383846bbe3dc",
-    "after": "native process.arch property lowering and imported property identity; native-reddb-process-arch-v68 compile-only attempts",
+    "compilerSourceBaseCommit": "e3fe0c56ca25520d363d478298b47e09ee79aef7",
+    "after": "owning module namespace identities, live named export reads, portable lexical-global initialization guards; native-reddb-namespaces-v69 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "src/manifest.ts:1512 nullable typeof import(\"./machine-profile.ts\") cache initializer has no native storage type; process.arch at line 1025 has been passed",
+    "red-dev": "src/unattended.ts:14 UNATTENDED_ENV uses an unported SatisfiesExpression (bytes 514..2687); nullable namespace caches at manifest.ts:1512 have been passed",
     "completedOriginalApplicationBinaries": 0,
     "nextCoercionConstraint": "Keep invariant typed views aliasing the original backing store and retain all extra own properties in subsequent spreads. Do not replace them with field-dropping clones or guessed union tags.",
-    "nextModuleConstraint": "Represent module namespace storage with the execution resolver and preserve live export bindings and lazy evaluation. require() inside the application uses its actual source runtime contract; do not turn an ESM/Bun require into eagerly initialized copies or a compiler fallback."
+    "nextModuleConstraint": "Keep namespace identity separate from the live export table. Reflection, erasure, indexed access, thenable assimilation and Bun lazy require remain explicit boundaries. The immediate observed red-dev syntax gap is satisfies, which must retain its operand runtime semantics and checked contextual typing."
   }
 }

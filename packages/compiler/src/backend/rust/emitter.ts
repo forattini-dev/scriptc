@@ -60,6 +60,7 @@ class RustEmitter {
   private readonly classes = new Map<string, IrClassDef>();
   private readonly classMeta = new Map<string, RustClassMeta>();
   private readonly globals = new Map<string, IrGlobal>();
+  private readonly tdzGlobals = new Set<string>();
   private readonly records = new Map<string, IrRecordShape>();
   private readonly unions = new Map<string, IrUnionDef>();
   private readonly closureShapes = new Map<string, RustClosureShape>();
@@ -215,7 +216,7 @@ class RustEmitter {
     emitExpr: (expr) => this.emitExpr(expr),
     emitExprWithValues: (expr, values) => this.expressionEmitter.emitExprWithValues(expr, values),
     emitStatement: (statement) => this.emitStatement(statement),
-    emitAssignment: (id, value, loc) => this.emitAssignment(id, value, loc),
+    emitAssignment: (id, value, loc, initializesGlobal) => this.emitAssignment(id, value, loc, initializesGlobal),
     emitAsyncValue: (expr, consume) => this.emitAsyncValue(expr, consume),
     emitAsyncContinuation: (dependencyExpr, consume, remaining, onComplete) =>
       this.asyncValueEmitter.emitAsyncContinuation(dependencyExpr, consume, remaining, onComplete),
@@ -377,6 +378,7 @@ class RustEmitter {
   private readonly valueEmitter = new RustValueEmitter({
     classes: this.classes,
     globals: this.globals,
+    tdzGlobals: this.tdzGlobals,
     records: this.records,
     unions: this.unions,
     currentFunction: () => this.currentFunction,
@@ -454,6 +456,7 @@ class RustEmitter {
     dynAdapterShapes: this.dynAdapterShapes,
     emitterSnapshotShapes: this.emitterSnapshotShapes,
     globals: this.globals,
+    tdzGlobals: this.tdzGlobals,
     internedClosureTargets: this.internedClosureTargets,
     promiseRejectorTypes: this.promiseRejectorTypes,
     promiseResolverTypes: this.promiseResolverTypes,
@@ -611,6 +614,7 @@ class RustEmitter {
       entryCommonJs: this.mod.entryCommonJs === true,
       hasErrorClasses: this.errorClassRoots().length !== 0,
       globals: [...this.globals.values()],
+      tdzGlobals: this.tdzGlobals,
       internedClosureNames: [...this.internedClosureTargets],
       usesDyn: this.usesDyn,
       usesDynamicInvoke: this.usesDynamicInvoke,
@@ -644,6 +648,7 @@ class RustEmitter {
       }
       if (value === null || typeof value !== "object") return;
       const node = value as Record<string, unknown>;
+      if (node.kind === "assign" && node.initializesGlobal === true && typeof node.localId === "string" && this.globals.has(node.localId)) this.tdzGlobals.add(node.localId);
       if (node.kind === "dynFrom" && node.fnLength !== undefined) this.usesDynamicInvoke = true;
       // Function types can live only in record fields or nested callback
       // signatures, with no concrete closure expression in the reachable
@@ -974,7 +979,7 @@ class RustEmitter {
       emitExpr: (expr) => this.emitExpr(expr),
       borrowBytesReceiver: (expr, later) => this.expressionEmitter.borrowBytesReceiver(expr, later),
       emitRead: (id, type, loc) => this.emitRead(id, type, loc),
-      emitAssignment: (id, value, loc) => this.emitAssignment(id, value, loc),
+      emitAssignment: (id, value, loc, initializesGlobal) => this.emitAssignment(id, value, loc, initializesGlobal),
       emitDynCheckValue: (type, value, loc) => this.emitDynCheckValue(type, value, loc),
       local: (id, loc) => this.local(id, loc),
       localIsBoxed: (local) => this.valueEmitter.localIsBoxed(local),
@@ -1058,7 +1063,7 @@ class RustEmitter {
     return integer === undefined ? this.valueEmitter.emitRead(id, type, loc) : `(${integer} as f64)`;
   }
 
-  private emitAssignment(id: string, value: string, loc: SrcLoc): void { this.valueEmitter.emitAssignment(id, value, loc); }
+  private emitAssignment(id: string, value: string, loc: SrcLoc, initializesGlobal = false): void { this.valueEmitter.emitAssignment(id, value, loc, initializesGlobal); }
 
   private assignmentExpr(id: string, value: string, loc: SrcLoc): string {
     return this.valueEmitter.assignmentExpr(id, value, loc);

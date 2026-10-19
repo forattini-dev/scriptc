@@ -31,6 +31,7 @@ mod helpers;
 pub mod inspect;
 mod json_modules;
 mod modules;
+mod namespace_values;
 mod parameters;
 mod pipeline;
 mod process;
@@ -154,6 +155,7 @@ struct Lowerer<'a> {
     data_bindings: HashSet<u32>,
     data_types: HashSet<TypeId>,
     commonjs: commonjs::Graph,
+    namespace_values: namespace_values::NamespaceValues,
 }
 
 impl<'a> Lowerer<'a> {
@@ -194,6 +196,7 @@ impl<'a> Lowerer<'a> {
             data_bindings: HashSet::new(),
             data_types: HashSet::new(),
             commonjs: commonjs::Graph::default(),
+            namespace_values: namespace_values::NamespaceValues::default(),
         }
     }
     fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
@@ -847,6 +850,12 @@ impl<'a> Lowerer<'a> {
         if let Some(value) = self.process_read(node)? {
             return Ok(value);
         }
+        if let Some(value) = self.namespace_reference(node)? {
+            return Ok(value);
+        }
+        if let Some(value) = self.namespace_property(node)? {
+            return Ok(value);
+        }
         if let Some(value) = self.json_value(node) {
             return self.json_expression(node, value);
         }
@@ -1113,6 +1122,9 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 if let Some(value) = self.regex_call(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.namespace_call(node)? {
                     return Ok(value);
                 }
                 if let Some(value) = self.class_call(node)? {

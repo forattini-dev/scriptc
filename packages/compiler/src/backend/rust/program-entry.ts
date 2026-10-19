@@ -7,6 +7,7 @@ export interface RustProgramEntryOptions {
   readonly entryCommonJs: boolean;
   readonly hasErrorClasses: boolean;
   readonly heapGlobalIds: readonly string[];
+  readonly tdzGlobals?: ReadonlySet<string>;
   readonly internedClosureNames: readonly string[];
   readonly usesDyn: boolean;
   readonly usesDynamicInvoke: boolean;
@@ -110,6 +111,7 @@ export function emitRustProgramEntry(options: RustProgramEntryOptions): string[]
   for (const id of options.heapGlobalIds) {
     lines.push(`    ${mangleGlobal(id)}.with(|slot| *slot.borrow_mut() = None);`);
   }
+  for (const id of options.tdzGlobals ?? []) lines.push(`    ${mangleGlobal(id)}_initialized.with(|slot| slot.set(false));`);
   for (const name of options.internedClosureNames) {
     lines.push(`    ${mangleFnClosure(name)}.with(|slot| *slot.borrow_mut() = None);`);
   }
