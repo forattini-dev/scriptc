@@ -155,7 +155,35 @@
         "Getter/setter reads and writes must evaluate the receiver once and invoke the correct accessor, including inheritance, super and exceptions.",
         "Keep definition-time effects distinct from construction-time field initializers and demanded method/accessor bodies; deferring a body does not authorize deleting an executable initializer."
       ],
-      "evidence": "The next original release boundary after module-level codec allocation is ToonlReader #source/#cursor/#state and get cursor in @reddb-io/toon/dist/toonl.js:573 onward; preserve private brands and accessor invocation rather than deleting the class declaration."
+      "evidence": "The next original release boundary after module-level codec allocation is ToonlReader #source/#cursor/#state and get cursor in @reddb-io/toon/dist/toonl.js:573 onward; preserve private brands and accessor invocation rather than deleting the class declaration.",
+      "nativeSetMilestone": {
+        "status": "partial",
+        "implementation": "Owned scalar, record, function, symbol and dynamic element layouts. Heterogeneous element unions use tagged native membership storage. Native and reference Rust comparisons preserve SameValueZero and normalized positive-zero storage. Existing Set IR and shared Rust runtime are retained.",
+        "fixtures": [
+          "rust-native-set-values/identity.ts",
+          "rust-native-set-values/callbacks.ts",
+          "rust-native-set-values/dynamic.ts",
+          "rust-native-set-values/seeds.ts",
+          "rust-native-set-values/order.ts",
+          "rust-native-set-values/untyped.js"
+        ],
+        "boundaries": [
+          "General iterable seeds, dynamic/function nonliteral seeds, unsupported typed element layouts and Set erasure.",
+          "Frontend values()/next()/spread iteration and live mutation during iteration remain separate contracts."
+        ],
+        "evidence": "Six new harmless programs match Node 24.15 through the Rust frontend and both Rust emitters. New reference API tests observe NaN collapse, stored positive zero and delete/reinsert order. The prior record-seed refusal is now a positive differential case; artifact-preserving iteration refusal remains tested. Original red-dev passes the registeredScopes Set and hook-warning Set initializers."
+      },
+      "nativeWeakMapMilestone": {
+        "status": "required",
+        "trigger": "red-dev node_modules/tuiuiu.js/dist/hooks/context.js:864..878 constructs appRuntimeScopes = new WeakMap(). Source uses get(appContext), set(ctx, resolvedScope) and delete(previous).",
+        "acceptanceAndRisks": [
+          "Retain per-instance identity and object-key identity through get/set/has/delete, aliases and declaration/runtime boundaries; preserve absent versus stored undefined and chaining.",
+          "Keys must not become ordinary strong roots. Values may refer back to keys through runtime scopes and hook state; account for ephemeron reachability rather than replacing WeakMap with Map or relying only on Rc weak keys while strongly rooting every value.",
+          "Integrate conditional edges and dead-entry cleanup with the native heap collector and prove owning cycles/finish cleanup. Run harmless object-key differential programs and deterministic collector-level tests.",
+          "Validate receiver/key failures and preserve source evaluation order. Other weak-key domains, constructor iterables, extracted methods, reflection and WeakSet need their own evidence or explicit refusal.",
+          "No empty-object placeholder, JS engine, source evaluator, compiler fallback or edits to original applications/dependencies."
+        ]
+      }
     },
     {
       "id": "iterator-protocol-and-generators",
@@ -404,16 +432,16 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "a7eb8bcb334456174d266be6b8b2c8de44d06e0b",
-    "after": "native AsyncLocalStorage constructor/run/getStore; native-reddb-async-context-v77 compile-only attempts",
+    "compilerSourceBaseCommit": "b75906133645c76079b694605a187dacb5bbbb1a",
+    "after": "native Set owning element identities and SameValueZero; native-reddb-set-values-v78 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "node_modules/tuiuiu.js/dist/core/runtime-scope.js:832..842 new Set() for registeredScopes. The AsyncLocalStorage module initializer has been passed.",
+    "red-dev": "node_modules/tuiuiu.js/dist/hooks/context.js:864..878 new WeakMap() for appRuntimeScopes. The runtime scope Set and hook warning Set initializers have been passed.",
     "completedOriginalApplicationBinaries": 0,
     "nextCoercionConstraint": "Keep the native undefined fact established by default lowering across body var redeclarations and captures; do not replace it with the checker declaration-file narrowing.",
     "nextModuleConstraint": "The github-token.ts uninitialized lexical declaration has been passed. Keep declaration-site initialization and module TDZ. Async suspension, direct Promise return adoption, Bun subprocess/Response streams, native namespace descriptors and async iteration remain outstanding.",
     "nextStorageConstraint": "Keep null/undefined JS lexical initialization separate from the permanent storage representation and from public typed call/return contracts. Preserve declaration-site initialization, captures and module TDZ.",
     "nextAsyncContextConstraint": "Keep the implemented run/getStore subset explicit; additional methods need their own context propagation and error contracts, especially disable across previously captured contexts.",
-    "nextCollectionConstraint": "Represent untyped Sets of owning record/function values with SameValueZero membership and traced cycles. Preserve insertion order, duplicate identity, delete/re-add and clear; test aliases, seed evaluation and existing scalar Sets. Iteration/values().next(), mutation during iteration and iterator closure are separate demanded contracts, not implied by accepting new Set()."
+    "nextCollectionConstraint": "Implement the demanded WeakMap object-key get/set/delete contract with conditional value reachability and dead-key cleanup, including value-to-key cycles through hook state. Native Set iteration/values().next() remains a separate outstanding contract."
   }
 }

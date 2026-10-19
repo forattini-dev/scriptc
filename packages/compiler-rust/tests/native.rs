@@ -177,6 +177,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-unit-caches/order.js",
         "rust-native-unit-caches/cycles.js",
         "rust-native-unit-caches/contracts.ts",
+        "rust-native-set-values/identity.ts",
+        "rust-native-set-values/callbacks.ts",
+        "rust-native-set-values/dynamic.ts",
+        "rust-native-set-values/seeds.ts",
+        "rust-native-set-values/order.ts",
+        "rust-native-set-values/untyped.js",
         "rust-native-async-context/scalars.ts",
         "rust-native-async-context/order.ts",
         "rust-native-async-context/exceptions.ts",
@@ -714,7 +720,7 @@ fn set_and_tuple_rest_boundaries_preserve_previous_native_artifacts() {
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "set-boundary");
     for source in [
-        "const set = new Set([{id: 1}]);",
+        "const set = new Set([{id: 1}]); set.values();",
         "const seed = new Set<string>(); const set = new Set(seed);",
         "const set = new Set<string>(); set.values();",
         "const set = new Set<string>(); const value: unknown = set;",
@@ -2659,6 +2665,51 @@ fn async_context_boundaries_preserve_existing_artifacts() {
             format!("import {{ AsyncLocalStorage }} from 'node:async_hooks'; {source}"),
         )
         .unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn owning_set_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "owning-set-boundary");
+    for source in [
+        "const set = new Set<unknown>(['a', ...['b']]);",
+        "const set = new Set<unknown>([,]);",
+        "const seed: unknown[] = ['a']; const set = new Set<unknown>(seed);",
+        "const seed = [() => 1]; const set = new Set(seed);",
+        "const set = new Set<boolean>();",
+        "const set = new Set<unknown>(); const value: unknown = set;",
+        "const set = new Set<unknown>(); const value: unknown = { set };",
+        "const set = new Set<unknown>(); set.values();",
+    ] {
+        fs::write(&input, source).unwrap();
         let artifacts = [
             &target,
             &target.with_extension("ir.json"),

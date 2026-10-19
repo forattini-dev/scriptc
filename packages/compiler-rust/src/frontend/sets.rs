@@ -24,7 +24,14 @@ impl Lowerer<'_> {
             return None;
         }
         let elem = self.type_id(args[0])?;
-        matches!(elem, Type::String | Type::F64).then_some(Type::Set {
+        // Portable Sets keep heterogeneous union values in the owning tagged
+        // slot. Membership consumes values; no unchecked element is projected.
+        let elem = if matches!(elem, Type::Union { .. }) {
+            Type::Dyn
+        } else {
+            elem
+        };
+        elem.set_element().then_some(Type::Set {
             elem: Box::new(elem),
         })
     }
@@ -63,11 +70,35 @@ impl Lowerer<'_> {
         {
             return Err(self.refuse(node, "Set accepts one native array seed"));
         }
+        if let Some(arg) = arguments.first()
+            && arg.kind() == SyntaxKind::ArrayLiteralExpression
+            && matches!(**elem, Type::Func { .. })
+        {
+            return self.set_literal_seed(node, *arg, ty.clone(), (**elem).clone());
+        }
         let seed = if let Some(arg) = arguments.first() {
             let value = if arg.kind() == SyntaxKind::ArrayLiteralExpression {
-                self.expected_expression(*arg, Type::Array { elem: elem.clone() })?
+                if **elem == Type::Dyn {
+                    let value = self.dynamic_literal(*arg)?;
+                    Expr::DynCheck {
+                        value: Box::new(value),
+                        r#type: Type::Array { elem: elem.clone() },
+                        loc: self.loc(*arg),
+                    }
+                } else {
+                    self.expected_expression(*arg, Type::Array { elem: elem.clone() })?
+                }
             } else {
-                self.expression(*arg)?
+                let value = self.expression(*arg)?;
+                if matches!(**elem, Type::Dyn | Type::Func { .. })
+                    && !matches!(value, Expr::UnitLit { .. })
+                {
+                    return Err(self.refuse(
+                        *arg,
+                        "dynamic/function Set seeds require a fixed array literal",
+                    ));
+                }
+                value
             };
             if matches!(value, Expr::UnitLit { .. }) {
                 None
@@ -84,6 +115,61 @@ impl Lowerer<'_> {
         };
         Ok(Expr::SetNew {
             seed,
+            r#type: ty,
+            loc: self.loc(node),
+        })
+    }
+
+    fn set_literal_seed(
+        &mut self,
+        node: Node,
+        seed: Node,
+        ty: Type,
+        elem: Type,
+    ) -> Result<Expr, String> {
+        let mut values = Vec::new();
+        for item in seed.elements() {
+            if matches!(
+                item.kind(),
+                SyntaxKind::SpreadElement | SyntaxKind::OmittedExpression
+            ) {
+                return Err(self.refuse(item, "Set literal seeds require fixed present elements"));
+            }
+            values.push(self.expected_expression(item, elem.clone())?);
+        }
+        // Snapshot all literal elements before insertion. The temporary source
+        // array has no observable identity; each stored value keeps its own.
+        let mut helper = helpers::Helper::new(
+            "set_literal",
+            vec![elem; values.len()],
+            ty.clone(),
+            self.loc(node),
+        );
+        let set = helper.local("set", ty.clone(), false);
+        helper.declare(
+            &set,
+            Expr::SetNew {
+                seed: None,
+                r#type: ty.clone(),
+                loc: self.loc(node),
+            },
+        );
+        for index in 0..values.len() {
+            helper.function.body.push(Stmt::Expression {
+                expr: Expr::SetIntrinsic {
+                    method: "add".into(),
+                    receiver: Box::new(helper.read(&set)),
+                    args: vec![helper.read(&helper.param(index))],
+                    r#type: Type::Void,
+                    loc: self.loc(node),
+                },
+                loc: self.loc(node),
+            });
+        }
+        let callee = self.install_helper(helper.finish(&set));
+        Ok(Expr::Call {
+            callee,
+            args: values,
             r#type: ty,
             loc: self.loc(node),
         })

@@ -1,3 +1,4 @@
+import { setElementEquality, setStoredElement } from "./set-elements.js";
 import type { IrFamily } from "../../ir/ir.js";
 import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import { typeKey } from "../../ir/ir.js";
@@ -332,11 +333,11 @@ export class RustContainerExpressionEmitter {
     const valueExpr = expr.args[0];
     if (valueExpr === undefined) this.context.unsupported(`set ${expr.method} without a value`, expr.loc);
     const value = this.context.nextTemporary();
-    const equality = this.context.mapKeyEquality("left", "right", type.elem, expr.loc);
+    const equality = setElementEquality(this.context, "left", "right", type.elem, expr.loc);
     const bindings = `${receiverBinding} let ${value} = ${this.context.emitExpr(valueExpr)};`;
     switch (expr.method) {
       case "add":
-        return `{ ${bindings} runtime::set_add_by(&${receiver}, ${this.context.mapStoredKey(value, type.elem)}, |left, right| ${equality}) }`;
+        return `{ ${bindings} runtime::set_add_by(&${receiver}, ${setStoredElement(this.context, value, type.elem)}, |left, right| ${equality}) }`;
       case "has":
         return `{ ${bindings} runtime::set_has_by(&${receiver}, &${value}, |left, right| ${equality}) }`;
       case "delete":

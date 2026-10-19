@@ -104,6 +104,18 @@ pub enum Type {
 }
 
 impl Type {
+    /// Element layouts with an owned SameValueZero identity contract.
+    pub fn set_element(&self) -> bool {
+        matches!(
+            self,
+            Self::String
+                | Self::F64
+                | Self::Symbol
+                | Self::Dyn
+                | Self::Record { .. }
+                | Self::Func { .. }
+        )
+    }
     pub fn bytes() -> Self {
         Self::Bytes { elem: "u8".into() }
     }
@@ -982,7 +994,7 @@ impl Module {
             }
             Type::Bytes { elem } => elem == "u8",
             Type::Promise { inner } => *inner == Type::Void || self.valid_type(*inner, active),
-            Type::Set { elem } => matches!(*elem, Type::String | Type::F64),
+            Type::Set { elem } => elem.set_element() && self.valid_type(*elem, active),
             Type::Map { key, value } => {
                 matches!(*key, Type::F64 | Type::String | Type::Dyn)
                     && !matches!(*value, Type::Func { .. } | Type::Map { .. })
@@ -1872,7 +1884,7 @@ fn validate_function(
                 let Type::Set { elem } = r#type else {
                     return Err("non-Set construction".into());
                 };
-                if !matches!(**elem, Type::String | Type::F64) {
+                if !elem.set_element() || !module.valid_type(r#type.clone(), &mut vec![]) {
                     return Err("invalid Set element type".into());
                 }
                 if let Some(seed) = seed {
@@ -4798,6 +4810,71 @@ mod tests {
             validate(&module).unwrap_err(),
             "invalid native environment read"
         );
+    }
+
+    #[test]
+    fn owning_set_elements_validate_their_layouts_and_keep_erasure_fenced() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        module.records.push(Record {
+            id: 0,
+            fields: vec![],
+            declared_order: vec![],
+            tuple: false,
+            index_value: None,
+        });
+        let loc = module.functions[0].loc.clone();
+        for (elem, accepted) in [
+            (Type::Dyn, true),
+            (Type::Symbol, true),
+            (Type::Record { shape_id: 0 }, true),
+            (
+                Type::Func {
+                    params: vec![],
+                    ret: Box::new(Type::F64),
+                    rest: false,
+                },
+                true,
+            ),
+            (Type::Record { shape_id: 9 }, false),
+            (
+                Type::Func {
+                    params: vec![Type::Void],
+                    ret: Box::new(Type::F64),
+                    rest: false,
+                },
+                false,
+            ),
+            (Type::Bool, false),
+            (Type::Undefined, false),
+            (Type::Caught, false),
+        ] {
+            let ty = Type::Set {
+                elem: Box::new(elem),
+            };
+            assert_eq!(module.valid_type(ty.clone(), &mut vec![]), accepted);
+            let value = || Expr::SetNew {
+                seed: None,
+                r#type: ty.clone(),
+                loc: loc.clone(),
+            };
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: value(),
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), accepted);
+            if accepted {
+                module.functions[0].body = vec![Stmt::Expression {
+                    expr: Expr::DynFrom {
+                        value: Box::new(value()),
+                        r#type: Type::Dyn,
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                }];
+                assert!(validate(&module).is_err());
+            }
+        }
     }
 
     #[test]

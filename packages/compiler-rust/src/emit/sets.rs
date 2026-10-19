@@ -5,6 +5,12 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
     let equality = |elem: &Type| {
         if *elem == Type::F64 {
             "a == b || (a.is_nan() && b.is_nan())"
+        } else if *elem == Type::Dyn {
+            "native_value_same_key(a, b)"
+        } else if *elem == Type::Symbol {
+            "runtime::symbol_ptr_eq(a, b)"
+        } else if matches!(elem, Type::Record { .. } | Type::Func { .. }) {
+            "a.ptr_eq(b)"
         } else {
             "a == b"
         }
@@ -12,6 +18,8 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
     let normalize = |elem: &Type, value: &str| {
         if *elem == Type::F64 {
             format!("if {value} == 0.0 {{ 0.0 }} else {{ {value} }}")
+        } else if *elem == Type::Dyn {
+            format!("native_map_key({value})")
         } else {
             value.into()
         }

@@ -1,3 +1,4 @@
+import { setElementEquality, setStoredElement } from "./set-elements.js";
 import { emitRecordView } from "./record-views.js";
 import { borrowedRustBytesLocal } from "./bytes-borrow.js";
 import { emitRustDynamicKeyRead } from "./dynamic-key-read.js";
@@ -595,11 +596,11 @@ export class RustExpressionEmitter {
         return this.context.emitMapIntrinsic(expr);
       case "setNew": {
         if (expr.type.kind !== "set") this.context.unsupported("setNew with a non-set type", expr.loc);
-        const equality = this.context.mapKeyEquality("left", "right", expr.type.elem, expr.loc);
+        const equality = setElementEquality(this.context, "left", "right", expr.type.elem, expr.loc);
         if (expr.seed === undefined) return `runtime::set_new::<${this.context.rustType(expr.type.elem, expr.loc)}>()`;
         const seed = this.context.nextName("sc_rt");
         const value = "value";
-        const normalized = this.context.mapStoredKey(value, expr.type.elem);
+        const normalized = setStoredElement(this.context, value, expr.type.elem);
         return `{ let ${seed} = ${this.emitExpr(expr.seed)}; runtime::set_from_array_by(&${seed}, |${value}| ${normalized}, |left, right| ${equality}) }`;
       }
       case "setIntrinsic":
