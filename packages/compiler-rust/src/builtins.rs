@@ -29,6 +29,14 @@ fn calls() -> &'static [Builtin] {
     CALLS.get_or_init(|| {
         vec![
             call!(
+                "url",
+                "fileURLToPath",
+                "url.fileURLToPathStr",
+                [String],
+                String,
+                "url_string_to_path"
+            ),
+            call!(
                 "path",
                 "join",
                 "path.join",

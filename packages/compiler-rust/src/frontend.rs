@@ -31,6 +31,7 @@ mod functions;
 mod helpers;
 pub mod inspect;
 mod json_modules;
+mod module_metadata;
 mod modules;
 mod namespace_values;
 mod parameters;
@@ -991,6 +992,9 @@ impl<'a> Lowerer<'a> {
                 self.expression(node.name())
             }
             SyntaxKind::PropertyAccessExpression => {
+                if let Some(value) = self.module_metadata(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.console_value(node)? {
                     return Ok(value);
                 }

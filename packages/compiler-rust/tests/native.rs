@@ -91,6 +91,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-file-urls/paths.ts",
+        "rust-native-file-urls/errors.ts",
+        "rust-native-file-urls/metadata.ts",
+        "rust-native-file-urls/modules.ts",
+        "rust-native-file-urls/order.ts",
+        "rust-native-file-urls/untyped.js",
         "rust-native-frontend/main.ts",
         "rust-native-frontend/numbers.ts",
         "rust-native-frontend/plain.js",
@@ -2790,4 +2796,91 @@ fn weak_map_boundaries_preserve_existing_artifacts() {
             assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn file_url_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "metadata-boundary");
+    for source in [
+        "console.log(import.meta);",
+        "console.log(import.meta.resolve('./x'));",
+        "console.log(import.meta['url']);",
+        "import.meta.url = 'file:///replacement';",
+        "const { url } = import.meta; console.log(url);",
+        "import { fileURLToPath } from 'node:url'; fileURLToPath('file:///C:/x', { windows: true });",
+        "import { fileURLToPath } from 'node:url'; fileURLToPath(new URL('file:///x'));",
+    ] {
+        fs::write(&input, source).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ];
+        for path in artifacts {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in artifacts {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn module_metadata_keeps_source_paths_after_changing_working_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("source # % café.mts");
+    fs::write(&input, "import { fileURLToPath } from 'node:url'; console.log(import.meta.url); console.log(import.meta.filename); console.log(import.meta.dirname); console.log(fileURLToPath(import.meta.url));").unwrap();
+    let target = binary(temp.path(), "different-output-name");
+    success(
+        &Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap(),
+    );
+    let cwd = temp.path().join("different cwd");
+    fs::create_dir(&cwd).unwrap();
+    let expected = Command::new(oracle())
+        .arg(&input)
+        .current_dir(&cwd)
+        .output()
+        .unwrap();
+    let actual = Command::new(&target)
+        .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+        .current_dir(&cwd)
+        .output()
+        .unwrap();
+    success(&expected);
+    success(&actual);
+    assert_eq!(
+        (actual.status.code(), actual.stdout, actual.stderr),
+        (expected.status.code(), expected.stdout, expected.stderr)
+    );
+}
+
+fn metadata_project(directory: &Path) {
+    fs::write(directory.join("tsconfig.json"), serde_json::to_vec(&serde_json::json!({
+        "compilerOptions": { "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext", "lib": ["ES2022"], "types": ["node"], "typeRoots": [root().join("node_modules/@types")], "skipLibCheck": true, "strict": true }
+    })).unwrap()).unwrap();
 }

@@ -155,7 +155,7 @@
         "Getter/setter reads and writes must evaluate the receiver once and invoke the correct accessor, including inheritance, super and exceptions.",
         "Keep definition-time effects distinct from construction-time field initializers and demanded method/accessor bodies; deferring a body does not authorize deleting an executable initializer."
       ],
-      "evidence": "The next original release boundary after module-level codec allocation is ToonlReader #source/#cursor/#state and get cursor in @reddb-io/toon/dist/toonl.js:573 onward; preserve private brands and accessor invocation rather than deleting the class declaration.",
+      "evidence": "The original release boundary after module-level codec allocation is ToonlReader #source/#cursor/#state and get cursor in @reddb-io/toon/dist/toonl.js:573 onward; preserve private brands and accessor invocation rather than deleting the class declaration. After file-backed metadata support, red-dev reaches Signal.get value/set value in tuiuiu.js/dist/primitives/signal.js. Reads may track the active Effect; writes compare with Object.is before notifying subscribers. Both need the same owned class/accessor model, with explicit boundaries for unported dependent calls.",
       "nativeSetMilestone": {
         "status": "partial",
         "implementation": "Owned scalar, record, function, symbol and dynamic element layouts. Heterogeneous element unions use tagged native membership storage. Native and reference Rust comparisons preserve SameValueZero and normalized positive-zero storage. Existing Set IR and shared Rust runtime are retained.",
@@ -298,6 +298,13 @@
         "Match argv/env/platform/cwd/exitCode/stdout/stderr and entry guards; do not skip dependency initialization.",
         "No runtime source evaluation, TS/Go fallback or replacement application entry."
       ],
+      "fileModuleMetadataMilestone": {
+        "status": "partial",
+        "implementation": "Direct file-backed import.meta.url/filename/dirname reads lower to owned strings from the canonical defining source module, including imported functions and captures. Default-platform one-string fileURLToPath calls reuse url.fileURLToPathStr in IR v13 and the shared Rust runtime. Strict decoding preserves URI errors, error codes, separator precedence, Windows encoded drive letters and Unicode UNC hosts.",
+        "fixtures": ["rust-native-file-urls/paths.ts", "rust-native-file-urls/errors.ts", "rust-native-file-urls/metadata.ts", "rust-native-file-urls/modules.ts", "rust-native-file-urls/order.ts", "rust-native-file-urls/untyped.js"],
+        "boundaries": ["Whole/escaped metadata objects, indexed/destructured reads, mutation and import.meta.resolve/main remain refused.", "URL-object input and explicit fileURLToPath options remain frontend boundaries; runtime string decoding support does not imply those overloads."],
+        "evidence": "Native and reference Rust differential programs compare canonical module provenance, imported calls, parameter ABI, captures, Unicode/percent paths, validation order and failures against Node 24.15. A native integration compares an unusual source filename from a different working directory. Original red-dev passes dev-warnings.js module path initialization and next refuses the Signal value getter."
+      },
       "namespaceMilestone": {
         "trigger": "red-dev manifest.ts:1512 stores typeof import(\"./machine-profile.ts\") | null; the next function uses lazy require with ??=.",
         "investigation": "A harmless two-export namespace stored through an alias reproduces an unlowered namespace value independently of the application. The real red-dev package has type:module and dev/build scripts using Bun. Import namespace identity and source-runtime require semantics need separate contracts.",
@@ -447,14 +454,15 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "bb85ddd31b287ac838bc7d53d0a1fb8ea997a261",
-    "after": "native record-key WeakMap operations and ephemeron collection; native-reddb-weak-maps-v79 compile-only attempts",
+    "compilerSourceBaseCommit": "9f6949b226fe84d4c8d0985c97cc69944b47a891",
+    "after": "native file-backed module metadata and string fileURLToPath; native-reddb-file-urls-v80 compile-only attempts",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
     "redskilled": "@reddb-io/toon/dist/toonl.js:574 ToonlReader private fields; cursor accessor and computed async generator also remain in the class",
-    "red-dev": "node_modules/tuiuiu.js/dist/core/dev-warnings.js:283..313 url.fileURLToPath(import.meta.url), nested in path.normalize during module initialization. The runtime scope Set, hook warning Set and WeakMap initializers have been passed.",
+    "red-dev": "node_modules/tuiuiu.js/dist/primitives/signal.js:712..910 Signal value getter. Getter dependency tracking and setter notification must preserve receiver identity and side effects; dev-warnings.js fileURLToPath/import.meta module initialization has been passed.",
     "completedOriginalApplicationBinaries": 0,
+    "nextClassConstraint": "Prioritize a shared private-slot and public-accessor model for ToonlReader and Signal. Keep declaration-owned private brands, receiver identity, inherited accessors, argument/RHS order, getter tracking and setter notifications. Object.is, Set iteration and the parser's computed async generator remain separate demanded dependencies; passing class registration alone does not establish application behavior.",
     "nextCoercionConstraint": "Keep the native undefined fact established by default lowering across body var redeclarations and captures; do not replace it with the checker declaration-file narrowing.",
-    "nextModuleConstraint": "The github-token.ts uninitialized lexical declaration has been passed. Keep declaration-site initialization and module TDZ. Port fileURLToPath together with source-module import.meta.url provenance, URL decoding/error behavior and platform path semantics; do not substitute the compiled executable path. Async suspension, direct Promise return adoption, Bun subprocess/Response streams, native namespace descriptors and async iteration remain outstanding.",
+    "nextModuleConstraint": "Keep canonical defining-module provenance for file-backed metadata and retain declaration-site initialization/module TDZ. Metadata reflection/mutation, import.meta.main/resolve, additional URL overloads, async suspension, direct Promise return adoption, Bun subprocess/Response streams, native namespace descriptors and async iteration remain outstanding.",
     "nextStorageConstraint": "Keep null/undefined JS lexical initialization separate from the permanent storage representation and from public typed call/return contracts. Preserve declaration-site initialization, captures and module TDZ.",
     "nextAsyncContextConstraint": "Keep the implemented run/getStore subset explicit; additional methods need their own context propagation and error contracts, especially disable across previously captured contexts.",
     "nextCollectionConstraint": "Keep conditional WeakMap reachability and dead-entry cleanup for record keys, including value-to-key and value-to-owner cycles. Other weak-key domains and iterable constructors remain explicit boundaries. Native Set iteration/values().next() is a separate outstanding contract."

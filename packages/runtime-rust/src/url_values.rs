@@ -2,7 +2,7 @@
 use crate::path_resolve;
 use crate::{
     JsArray, JsString, array_get, array_len, array_new, empty_string, string,
-    string_to_well_formed, throw_type_error, throw_type_error_code,
+    string_to_well_formed, throw_type_error, throw_type_error_code, throw_uri_error,
 };
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -17,6 +17,10 @@ pub struct UrlData {
 }
 
 pub type JsUrl = Rc<UrlData>;
+
+#[cfg(test)]
+#[path = "file_url.test.rs"]
+mod file_url_tests;
 
 fn url_from_parsed(value: url::Url) -> JsUrl {
     Rc::new(UrlData {
@@ -146,7 +150,6 @@ pub fn url_set_pathname(value: &JsUrl, pathname: &JsString) {
     value.value.borrow_mut().set_path(pathname);
 }
 
-#[cfg(not(windows))]
 fn percent_hex(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
@@ -156,11 +159,47 @@ fn percent_hex(byte: u8) -> Option<u8> {
     }
 }
 
+fn decode_file_path(encoded: &[u8], windows: bool) -> String {
+    if encoded.windows(3).any(|part| {
+        part[0] == b'%'
+            && (part[1] == b'2' && part[2].eq_ignore_ascii_case(&b'f')
+                || windows && part[1] == b'5' && part[2].eq_ignore_ascii_case(&b'c'))
+    }) {
+        let message = if windows {
+            "File URL path must not include encoded \\ or / characters"
+        } else {
+            "File URL path must not include encoded / characters"
+        };
+        throw_type_error_code(message.into(), "ERR_INVALID_FILE_URL_PATH");
+    }
+    let mut decoded = Vec::with_capacity(encoded.len());
+    let mut index = 0;
+    while index < encoded.len() {
+        if encoded[index] == b'%' {
+            let byte = encoded
+                .get(index + 1)
+                .and_then(|high| percent_hex(*high))
+                .zip(encoded.get(index + 2).and_then(|low| percent_hex(*low)))
+                .map(|(high, low)| high << 4 | low)
+                .unwrap_or_else(|| throw_uri_error("URI malformed".into()));
+            decoded.push(byte);
+            index += 3;
+        } else {
+            decoded.push(encoded[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).unwrap_or_else(|_| throw_uri_error("URI malformed".into()))
+}
+
 #[cfg(not(windows))]
 fn file_url_path(value: &JsUrl) -> JsString {
     let parsed = value.value.borrow();
     if parsed.scheme() != "file" {
-        throw_type_error("The URL must be of scheme file".to_owned());
+        throw_type_error_code(
+            "The URL must be of scheme file".to_owned(),
+            "ERR_INVALID_URL_SCHEME",
+        );
     }
     if let Some(host) = parsed.host_str().filter(|host| !host.is_empty()) {
         let _ = host;
@@ -171,55 +210,41 @@ fn file_url_path(value: &JsUrl) -> JsString {
         } else {
             "posix"
         };
-        throw_type_error(format!(
-            "File URL host must be \"localhost\" or empty on {platform}"
-        ));
+        throw_type_error_code(
+            format!("File URL host must be \"localhost\" or empty on {platform}"),
+            "ERR_INVALID_FILE_URL_HOST",
+        );
     }
     let encoded = parsed.path().as_bytes();
-    let mut decoded = Vec::with_capacity(encoded.len());
-    let mut index = 0;
-    while index < encoded.len() {
-        if encoded[index] == b'%'
-            && index + 2 < encoded.len()
-            && let (Some(high), Some(low)) = (
-                percent_hex(encoded[index + 1]),
-                percent_hex(encoded[index + 2]),
-            )
-        {
-            let byte = high << 4 | low;
-            if byte == b'/' {
-                throw_type_error("File URL path must not include encoded / characters".to_owned());
-            }
-            decoded.push(byte);
-            index += 3;
-            continue;
-        }
-        decoded.push(encoded[index]);
-        index += 1;
-    }
-    JsString::from(String::from_utf8_lossy(&decoded).into_owned())
+    JsString::from(decode_file_path(encoded, false))
 }
 
 #[cfg(windows)]
 fn file_url_path(value: &JsUrl) -> JsString {
     let parsed = value.value.borrow();
     if parsed.scheme() != "file" {
-        throw_type_error("The URL must be of scheme file".to_owned());
+        throw_type_error_code(
+            "The URL must be of scheme file".to_owned(),
+            "ERR_INVALID_URL_SCHEME",
+        );
     }
     let encoded = parsed.path().as_bytes();
-    if encoded.windows(3).any(|window| {
-        window[0] == b'%'
-            && ((window[1] == b'2' && window[2].eq_ignore_ascii_case(&b'f'))
-                || (window[1] == b'5' && window[2].eq_ignore_ascii_case(&b'c')))
-    }) {
-        throw_type_error("File URL path must not include encoded \\ or / characters".to_owned());
+    let path = decode_file_path(encoded, true).replace('/', "\\");
+    if let Some(host) = parsed.host_str().filter(|host| !host.is_empty()) {
+        return JsString::from(format!(r"\\{}{path}", url::quirks::domain_to_unicode(host)));
     }
-    parsed
-        .to_file_path()
-        .ok()
-        .and_then(|path| path.into_os_string().into_string().ok())
-        .map(|path| JsString::from(path.as_str()))
-        .unwrap_or_else(|| throw_type_error("File URL path must be absolute".to_owned()))
+    let bytes = path.as_bytes();
+    if !(bytes.len() >= 3
+        && bytes[0] == b'\\'
+        && bytes[1].is_ascii_alphabetic()
+        && bytes[2] == b':')
+    {
+        throw_type_error_code(
+            "File URL path must be absolute".into(),
+            "ERR_INVALID_FILE_URL_PATH",
+        );
+    }
+    JsString::from(&path[1..])
 }
 
 pub fn url_file_url_to_path(value: &JsUrl) -> JsString {
@@ -227,7 +252,9 @@ pub fn url_file_url_to_path(value: &JsUrl) -> JsString {
 }
 
 pub fn url_string_to_path(value: &JsString) -> JsString {
-    file_url_path(&url_new(value))
+    let parsed = url::Url::parse(value)
+        .unwrap_or_else(|_| throw_type_error_code("Invalid URL".into(), "ERR_INVALID_URL"));
+    file_url_path(&url_from_parsed(parsed))
 }
 
 #[cfg(not(windows))]
