@@ -91,6 +91,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-accessors/main.ts",
+        "rust-native-accessors/inheritance.ts",
+        "rust-native-accessors/order.ts",
+        "rust-native-accessors/contracts.ts",
+        "rust-native-accessors/untyped.js",
+        "rust-native-accessors/identity.ts",
         "rust-native-file-urls/paths.ts",
         "rust-native-file-urls/errors.ts",
         "rust-native-file-urls/metadata.ts",
@@ -1008,7 +1014,7 @@ fn error_definitions_defer_instance_code_and_refuse_unported_effects() {
         ),
         (
             "accessor",
-            "class Fault extends Error { get field(): number { return 1; } }",
+            "class Fault extends Error { get #field(): number { return 1; } }",
         ),
         ("generic", "class Fault<T> extends Error {}"),
         ("cause", "new Error('message', { cause: 1 });"),
@@ -1964,7 +1970,7 @@ fn exception_boundaries_preserve_previous_artifacts() {
         "try { throw {}; } catch ({ message }) { console.log(message); }",
         "try { throw 1; } catch (error) { error = 2; console.log(error); }",
         "try { throw 1; } catch (error) { const replace = () => { error = 2; }; replace(); }",
-        "class Ordinary { get value() { return 1; } } try { throw new Ordinary(); } catch {}",
+        "class Ordinary { get #value() { return 1; } } try { throw new Ordinary(); } catch {}",
     ] {
         fs::write(&input, source).unwrap();
         for artifact in [
@@ -2006,7 +2012,7 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
     for source in [
         "class Box { static value = console.log('effect'); } new Box();",
         "class Box { method() { return 1; } } const unbound = new Box().method; unbound();",
-        "class Box { get value() { return 1; } } new Box();",
+        "class Box { get #value() { return 1; } } new Box();",
         "class Box { ['value'] = 1; } new Box();",
         "class Box { #value = 1; } new Box();",
         "class Box { constructor(public value: number) {} } new Box(1);",
@@ -2045,6 +2051,102 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn accessor_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "accessor-boundary");
+    for source in [
+        "class Box { get value() { return 1; } } new Box().value = 2;",
+        "class Box { set value(value: number) {} } console.log(new Box().value);",
+        "class Box { get value() { return 1; } set value(value: number) {} } new Box().value += 2;",
+        "class Box { get value() { return 1; } set value(value: number) {} } console.log(new Box().value++);",
+        "class Box { get value() { return 1; } } console.log(new Box()['value']);",
+        "class Box { static get value() { return 1; } } console.log(Box.value);",
+        "class Box { get ['value']() { return 1; } } new Box();",
+        "class Box { get #value() { return 1; } } new Box();",
+        "class Base { get value(): number { return 1; } set value(n: number) {} } class Child extends Base { get value(): number { return 2; } } const box: Base = new Child(); box.value = 3;",
+        "class Base { get value(): number { return 1; } set value(n: number) {} } class Child extends Base { set value(n: number) {} } const box: Base = new Child(); console.log(box.value);",
+        "class Base { get value(): number { return 1; } } class Child extends Base { get value(): any { return 'different'; } } const box: Base = new Child(); console.log(box.value);",
+        "class Base { stored = 1; } class Child extends Base { get value(): number { return super.stored; } } console.log(new Child().value);",
+        "// @ts-nocheck\nclass Base { get value() { return 1; } } class Child extends Base { value = 2; } new Child();",
+        "// @ts-nocheck\nclass Base { value = 1; } class Child extends Base { get value() { return 2; } } new Child();",
+        "// @ts-nocheck\nclass Base { get value() { return 1; } } class Child extends Base { value() { return 2; } } new Child();",
+        "// @ts-nocheck\nclass Base { value() { return 1; } } class Child extends Base { get value() { return 2; } } new Child();",
+    ] {
+        // Exercise our native boundary even where TypeScript also rejects it.
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!result.status.success(), "{source}");
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(stderr.contains("SCN1001"), "{source}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{source}: {stderr}");
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn accessors_keep_descriptor_surface_and_demand_only_used_bodies() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let output = temp.path().join("main.json");
+    fs::write(&input, "class Box { stored = 1; get value(): number { return this.stored; } set value(n: number) { this.stored = n; } get unused(): number { while (true) {} } } const box = new Box(); box.value = 2; console.log(box.value);").unwrap();
+    success(
+        &Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--emit", "ir", "--out"])
+            .arg(&output)
+            .output()
+            .unwrap(),
+    );
+    let ir: serde_json::Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(ir["irVersion"], 13);
+    let classes = ir["classes"].as_array().unwrap();
+    assert_eq!(classes.len(), 1);
+    assert_eq!(
+        classes[0]["methodNames"],
+        serde_json::json!(["value", "unused"])
+    );
+    assert!(classes[0].get("methods").is_none());
+    let fields = classes[0]["fields"].as_array().unwrap();
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0]["name"], "stored");
+    let functions = ir["functions"].as_array().unwrap();
+    for suffix in [".get:value", ".set:value"] {
+        let function = functions
+            .iter()
+            .find(|f| f["name"].as_str().unwrap().ends_with(suffix))
+            .unwrap();
+        assert_eq!(function["params"][0]["name"], "this");
+        assert_eq!(function["params"][0]["type"]["kind"], "object");
+    }
+    assert!(
+        !functions
+            .iter()
+            .any(|f| f["name"].as_str().unwrap().ends_with(":unused"))
+    );
 }
 
 #[test]

@@ -210,9 +210,9 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
                             methods.push((name, signature));
                             continue;
                         }
-                        if info.flags.intersects(SymbolFlags::ACCESSOR) {
-                            continue;
-                        }
+                        // Public accessors carry a property contract too. The
+                        // execution graph decides whether it is storage or a
+                        // receiver-explicit getter/setter call.
                         let id = lowerer.checker.get_type_of_symbol(property);
                         fields.push((
                             name,

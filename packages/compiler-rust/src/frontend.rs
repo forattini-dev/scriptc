@@ -502,7 +502,11 @@ impl<'a> Lowerer<'a> {
                 || self.file.ends_with(".mjs")
                 || self.file.ends_with(".cjs"))
             && params.iter().any(|p| p.r#type == Type::Dyn);
-        let method_void = if node.kind() == SyntaxKind::MethodDeclaration && declared.is_none() {
+        let method_void = if matches!(
+            node.kind(),
+            SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor | SyntaxKind::SetAccessor
+        ) && declared.is_none()
+        {
             let signature = self.checker.get_signature_from_declaration(node);
             let result = self.checker.get_return_type_of_signature(signature);
             self.checker
@@ -575,7 +579,10 @@ impl<'a> Lowerer<'a> {
         self.return_type = Some(body_return.clone());
         self.instance_this = None;
         let mut body = Vec::new();
-        let method = signature.node.kind() == SyntaxKind::MethodDeclaration;
+        let method = matches!(
+            signature.node.kind(),
+            SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor | SyntaxKind::SetAccessor
+        );
         if method {
             self.bind_parameter(None, &signature.params[0])?;
             self.instance_this = Some(self.locals[0].clone());
@@ -1121,6 +1128,12 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::BinaryExpression => {
+                if node.operator_token().kind() == SyntaxKind::EqualsToken
+                    && node.left().kind() == SyntaxKind::PropertyAccessExpression
+                    && let Some(value) = self.class_accessor_assignment(node)?
+                {
+                    return Ok(value);
+                }
                 if node.operator_token().kind() == SyntaxKind::InstanceOfKeyword {
                     return self.class_instanceof(node);
                 }

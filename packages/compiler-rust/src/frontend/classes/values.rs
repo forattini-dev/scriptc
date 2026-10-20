@@ -303,7 +303,10 @@ impl Lowerer<'_> {
 
     pub(in crate::frontend) fn class_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
         // Probe the type without lowering the receiver twice (calls can enqueue helpers).
-        let ty = if node.expression().kind() == SyntaxKind::ThisKeyword {
+        let ty = if matches!(
+            node.expression().kind(),
+            SyntaxKind::ThisKeyword | SyntaxKind::SuperKeyword
+        ) {
             self.instance_this.as_ref().map(|l| l.r#type.clone())
         } else {
             self.ty(node.expression()).ok()
@@ -311,7 +314,11 @@ impl Lowerer<'_> {
         if !matches!(ty, Some(Type::Object { .. })) {
             return Ok(None);
         }
-        let obj = self.expression(node.expression())?;
+        let obj = if node.expression().kind() == SyntaxKind::SuperKeyword {
+            self.this_expression(node.expression())?
+        } else {
+            self.expression(node.expression())?
+        };
         let Type::Object { class_name } = obj.ty() else {
             return Err(self.refuse(node, "class receiver has no object representation"));
         };
@@ -326,6 +333,29 @@ impl Lowerer<'_> {
             return Err(self.refuse(
                 node,
                 "AsyncLocalStorage property reads and extracted methods are not ported",
+            ));
+        }
+        let index = self
+            .classes
+            .definitions
+            .iter()
+            .position(|d| d.name == class_name)
+            .ok_or_else(|| self.refuse(node, "class property has no source descriptor"))?;
+        let lookup = if node.expression().kind() == SyntaxKind::SuperKeyword {
+            self.classes.definitions[index].base.ok_or_else(|| {
+                self.refuse(node, "super property requires a derived instance body")
+            })?
+        } else {
+            index
+        };
+        if self.classes.accessor(lookup, &field).is_some() {
+            let value = self.accessor_call(node, obj, &field, None)?.unwrap();
+            return Ok(Some(self.narrowed(value, node)?));
+        }
+        if node.expression().kind() == SyntaxKind::SuperKeyword {
+            return Err(self.refuse(
+                node,
+                "super data-property reads require prototype descriptors",
             ));
         }
         let ty = self
@@ -361,6 +391,12 @@ impl Lowerer<'_> {
     }
 
     pub(in crate::frontend) fn class_set(&mut self, node: Node) -> Result<Option<Stmt>, String> {
+        if let Some(expr) = self.class_accessor_assignment(node)? {
+            return Ok(Some(Stmt::Expression {
+                expr,
+                loc: self.loc(node),
+            }));
+        }
         let member = node.left();
         let ty = if member.expression().kind() == SyntaxKind::ThisKeyword {
             self.instance_this.as_ref().map(|l| l.r#type.clone())

@@ -220,7 +220,7 @@ pub struct Class {
     pub fields: Vec<Field>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub methods: Vec<String>,
-    /// Full own surface, including bodies not demanded by the source call graph.
+    /// Full own non-data surface (methods/accessors), including undemanded bodies.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub method_names: Vec<String>,
     pub loc: Loc,

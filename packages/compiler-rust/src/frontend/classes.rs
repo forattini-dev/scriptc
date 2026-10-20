@@ -23,6 +23,7 @@ pub(super) struct ClassGraph {
     pending: VecDeque<usize>,
     layout_active: HashSet<usize>,
     methods: HashMap<(usize, String), Signature>,
+    accessors: HashMap<(usize, String, bool), Signature>,
     method_queue: VecDeque<Signature>,
 }
 
@@ -411,7 +412,10 @@ impl Lowerer<'_> {
                 || (member.kind() != SyntaxKind::Constructor
                     && (!matches!(
                         member.kind(),
-                        SyntaxKind::PropertyDeclaration | SyntaxKind::MethodDeclaration
+                        SyntaxKind::PropertyDeclaration
+                            | SyntaxKind::MethodDeclaration
+                            | SyntaxKind::GetAccessor
+                            | SyntaxKind::SetAccessor
                     ) || !matches!(
                         member.name().kind(),
                         SyntaxKind::Identifier | SyntaxKind::StringLiteral
@@ -419,16 +423,17 @@ impl Lowerer<'_> {
             {
                 return Err(self.refuse(
                     member,
-                    "class accessors, static/computed/private members and decorators are not ported",
+                    "class static/computed/private members and decorators are not ported",
                 ));
             }
         }
         self.classes.definitions[index].base = base;
-        for member in node
-            .members()
-            .into_iter()
-            .filter(|m| m.kind() == SyntaxKind::MethodDeclaration)
-        {
+        for member in node.members().into_iter().filter(|m| {
+            matches!(
+                m.kind(),
+                SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor | SyntaxKind::SetAccessor
+            )
+        }) {
             let name = member.name().text();
             if name.starts_with('%')
                 || name.contains(':')
@@ -440,6 +445,53 @@ impl Lowerer<'_> {
                     member,
                     "reserved methods and Error coercion overrides are not ported",
                 ));
+            }
+        }
+        // The initial descriptor model separates prototype accessors from data
+        // slots and methods. Do not silently merge incompatible declarations.
+        for member in node.members().into_iter().filter(|m| {
+            matches!(
+                m.kind(),
+                SyntaxKind::MethodDeclaration | SyntaxKind::PropertyDeclaration
+            )
+        }) {
+            if let Some(base) = base
+                && self.classes.accessor(base, member.name().text()).is_some()
+            {
+                return Err(self.refuse(
+                    member,
+                    "accessor/data or accessor/method shadowing is not ported",
+                ));
+            }
+        }
+        for member in node
+            .members()
+            .into_iter()
+            .filter(|m| matches!(m.kind(), SyntaxKind::GetAccessor | SyntaxKind::SetAccessor))
+        {
+            let name = member.name().text();
+            let mut owner = Some(index);
+            while let Some(current) = owner {
+                if self.classes.definitions[current].node.is_nil() {
+                    break;
+                }
+                if self.classes.definitions[current]
+                    .node
+                    .members()
+                    .into_iter()
+                    .any(|m| {
+                        matches!(
+                            m.kind(),
+                            SyntaxKind::MethodDeclaration | SyntaxKind::PropertyDeclaration
+                        ) && m.name().text() == name
+                    })
+                {
+                    return Err(self.refuse(
+                        member,
+                        "accessor/data or accessor/method shadowing is not ported",
+                    ));
+                }
+                owner = self.classes.definitions[current].base;
             }
         }
         self.classes.definitions[index].resolved = true;
@@ -570,6 +622,10 @@ impl Lowerer<'_> {
             assigned(ctor.body(), &mut sources);
         }
         let contract = self.class_contract(definition.node).cloned();
+        sources.retain(|(name, node)| {
+            node.kind() == SyntaxKind::PropertyDeclaration
+                || self.classes.accessor(index, name).is_none()
+        });
         for (name, field) in sources {
             if name.starts_with('%') || name == "__proto__" {
                 return Err(self.refuse(field, "reserved class field names are not ported"));
@@ -626,20 +682,26 @@ impl Lowerer<'_> {
             .node
             .members()
             .into_iter()
-            .filter(|member| member.kind() == SyntaxKind::MethodDeclaration)
+            .filter(|member| {
+                matches!(
+                    member.kind(),
+                    SyntaxKind::MethodDeclaration
+                        | SyntaxKind::GetAccessor
+                        | SyntaxKind::SetAccessor
+                )
+            })
             .map(|member| member.name().text().to_string())
             .collect();
         let mut seen = HashSet::new();
         layout.method_names.retain(|name| seen.insert(name.clone()));
-        if let Some(field) = layout
-            .fields
-            .iter()
-            .find(|field| self.classes.method(index, &field.name).is_some())
-        {
+        if let Some(field) = layout.fields.iter().find(|field| {
+            self.classes.method(index, &field.name).is_some()
+                || self.classes.accessor(index, &field.name).is_some()
+        }) {
             return Err(self.refuse(
                 definition.node,
                 &format!(
-                    "instance field '{}' shadows a method; property descriptors are not ported",
+                    "instance field '{}' shadows a prototype property; descriptor shadowing is not ported",
                     field.name
                 ),
             ));
@@ -674,6 +736,7 @@ impl Lowerer<'_> {
     }
 }
 
+mod accessors;
 mod constructors;
 mod methods;
 mod values;
