@@ -7,19 +7,31 @@ pub fn view_pairs(
     records: &[Record],
     unions: &[Union],
 ) -> Option<Vec<(usize, usize)>> {
-    fn arms(ty: &Type, unions: &[Union]) -> Vec<Type> {
+    fn arms(ty: &Type, unions: &[Union]) -> Option<Vec<Type>> {
         match ty {
-            Type::Union { union_id } => unions[*union_id].arms.clone(),
-            _ => vec![ty.clone()],
+            Type::Union { union_id } => unions.get(*union_id).map(|u| u.arms.clone()),
+            _ => Some(vec![ty.clone()]),
         }
     }
-    let targets = arms(target, unions);
-    arms(source, unions)
+    let targets = arms(target, unions)?;
+    let sources = arms(source, unions)?;
+    if !sources.iter().any(|t| matches!(t, Type::Record { .. })) {
+        return None;
+    }
+    sources
         .iter()
         .enumerate()
         .map(|(from, ty)| {
             let Type::Record { shape_id } = ty else {
-                return None;
+                if !matches!(ty, Type::Null | Type::Undefined) {
+                    return None;
+                }
+                let choices = targets
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, target)| *target == ty)
+                    .collect::<Vec<_>>();
+                return (choices.len() == 1).then(|| (from, choices[0].0));
             };
             let source = records.get(*shape_id)?;
             if source.tuple
@@ -39,7 +51,17 @@ pub fn view_pairs(
                     let target = records.get(*shape_id)?;
                     (!target.tuple
                         && target.index_value.is_none()
-                        && target.fields.iter().all(|f| source.fields.contains(f)))
+                        && target.fields.iter().all(|f| {
+                            source.fields.iter().any(|old| {
+                                old.name == f.name
+                                    && super::record_equivalence::equivalent(
+                                        &old.r#type,
+                                        &f.r#type,
+                                        records,
+                                        unions,
+                                    )
+                            })
+                        }))
                     .then_some(to)
                 })
                 .collect::<Vec<_>>();

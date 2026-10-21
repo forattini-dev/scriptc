@@ -507,9 +507,9 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "e2222debbad9a0d9a05c73fbaec3c8efef68e465",
-    "after": "guarded recursive native values, journaled type resolution and recursive reference views; native-reddb-recursive-values-v89 compile-only attempts",
-    "compilerBinarySha256": "6a000bb509bee87b4d7db57f8d0829d140286e130eae0135412866a3a5df37c3",
+    "compilerSourceBaseCommit": "d310b1c96db7f8b1a68b31d05d93ece979763870",
+    "after": "invariant closed recursive record equivalence, canonical erased layout tags and nullable source views; native-reddb-equivalent-recursive-v90 compile-only attempts",
+    "compilerBinarySha256": "ae9cfee237c7e8476f9edfeee5a6173a39d9640a65079099da98f80440b1a6fd",
     "red-skills-release": "SCN1001: /work/redskilled/packages/shared/lane-retention.ts:814..834: native library call 'util.promisify' is not ported (CallExpression); native subset only, no fallback",
     "redskilled": "SCN1001: /work/redskilled/packages/shared/lane-retention.ts:814..834: native library call 'util.promisify' is not ported (CallExpression); native subset only, no fallback",
     "red-dev": "SCN1001: /work/red-dev/node_modules/tuiuiu.js/dist/core/pool.js:2023..2087: type has no representation in the first native IR subset (ArrowFunction); native subset only, no fallback",
@@ -523,7 +523,7 @@
     "nextCollectionConstraint": "Keep conditional WeakMap reachability and dead-entry cleanup for record keys, including value-to-key and value-to-owner cycles. Other weak-key domains and iterable constructors remain explicit boundaries. Native Set iteration/values().next() is a separate outstanding contract.",
     "referenceCheckpointDebt": "The preexisting clean full IR Promise dynCheck refusal remains outside this checkpoint. Recursive-value fixtures and reference API checks are validated from an owned snapshot excluding the pending legacy work. Working-tree full-IR success cannot replace clean full-checkpoint acceptance; reconcile Promise validation and complete full plain/SAN before shipping.",
     "nextPublicCallableConstraint": "The original release and redskilled now pass the public decode alias with its recursive JsonValue result; both next refuse util.promisify in shared/lane-retention.ts. Preserve custom promisify contracts, callback result ownership and Promise scheduling when implementing that bridge; changing an import name is insufficient. Async suspension and child_process APIs remain separate prerequisites of the original command bodies.",
-    "nextNativeTypeConstraint": "Guarded record/dictionary/array union graphs use stable IDs, transactional completion and owning references. Bare self-recursive array/tuple aliases, ambiguous recursive union alternatives and coercions between independently declared equivalent recursive layouts retain explicit refusals. A standalone equivalent A/B recursive-view IR probe still refuses native representation coercion; support requires cycle-safe structural equivalence and compatible live views, not unchecked erasure or cloning."
+    "nextNativeTypeConstraint": "Guarded record/dictionary/array union graphs use stable IDs, transactional completion and owning references. Independently declared closed recursive records now use coinductive invariant field equivalence, canonical erased layout markers and identity-preserving nullable tag remapping. Distinct recursive array/dictionary storage, nested field width changes, bare self-recursive aliases, ambiguous union alternatives and partial-union flow narrowing retain explicit boundaries."
   },
   "deliveryAudit20261021": {
     "compilerCommit": "e2222debbad9a0d9a05c73fbaec3c8efef68e465",
@@ -553,10 +553,11 @@
           "Stable reserved record/union identities; distinct resolving/ready/failed states; rollback of incomplete graph and dependent caches.",
           "Type-resolution insertion journal avoids copying the complete accumulated type cache for each root.",
           "Native and reference Rust emitters retain cyclic/shared structural identity; checked reference views validate active object/type pairs and recheck later mutations.",
-          "Public declaration-to-JavaScript decode alias with recursive mutable/readonly JSON results; originals progress to util.promisify."
+          "Public declaration-to-JavaScript decode alias with recursive mutable/readonly JSON results; originals progress to util.promisify.",
+          "Coinductive invariant closed-record equivalence, canonical erased layout tags and nullable source tag remapping preserve alias identity across independent recursive declarations."
         ],
         "remaining": [
-          "Coercions between independently declared equivalent recursive layouts need structural graph equivalence and compatible owning view contracts.",
+          "Distinct recursive array/dictionary storage and broader container/callable views still need owning adapters; only closed record/union graph equivalence is implemented. Partial-union flow narrowing remains separate.",
           "Bare self-recursive array/tuple aliases and broader recursive callable/branded/ambiguous union families retain explicit boundaries."
         ],
         "fixtures": [
@@ -566,7 +567,11 @@
           "rust-native-recursive-values/empty.ts",
           "rust-native-recursive-values/contracts.ts",
           "rust-native-recursive-values/checked.ts",
-          "rust-native-recursive-values/dictionary.ts"
+          "rust-native-recursive-values/dictionary.ts",
+          "rust-native-recursive-values/equivalent.ts",
+          "rust-native-recursive-values/equivalent-mutual.ts",
+          "rust-native-recursive-values/equivalent-unions.ts",
+          "rust-native-recursive-values/equivalent-nullable.ts"
         ]
       },
       {

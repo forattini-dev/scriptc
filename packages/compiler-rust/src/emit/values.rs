@@ -160,13 +160,16 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
         writeln!(out, "Self::V{i}(v) => v.trace_native(tracer),").unwrap();
     }
     out.push_str("_ => {} } } }\nimpl runtime::ArrayElement for NativeValue { fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { self.trace_native(tracer); } }\n");
+    let record_tags =
+        crate::ir::record_equivalence::record_representatives(&module.records, &module.unions);
     for (i, ty) in types.iter().enumerate() {
         let rt = rust_type(ty.clone(), module);
         let (box_code, try_code) = match ty {
             Type::Record { shape_id } if record_storage::shared(&module.records[*shape_id]) => (
-                format!("NativeValue::Record({shape_id}, value)"),
+                format!("NativeValue::Record({}, value)", record_tags[*shape_id]),
                 format!(
-                    "if let NativeValue::Record({shape_id}, value) = value {{ Some(value.clone()) }} else {{ None }}"
+                    "if let NativeValue::Record({}, value) = value {{ Some(value.clone()) }} else {{ None }}",
+                    record_tags[*shape_id]
                 ),
             ),
             Type::Promise { .. } => (

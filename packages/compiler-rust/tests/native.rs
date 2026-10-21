@@ -91,6 +91,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-recursive-values/equivalent.ts",
+        "rust-native-recursive-values/equivalent-nullable.ts",
+        "rust-native-recursive-values/equivalent-mutual.ts",
+        "rust-native-recursive-values/equivalent-unions.ts",
         "rust-native-recursive-values/main.ts",
         "rust-native-recursive-values/mutual.ts",
         "rust-native-recursive-values/json.ts",
@@ -3198,6 +3202,8 @@ fn unsupported_recursive_layouts_preserve_previous_artifacts() {
         "type Chain = [Chain]; function use(value: Chain): number { return 1; } console.log(use);",
         "interface Bad { self: Bad; invalid: Map<string, number> | string; } function use(value: Bad): number { return 1; } console.log(use);",
         "interface Bad { self: Bad; method(): number; } function use(value: Bad): number { return 1; } console.log(use);",
+        "interface A { next?: A; value: number; } interface B { next?: B; value: number; extra: string; } function use(value: A): number { return value.value; } const b: B = { value: 1, extra: 'required' }; console.log(use(b));",
+        "interface A { children: A[]; value: number; } interface B { children: B[]; value: number; } function use(value: A): number { return value.value; } const b: B = { value: 1, children: [] }; console.log(use(b));",
     ] {
         fs::write(&input, source).unwrap();
         let artifacts = [

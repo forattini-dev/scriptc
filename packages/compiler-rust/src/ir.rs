@@ -1,5 +1,6 @@
 //! The first native subset of the existing scriptc IR v13 wire contract.
 use serde::Serialize;
+pub mod record_equivalence;
 pub mod record_views;
 mod symbol_methods;
 mod symbols;
