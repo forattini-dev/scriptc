@@ -27,7 +27,9 @@ fn level_six_discards_distant_three_byte_matches_at_the_node_boundary() {
         let input = bytes_from_elements(source);
         let expected: Vec<u8> = expected
             .as_bytes()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect();
         assert_eq!(

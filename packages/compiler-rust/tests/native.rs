@@ -284,6 +284,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-symbols/registry.ts",
         "rust-native-symbols/containers.ts",
         "rust-native-symbols/erased.ts",
+        "rust-native-well-known-symbols/identity.ts",
+        "rust-native-well-known-symbols/storage.ts",
+        "rust-native-well-known-symbols/modules.ts",
+        "rust-native-well-known-symbols/shadows.ts",
+        "rust-native-well-known-symbols/untyped.js",
         "rust-native-methods/direct.ts",
         "rust-native-methods/dispatch.ts",
         "rust-native-methods/contracts.ts",
@@ -313,7 +318,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     .enumerate()
     {
         let input = root().join("tests/corpus").join(name);
-        let target = binary(temp.path(), &format!("case-{index}"));
+        // Keep this program's artifacts through every assertion, then release
+        // them before the next program instead of accumulating the whole corpus.
+        let artifacts = tempfile::tempdir_in(temp.path()).unwrap();
+        let target = binary(artifacts.path(), &format!("case-{index}"));
         let expected = Command::new(oracle())
             .arg(&input)
             .envs(process_environment(name, false))
@@ -2330,7 +2338,11 @@ fn symbol_boundaries_preserve_previous_artifacts() {
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "symbol-boundary");
     for source in [
-        "const iterator = Symbol.iterator; console.log(iterator);",
+        "const values = new Map<symbol, number>(); values.set(Symbol.iterator, 1);",
+        "class C { [Symbol.asyncIterator]() { return 1; } }",
+        "const value = { [Symbol.iterator]: 1 }; console.log(value);",
+        "const value = Symbol.iterator; console.log(value[Symbol.toPrimitive]);",
+        "const { iterator } = Symbol; console.log(iterator);",
         "const obj = { [Symbol('key')]: 1 }; console.log(obj);",
         "const factory = Symbol; const value = factory('key');",
         "const value = Symbol(1 as any);",

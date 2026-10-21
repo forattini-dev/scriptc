@@ -92,9 +92,13 @@ impl Lowerer<'_> {
     }
     pub(super) fn symbol_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
         if self.standard_symbol(node.expression()) {
+            let operation = format!("sym.{}", node.name().text());
+            if ir::well_known_symbol(&operation).is_some() {
+                return Ok(Some(self.symbol_operation(&operation, vec![], node)));
+            }
             return Err(self.refuse(
                 node,
-                "well-known symbols and Symbol factory values are not ported",
+                "Symbol factory values and this property are not ported",
             ));
         }
         if self.ty(node.expression()).ok() != Some(Type::Symbol) {

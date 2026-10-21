@@ -1,8 +1,10 @@
 //! The first native subset of the existing scriptc IR v13 wire contract.
 use serde::Serialize;
 pub mod record_views;
+mod symbols;
 mod walk;
 use std::collections::HashMap;
+pub(crate) use symbols::well_known_symbol;
 
 pub const VERSION: u32 = 13;
 
@@ -1444,6 +1446,9 @@ fn validate_function(
                 }
                 let arg_types = args.iter().map(Expr::ty).collect::<Vec<_>>();
                 let valid = match r#fn.as_str() {
+                    operation if well_known_symbol(operation).is_some() => {
+                        arg_types.is_empty() && *r#type == Type::Symbol
+                    }
                     "sym.newAnon" => arg_types.is_empty() && *r#type == Type::Symbol,
                     "sym.new" | "sym.for" => arg_types == [Type::String] && *r#type == Type::Symbol,
                     "sym.toString" => arg_types == [Type::Symbol] && *r#type == Type::String,
@@ -3198,6 +3203,68 @@ mod tests {
             validate(&m).unwrap_err(),
             "invalid native symbol/typeof operation"
         );
+    }
+
+    #[test]
+    fn well_known_symbol_operations_require_zero_arguments_and_symbol_results() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        for operation in [
+            "sym.asyncIterator",
+            "sym.hasInstance",
+            "sym.isConcatSpreadable",
+            "sym.iterator",
+            "sym.match",
+            "sym.matchAll",
+            "sym.replace",
+            "sym.search",
+            "sym.species",
+            "sym.split",
+            "sym.toPrimitive",
+            "sym.toStringTag",
+            "sym.unscopables",
+            "sym.dispose",
+            "sym.asyncDispose",
+        ] {
+            for (args, result, valid) in [
+                (vec![], Type::Symbol, true),
+                (vec![], Type::String, false),
+                (
+                    vec![Expr::UnitLit {
+                        unit: "undefined",
+                        r#type: Type::Undefined,
+                        loc: loc.clone(),
+                    }],
+                    Type::Symbol,
+                    false,
+                ),
+            ] {
+                module.functions[0].body = vec![Stmt::Expression {
+                    expr: Expr::LibCall {
+                        r#fn: operation.into(),
+                        args,
+                        r#type: result,
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                }];
+                assert_eq!(validate(&module).is_ok(), valid, "{operation}");
+                if valid {
+                    let wire = serde_json::to_value(&module).unwrap();
+                    assert_eq!(wire["functions"][0]["body"][0]["expr"]["fn"], operation);
+                }
+            }
+        }
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "sym.unknown".into(),
+                args: vec![],
+                r#type: Type::Symbol,
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert!(validate(&module).is_err());
     }
 
     #[test]

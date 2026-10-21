@@ -1,3 +1,4 @@
+import type { WellKnownSymbolFn } from "./well-known-symbols.js";
 import { BIGINT_MAY_THROW, type IrBigIntLibFn } from "./bigint-signatures.js"; import type { IrJsonReplacerFn } from "./json-replacer.js";
 export * from "./type-constants.js";
 import { F64, BYTES_U8, STRING, BOOL, VOID } from "./type-constants.js";
@@ -2379,6 +2380,7 @@ export type IrLibFn =
    * the child.stdout pattern). None of these throw. */
   | "sym.new"
   | "sym.newAnon"
+  | WellKnownSymbolFn
   | "sym.for"
   | "sym.keyFor"
   | "sym.desc"

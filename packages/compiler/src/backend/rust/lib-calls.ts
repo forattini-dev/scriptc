@@ -1,3 +1,4 @@
+import { wellKnownSymbolVariant } from "../../ir/well-known-symbols.js";
 import { emitRustWeakMapCall } from "./weak-maps.js";
 import { emitRustBigIntCall } from "./bigint.js";
 import { emitRustBunWhich } from "./bun-which.js";
@@ -354,6 +355,10 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   }
   if (expr.fn === "str.b64Missing" && expr.args.length === 0) {
     return "runtime::string_base64_missing_argument()";
+  }
+  const symbolVariant = wellKnownSymbolVariant(expr.fn);
+  if (symbolVariant !== undefined && expr.args.length === 0) {
+    return `runtime::symbol_well_known(runtime::WellKnownSymbol::${symbolVariant})`;
   }
   if (expr.fn === "sym.new" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::symbol_new(&(${context.emitExpr(arg)}))`;

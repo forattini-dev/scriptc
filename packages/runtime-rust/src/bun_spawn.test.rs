@@ -56,7 +56,7 @@ fn bun_subprocess_custom_windows_path_refuses_to_change_argv0() {
     std::fs::write(root.join(format!("{name}.exe")), b"not executed").unwrap();
     let error = std::panic::catch_unwind(|| bun_spawn_check_windows_path(
         &string(name), Some(&array_new(vec![string("PATH"), string(root.to_str().unwrap())])), &string("")));
-    let reason = caught_from_panic(error.err().expect("custom executable must be refused"));
+    let reason = caught_from_panic(error.expect_err("custom executable must be refused"));
     assert_eq!(caught_error_code(&reason), Some(string("SC3001")));
     assert!(!children_referenced_pending());
     drop(reason);

@@ -6,11 +6,10 @@ fn bun_write_result(promise: &JsPromise<f64>) -> Result<f64, Caught> {
         Box::new(move |result| *output.borrow_mut() = Some(result)),
     );
     run_event_loop();
-    let result = observed
+    observed
         .borrow_mut()
         .take()
-        .expect("write settled on its loop");
-    result
+        .expect("write settled on its loop")
 }
 
 #[test]

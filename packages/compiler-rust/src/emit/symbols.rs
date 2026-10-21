@@ -1,4 +1,5 @@
 use super::*;
+use crate::ir;
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     let Expr::LibCall {
         r#fn, args, r#type, ..
@@ -8,6 +9,10 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
     };
     let arg = || expr(&args[0], function, module);
     Some(match r#fn.as_str() {
+        operation if ir::well_known_symbol(operation).is_some() => format!(
+            "runtime::symbol_well_known(runtime::WellKnownSymbol::{})",
+            ir::well_known_symbol(operation).unwrap()
+        ),
         "sym.newAnon" => "runtime::symbol_new_anonymous()".into(),
         "sym.new" | "sym.for" => format!(
             "runtime::{}(&runtime::JsString::from({}))",

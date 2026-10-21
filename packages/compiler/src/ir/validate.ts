@@ -1,3 +1,4 @@
+import { WELL_KNOWN_SYMBOL_LIB_SIGS } from "./well-known-symbols.js";
 import { canDynCheckTo } from "./ir.js";
 import { recordViewPairs } from "./record-views.js";
 import { validationFields, type ValidationFields } from "./validation-fields.js";
@@ -304,6 +305,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "num.toRadixString": { argTypes: [F64, F64], result: STRING },
   "num.sameValue": { argTypes: [F64, F64], result: BOOL },
   "intl.numFormatEnUs": { argTypes: [F64], result: STRING },
+  ...WELL_KNOWN_SYMBOL_LIB_SIGS,
   "sym.new": { argTypes: [STRING], result: SYMBOL_T },
   "sym.newAnon": { argTypes: [], result: SYMBOL_T },
   "sym.for": { argTypes: [STRING], result: SYMBOL_T },
@@ -3986,7 +3988,7 @@ function validateFunction(
               !typeEquals(e.args[1]?.type ?? VOID, arrayOf(STRING))) err("record.cloneOwn requires a closed record and a string-array own-key plan", e.loc);
           break;
         }
-        const sig = LIB_FN_SIGS[e.fn];
+        const sig = Object.hasOwn(LIB_FN_SIGS, e.fn) ? LIB_FN_SIGS[e.fn] : undefined;
         if (!sig) {
           err(`libCall of unknown library function "${e.fn as string}"`, e.loc);
           break;

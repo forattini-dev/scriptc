@@ -91,6 +91,7 @@ where
 
 /// `child_process`'s exit/error listeners take the boxed flavour of the same
 /// closure.
+#[cfg(unix)]
 fn no_trace_boxed() -> Box<dyn for<'a> Fn(&mut Tracer<'a>)> {
     Box::new(|_tracer| {})
 }

@@ -60,8 +60,21 @@
       ],
       "acceptanceAndRisks": [
         "Symbol creation and registry identity match Node; equal descriptions never imply equality.",
-        "Keep well-known symbols, factory aliases, descriptor keys and unsupported coercions as explicit boundaries until covered."
-      ]
+        "Direct reads of the pinned Node release's 15 well-known symbols preserve singleton identity, description and nonmembership in Symbol.for. Factory aliases, symbol descriptor keys, iteration protocols and unsupported coercions retain explicit boundaries."
+      ],
+      "wellKnownIdentity": {
+        "status": "implemented-subset",
+        "irVersion": 13,
+        "operations": "Zero-argument sym.<standard name> singleton reads; no string key encoding and no shared user registry.",
+        "fixtures": [
+          "rust-native-well-known-symbols/identity.ts",
+          "rust-native-well-known-symbols/storage.ts",
+          "rust-native-well-known-symbols/modules.ts",
+          "rust-native-well-known-symbols/shadows.ts",
+          "rust-native-well-known-symbols/untyped.js"
+        ],
+        "next": "Represent symbol-valued class method keys separately from public string names, then port generator suspension and iterator completions without erasing demanded bodies."
+      }
     },
     {
       "id": "console-function-values",
@@ -225,6 +238,7 @@
       ],
       "acceptanceAndRisks": [
         "Keep suspended local state, generator identity, next/return/throw and delegated yields.",
+        "Audit traced ownership of suspended captures, yielded values and queued async requests before adopting runtime generator handles; close/drop must release frames and preserve externally held aliases.",
         "IteratorClose and generator finally run exactly when Node runs them; never eagerly consume a lazy generator.",
         "Test the original parser in isolated encode/decode scenarios before claiming the dependency works."
       ]
@@ -469,12 +483,13 @@
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
     "compilerSourceBaseCommit": "212a353a716308b9fbabbce180d51d15d214adb9",
-    "after": "declaration-owned private instance fields; native-reddb-private-v83 compile-only attempts",
+    "after": "well-known primitive symbol identities; native-reddb-well-known-v84 compile-only attempts",
+    "compilerBinarySha256": "023e13dc0a7f2cf71db9e02afa2fd3ead3694ece47d968e5a77c3c8f0e14b1f6",
     "red-skills-release": "@reddb-io/toon/dist/toonl.js:21575..22416 ToonlReader computed [Symbol.asyncIterator] method; private field inventory is passed",
     "redskilled": "@reddb-io/toon/dist/toonl.js:21575..22416 ToonlReader computed [Symbol.asyncIterator] method; private field inventory is passed",
     "red-dev": "node_modules/tuiuiu.js/dist/core/pool.js:2023..2087 VNode factory arrow returning {type: 'box', props: {}, children: [], key: undefined} has no native function-result representation. Signal getter/setter definition registration is now passed; its demanded behavior is not yet an application acceptance claim.",
     "completedOriginalApplicationBinaries": 0,
-    "nextClassConstraint": "Represent well-known Symbol method keys and a native async-generator/async-iterator contract, preserving lazy execution, suspended frames, next/return/throw, queued steps, backpressure and cleanup on abrupt iteration exits. ToonlReader also depends on decoding state/options and stream consumption. Keep unsupported private methods/accessors explicit. Object.is and Set iteration remain separate demanded dependencies; passing private field inventory does not establish application behavior.",
+    "nextClassConstraint": "Well-known primitive Symbol reads now have canonical singleton identities. Represent symbol-valued class method keys and a native async-generator/async-iterator contract, preserving lazy execution, suspended frames, next/return/throw, queued steps, backpressure and cleanup on abrupt iteration exits. ToonlReader also depends on decoding state/options and stream consumption. Keep unsupported private methods/accessors explicit. Object.is and Set iteration remain separate demanded dependencies; passing private field inventory does not establish application behavior.",
     "nextFactoryConstraint": "Supply owning result contracts for JS callbacks returning records with unit-only properties and empty mutable containers. Minimal lowering probes independently refuse the VNode-shaped arrow, its no-key version and a nonempty-container version with key:undefined, while the concrete-container/numeric-key version emits IR. Preserve present undefined, fresh per-call ownership, mutation, aliases and captured pool state. Returned object-literal methods/getters require their own descriptor/receiver contract; class accessor support does not imply it.",
     "nextCoercionConstraint": "Keep the native undefined fact established by default lowering across body var redeclarations and captures; do not replace it with the checker declaration-file narrowing.",
     "nextModuleConstraint": "Keep canonical defining-module provenance for file-backed metadata and retain declaration-site initialization/module TDZ. Metadata reflection/mutation, import.meta.main/resolve, additional URL overloads, async suspension, direct Promise return adoption, Bun subprocess/Response streams, native namespace descriptors and async iteration remain outstanding.",
