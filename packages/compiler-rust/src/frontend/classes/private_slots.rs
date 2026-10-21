@@ -15,6 +15,7 @@ enum Access {
     Read,
     Write,
     Install,
+    MethodReceiver,
 }
 
 impl Lowerer<'_> {
@@ -25,17 +26,20 @@ impl Lowerer<'_> {
             .members()
             .into_iter()
             .filter(|n| {
-                n.kind() == SyntaxKind::PropertyDeclaration
-                    && n.name().kind() == SyntaxKind::PrivateIdentifier
+                matches!(
+                    n.kind(),
+                    SyntaxKind::PropertyDeclaration | SyntaxKind::MethodDeclaration
+                ) && n.name().kind() == SyntaxKind::PrivateIdentifier
             })
             .enumerate()
         {
             if field.modifier_flags().intersects(ModifierFlags::AMBIENT)
                 || !names.insert(field.name().text().to_string())
             {
-                return Err(
-                    self.refuse(field, "ambient or duplicate private fields are not ported")
-                );
+                return Err(self.refuse(
+                    field,
+                    "ambient or duplicate private declarations are not ported",
+                ));
             }
             let symbol = self.symbol(field.name());
             if symbol == 0 {
@@ -96,7 +100,7 @@ impl Lowerer<'_> {
         }
         Err(self.refuse(
             name,
-            "unresolved private declaration; private methods/accessors are not ported",
+            "unresolved private declaration; private accessors are not ported",
         ))
     }
 
@@ -145,8 +149,10 @@ impl Lowerer<'_> {
     ) -> Result<Vec<Stmt>, String> {
         let mut body = vec![];
         for field in self.classes.definitions[owner].node.members() {
-            if field.kind() != SyntaxKind::PropertyDeclaration
-                || field.name().kind() != SyntaxKind::PrivateIdentifier
+            if !matches!(
+                field.kind(),
+                SyntaxKind::PropertyDeclaration | SyntaxKind::MethodDeclaration
+            ) || field.name().kind() != SyntaxKind::PrivateIdentifier
             {
                 continue;
             }
@@ -190,6 +196,9 @@ impl Lowerer<'_> {
 
     pub(in crate::frontend) fn private_get(&mut self, node: Node) -> Result<Expr, String> {
         let slot = self.private_slot(node.name())?;
+        if slot.declaration.kind() == SyntaxKind::MethodDeclaration {
+            return Err(self.refuse(node, "private method values require an explicit receiver ABI; only direct calls are ported"));
+        }
         let receiver = self.private_receiver(node.expression())?;
         let value = self.private_access(&slot, receiver, None, Access::Read, node)?;
         if self.checker_any(node) {
@@ -204,6 +213,9 @@ impl Lowerer<'_> {
     pub(in crate::frontend) fn private_assignment(&mut self, node: Node) -> Result<Expr, String> {
         let member = node.left();
         let slot = self.private_slot(member.name())?;
+        if slot.declaration.kind() == SyntaxKind::MethodDeclaration {
+            return Err(self.refuse(member, "writes to private methods are not ported"));
+        }
         let receiver = self.private_receiver(member.expression())?;
         // Retain contextual callback/container contracts before erasing the
         // owning payload into the slot. Erasing first can change a closure ABI.
@@ -296,20 +308,37 @@ impl Lowerer<'_> {
             Access::Read => "read",
             Access::Write => "write",
             Access::Install => "install",
+            Access::MethodReceiver => "method_receiver",
+        };
+        let method_receiver = access == Access::MethodReceiver;
+        let result = if method_receiver {
+            self.classes.object(slot.owner)
+        } else {
+            Type::Dyn
         };
         let mut helper = helpers::Helper::new(
             &format!("private_{kind}_{}", slot.global.id),
             args.iter().map(Expr::ty).collect(),
-            Type::Dyn,
+            result.clone(),
             self.loc(site),
         );
-        let read = access == Access::Read;
-        let brand_message = format!(
-            "Cannot {} private member {} {} an object whose class did not declare it",
-            if read { "read" } else { "write" },
-            slot.label,
-            if read { "from" } else { "to" }
-        );
+        let read = matches!(access, Access::Read | Access::MethodReceiver);
+        let class_label = if self.classes.definitions[slot.owner].node.name().is_nil() {
+            "anonymous"
+        } else {
+            self.classes.definitions[slot.owner].node.name().text()
+        }
+        .to_string();
+        let brand_message = if method_receiver {
+            format!("Receiver must be an instance of class {class_label}")
+        } else {
+            format!(
+                "Cannot {} private member {} {} an object whose class did not declare it",
+                if read { "read" } else { "write" },
+                slot.label,
+                if read { "from" } else { "to" }
+            )
+        };
         let ty = helper.param(0).r#type;
         let receiver = if ty == Type::Dyn {
             for (unit, target) in [("null", Type::Null), ("undefined", Type::Undefined)] {
@@ -334,7 +363,11 @@ impl Lowerer<'_> {
                             "Cannot {} properties of {unit} ({} '{}')",
                             if read { "read" } else { "set" },
                             if read { "reading" } else { "setting" },
-                            slot.label
+                            if method_receiver {
+                                &class_label
+                            } else {
+                                &slot.label
+                            }
                         ),
                         helper.loc(),
                     )],
@@ -371,7 +404,15 @@ impl Lowerer<'_> {
                 r#type: self.classes.object(slot.owner),
                 loc: helper.loc(),
             }
-        } else if matches!(ty, Type::Object { .. }) {
+        } else if let Type::Object { class_name } = &ty
+            && (!method_receiver
+                || self
+                    .classes
+                    .subclass(class_name, &self.classes.definitions[slot.owner].name)
+                || self
+                    .classes
+                    .subclass(&self.classes.definitions[slot.owner].name, class_name))
+        {
             helper.read(&helper.param(0))
         } else {
             helper
@@ -382,7 +423,7 @@ impl Lowerer<'_> {
             return Ok(Expr::Call {
                 callee,
                 args,
-                r#type: Type::Dyn,
+                r#type: result,
                 loc: self.loc(site),
             });
         };
@@ -445,7 +486,15 @@ impl Lowerer<'_> {
             });
         }
         helper.function.body.push(Stmt::Return {
-            value: Some(if read {
+            value: Some(if method_receiver {
+                let receiver = helper.read(&local);
+                if receiver.ty() == result { receiver }
+                else if matches!(receiver.ty(), Type::Object { class_name } if self.classes.subclass(&class_name, &self.classes.definitions[slot.owner].name)) {
+                    Expr::Upcast { value: Box::new(receiver), r#type: result.clone(), loc: helper.loc() }
+                } else {
+                    Expr::Downcast { value: Box::new(receiver), r#type: result.clone(), loc: helper.loc() }
+                }
+            } else if read {
                 operation("get", &helper)
             } else {
                 helper.read(&helper.param(1))
@@ -456,8 +505,10 @@ impl Lowerer<'_> {
         Ok(Expr::Call {
             callee,
             args,
-            r#type: Type::Dyn,
+            r#type: result,
             loc: self.loc(site),
         })
     }
 }
+
+mod methods;

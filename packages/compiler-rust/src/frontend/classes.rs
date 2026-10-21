@@ -27,6 +27,7 @@ pub(super) struct ClassGraph {
     symbol_signatures: HashMap<(usize, ir::SymbolMethodKey), Signature>,
     accessors: HashMap<(usize, String, bool), Signature>,
     private_slots: HashMap<u32, private_slots::Slot>,
+    private_method_signatures: HashMap<String, Signature>,
     method_queue: VecDeque<Signature>,
 }
 
@@ -432,13 +433,15 @@ impl Lowerer<'_> {
                     ) || !matches!(
                         member.name().kind(),
                         SyntaxKind::Identifier | SyntaxKind::StringLiteral
-                    ) && !(member.kind() == SyntaxKind::PropertyDeclaration
-                        && member.name().kind() == SyntaxKind::PrivateIdentifier)
+                    ) && !(matches!(
+                        member.kind(),
+                        SyntaxKind::PropertyDeclaration | SyntaxKind::MethodDeclaration
+                    ) && member.name().kind() == SyntaxKind::PrivateIdentifier)
                         && symbol_method.is_none()))
             {
                 return Err(self.refuse(
                     member,
-                    "class static/computed members, private methods/accessors and decorators are not ported",
+                    "class static/computed members, private accessors and decorators are not ported",
                 ));
             }
             if let Some(key) = symbol_method {
@@ -451,7 +454,10 @@ impl Lowerer<'_> {
             matches!(
                 m.kind(),
                 SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor | SyntaxKind::SetAccessor
-            ) && m.name().kind() != SyntaxKind::ComputedPropertyName
+            ) && !matches!(
+                m.name().kind(),
+                SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
+            )
         }) {
             let name = member.name().text();
             if name.starts_with('%')
@@ -472,7 +478,10 @@ impl Lowerer<'_> {
             matches!(
                 m.kind(),
                 SyntaxKind::MethodDeclaration | SyntaxKind::PropertyDeclaration
-            ) && m.name().kind() != SyntaxKind::ComputedPropertyName
+            ) && !matches!(
+                m.name().kind(),
+                SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
+            )
         }) {
             if let Some(base) = base
                 && self.classes.accessor(base, member.name().text()).is_some()
@@ -502,8 +511,10 @@ impl Lowerer<'_> {
                         matches!(
                             m.kind(),
                             SyntaxKind::MethodDeclaration | SyntaxKind::PropertyDeclaration
-                        ) && m.name().kind() != SyntaxKind::ComputedPropertyName
-                            && m.name().text() == name
+                        ) && !matches!(
+                            m.name().kind(),
+                            SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
+                        ) && m.name().text() == name
                     })
                 {
                     return Err(self.refuse(
@@ -714,7 +725,10 @@ impl Lowerer<'_> {
                     SyntaxKind::MethodDeclaration
                         | SyntaxKind::GetAccessor
                         | SyntaxKind::SetAccessor
-                ) && member.name().kind() != SyntaxKind::ComputedPropertyName
+                ) && !matches!(
+                    member.name().kind(),
+                    SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
+                )
             })
             .map(|member| member.name().text().to_string())
             .collect();

@@ -91,6 +91,14 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-private-methods/main.ts",
+        "rust-native-private-methods/brands.ts",
+        "rust-native-private-methods/order.ts",
+        "rust-native-private-methods/inheritance.ts",
+        "rust-native-private-methods/deferred.ts",
+        "rust-native-private-methods/identity.ts",
+        "rust-native-private-methods/modules.ts",
+        "rust-native-private-methods/untyped.js",
         "rust-native-private/main.ts",
         "rust-native-private/fields.ts",
         "rust-native-private/brand.ts",
@@ -402,6 +410,33 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         let ir: serde_json::Value =
             serde_json::from_slice(&fs::read(target.with_extension("ir.json")).unwrap()).unwrap();
         assert_eq!(ir["irVersion"], 13);
+        if name.starts_with("rust-native-private-methods/") {
+            let demanded = ir["functions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|function| function["name"].as_str().unwrap().starts_with("%private."));
+            assert_eq!(demanded, !name.ends_with("/deferred.ts"), "{name}");
+            assert!(
+                ir["globals"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|global| { global["id"].as_str().unwrap().starts_with("%g.private.") })
+            );
+            for class in ir["classes"].as_array().unwrap() {
+                for surface in ["methodNames", "methods"] {
+                    assert!(
+                        class[surface]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .all(|method| { !method.as_str().unwrap().starts_with('#') }),
+                        "{name}: private method entered the public surface"
+                    );
+                }
+            }
+        }
         if name.starts_with("rust-native-symbol-methods/") {
             let descriptors = ir["classes"]
                 .as_array()
@@ -2073,7 +2108,6 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
         "class Box { method() { return 1; } } const unbound = new Box().method; unbound();",
         "class Box { get #value() { return 1; } } new Box();",
         "class Box { ['value'] = 1; } new Box();",
-        "class Box { #value() { return 1; } } new Box();",
         "class Box { constructor(public value: number) {} } new Box(1);",
         "class Box { constructor() { return {}; } } new Box();",
         "class Box { '__proto__' = 1; } new Box();",
@@ -2113,13 +2147,58 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
 }
 
 #[test]
+fn private_method_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "private-method-boundary");
+    for source in [
+        "class Box { static #method() {} } new Box();",
+        "class Box { get #method() { return 1; } } new Box();",
+        "class Box { #method() { return 1; } read() { return this.#method; } } new Box().read();",
+        "class Box { #method() { return 1; } write() { this.#method = () => 2; } } new Box().write();",
+        "class Box { *#method() { yield 1; } read() { return this.#method(); } } new Box().read();",
+        "class Box { async *#method() { yield 1; } read() { return this.#method(); } } new Box().read();",
+        "class Box { #method<T>(value: T): T { return value; } read() { return this.#method(1); } } new Box().read();",
+        "class Box { #method() {} has(value: unknown) { return #method in value; } } new Box().has({});",
+        "function factory() { return class Box { #method() {} }; } new (factory())();",
+        "class Box { #method(): number { return 1; } read() { return () => this.#method(); } } new Box().read()();",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!result.status.success(), "{source}");
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(error.contains("SCN1001"), "{source}: {error}");
+        assert!(!error.contains("panicked"), "{error}");
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
 fn private_field_boundaries_preserve_previous_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "private-boundary");
     for source in [
         "class Box { static #value = 1; } new Box();",
-        "class Box { #value() { return 1; } } new Box();",
         "class Box { get #value() { return 1; } } new Box();",
         "class Box { set #value(value: number) {} } new Box();",
         "class Box { #value = 1; update() { this.#value += 1; } } new Box().update();",

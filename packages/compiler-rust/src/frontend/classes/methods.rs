@@ -12,7 +12,10 @@ impl ClassGraph {
             if !definition.node.is_nil()
                 && let Some(node) = definition.node.members().into_iter().rev().find(|node| {
                     node.kind() == SyntaxKind::MethodDeclaration
-                        && node.name().kind() != SyntaxKind::ComputedPropertyName
+                        && !matches!(
+                            node.name().kind(),
+                            SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
+                        )
                         && node.name().text() == name
                 })
             {
@@ -112,6 +115,9 @@ impl Lowerer<'_> {
         let member = call.expression();
         if member.kind() != SyntaxKind::PropertyAccessExpression {
             return Ok(None);
+        }
+        if member.name().kind() == SyntaxKind::PrivateIdentifier {
+            return self.private_method_call(call);
         }
         let receiver = member.expression();
         if self.module_namespace(receiver) {
