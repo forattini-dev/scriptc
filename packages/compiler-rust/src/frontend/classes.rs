@@ -15,7 +15,7 @@ struct Definition {
     token: Option<Local>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct ClassGraph {
     definitions: Vec<Definition>,
     symbols: HashMap<u32, usize>,

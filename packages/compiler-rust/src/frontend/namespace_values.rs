@@ -2,7 +2,7 @@
 //! The portable object ABI is a private zero-field capsule, never an export snapshot.
 use super::*;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct NamespaceValues {
     paths: HashMap<String, usize>,
     slots: Vec<ir::Global>,

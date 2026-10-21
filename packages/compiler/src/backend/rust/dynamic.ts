@@ -1,3 +1,5 @@
+import { recursiveNativeReference } from "../../ir/recursive-native.js";
+import { RecursiveNativeChecks } from "./recursive-checks.js";
 import { isRegexCaptureRow } from "../../ir/regex-captures.js";
 import { emitRustDynamicKindQueries } from "./dynamic-kind.js";
 import { sharedDiscriminatedUnion, discriminatedUnionCheck } from "./discriminated-records.js";
@@ -32,8 +34,10 @@ import { mangleField, mangleRecordStruct } from "../mangle.js";
 
 export class RustDynamicEmitter {
   private readonly dynFrom: RustDynamicFromEmitter;
+  private readonly recursiveChecks: RecursiveNativeChecks;
 
   constructor(private readonly context: RustDynamicContext) {
+    this.recursiveChecks = new RecursiveNativeChecks(context);
     this.dynFrom = new RustDynamicFromEmitter(context, (type, value, loc) => this.emitDynCheckValue(type, value, loc));
   }
 
@@ -986,10 +990,17 @@ export class RustDynamicEmitter {
   }
 
   emitDynFromDefinitions(): void {
-    this.dynFrom.emitDefinitions();
+    do {
+      this.dynFrom.emitDefinitions();
+      this.recursiveChecks.emitDefinitions((type, value, loc, path) => this.emitDynCheckInline(type, value, loc, path));
+    } while (this.dynFrom.pending || this.recursiveChecks.pending);
   }
 
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc, path = '"$"'): string {
+    return this.recursiveChecks.call(type, value, loc, path) ?? this.emitDynCheckInline(type, value, loc, path);
+  }
+
+  private emitDynCheckInline(type: IrType, value: string, loc?: SrcLoc, path = '"$"'): string {
     switch (type.kind) {
       case "dyn": case "jsval": return value;
       case "date": return `sc_dyn_check_date_at(${value}, ${path})`;
@@ -1109,7 +1120,7 @@ export class RustDynamicEmitter {
           const record = `${name}::${this.context.unionVariant(shared.tag)}(${this.emitDynCheckValue(shared.arm, "value", loc, path)})`;
           return `{ let value = ${value}; match value { ${units.join(", ")}, value => ${record}, } }`;
         }
-        if (!this.context.isRustJsonCompatible(type)) {
+        if (!this.context.isRustJsonCompatible(type) || recursiveNativeReference(type, id => this.context.records.get(id), id => this.context.union(id, loc))) {
           const native = emitNativeUnionCheck(this.context, union, value,
             (arm, input, loc) => this.emitDynCheckValue(arm, input, loc, path), loc, path);
           if (native !== null) return native;
@@ -1130,7 +1141,7 @@ export class RustDynamicEmitter {
       case "array": {
         const name = this.context.dynTypeName();
         if (nativeArrayCheckSupported(type, id => this.context.records.get(id), id => this.context.union(id, loc)) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayCheck(type, value, name,
-          (element, item) => this.emitDynFromValue(element, item, loc), (element, item, itemPath) => this.emitDynCheckValue(element, item, loc, itemPath), path);
+          (element, item) => this.emitDynFromValue(element, item, loc), (element, item, itemPath) => this.emitDynCheckValue(element, item, loc, itemPath), path, recursiveNativeReference(type, id => this.context.records.get(id), id => this.context.union(id, loc)) ? typeKey(type) : undefined);
         if (type.elem.kind === "dyn" || type.elem.kind === "jsval") {
           return `match ${value} { ${name}::Array(array) => array, value => sc_dyn_check_fail_at("array", &value, ${path}) }`;
         }
@@ -1164,7 +1175,7 @@ export class RustDynamicEmitter {
           }
           const indexValue = nativeIndexedRecordValue(type, id => this.context.records.get(id), id => this.context.union(id, loc));
           if (indexValue !== undefined && indexValue.kind !== "dyn") return emitNativeMapCheck(indexValue, value, this.context.dynTypeName(),
-            (element, item) => this.emitDynFromValue(element, item, loc), (element, item, itemPath) => this.emitDynCheckValue(element, item, loc, itemPath), path);
+            (element, item) => this.emitDynFromValue(element, item, loc), (element, item, itemPath) => this.emitDynCheckValue(element, item, loc, itemPath), path, recursiveNativeReference(type, id => this.context.records.get(id), id => this.context.union(id, loc)) ? typeKey(type) : undefined);
           if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
             const name = this.context.dynTypeName();
             return `{ let value = ${value}; match value { ${name}::Object(object) => object, value => sc_dyn_check_fail_at("object", &value, ${path}), } }`;

@@ -1,5 +1,9 @@
 //! Cycle-safe queries over owned native type layouts.
 use super::*;
+mod cache;
+mod resolution;
+pub(super) use cache::TypeCache;
+pub(super) use resolution::{Checkpoint, LayoutKind, Resolution};
 impl Lowerer<'_> {
     pub(super) fn native_type_contains(
         &self,

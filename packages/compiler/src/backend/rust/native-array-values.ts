@@ -17,16 +17,18 @@ export function emitNativeArrayFrom(type: ArrayType, value: string, dyn: string,
 
 /** Validate existing elements at the boundary, then retain the source array.
  * Later reads validate the current element, and writes update the source. */
-export function emitNativeArrayCheck(type: ArrayType, value: string, dyn: string, box: Convert, check: Convert, path = '"$"'): string {
+export function emitNativeArrayCheck(type: ArrayType, value: string, dyn: string, box: Convert, check: Convert, path = '"$"', recursiveLayout?: string): string {
   if (type.elem.kind === "dyn") return `match ${value} { ${dyn}::Array(sc_array) => sc_array, sc_other => sc_dyn_check_fail_at("array", &sc_other, ${path}), }`;
   const read = check(type.elem, "sc_item");
   const validate = check(type.elem, "sc_item", "&runtime::json_index_path(sc_path, sc_index as usize)");
   const write = box(type.elem, "sc_item");
+  const guard = recursiveLayout === undefined ? "" : `let sc_guard = ScNativeCheckGuard::enter(sc_array.identity(), ${JSON.stringify(recursiveLayout)}); if sc_guard.is_some() { `;
+  const guardEnd = recursiveLayout === undefined ? "" : "} drop(sc_guard); ";
   return `{ let sc_value = ${value}; let sc_path = ${path}; match sc_value { ${dyn}::Array(sc_array) => ` +
     `runtime::array_mapped_source(&sc_array).unwrap_or_else(|| { ` +
-    `let mut sc_index = 0.0; while sc_index < runtime::array_len(&sc_array) { ` +
+    `${guard}let mut sc_index = 0.0; while sc_index < runtime::array_len(&sc_array) { ` +
     `let sc_item = runtime::array_get(&sc_array, sc_index); let _ = ${validate}; sc_index += 1.0; } ` +
-    `runtime::array_mapped(sc_array, |sc_item| ${read}, |sc_item| ${write}) }), ` +
+    `${guardEnd}runtime::array_mapped(sc_array, |sc_item| ${read}, |sc_item| ${write}) }), ` +
     `sc_other => sc_dyn_check_fail_at("array", &sc_other, sc_path), } }`;
 }
 

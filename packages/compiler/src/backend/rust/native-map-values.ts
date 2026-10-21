@@ -9,12 +9,14 @@ export function emitNativeMapFrom(element: IrType, value: string, dyn: string, b
     `None => ${dyn}::Object(runtime::map_mapped(sc_source, |sc_item| ${box(element, "sc_item")}, |sc_item| ${check(element, "sc_item")})), } }`;
 }
 
-export function emitNativeMapCheck(element: IrType, value: string, dyn: string, box: Convert, check: Convert, path = '"$"'): string {
+export function emitNativeMapCheck(element: IrType, value: string, dyn: string, box: Convert, check: Convert, path = '"$"', recursiveLayout?: string): string {
   const read = check(element, "sc_item");
   const validate = check(element, "sc_item", "&runtime::json_property_path(sc_path, runtime::map_iter_key(&sc_map, sc_index).as_ref())");
-  const project = `{ let mut sc_index = 0.0; while sc_index < runtime::map_iter_count(&sc_map) { ` +
+  const guard = recursiveLayout === undefined ? "" : `let sc_guard = ScNativeCheckGuard::enter(runtime::map_identity(&sc_map), ${JSON.stringify(recursiveLayout)}); if sc_guard.is_some() { `;
+  const guardEnd = recursiveLayout === undefined ? "" : "} drop(sc_guard); ";
+  const project = `{ ${guard}let mut sc_index = 0.0; while sc_index < runtime::map_iter_count(&sc_map) { ` +
     `if runtime::map_iter_live(&sc_map, sc_index) { let sc_item = runtime::map_iter_value(&sc_map, sc_index); let _ = ${validate}; } sc_index += 1.0; } ` +
-    `runtime::map_mapped(sc_map, |sc_item| ${read}, |sc_item| ${box(element, "sc_item")}) }`;
+    `${guardEnd}runtime::map_mapped(sc_map, |sc_item| ${read}, |sc_item| ${box(element, "sc_item")}) }`;
   // Null and undefined share Rust's unit layout. Recovering solely by Rust
   // type would bypass their distinct checked-boundary contracts.
   const checked = element.kind === "nullT" || element.kind === "undefinedT" ? project

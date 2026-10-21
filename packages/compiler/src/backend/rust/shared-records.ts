@@ -1,3 +1,4 @@
+import { recursiveNativeReference } from "../../ir/recursive-native.js";
 import { rustJsString } from "./string-literals.js";
 import { emitSharedTupleDefinition } from "./shared-tuples.js";
 import { sharedWidthPair } from "./shared-width.js";
@@ -101,6 +102,10 @@ export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordSh
     Object.values(value).forEach(visit);
   };
   for (const fn of mod.functions) { const pair = sharedWidthPair(fn, records, unions); if (pair) { mark(pair.source); mark(pair.target); } }
+  for (const shape of records.values()) {
+    const type: IrType = { kind: "record", shapeId: shape.id };
+    if (recursiveNativeReference(type, id => records.get(id), id => unions.get(id))) mark(type);
+  }
   visit(mod);
   // The complete dependency graph makes propagation independent of IR order.
   // All variants of a shared view must recheck its live discriminator.
@@ -182,6 +187,9 @@ export function emitSharedRecordDefinition(context: RustDefinitionContext, shape
   // populate the handler's caches merely to validate the asserted shape.
   context.line(`let object = match value { object @ ${dyn}::Proxy(..) => return ${name} { object }, object @ ${dyn}::Object(..) => object, value => sc_dyn_check_fail_at("object", &value, path) };`);
   context.line(`let record = ${name} { object };`);
+  if (recursiveNativeReference({ kind: "record", shapeId: shape.id }, id => context.records.get(id), id => context.union(id))) {
+    context.line(`let Some(_guard) = ScNativeCheckGuard::enter(record.identity(), "record:${context.rustString(shape.id)}") else { return record; };`);
+  }
   for (const field of shape.fields) context.line(`let _ = record.get_${mangleField(field.name)}_at(path);`);
   context.line("record }");
   context.line(`fn ${recordNewName(shape.id)}(value: ${struct}) -> ${name} {`);

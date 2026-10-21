@@ -62,7 +62,7 @@ test("shared fields and methods accept a single optional array view", () => {
   const optional: IrType = { kind: "union", unionId: "optional" };
   const check = (field: IrType, arms: IrType[]) => nativeRecordCheckSupported(
     { kind: "record", shapeId: "flag" },
-    id => ({ id, fields: [{ name: "member", type: field }] }),
+    id => id === "flag" ? { id, fields: [{ name: "member", type: field }] } : undefined,
     id => id === "optional" ? { id, arms } : undefined,
   );
   const arms: IrType[] = [{ kind: "array", elem: STRING }, { kind: "undefinedT" }, { kind: "nullT" }];
@@ -84,7 +84,7 @@ test("shared methods box scalar union returns without copying composites", () =>
   expect(check([F64, { kind: "bytes", elem: "u32" }])).toBe(false);
 });
 
-test("nested shared records admit acyclic and byte views but reject recursive layouts", () => {
+test("nested shared records admit guarded recursion and native byte views", () => {
   const records = new Map<string, IrRecordShape>([
     ["leaf", { id: "leaf", fields: [{ name: "count", type: F64 }] }],
     ["outer", { id: "outer", fields: [{ name: "leaf", type: { kind: "record", shapeId: "leaf" } }] }],
@@ -94,24 +94,23 @@ test("nested shared records admit acyclic and byte views but reject recursive la
   const getRecord = (id: string) => records.get(id);
   const check = (shapeId: string) => nativeRecordCheckSupported({ kind: "record", shapeId }, getRecord, () => undefined);
   expect(check("outer")).toBe(true);
-  expect(check("cycle")).toBe(false);
+  expect(check("cycle")).toBe(true);
   expect(check("bytes")).toBe(true);
   const optional: IrType = { kind: "union", unionId: "optional" };
   const checkUnion = (arms: IrType[]) => nativeRecordCheckSupported(optional, getRecord, id => ({ id, arms }));
   expect(checkUnion([{ kind: "record", shapeId: "leaf" }, { kind: "undefinedT" }, { kind: "nullT" }])).toBe(true);
   expect(checkUnion([{ kind: "record", shapeId: "leaf" }, { kind: "record", shapeId: "outer" }])).toBe(false);
-  expect(checkUnion([{ kind: "record", shapeId: "cycle" }, { kind: "undefinedT" }])).toBe(false);
+  expect(checkUnion([{ kind: "record", shapeId: "cycle" }, { kind: "undefinedT" }])).toBe(true);
 });
 
-test("indexed record recursion and record arrays retain their admission fences", () => {
+test("indexed records admit guarded recursion while acyclic array dictionaries retain their boundary", () => {
   const records = new Map<string, IrRecordShape>([
     ["loop", { id: "loop", fields: [], indexValue: { kind: "record", shapeId: "loop" } }],
     ["leaf", { id: "leaf", fields: [{ name: "kind", type: STRING }] }],
     ["array", { id: "array", fields: [], indexValue: { kind: "array", elem: { kind: "record", shapeId: "leaf" } } }],
   ]);
-  for (const shapeId of ["loop", "array"]) expect(nativeRecordCheckSupported(
-    { kind: "record", shapeId }, id => records.get(id), () => undefined,
-  )).toBe(false);
+  expect(nativeRecordCheckSupported({ kind: "record", shapeId: "loop" }, id => records.get(id), () => undefined)).toBe(true);
+  expect(nativeRecordCheckSupported({ kind: "record", shapeId: "array" }, id => records.get(id), () => undefined)).toBe(false);
 });
 
 test("tagged spread sources need no discriminant, while checking an untyped union still does", () => {
@@ -145,8 +144,8 @@ test("open records retain arrays of acyclic shared records, including optional a
   expect(nativeArrayCheckSupported(array, getRecord, getUnion)).toBe(true);
   expect(nativeRecordCheckSupported({ kind: "record", shapeId: "config" }, getRecord, getUnion)).toBe(true);
   records.set("row", { id: "row", fields: [{ name: "children", type: array }] });
-  expect(nativeArrayViewSupported(array, getRecord, getUnion)).toBe(false);
-  expect(nativeRecordCheckSupported({ kind: "record", shapeId: "config" }, getRecord, getUnion)).toBe(false);
+  expect(nativeArrayViewSupported(array, getRecord, getUnion)).toBe(true);
+  expect(nativeRecordCheckSupported({ kind: "record", shapeId: "config" }, getRecord, getUnion)).toBe(true);
   records.set("row", { id: "row", fields: [{ name: "%get:label", type: { kind: "func", params: [], ret: STRING } }] });
   expect(nativeArrayCheckSupported(array, getRecord, getUnion)).toBe(false);
 });

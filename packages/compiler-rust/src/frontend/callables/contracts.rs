@@ -50,7 +50,13 @@ impl Lowerer<'_> {
         }
         let shape_id = self.records.len();
         self.polymorphic_callables.insert(symbol, shape_id);
-        self.types.insert(id, Some(Type::Record { shape_id }));
+        self.types.insert(
+            id,
+            type_graph::Resolution::Resolving {
+                kind: type_graph::LayoutKind::Record,
+                reference: Some(Type::Record { shape_id }),
+            },
+        );
         self.records.push(ir::Record {
             id: shape_id,
             fields: vec![],

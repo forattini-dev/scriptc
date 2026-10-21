@@ -12,11 +12,44 @@ impl Lowerer<'_> {
             return Some(Type::Undefined);
         }
         if let Some(cached) = self.types.get(&id) {
-            return cached.clone();
+            return match cached {
+                type_graph::Resolution::Ready(ty) => Some(ty.clone()),
+                type_graph::Resolution::Failed { .. } => None,
+                type_graph::Resolution::Resolving { .. } => self.recursive_layout(id),
+            };
         }
-        self.types.insert(id, None);
-        let result = self.aggregate_type_inner(id);
-        self.types.insert(id, result.clone());
+        let checkpoint = self
+            .type_stack
+            .is_empty()
+            .then(|| type_graph::Checkpoint::new(self));
+        self.type_stack.push(id);
+        self.types.insert(
+            id,
+            type_graph::Resolution::Resolving {
+                kind: type_graph::LayoutKind::Other,
+                reference: None,
+            },
+        );
+        let mut result = self.aggregate_type_inner(id);
+        let reference = self.reserved_layout(id);
+        self.types.insert(
+            id,
+            match &result {
+                Some(ty) => type_graph::Resolution::Ready(ty.clone()),
+                None => type_graph::Resolution::Failed { reference },
+            },
+        );
+        assert_eq!(self.type_stack.pop(), Some(id));
+        if let Some(checkpoint) = checkpoint {
+            if checkpoint.failed_layout(self) {
+                result = None;
+            }
+            if result.is_none() {
+                checkpoint.restore(self);
+                self.types
+                    .insert(id, type_graph::Resolution::Failed { reference: None });
+            }
+        }
         result
     }
 
@@ -56,15 +89,27 @@ impl Lowerer<'_> {
             return self.callable_type(id);
         }
         if flags.intersects(TypeFlags::UNION) {
+            self.resolving_layout(id, type_graph::LayoutKind::Union);
             let source = self.checker.ty(id).types().to_vec();
             let mut arms = Vec::new();
             for source in source {
                 let arm = self.type_id(source)?;
                 if let Type::Union { union_id } = arm {
+                    if self.unions[union_id].arms.is_empty() {
+                        return None;
+                    }
                     arms.extend(self.unions[union_id].arms.clone());
                 } else {
                     arms.push(arm);
                 }
+            }
+            if let Some(Type::Union { union_id }) = self.reserved_layout(id) {
+                let arms = self.union_arms(arms)?;
+                if arms.len() < 2 || arms.contains(&Type::Dyn) {
+                    return None;
+                }
+                self.unions[union_id].arms = arms;
+                return Some(Type::Union { union_id });
             }
             return self.intern_union(arms);
         }
@@ -90,6 +135,7 @@ impl Lowerer<'_> {
         {
             return None;
         }
+        self.resolving_layout(id, type_graph::LayoutKind::Record);
         let properties = self.checker.get_properties_of_type(id).to_vec();
         let indexes = self.checker.get_index_infos_of_type(id).to_vec();
         let index_value = if indexes.is_empty() {
@@ -154,8 +200,19 @@ impl Lowerer<'_> {
         }
         let declared_order = fields.iter().map(|f| f.name.clone()).collect();
         fields.sort_by(|a, b| a.name.cmp(&b.name));
+        if let Some(Type::Record { shape_id }) = self.reserved_layout(id) {
+            self.records[shape_id] = ir::Record {
+                id: shape_id,
+                fields,
+                declared_order,
+                tuple: false,
+                index_value,
+            };
+            return Some(Type::Record { shape_id });
+        }
         if let Some(record) = self.records.iter().find(|r| {
             !r.tuple
+                && !self.pending_layout(&Type::Record { shape_id: r.id })
                 && !self.enum_shape(r.id)
                 && !self.callables.contains_key(&r.id)
                 && r.fields == fields
@@ -176,14 +233,14 @@ impl Lowerer<'_> {
         Some(Type::Record { shape_id })
     }
 
-    pub(super) fn intern_union(&mut self, mut arms: Vec<Type>) -> Option<Type> {
+    fn union_arms(&self, mut arms: Vec<Type>) -> Option<Vec<Type>> {
         if arms.contains(&Type::Dyn) {
-            return Some(Type::Dyn);
+            return Some(vec![Type::Dyn]);
         }
         arms.sort_by_key(|a| format!("{a:?}"));
         arms.dedup();
         if arms.len() == 1 {
-            return Some(arms[0].clone());
+            return Some(arms);
         }
         if arms.is_empty()
             || (arms.iter().any(|a| matches!(a, Type::Set { .. }))
@@ -197,6 +254,14 @@ impl Lowerer<'_> {
                 .any(|a| matches!(a, Type::Void | Type::Map { .. }))
         {
             return None;
+        }
+        Some(arms)
+    }
+
+    pub(super) fn intern_union(&mut self, arms: Vec<Type>) -> Option<Type> {
+        let arms = self.union_arms(arms)?;
+        if arms.len() == 1 {
+            return Some(arms[0].clone());
         }
         if let Some(union) = self.unions.iter().find(|u| u.arms == arms) {
             return Some(Type::Union { union_id: union.id });

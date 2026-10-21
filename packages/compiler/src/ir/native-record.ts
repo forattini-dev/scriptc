@@ -1,3 +1,4 @@
+import { recursiveNativeReference } from "./recursive-native.js";
 import { nativeTupleElement } from "./native-tuple.js";
 import { validRecordDiscriminant } from "./record-discriminant.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "./ir.js";
@@ -5,13 +6,15 @@ import type { IrRecordShape, IrType, IrUnionDef } from "./ir.js";
 /** Shared native records admit scalars and methods whose arguments/results
  * need no composite copy at the dynamic boundary. Arrays and scalar indexed
  * records have shared views, including optional acyclic nested records.
- * Byte views and BigInt retain their native references. Recursive layouts
- * remain fenced. Arrays of acyclic shared records retain mapped views. */
+ * Byte views and BigInt retain their native references. Guarded recursive
+ * records and JSON unions retain owning views; other recursive families
+ * remain fenced. Arrays of shared records retain mapped views. */
 export function nativeRecordShapeSupported(
   shape: IrRecordShape, unions: Pick<ReadonlyMap<string, IrUnionDef>, "get">,
   getRecord: (id: string) => IrRecordShape | undefined = () => undefined,
   visiting: Set<string> = new Set(),
 ): boolean {
+  if (recursiveNativeReference({ kind: "record", shapeId: shape.id }, getRecord, id => unions.get(id))) return true;
   if (shape.tuple) return nativeTupleElement(shape) !== undefined;
   if (visiting.has(shape.id)) return false;
   visiting.add(shape.id);
@@ -111,20 +114,21 @@ export function nativeArrayCheckSupported(
     (nativeArrayViewSupported(type, getRecord, getUnion) || nativeTupleCheckSupported(type.elem, getRecord));
 }
 
-/** Native array views check and box scalars or acyclic shared records without copies. */
+/** Native array views check and box scalars or supported shared records without copies. */
 export function nativeArrayViewSupported(
   type: IrType,
   getRecord: (id: string) => IrRecordShape | undefined = () => undefined,
   getUnion: (id: string) => IrUnionDef | undefined = () => undefined,
   visiting: Set<string> = new Set(),
 ): boolean {
+  if (type.kind === "array" && recursiveNativeReference(type, getRecord, getUnion)) return true;
   const shape = type.kind === "array" && type.elem.kind === "record" ? getRecord(type.elem.shapeId) : undefined;
   return type.kind === "array" && (nativeArrayViewSupported(type.elem, getRecord, getUnion, visiting) ||
     (shape !== undefined && !shape.tuple && nativeRecordShapeSupported(shape, { get: getUnion }, getRecord, visiting)) ||
     ["effect", "date", "f64", "bool", "string", "dyn"].includes(type.elem.kind));
 }
 
-/** Acyclic dictionaries project scalar or shared record values without copies. */
+/** Supported dictionaries project scalar or shared record values without copies. */
 export function nativeIndexedRecordValue(
   type: IrType, getRecord: (id: string) => IrRecordShape | undefined,
   getUnion: (id: string) => IrUnionDef | undefined,

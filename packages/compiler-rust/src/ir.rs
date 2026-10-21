@@ -977,11 +977,19 @@ impl Module {
     }
     fn valid_type(&self, ty: Type, active: &mut Vec<Type>) -> bool {
         if let Some(first) = active.iter().position(|current| *current == ty) {
-            // Callable signatures describe an ABI, rather than an inline
-            // storage edge. Recursive callable results may name their record.
-            return active[first..]
-                .iter()
-                .any(|edge| matches!(edge, Type::Func { .. }));
+            // A recursive native layout must cross owning heap storage (or a
+            // callable ABI). Union payloads alone would form an infinite Rust
+            // value; records and arrays hold traced handles instead.
+            return active[first..].iter().any(|edge| {
+                matches!(
+                    edge,
+                    Type::Func { .. }
+                        | Type::Record { .. }
+                        | Type::Array { .. }
+                        | Type::Map { .. }
+                        | Type::Promise { .. }
+                )
+            });
         }
         active.push(ty.clone());
         let valid = match ty {
@@ -4133,8 +4141,8 @@ mod tests {
         );
         m.records[0].fields[0].r#type = array.clone();
         assert!(
-            !m.valid_type(array, &mut vec![]),
-            "cycles through array elements must be checked"
+            m.valid_type(array, &mut vec![]),
+            "array and record handles guard recursive element storage"
         );
         assert!(!m.valid_type(
             Type::Array {
@@ -4370,7 +4378,7 @@ mod tests {
     }
 
     #[test]
-    fn indexed_layouts_reject_cycles_and_incompatible_overflow() {
+    fn indexed_layouts_accept_guarded_cycles_and_reject_incompatible_overflow() {
         let mut m = callable_module();
         m.functions.truncate(1);
         let loc = m.functions[0].loc.clone();
@@ -4402,7 +4410,8 @@ mod tests {
         m.records[0].index_value = Some(Type::Bool);
         assert!(validate(&m).is_ok());
         m.records[0].index_value = Some(Type::Record { shape_id: 0 });
-        assert_eq!(validate(&m).unwrap_err(), "invalid/recursive record layout");
+        assert!(m.valid_type(Type::Record { shape_id: 0 }, &mut vec![]));
+        assert_eq!(validate(&m).unwrap_err(), "invalid overflow initializer");
         m.records[0].index_value = Some(Type::Func {
             rest: false,
             params: vec![],
@@ -4505,7 +4514,7 @@ mod tests {
     }
 
     #[test]
-    fn callable_signature_cycles_are_distinct_from_inline_layout_cycles() {
+    fn recursive_signatures_and_record_handles_have_finite_storage() {
         let mut m = record_module();
         m.records[0].fields[0].r#type = Type::Func {
             rest: false,
@@ -4514,6 +4523,34 @@ mod tests {
         };
         assert!(m.valid_type(Type::Record { shape_id: 0 }, &mut vec![]));
         m.records[0].fields[0].r#type = Type::Record { shape_id: 0 };
+        assert!(m.valid_type(Type::Record { shape_id: 0 }, &mut vec![]));
+    }
+
+    #[test]
+    fn recursive_union_layouts_require_heap_edges_and_validate_other_members() {
+        let mut m = record_module();
+        m.unions.push(Union {
+            id: 0,
+            arms: vec![
+                Type::Null,
+                Type::Array {
+                    elem: Box::new(Type::Union { union_id: 0 }),
+                },
+            ],
+        });
+        assert!(m.valid_type(Type::Union { union_id: 0 }, &mut vec![]));
+        m.unions[0].arms[1] = Type::Union { union_id: 0 };
+        assert!(!m.valid_type(Type::Union { union_id: 0 }, &mut vec![]));
+        m.unions[0].arms[1] = Type::Record { shape_id: 0 };
+        m.records[0].fields[0].r#type = Type::Union { union_id: 0 };
+        assert!(m.valid_type(Type::Union { union_id: 0 }, &mut vec![]));
+        m.records[0].fields.push(Field {
+            name: "missing".into(),
+            r#type: Type::Record { shape_id: 99 },
+        });
+        assert!(!m.valid_type(Type::Union { union_id: 0 }, &mut vec![]));
+        m.records[0].fields.pop();
+        m.unions[0].arms.clear();
         assert!(!m.valid_type(Type::Record { shape_id: 0 }, &mut vec![]));
     }
 
@@ -4597,7 +4634,11 @@ mod tests {
         let mut m = record_module();
         assert!(validate(&m).is_ok());
         m.records[0].fields[0].r#type = Type::Record { shape_id: 0 };
-        assert_eq!(validate(&m).unwrap_err(), "invalid/recursive record layout");
+        assert!(m.valid_type(Type::Record { shape_id: 0 }, &mut vec![]));
+        assert!(
+            validate(&m).is_err(),
+            "the initializer must still match its recursive field"
+        );
         let mut m = record_module();
         m.records[0].declared_order.clear();
         assert_eq!(

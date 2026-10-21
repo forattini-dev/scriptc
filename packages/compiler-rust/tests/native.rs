@@ -91,6 +91,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-recursive-values/main.ts",
+        "rust-native-recursive-values/mutual.ts",
+        "rust-native-recursive-values/json.ts",
+        "rust-native-recursive-values/empty.ts",
+        "rust-native-recursive-values/contracts.ts",
+        "rust-native-recursive-values/checked.ts",
+        "rust-native-recursive-values/dictionary.ts",
         "rust-native-private-methods/main.ts",
         "rust-native-private-methods/brands.ts",
         "rust-native-private-methods/order.ts",
@@ -1358,18 +1365,8 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         (
-            "recursive-dictionary",
-            "interface Node { next: Record<string, Node> } function f(value: Node): void {} f;",
-            "SCN1001",
-        ),
-        (
             "dictionary-prototype-write",
             "const values: Record<string, boolean> = {}; values['__proto__'] = false;",
-            "SCN1001",
-        ),
-        (
-            "recursive-record",
-            "interface Link { next?: Link }; function f(link: Link): void {} f;",
             "SCN1001",
         ),
         (
@@ -3187,6 +3184,47 @@ fn file_url_boundaries_preserve_previous_artifacts() {
         );
         for path in artifacts {
             assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn unsupported_recursive_layouts_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "recursive-boundary");
+    for source in [
+        "type Chain = Chain[]; const chain: Chain = []; console.log(chain.length);",
+        "type Chain = [Chain]; function use(value: Chain): number { return 1; } console.log(use);",
+        "interface Bad { self: Bad; invalid: Map<string, number> | string; } function use(value: Bad): number { return 1; } console.log(use);",
+        "interface Bad { self: Bad; method(): number; } function use(value: Bad): number { return 1; } console.log(use);",
+    ] {
+        fs::write(&input, source).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in &artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
 }

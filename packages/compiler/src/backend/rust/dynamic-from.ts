@@ -27,6 +27,9 @@ interface DynFromHelper {
 export class RustDynamicFromEmitter {
   private readonly helperNames = new Map<string, string>();
   private readonly helpers: DynFromHelper[] = [];
+  private emitted = 0;
+
+  get pending(): boolean { return this.emitted < this.helpers.length; }
 
   constructor(private readonly context: RustDynamicContext, private readonly check: (type: IrType, value: string, loc?: SrcLoc) => string) {}
 
@@ -38,8 +41,8 @@ export class RustDynamicFromEmitter {
   }
 
   emitDefinitions(): void {
-    for (let index = 0; index < this.helpers.length; index++) {
-      const helper = this.helpers[index];
+    while (this.pending) {
+      const helper = this.helpers[this.emitted++];
       if (helper === undefined) continue;
       this.context.line(`fn ${helper.name}(value: ${this.context.rustType(helper.type, helper.loc)}) -> ${this.context.dynTypeName()} {`);
       this.context.pushIndent();

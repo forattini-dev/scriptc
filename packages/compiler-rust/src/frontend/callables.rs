@@ -31,7 +31,13 @@ impl Lowerer<'_> {
             tuple: false,
             index_value: None,
         });
-        self.types.insert(id, Some(result.clone()));
+        self.types.insert(
+            id,
+            type_graph::Resolution::Resolving {
+                kind: type_graph::LayoutKind::Record,
+                reference: Some(result.clone()),
+            },
+        );
         let signature = self.function_type(id)?;
         let mut fields = vec![ir::Field {
             name: CALL_FIELD.into(),
@@ -100,7 +106,8 @@ impl Lowerer<'_> {
             let result = Type::Record {
                 shape_id: existing.id,
             };
-            self.types.insert(id, Some(result.clone()));
+            self.types
+                .insert(id, type_graph::Resolution::Ready(result.clone()));
             return Some(result);
         }
         self.callables.insert(shape_id, signature);
