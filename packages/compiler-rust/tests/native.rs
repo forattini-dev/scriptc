@@ -86,11 +86,29 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     for name in ["node", "go", "tsgo", "tsc", "bun"] {
         fs::copy(&trap, binary(&traps, name)).unwrap();
     }
+    let helper = binary(temp.path(), "exec-file-helper");
+    success(
+        &Command::new("rustc")
+            .arg(root().join("tests/fixtures/native-exec-file-helper.rs"))
+            .arg("-o")
+            .arg(&helper)
+            .output()
+            .unwrap(),
+    );
     let marker = temp.path().join("forbidden-called");
     let mut paths = vec![traps];
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-exec-file/identity.ts",
+        "rust-native-exec-file/success.ts",
+        "rust-native-exec-file/errors.ts",
+        "rust-native-exec-file/limits.ts",
+        "rust-native-exec-file/callbacks.ts",
+        "rust-native-exec-file/validation.ts",
+        "rust-native-exec-file/callback-errors.ts",
+        "rust-native-exec-file/options.ts",
+        "rust-native-exec-file/properties.ts",
         "rust-native-recursive-values/equivalent.ts",
         "rust-native-recursive-values/equivalent-nullable.ts",
         "rust-native-recursive-values/equivalent-mutual.ts",
@@ -348,6 +366,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         let artifacts = tempfile::tempdir_in(temp.path()).unwrap();
         let target = binary(artifacts.path(), &format!("case-{index}"));
         let expected = Command::new(oracle())
+            .env("SCRIPTC_EXEC_FILE_HELPER", &helper)
             .arg(&input)
             .envs(process_environment(name, false))
             .env_remove("SCRIPTC_NATIVE_PROCESS_MISSING")
@@ -355,6 +374,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
             .unwrap();
         success(&expected);
         let build = Command::new(compiler())
+            .env("SCRIPTC_EXEC_FILE_HELPER", &helper)
             .args(["build"])
             .arg(&input)
             .arg("--out")
@@ -376,6 +396,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
             "780dc512d64f40afebffa6a7028207649fb7ed1c"
         );
         let actual = Command::new(&target)
+            .env("SCRIPTC_EXEC_FILE_HELPER", &helper)
             .env("PATH", &path)
             .env("SCRIPTC_FORBIDDEN_MARKER", &marker)
             .env("SCRIPTC_RUST_HEAP_AUDIT", "1")

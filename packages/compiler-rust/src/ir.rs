@@ -1,5 +1,6 @@
 //! The first native subset of the existing scriptc IR v13 wire contract.
 use serde::Serialize;
+mod child_process;
 pub mod record_equivalence;
 pub mod record_views;
 mod symbol_methods;
@@ -66,6 +67,7 @@ pub enum Type {
     Bool,
     Regex,
     Symbol,
+    Child,
     Bytes {
         elem: String,
     },
@@ -2426,6 +2428,21 @@ fn validate_function(
                     }
                     return Ok(());
                 }
+                if let Some(valid) = child_process::signature(
+                    r#fn,
+                    &args.iter().map(Expr::ty).collect::<Vec<_>>(),
+                    r#type,
+                    module,
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native child process signature".into())
+                    };
+                }
                 let builtin = crate::builtins::by_ir(r#fn).ok_or("unknown native library call")?;
                 if *r#type != builtin.result || args.len() != builtin.args.len() {
                     return Err("invalid native library signature".into());
@@ -2486,6 +2503,7 @@ fn validate_function(
                                 | Type::Object { .. }
                                 | Type::Bytes { .. }
                                 | Type::Promise { .. }
+                                | Type::Child
                         )
                 } else {
                     left.ty() == Type::F64 && right.ty() == Type::F64
@@ -2853,6 +2871,84 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exec_file_contract_rejects_malformed_capture_and_handle_abis() {
+        let mut module = callable_module();
+        module.records.push(Record {
+            id: 0,
+            fields: vec![
+                Field {
+                    name: "stdout".into(),
+                    r#type: Type::String,
+                },
+                Field {
+                    name: "stderr".into(),
+                    r#type: Type::String,
+                },
+            ],
+            tuple: false,
+            index_value: None,
+            declared_order: vec![],
+        });
+        let args = [Type::Array {
+            elem: Box::new(Type::Dyn),
+        }];
+        let promise = Type::Promise {
+            inner: Box::new(Type::Record { shape_id: 0 }),
+        };
+        let check = |name, args: &[Type], result: &Type, module: &Module| {
+            child_process::signature(name, args, result, module)
+        };
+        assert_eq!(
+            check("cp.execFileNative", &args, &Type::Child, &module),
+            Some(true)
+        );
+        assert_eq!(
+            check("cp.execFilePromise", &args, &promise, &module),
+            Some(true)
+        );
+        assert_eq!(
+            check("cp.execFilePromise", &[], &promise, &module),
+            Some(false)
+        );
+        assert_eq!(
+            check("cp.execFilePromise", &args, &Type::Child, &module),
+            Some(false)
+        );
+        assert_eq!(
+            check(
+                "cp.promiseChild",
+                std::slice::from_ref(&promise),
+                &Type::Child,
+                &module
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            check("cp.promiseChild", &[Type::String], &Type::Child, &module),
+            Some(false)
+        );
+        assert_eq!(
+            check("child.killed", &[Type::Child], &Type::Bool, &module),
+            Some(true)
+        );
+        assert_eq!(
+            check("child.killed", &[Type::F64], &Type::Bool, &module),
+            Some(false)
+        );
+        module.records[0].fields[1].r#type = Type::F64;
+        assert_eq!(
+            check("cp.execFilePromise", &args, &promise, &module),
+            Some(false)
+        );
+        module.records[0].fields[1].r#type = Type::String;
+        module.records[0].index_value = Some(Type::String);
+        assert_eq!(
+            check("cp.execFilePromise", &args, &promise, &module),
+            Some(false)
+        );
+    }
 
     #[test]
     fn async_context_library_calls_preserve_handle_and_value_contracts() {

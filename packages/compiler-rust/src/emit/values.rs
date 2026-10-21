@@ -2,7 +2,7 @@
 use super::*;
 use std::fmt::Write;
 
-fn types(module: &Module) -> Vec<Type> {
+pub(super) fn types(module: &Module) -> Vec<Type> {
     fn visit(ty: &Type, out: &mut Vec<Type>) {
         if out.contains(ty) || *ty == Type::Void {
             return;
@@ -122,6 +122,7 @@ fn specialized(ty: &Type, module: &Module) -> bool {
             | Type::Set { .. }
             | Type::Classval { .. }
             | Type::Bytes { .. }
+            | Type::Child
     )
 }
 fn boxed(ty: &Type, value: &str, module: &Module) -> String {
@@ -162,6 +163,11 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
     out.push_str("_ => {} } } }\nimpl runtime::ArrayElement for NativeValue { fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { self.trace_native(tracer); } }\n");
     let record_tags =
         crate::ir::record_equivalence::record_representatives(&module.records, &module.unions);
+    out.push_str("fn native_promise_property(promise: &runtime::JsPromise<NativeValue>, key: &str) -> NativeValue {\n");
+    if types.contains(&Type::Child) {
+        writeln!(out, "if key == \"child\" {{ return runtime::promise_own_get::<_, runtime::JsChild>(promise, key).map(|value| {}).unwrap_or(NativeValue::Undefined); }}", boxed(&Type::Child, "value", module)).unwrap();
+    }
+    out.push_str("native_value_missing_kind(key, \"promise\") }\n");
     for (i, ty) in types.iter().enumerate() {
         let rt = rust_type(ty.clone(), module);
         let (box_code, try_code) = match ty {
@@ -288,7 +294,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
     out.push_str("NativeValue::Record(_,object) => { if key == \"__proto__\" { runtime::throw_type_error(\"scriptc: ordinary prototype writes are not ported\".into()); } native_record_set(&object, key, field); }, _ => runtime::throw_type_error(\"scriptc: property writes require a native plain object\".into()) } }\n");
     out.push_str("fn native_record_plan_set(plan: NativeValue, key: String, value: NativeValue) { match plan { NativeValue::Object(object) => object.with_mut(|data| native_record_define(&mut data.entries, key, value)), NativeValue::Record(_,object) => native_record_set(&object, key, value), _ => runtime::throw_type_error(\"scriptc: own-value plan must be a native object\".into()) } }\n");
     own_key_definitions(&types, module, out);
-    out.push_str("fn native_value_get(value: NativeValue, key: String) -> NativeValue { match value { NativeValue::Record(_,object) => native_record_property(&object, &key), NativeValue::Undefined => runtime::throw_type_error(format!(\"Cannot read properties of undefined (reading '{}')\", key)), NativeValue::Null => runtime::throw_type_error(format!(\"Cannot read properties of null (reading '{}')\", key)), NativeValue::Promise(_) => native_value_missing_kind(&key, \"promise\"), NativeValue::Map(map) => { if key == \"size\" { NativeValue::Number(map.with(|m| m.entries.len() as f64)) } else { native_value_missing_kind(&key, \"map\") } }, NativeValue::Object(object) => object.with(|o| o.entries.iter().find(|(k,_)| *k == key).map(|(_,v)| v.clone()).unwrap_or_else(|| native_value_missing(&key))), NativeValue::Array(array) => { if key == \"length\" { NativeValue::Number(runtime::array_len(&array)) } else if let Ok(i) = key.parse::<usize>() { if i.to_string() == key && (i as f64) < runtime::array_len(&array) { runtime::array_get(&array, i as f64) } else { NativeValue::Undefined } } else { native_value_missing_kind(&key, \"array\") } }, NativeValue::String(s) => { if key == \"length\" { NativeValue::Number(s.encode_utf16().count() as f64) } else if let Ok(index) = key.parse::<usize>() { if index.to_string() == key { s.encode_utf16().nth(index).map(|unit| NativeValue::String(String::from_utf16(&[unit]).unwrap_or_else(|_| runtime::throw_type_error(\"scriptc: lone UTF-16 surrogates are not ported\".into())))).unwrap_or(NativeValue::Undefined) } else { NativeValue::Undefined } } else { native_value_missing_kind(&key, \"string\") } },\n");
+    out.push_str("fn native_value_get(value: NativeValue, key: String) -> NativeValue { match value { NativeValue::Record(_,object) => native_record_property(&object, &key), NativeValue::Undefined => runtime::throw_type_error(format!(\"Cannot read properties of undefined (reading '{}')\", key)), NativeValue::Null => runtime::throw_type_error(format!(\"Cannot read properties of null (reading '{}')\", key)), NativeValue::Promise(promise) => native_promise_property(&promise, &key), NativeValue::Map(map) => { if key == \"size\" { NativeValue::Number(map.with(|m| m.entries.len() as f64)) } else { native_value_missing_kind(&key, \"map\") } }, NativeValue::Object(object) => object.with(|o| o.entries.iter().find(|(k,_)| *k == key).map(|(_,v)| v.clone()).unwrap_or_else(|| native_value_missing(&key))), NativeValue::Array(array) => { if key == \"length\" { NativeValue::Number(runtime::array_len(&array)) } else if let Ok(i) = key.parse::<usize>() { if i.to_string() == key && (i as f64) < runtime::array_len(&array) { runtime::array_get(&array, i as f64) } else { NativeValue::Undefined } } else { native_value_missing_kind(&key, \"array\") } }, NativeValue::String(s) => { if key == \"length\" { NativeValue::Number(s.encode_utf16().count() as f64) } else if let Ok(index) = key.parse::<usize>() { if index.to_string() == key { s.encode_utf16().nth(index).map(|unit| NativeValue::String(String::from_utf16(&[unit]).unwrap_or_else(|_| runtime::throw_type_error(\"scriptc: lone UTF-16 surrogates are not ported\".into())))).unwrap_or(NativeValue::Undefined) } else { NativeValue::Undefined } } else { native_value_missing_kind(&key, \"string\") } },\n");
     for (i, t) in types.iter().enumerate() {
         if let Type::Record { shape_id } = t {
             let r = &module.records[*shape_id];
@@ -345,6 +351,11 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
         }
     }
     for (i, t) in types.iter().enumerate() {
+        if *t == Type::Child {
+            writeln!(out, "NativeValue::V{i}(child) => match key.as_str() {{ \"pid\" => runtime::child_pid(&child).map(NativeValue::Number).unwrap_or(NativeValue::Undefined), \"exitCode\" => runtime::child_exit_code(&child).map(NativeValue::Number).unwrap_or(NativeValue::Null), \"killed\" => NativeValue::Boolean(runtime::child_killed(&child)), \"then\" => NativeValue::Undefined, _ => runtime::throw_type_error(\"scriptc: ChildProcess member is not ported\".into()) }},").unwrap();
+        }
+    }
+    for (i, t) in types.iter().enumerate() {
         if let Type::Array { elem } = t
             && **elem != Type::Dyn
         {
@@ -359,7 +370,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
     }
     if !module.classes.is_empty() {
         out.push_str(
-            "NativeValue::Instance(object) => { let kind = object.with(|o| o.kind); match kind {\n",
+            "NativeValue::Instance(object) => { if let Some(value) = object.with(|o| o.error.as_ref().and_then(|e| e.own.iter().find(|(name,_)| name == &key).map(|(_,v)| v.clone()))) { return value; } let kind = object.with(|o| o.kind); match kind {\n",
         );
         for (i, c) in module.classes.iter().enumerate() {
             writeln!(out, "{i} => match key.as_str() {{").unwrap();
@@ -446,7 +457,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
 }
 
 fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
-    out.push_str("fn native_value_own_keys(value: &NativeValue) -> Vec<String> { match value { NativeValue::Record(_,object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()), NativeValue::Object(object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()),\n");
+    out.push_str("fn native_value_own_keys(value: &NativeValue) -> Vec<String> { match value { NativeValue::Promise(promise) => runtime::promise_own_keys(promise), NativeValue::Record(_,object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()), NativeValue::Object(object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()),\n");
     for (i, ty) in types.iter().enumerate() {
         if let Type::Record { shape_id } = ty {
             let record = &module.records[*shape_id];

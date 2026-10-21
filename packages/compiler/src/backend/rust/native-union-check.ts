@@ -19,6 +19,8 @@ function variants(type: IrType): readonly string[] | null {
     case "array": return ["Array"];
     case "record": return ["Object", "Proxy"];
     case "func": return ["function"];
+    case "promise": return ["Promise"];
+    case "child": return ["Child"];
     case "bytes": return type.elem === "u8" ? ["Bytes", "Buffer"] : null;
     case "object": return ["Object"];
     case "netSocket": return ["NetSocket"];

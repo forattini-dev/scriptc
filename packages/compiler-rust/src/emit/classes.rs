@@ -24,7 +24,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
     // Each supported definition executes once at module scope. Constructor
     // values cannot be widened across class identities in this ABI.
     output.push_str("#[derive(Clone, Copy, PartialEq)]\nstruct NativeClass(usize);\nimpl NativeTrace for NativeClass { fn trace_native(&self, _: &mut runtime::Tracer<'_>) {} }\nimpl runtime::ArrayElement for NativeClass {}\n");
-    output.push_str("struct NativeErrorData { name: String, message: String }\nstruct NativeInstance { kind: usize, error: Option<NativeErrorData>, fields: NativeInstanceFields }\nenum NativeInstanceFields {\n");
+    output.push_str("struct NativeErrorData { name: String, message: String, own: Vec<(String, NativeValue)> }\nstruct NativeInstance { kind: usize, error: Option<NativeErrorData>, fields: NativeInstanceFields }\nenum NativeInstanceFields {\n");
     for (index, class) in module.classes.iter().enumerate() {
         writeln!(output, "C{index} {{").unwrap();
         for field in class.fields.iter().skip(module.class_header_len(class)) {
@@ -38,7 +38,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
         }
         output.push_str("},\n");
     }
-    output.push_str("}\nimpl runtime::Trace for NativeInstance { fn trace(&self, tracer: &mut runtime::Tracer<'_>) { match &self.fields {\n");
+    output.push_str("}\nimpl runtime::Trace for NativeInstance { fn trace(&self, tracer: &mut runtime::Tracer<'_>) { if let Some(error) = &self.error { for (_, value) in &error.own { value.trace_native(tracer); } } match &self.fields {\n");
     for (index, class) in module.classes.iter().enumerate() {
         let names = class
             .fields
@@ -61,7 +61,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
         }
         output.push_str("},\n");
     }
-    output.push_str("} } }\nimpl runtime::ClearEdges for NativeInstance { fn clear_edges(&mut self) { match &mut self.fields {\n");
+    output.push_str("} } }\nimpl runtime::ClearEdges for NativeInstance { fn clear_edges(&mut self) { if let Some(error) = &mut self.error { error.own.clear(); } match &mut self.fields {\n");
     for (index, class) in module.classes.iter().enumerate() {
         let names = class
             .fields
@@ -94,7 +94,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                 native = module.class(native.base.as_ref().unwrap()).unwrap();
             }
             format!(
-                "Some(NativeErrorData {{ name: String::from({:?}), message: String::new() }})",
+                "Some(NativeErrorData {{ name: String::from({:?}), message: String::new(), own: Vec::new() }})",
                 native.js_name
             )
         } else {

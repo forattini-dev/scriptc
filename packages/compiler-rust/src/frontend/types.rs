@@ -30,6 +30,18 @@ impl Lowerer<'_> {
         if let Some(ty) = self.primitive_type(self.checker.ty(id).flags) {
             return Some(ty);
         }
+        let symbol = self.checker.ty(id).symbol().0;
+        if symbol != 0
+            && self
+                .checker
+                .sym(source_frontend::prelude::SymbolId(symbol))
+                .name
+                .as_ref()
+                == "ChildProcess"
+            && self.standard_child_symbol(symbol)
+        {
+            return Some(Type::Child);
+        }
         if self.standard_console_type(id) {
             return Some(console::text_sink_type());
         }
@@ -48,6 +60,9 @@ impl Lowerer<'_> {
         self.aggregate_type(id)
     }
     pub(super) fn ty(&mut self, node: Node) -> Result<Type, String> {
+        if let Some(ty) = self.child_projected_type(node) {
+            return Ok(ty);
+        }
         if self
             .commonjs
             .requires

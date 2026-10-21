@@ -30,7 +30,7 @@ export function emitRustDynamicKindQueries(context: RustDynamicContext, boxedSha
   context.line(`${name}::Getter(..) => "function",`);
   context.line(`${name}::Promise(..) => "promise",`);
   context.line(`${name}::NetServer(..) => "object",`);
-  context.line(`${name}::NetSocket(..) => "object",`);
+  context.line(`${name}::NetSocket(..) | ${name}::Child(..) => "object",`);
   context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => "object",`);
   if (boxedShapes.length > 0) {
     context.line(`${boxedShapes.map((shape) => `${name}::${context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
@@ -72,7 +72,7 @@ export function emitRustDynamicKindQueries(context: RustDynamicContext, boxedSha
   context.line(`${name}::TypedBytes(..) => "object",`);
   context.line(`${name}::Buffer(..) => "object",`);
   context.line(`${name}::NetServer(..) => "object",`);
-  context.line(`${name}::NetSocket(..) => "object",`);
+  context.line(`${name}::NetSocket(..) | ${name}::Child(..) => "object",`);
   if (boxedShapes.length > 0) {
     context.line(`${boxedShapes.map((shape) => `${name}::${context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
   }

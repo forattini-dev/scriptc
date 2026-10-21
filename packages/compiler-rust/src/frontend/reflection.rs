@@ -128,6 +128,7 @@ impl Lowerer<'_> {
 
     fn reflected_record(&self, ty: &Type) -> bool {
         match ty {
+            Type::Promise { .. } => true,
             Type::Record { shape_id } => {
                 let shape = &self.records[*shape_id];
                 !shape.tuple

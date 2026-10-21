@@ -44,6 +44,7 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::ArrayIterator(..) => "Object [Array Iterator] {}".to_owned(),`);
   context.line(`${name}::NetServer(..) => "Server {}".to_owned(),`);
   context.line(`${name}::NetSocket(..) => "Socket {}".to_owned(),`);
+  context.line(`${name}::Child(..) => runtime::throw_type_error("scriptc: ChildProcess inspection is not ported".into()),`);
   context.line(`${name}::AbortController(..) => "AbortController {}".to_owned(), ${name}::AbortSignal(..) => "AbortSignal { aborted: false }".to_owned(), ${name}::HttpRequest(..) => "IncomingMessage {}".to_owned(),`);
   context.line(`${name}::HttpHeaders(..) => "Headers {}".to_owned(),`);
   context.line(`${name}::FetchBody(..) => "ReadableStream {}".to_owned(),`);
@@ -97,7 +98,7 @@ export function emitRustDynamicAssertions(
   context.popIndent();
   context.line("}");
 
-  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::NativePrototype(..) | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::ArrayIterator(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Url(..) | ${name}::SearchParams(..) | ${name}::Map(..) | ${name}::Set(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
+  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::NativePrototype(..) | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::ArrayIterator(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Url(..) | ${name}::SearchParams(..) | ${name}::Map(..) | ${name}::Set(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::Child(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
   if (functionPatterns.length === 0) {
     context.line(`fn sc_dyn_assert_is_function(value: &${name}) -> bool { matches!(value, ${name}::NativeConstructor(..) | ${name}::NativeMethod(..)) }`);
   } else {

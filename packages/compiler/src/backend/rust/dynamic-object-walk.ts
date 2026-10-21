@@ -48,6 +48,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line("match value {");
   context.pushIndent();
   context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("object reflection"),`);
+  context.line(`${name}::Promise(handle) => for key in runtime::promise_handle_own_keys(handle) { let field = if mode == 0 { ${name}::Undefined } else if key == "child" { runtime::promise_handle_own_get::<runtime::JsChild>(handle, &key).map(${name}::Child).unwrap_or(${name}::Undefined) } else { runtime::throw_type_error("scriptc: Promise own property is not ported".into()) }; sc_dyn_obj_walk_push(&output, mode, runtime::string(&key), field); },`);
   context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("object reflection"),`);
   if (context.hasEmbeddedModules()) context.line(`${name}::Island(value) => return sc_dyn_island_object_walk(value, mode),`);
   context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);

@@ -1,3 +1,4 @@
+import { emitExecFileCall } from "./exec-file.js";
 import { wellKnownSymbolVariant } from "../../ir/well-known-symbols.js";
 import { emitRustWeakMapCall } from "./weak-maps.js";
 import { emitRustBigIntCall } from "./bigint.js";
@@ -117,6 +118,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (eventEmitterCall !== null) return eventEmitterCall;
   const dynamicCall = emitRustDynamicLibCall(expr, context);
   if (dynamicCall !== null) return dynamicCall;
+  const execFileCall = emitExecFileCall(expr, context);
+  if (execFileCall !== null) return execFileCall;
   const childProcessCall = emitRustChildProcessCall(expr, context);
   if (childProcessCall !== null) return childProcessCall;
   const sqliteCall = emitRustSqliteCall(expr, context);

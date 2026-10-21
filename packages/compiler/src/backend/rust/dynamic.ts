@@ -1,3 +1,4 @@
+import { emitExecFileDefinitions } from "./exec-file.js";
 import { recursiveNativeReference } from "../../ir/recursive-native.js";
 import { RecursiveNativeChecks } from "./recursive-checks.js";
 import { isRegexCaptureRow } from "../../ir/regex-captures.js";
@@ -78,6 +79,7 @@ export class RustDynamicEmitter {
     this.context.line("NativeConstructor(&'static str),");
     this.context.line("NativeMethod(ScDynNativeMethod),");
     this.context.line("Promise(runtime::JsPromiseHandle),");
+    this.context.line("Child(runtime::JsChild),");
     this.context.line("NetServer(runtime::JsNetServer),");
     this.context.line("NetSocket(runtime::JsNetSocket),");
     this.context.line(`AbortController(runtime::JsAbortSignal<${name}>), AbortSignal(runtime::JsAbortSignal<${name}>), HttpRequest(runtime::JsHttpRequest),`);
@@ -123,6 +125,7 @@ export class RustDynamicEmitter {
     this.context.line("Self::Promise(value) => runtime::promise_handle_trace(value, tracer),");
     this.context.line("Self::NetServer(value) => tracer.edge(value),");
     this.context.line("Self::NetSocket(value) => tracer.edge(value),");
+    this.context.line("Self::Child(value) => tracer.edge(value),");
     this.context.line("Self::AbortController(value) | Self::AbortSignal(value) => tracer.edge(value), Self::HttpRequest(value) => tracer.edge(value),");
     this.context.line("Self::HttpHeaders(value) => tracer.edge(value),");
     this.context.line("Self::FetchBody(value) => tracer.edge(value),");
@@ -190,6 +193,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::NetServer(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::NetSocket(..) => { writer.begin_object(); writer.end_object(); },`);
+    this.context.line(`${name}::Child(..) => runtime::throw_type_error("scriptc: ChildProcess JSON serialization is not ported".into()),`);
     this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => { writer.begin_object(); writer.end_object(); },`);
     if (usesEmbeddedModules) {
       this.context.line(`${name}::Island(value) => runtime::JsonValue::write_json(&runtime::island_json_node(value), writer),`);
@@ -349,6 +353,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(value) => ${name}::Promise(value.clone()),`);
     this.context.line(`${name}::NetServer(value) => ${name}::NetServer(value.clone()),`);
     this.context.line(`${name}::NetSocket(value) => ${name}::NetSocket(value.clone()),`);
+    this.context.line(`${name}::Child(value) => ${name}::Child(value.clone()),`);
     this.context.line(`${name}::AbortController(value) => ${name}::AbortController(value.clone()), ${name}::AbortSignal(value) => ${name}::AbortSignal(value.clone()), ${name}::HttpRequest(value) => ${name}::HttpRequest(value.clone()),`);
     this.context.line(`${name}::HttpHeaders(value) => ${name}::HttpHeaders(value.clone()),`);
     this.context.line(`${name}::FetchBody(value) => ${name}::FetchBody(value.clone()),`);
@@ -414,6 +419,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::NetServer(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::NetSocket(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
+    this.context.line(`${name}::Child(..) => runtime::throw_type_error("scriptc: ChildProcess JSON serialization is not ported".into()),`);
     this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::ArrayIterator(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::Array(value) => {`);
@@ -515,6 +521,7 @@ export class RustDynamicEmitter {
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, true),`);
     this.context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()),`);
+    this.context.line(`${name}::Promise(handle) => runtime::promise_handle_own_keys(handle).iter().any(|own| own.as_str() == key.to_utf8_lossy()),`);
     this.context.line(`${name}::Array(array) => key.as_ref() == "length" || (key.as_ref() == "raw" && runtime::array_raw(array).is_some()) || runtime::array_property_has(array, key) || sc_dyn_key_index(key).is_some_and(|index| runtime::array_has(array, index as f64)),`);
     this.context.line("_ => false,");
     this.context.popIndent();
@@ -542,6 +549,8 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::Object(..) | ${name}::Proxy(..) => sc_dyn_get(value, key, value),`);
+    this.context.line(`${name}::Child(child) => sc_native_child_get(child, key.as_ref()),`);
+    this.context.line(`${name}::Promise(handle) if key.as_ref() == "child" => runtime::promise_handle_own_get::<runtime::JsChild>(handle, "child").map(${name}::Child).unwrap_or(${name}::Undefined),`);
     this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("property access"),`);
     this.context.line(`${name}::Number(..) => match key.to_utf8_lossy() { "toString" => ${name}::NativeMethod(ScDynNativeMethod::NumberToString), "toFixed" => ${name}::NativeMethod(ScDynNativeMethod::NumberToFixed), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Symbol(value) => match key.to_utf8_lossy() { "description" => runtime::symbol_description(value).map(${name}::String).unwrap_or(${name}::Undefined), "toString" | "valueOf" | "constructor" => runtime::throw_error("scriptc: native Symbol prototype property access is not supported yet".to_owned()), _ => ${name}::Undefined, },`);
@@ -730,6 +739,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => runtime::string("[object Promise]"),`);
     this.context.line(`${name}::NetServer(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::NetSocket(..) => runtime::string("[object Object]"),`);
+    this.context.line(`${name}::Child(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
@@ -801,6 +811,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Effect(..) => "a native kernel reference".to_owned(),`);
     this.context.line(`${name}::NetServer(..) => "an instance of Server".to_owned(),`);
     this.context.line(`${name}::NetSocket(..) => "an instance of Socket".to_owned(),`);
+    this.context.line(`${name}::Child(..) => "an instance of ChildProcess".to_owned(),`);
     this.context.line(`${name}::AbortController(..) => "an instance of AbortController".to_owned(), ${name}::AbortSignal(..) => "an instance of AbortSignal".to_owned(), ${name}::HttpRequest(..) => "an instance of IncomingMessage".to_owned(),`);
     this.context.line(`${name}::HttpHeaders(..) => "an instance of Headers".to_owned(),`);
     this.context.line(`${name}::FetchBody(..) => "an instance of ReadableStream".to_owned(),`);
@@ -925,6 +936,7 @@ export class RustDynamicEmitter {
     emitRustDynamicStringCoercion(this.context, boxedShapes);
     emitRustDynamicJsonReplacer(this.context);
     emitRustDynamicErrorAndCloneHelpers(this.context, boxedShapes);
+    emitExecFileDefinitions(this.context);
     emitRustDynamicAssertions(this.context, boxedShapes);
     this.context.line("");
   }
@@ -966,6 +978,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => sc_dyn_native_prototype("Promise"),`);
     this.context.line(`${name}::NetServer(..) => sc_dyn_native_prototype("Server"),`);
     this.context.line(`${name}::NetSocket(..) => sc_dyn_native_prototype("Socket"),`);
+    this.context.line(`${name}::Child(..) => runtime::throw_type_error("scriptc: ChildProcess prototype reflection is not ported".into()),`);
     this.context.line(`${name}::AbortController(..) => sc_dyn_native_prototype("AbortController"),`);
     this.context.line(`${name}::AbortSignal(..) => sc_dyn_native_prototype("AbortSignal"),`);
     this.context.line(`${name}::HttpRequest(..) => sc_dyn_native_prototype("IncomingMessage"),`);
@@ -1003,6 +1016,13 @@ export class RustDynamicEmitter {
   private emitDynCheckInline(type: IrType, value: string, loc?: SrcLoc, path = '"$"'): string {
     switch (type.kind) {
       case "dyn": case "jsval": return value;
+      case "child": return `{ let value = ${value}; match value { ${this.context.dynTypeName()}::Child(child) => child, value => sc_dyn_check_fail_at("ChildProcess", &value, ${path}), } }`;
+      case "promise": {
+        const name = this.context.dynTypeName();
+        const payload = type.inner.kind === "void" ? "{ let _ = sc_payload; () }"
+          : this.emitDynCheckValue(type.inner, "sc_payload", loc, "&sc_payload_path");
+        return `{ let sc_input = ${value}; let sc_payload_path = (${path}).to_string(); match sc_input { ${name}::Promise(handle) => { let sc_source = runtime::promise_view_from_handle::<${name}>(&handle); runtime::promise_view_map(&sc_source, move |sc_payload| ${payload}) }, sc_other => sc_dyn_check_fail_at("Promise", &sc_other, &sc_payload_path), } }`;
+      }
       case "date": return `sc_dyn_check_date_at(${value}, ${path})`;
       case "regex": {
         const name = this.context.dynTypeName();

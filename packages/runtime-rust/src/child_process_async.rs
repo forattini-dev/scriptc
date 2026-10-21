@@ -316,6 +316,17 @@ pub fn child_spawn_options(
     env_pairs: &JsArray<JsString>,
     cwd: &JsString,
 ) -> JsChild {
+    child_spawn_configured(command, arguments, stdin_mode, stdout_mode, stderr_mode,
+        stdout_fd, stderr_fd, detached, has_env, env_pairs, cwd, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn child_spawn_configured(
+    command: &JsString, arguments: &JsArray<JsString>,
+    stdin_mode: f64, stdout_mode: f64, stderr_mode: f64,
+    stdout_fd: f64, stderr_fd: f64, detached: bool, has_env: bool,
+    env_pairs: &JsArray<JsString>, cwd: &JsString, windows_hide: bool,
+) -> JsChild {
     use std::io::Write;
     use std::process::Stdio;
 
@@ -338,6 +349,13 @@ pub fn child_spawn_options(
             );
         }
     };
+    #[cfg(windows)]
+    if windows_hide {
+        use std::os::windows::process::CommandExt;
+        child_command.creation_flags(0x0800_0000);
+    }
+    #[cfg(not(windows))]
+    let _ = windows_hide;
     child_configure_environment(&mut child_command, has_env.then_some(env_pairs));
     if !cwd.is_empty() {
         child_command.current_dir(cwd.to_utf8_lossy());

@@ -23,6 +23,7 @@ pub fn promise_view_from_handle<T: HeapValue>(handle: &JsPromiseHandle) -> JsPro
         handled: true,
         reported: false,
         view: Some(Rc::new(handle.clone())),
+        own: Some(handle.own.clone()),
     })
 }
 

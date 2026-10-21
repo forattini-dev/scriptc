@@ -5,9 +5,13 @@ use source_frontend::prelude::{SignatureKind, SymbolId, get_source_file_of_node}
 impl Lowerer<'_> {
     pub(super) fn promise_type(&mut self, id: TypeId) -> Option<Type> {
         let symbol = self.checker.ty(id).symbol();
-        if symbol.0 == 0
-            || self.checker.sym(symbol).name.as_ref() != "Promise"
-            || !self.standard_promise(symbol)
+        let child_promise = symbol.0 != 0
+            && self.checker.sym(symbol).name.as_ref() == "PromiseWithChild"
+            && self.standard_child_symbol(symbol.0);
+        if !child_promise
+            && (symbol.0 == 0
+                || self.checker.sym(symbol).name.as_ref() != "Promise"
+                || !self.standard_promise(symbol))
         {
             return None;
         }
@@ -158,8 +162,15 @@ impl Lowerer<'_> {
             self.ensure_exception_classes(node)?;
         }
         let recv = self.expression(receiver)?;
+        let Type::Promise {
+            inner: source_inner,
+        } = recv.ty()
+        else {
+            return Err(self.refuse(receiver, "Promise receiver has no owning native contract"));
+        };
         let recv = self.coerce(recv, Type::Dyn, receiver)?;
         let mut values = Vec::new();
+        let mut results = [None, None];
         for (index, arg) in args.into_iter().enumerate() {
             // A Promise<void> callback still receives the JavaScript undefined value.
             if matches!(
@@ -190,9 +201,7 @@ impl Lowerer<'_> {
                     }
                 };
                 self.refuse_thenable(&ret, arg)?;
-                let Type::Promise { inner } = self.ty(receiver)? else {
-                    unreachable!()
-                };
+                let inner = source_inner.clone();
                 let param =
                     if index == 1 || matches!(*inner, Type::Void | Type::Null | Type::Undefined) {
                         Type::Dyn
@@ -207,11 +216,41 @@ impl Lowerer<'_> {
                         ret: Box::new(ret),
                     }),
                 )?;
+                results[index] = reaction_result(&callback.ty());
                 values.push(self.coerce(callback, Type::Dyn, arg)?);
             } else {
-                values.push(self.expected_expression(arg, Type::Dyn)?);
+                let value = self.expected_expression(arg, Type::Dyn)?;
+                results[index] = match &value {
+                    Expr::DynFrom { value, .. } => reaction_result(&value.ty()),
+                    Expr::UnitLit { .. } => None,
+                    _ if self.checker_any(arg) => Some(Type::Dyn),
+                    _ => None,
+                };
+                values.push(value);
             }
         }
+        let mut arms = vec![results[0].take().unwrap_or(*source_inner)];
+        if let Some(rejected) = results[1].take() {
+            arms.push(rejected);
+        }
+        let mut normalized = Vec::new();
+        for arm in arms {
+            match arm {
+                Type::Void => normalized.push(Type::Undefined),
+                Type::Union { union_id } => normalized.extend(self.unions[union_id].arms.clone()),
+                arm => normalized.push(arm),
+            }
+        }
+        let inner = self
+            .intern_union(normalized)
+            .ok_or_else(|| self.refuse(node, "Promise reaction result union is not ported"))?;
+        let target = Type::Promise {
+            inner: Box::new(if inner == Type::Undefined {
+                Type::Void
+            } else {
+                inner
+            }),
+        };
         let value = Expr::DynInvoke {
             recv: Box::new(recv),
             method: "then".into(),
@@ -220,7 +259,16 @@ impl Lowerer<'_> {
             r#type: Type::Dyn,
             loc: self.loc(node),
         };
-        let target = self.ty(node)?;
         self.coerce(value, target, node).map(Some)
     }
+}
+
+fn reaction_result(ty: &Type) -> Option<Type> {
+    let Type::Func { ret, .. } = ty else {
+        return None;
+    };
+    Some(match ret.as_ref() {
+        Type::Promise { inner } => (**inner).clone(),
+        ret => ret.clone(),
+    })
 }

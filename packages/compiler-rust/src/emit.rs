@@ -1,6 +1,7 @@
 use crate::ir::{Expr, Function, Module, Stmt, Type};
 mod async_context;
 mod bytes;
+mod child_process;
 mod classes;
 mod collections;
 mod exceptions;
@@ -20,6 +21,7 @@ fn rust_type(ty: Type, module: &Module) -> String {
     match ty {
         Type::Dyn | Type::Caught => "NativeValue",
         Type::Promise { .. } => "runtime::JsPromise<NativeValue>",
+        Type::Child => "runtime::JsChild",
         ty @ Type::Func { .. } => {
             return format!("runtime::Gc<{}>", functions::type_name(&ty, module));
         }
@@ -99,6 +101,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         functions::definitions(module, &mut output);
         values::definitions(module, &mut output);
         exceptions::definitions(module, &mut output);
+        child_process::definitions(module, &mut output);
     }
     storage::definitions(module, &mut output);
     for function in &module.functions {
@@ -285,6 +288,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         return value;
     }
     if let Some(code) = process::expression(value, function, module) {
+        return code;
+    }
+    if let Some(code) = child_process::expression(value, function, module) {
         return code;
     }
     if let Some(code) = sets::expression(value, function, module) {
@@ -598,6 +604,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Bytes { .. }
                     | Type::Symbol
                     | Type::Promise { .. }
+                    | Type::Child
             ) {
                 format!("{local_id}.clone()")
             } else {
@@ -616,6 +623,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Object { .. }
                     | Type::Func { .. }
                     | Type::Bytes { .. }
+                    | Type::Child
             );
             let record = matches!(left.ty(), Type::Regex);
             let promise = matches!(left.ty(), Type::Promise { .. });

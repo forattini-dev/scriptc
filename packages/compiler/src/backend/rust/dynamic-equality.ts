@@ -29,6 +29,7 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   context.line(`(${name}::Promise(left), ${name}::Promise(right)) => runtime::promise_handle_identity(left) == runtime::promise_handle_identity(right),`);
   context.line(`(${name}::NetServer(left), ${name}::NetServer(right)) => left.ptr_eq(right),`);
   context.line(`(${name}::NetSocket(left), ${name}::NetSocket(right)) => left.ptr_eq(right),`);
+  context.line(`(${name}::Child(left), ${name}::Child(right)) => left.ptr_eq(right),`);
   context.line(`(${name}::AbortController(left), ${name}::AbortController(right)) | (${name}::AbortSignal(left), ${name}::AbortSignal(right)) => left.ptr_eq(right), (${name}::HttpRequest(left), ${name}::HttpRequest(right)) => left.ptr_eq(right),`);
   context.line(`(${name}::HttpHeaders(left), ${name}::HttpHeaders(right)) => left.ptr_eq(right),`);
   context.line(`(${name}::FetchBody(left), ${name}::FetchBody(right)) => left.ptr_eq(right),`);

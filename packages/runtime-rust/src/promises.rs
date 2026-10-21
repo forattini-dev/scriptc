@@ -93,11 +93,13 @@ pub struct PromiseData<T: HeapValue> {
     reported: bool,
     // Keep ordinary promises at one optional pointer of view overhead.
     view: Option<Rc<JsPromiseHandle>>,
+    own: Option<Gc<PromiseProperties>>,
 }
 
 impl<T: HeapValue> Trace for PromiseData<T> {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         if let Some(view) = &self.view { promise_handle_trace(view, tracer); }
+        if let Some(own) = &self.own { tracer.edge(own); }
         if let PromiseState::Fulfilled(Some(value)) = &self.state {
             value.trace_value(tracer);
         }
@@ -107,6 +109,7 @@ impl<T: HeapValue> Trace for PromiseData<T> {
 impl<T: HeapValue> ClearEdges for PromiseData<T> {
     fn clear_edges(&mut self) {
         self.view = None;
+        self.own = None;
         self.state = PromiseState::Pending(Vec::new());
         self.handled = true;
     }
@@ -139,6 +142,7 @@ pub struct JsPromiseHandle {
     observe: PromiseObserveHook,
     poll: PromisePollHook,
     trace: Gc<PromiseHandleEdges>,
+    own: Gc<PromiseProperties>,
 }
 
 pub fn promise_handle_identity(handle: &JsPromiseHandle) -> usize {
@@ -162,6 +166,7 @@ pub fn promise_handle_observe(handle: &JsPromiseHandle, callback: PromiseObserve
 
 pub fn promise_handle_trace(handle: &JsPromiseHandle, tracer: &mut Tracer<'_>) {
     tracer.edge(&handle.trace);
+    tracer.edge(&handle.own);
 }
 
 pub fn promise_set_unhandled_rejection_handler(
@@ -195,6 +200,7 @@ where
     let poll_map = map.clone();
     JsPromiseHandle {
         identity,
+        own: promise_properties(promise),
         catch: Rc::new(move |callback| {
             let source = source.upgrade().expect("scriptc: cleared Promise handle");
             let result = promise_new::<()>();
@@ -257,6 +263,7 @@ pub fn promise_new<T: HeapValue>() -> JsPromise<T> {
         handled: false,
         reported: false,
         view: None,
+        own: None,
     });
     let weak = promise.downgrade();
     PROMISE_FINALIZERS.with(|finalizers| {
@@ -295,6 +302,7 @@ pub fn promise_resolved<T: HeapValue>(value: T) -> JsPromise<T> {
         handled: false,
         reported: false,
         view: None,
+        own: None,
     })
 }
 

@@ -525,6 +525,7 @@ export function isSupportedArrayElem(t: IrType, nativeCollectionArrays = false):
     case "classval":
     case "moduleNs":
       return true;
+    case "dyn":
     case "map":
     case "set":
       return nativeCollectionArrays;
@@ -2496,6 +2497,9 @@ export type IrLibFn =
    * child registry. The callback shape is program-dependent and checked
    * by the validator/backends. */
   | "cp.execFile"
+  | "cp.execFileNative"
+  | "cp.execFilePromise"
+  | "cp.promiseChild"
   | "child.onExit"
   | "child.onClose"
   | "child.onError"
@@ -6130,9 +6134,9 @@ export function canMarshalTypedFuncIntoIsland(
  * Deliberately fenced OUT of both directions: generic signatures (no
  * concrete IR type exists), this-parameters, construct signatures (`new`
  * through a dyn value), properties ON function values, and params/results
- * outside the conversion domains (Maps, class instances, ...). Promises
- * CONVERT in (canConvertToDyn's promise arm — an async dyn-boxed closure's
- * return) but do not check OUT (`u as Promise<T>` stays fenced).
+ * outside the conversion domains (Maps, class instances, ...). Native
+ * promises retain their identity through Rust payload views; checking a
+ * payload is deferred until settlement and does not schedule another job.
  */
 
 /** The runtime HANDLE kinds that cross the checked-dynamic boundary as
@@ -6252,6 +6256,8 @@ function canBoxDynComposite(
       return t.elem === "u8";
     case "func":
       return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
+    case "promise":
+      return t.inner.kind === "void" || canConvertToDyn(t.inner, getRecord, getUnion, visiting);
     case "array":
       return canBoxDynComposite(t.elem, getRecord, getUnion, visiting);
     case "map":
@@ -6302,6 +6308,7 @@ export function canDynCheckTo(
   getUnion: (unionId: string) => IrUnionDef | undefined,
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion) || nativeArrayCheckSupported(t, getRecord, getUnion) || nativeRecordCheckSupported(t, getRecord, getUnion) || nativeTupleCheckSupported(t, getRecord)) return true;
+  if (t.kind === "promise") return t.inner.kind === "void" || t.inner.kind === "dyn" || canDynCheckTo(t.inner, getRecord, getUnion);
   if ((t.kind === "map" && t.key.kind === "dyn" && t.value.kind === "dyn") ||
       (t.kind === "set" && t.elem.kind === "dyn") || t.kind === "searchParams") return true;
   if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;

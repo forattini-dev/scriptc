@@ -165,6 +165,7 @@ export function emitRustDynamicErrorAndCloneHelpers(context: RustDynamicContext,
   context.line(`${name}::Promise(..) => runtime::throw_dom_exception("DataCloneError", "#<Promise> could not be cloned."),`);
   context.line(`${name}::NetServer(..) => runtime::throw_dom_exception("DataCloneError", "#<Server> could not be cloned."),`);
   context.line(`${name}::NetSocket(..) => runtime::throw_dom_exception("DataCloneError", "#<Socket> could not be cloned."),`);
+  context.line(`${name}::Child(..) => runtime::throw_dom_exception("DataCloneError", "#<ChildProcess> could not be cloned."),`);
   context.line(`${name}::AbortController(..) => runtime::throw_dom_exception("DataCloneError", "#<AbortController> could not be cloned."), ${name}::AbortSignal(..) => runtime::throw_dom_exception("DataCloneError", "#<AbortSignal> could not be cloned."), ${name}::HttpRequest(..) => runtime::throw_dom_exception("DataCloneError", "#<IncomingMessage> could not be cloned."),`);
   context.line(`${name}::HttpHeaders(..) => runtime::throw_dom_exception("DataCloneError", "#<Headers> could not be cloned."),`);
   context.line(`${name}::FetchBody(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStream> could not be cloned."),`);

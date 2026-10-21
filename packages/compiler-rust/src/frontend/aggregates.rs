@@ -1104,6 +1104,7 @@ impl Lowerer<'_> {
                         | Type::Regex
                         | Type::Bytes { .. }
                         | Type::Promise { .. }
+                        | Type::Child
                 )
         } else {
             left.ty() == Type::F64 && right.ty() == Type::F64

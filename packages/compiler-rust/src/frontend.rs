@@ -18,6 +18,7 @@ mod arrays;
 mod async_context;
 mod callables;
 mod callbacks;
+mod child_process;
 mod classes;
 mod codecs;
 mod collections;
@@ -898,6 +899,12 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expression_inner(&mut self, node: Node) -> Result<Expr, String> {
+        if let Some(value) = self.child_builtin_value(node)? {
+            return Ok(value);
+        }
+        if let Some(value) = self.child_property(node)? {
+            return Ok(value);
+        }
         if let Some(value) = self.commonjs_value(node)? {
             return Ok(value);
         }
@@ -1192,6 +1199,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.promisify_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.weak_map_call(node)? {
                     return Ok(value);
                 }

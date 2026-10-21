@@ -850,6 +850,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.onMessage": { argTypes: [null, BOOL], result: VOID },
   "process.onDisconnect": { argTypes: [null, BOOL], result: VOID },
   "cp.execFile": { argTypes: [STRING, arrayOf(STRING), null], result: CHILD_T },
+  "cp.execFileNative": { argTypes: [arrayOf(DYN)], result: CHILD_T },
+  "cp.execFilePromise": { argTypes: [arrayOf(DYN)], result: VOID },
+  "cp.promiseChild": { argTypes: [null], result: CHILD_T },
   // spawn's options form: per-slot stdio modes (0 ignore / 1 inherit /
   // 2 fd) with the out/err fds for mode 2, detached, env replacement
   // pairs, cwd ("" = inherit).
@@ -4676,6 +4679,14 @@ function validateFunction(
           }
           break;
         }
+        if (e.fn === "cp.execFilePromise") {
+          const shape = e.type.kind === "promise" && e.type.inner.kind === "record" ? records.get(e.type.inner.shapeId) : undefined;
+          if (!shape || shape.tuple || shape.indexValue || shape.fields.length !== 2 ||
+              !["stdout", "stderr"].every(name => shape.fields.some(field => field.name === name && field.type.kind === "string")))
+            err("libCall cp.execFilePromise must return Promise<{stdout:string, stderr:string}>", e.loc);
+          break;
+        }
+        if (e.fn === "cp.promiseChild" && e.args[0]?.type.kind !== "promise") err("libCall cp.promiseChild requires a Promise receiver", e.loc);
         if (e.fn === "cp.execFile") {
           const cb = e.args[2]?.type;
           if (cb?.kind !== "func" || cb.rest === true || cb.params.length > 3 || cb.ret.kind !== "void") {
@@ -5313,7 +5324,7 @@ function validateFunction(
         // Runtime HANDLE targets unwrap the checked-dynamic tree's handle kind by tag (a
         // retained reference, no copy — DYN_HANDLE_KINDS).
         const handleOk = DYN_HANDLE_KINDS.has(e.type.kind);
-        const nativeReferenceOk = e.type.kind === "union" &&
+        const nativeReferenceOk = (e.type.kind === "promise" || e.type.kind === "union") &&
           canDynCheckTo(e.type, id => records.get(id), id => unions.get(id));
         if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !classOk && !nativeScalarOk && !brandedOk && !collectionOk && !nativeContainerOk && !funcOk && !handleOk && !nativeReferenceOk) {
           err(`dynCheck against non-JSON-representable type ${e.type.kind}`, e.loc);

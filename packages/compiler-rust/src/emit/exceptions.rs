@@ -9,7 +9,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
     }
     output.push_str("value @ (NativeValue::Undefined | NativeValue::Null | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::String(_)) => native_value_string(value), _ => String::from(\"[object Object]\"), }; } runtime::caught_to_string(caught).to_string() }\n");
     if module.classes.iter().any(|c| c.name == "%Error") {
-        output.push_str("fn native_caught(caught: runtime::Caught) -> NativeValue { if runtime::caught_is::<NativeValue>(&caught) { return runtime::caught_narrow::<NativeValue>(&caught); } if runtime::caught_is::<f64>(&caught) { return NativeValue::Number(runtime::caught_narrow::<f64>(&caught)); } if runtime::caught_is::<bool>(&caught) { return NativeValue::Boolean(runtime::caught_narrow::<bool>(&caught)); } if runtime::caught_is::<runtime::JsString>(&caught) { return NativeValue::String(runtime::caught_narrow::<runtime::JsString>(&caught).to_string()); } if runtime::caught_is_error(&caught) { let error = runtime::caught_error_value(&caught); let name = runtime::error_name(&error).to_string(); let message = runtime::error_message(&error).to_string(); let object = match name.as_str() {\n");
+        output.push_str("fn native_caught(caught: runtime::Caught) -> NativeValue { if runtime::caught_is::<NativeValue>(&caught) { return runtime::caught_narrow::<NativeValue>(&caught); } if runtime::caught_is::<f64>(&caught) { return NativeValue::Number(runtime::caught_narrow::<f64>(&caught)); } if runtime::caught_is::<bool>(&caught) { return NativeValue::Boolean(runtime::caught_narrow::<bool>(&caught)); } if runtime::caught_is::<runtime::JsString>(&caught) { return NativeValue::String(runtime::caught_narrow::<runtime::JsString>(&caught).to_string()); } if runtime::caught_is_error(&caught) { let error = runtime::caught_error_value(&caught); let name = runtime::error_name(&error).to_string(); let message = runtime::error_message(&error).to_string(); let code = runtime::error_code(&error).map(|code| code.to_string()); let object = match name.as_str() {\n");
         for (index, class) in module.classes.iter().enumerate().filter(|(_, c)| c.runtime) {
             writeln!(
                 output,
@@ -23,7 +23,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             .iter()
             .position(|c| c.name == "%Error")
             .unwrap();
-        writeln!(output, "_ => instance_allocate_{root}(), }}; object.with_mut(|object| {{ let error = object.error.as_mut().expect(\"validated Error receiver\"); error.name = name; error.message = message; }}); return NativeValue::Instance(object); }} runtime::throw_type_error(\"scriptc: unknown native exception payload\".into()) }}").unwrap();
+        writeln!(output, "_ => instance_allocate_{root}(), }}; object.with_mut(|object| {{ let error = object.error.as_mut().expect(\"validated Error receiver\"); error.name = name; error.message = message; if let Some(code) = code {{ error.own.push((String::from(\"code\"), NativeValue::String(code))); }} }}); return NativeValue::Instance(object); }} runtime::throw_type_error(\"scriptc: unknown native exception payload\".into()) }}").unwrap();
     } else {
         output.push_str("fn native_caught(caught: runtime::Caught) -> NativeValue { if runtime::caught_is::<NativeValue>(&caught) { return runtime::caught_narrow::<NativeValue>(&caught); } runtime::throw_type_error(\"scriptc: native exception conversion requires Error classes\".into()) }\n");
     }

@@ -82,6 +82,7 @@ export function emitRustDynamicInspect(
   context.popIndent();
   context.line("},");
   context.line(`${name}::NetSocket(..) => runtime::string("Socket {}"),`);
+  context.line(`${name}::Child(..) => runtime::throw_type_error("scriptc: ChildProcess inspection is not ported".into()),`);
   context.line(`${name}::NetServer(..) => runtime::string("Server {}"),`);
   context.line(`${name}::AbortController(..) => runtime::string("AbortController {}"), ${name}::AbortSignal(..) => runtime::string("AbortSignal { aborted: false }"), ${name}::HttpRequest(..) => runtime::string("IncomingMessage {}"),`);
   context.line(`${name}::HttpHeaders(..) => runtime::string("Headers {}"),`);

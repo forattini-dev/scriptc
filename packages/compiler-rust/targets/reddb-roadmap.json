@@ -766,5 +766,36 @@
         }
       }
     ]
+  },
+  "nativeExecFileCheckpoint": {
+    "date": "2026-10-21",
+    "status": "partial",
+    "engine": "none",
+    "compiler": "rust",
+    "irVersion": 13,
+    "originalAppBinaries": 0,
+    "originalAppsExecuted": false,
+    "fixtures": [
+      "rust-native-exec-file/identity.ts",
+      "rust-native-exec-file/success.ts",
+      "rust-native-exec-file/errors.ts",
+      "rust-native-exec-file/limits.ts",
+      "rust-native-exec-file/callbacks.ts",
+      "rust-native-exec-file/validation.ts",
+      "rust-native-exec-file/callback-errors.ts",
+      "rust-native-exec-file/options.ts",
+      "rust-native-exec-file/properties.ts"
+    ],
+    "resolved": "execFile custom promisify initialization and asynchronous native child capture",
+    "nextFirstRefusals": {
+      "red-skills-release": "json-with-bigint: first-class JSON.stringify binding",
+      "redskilled": "death-record.ts: object method ABI",
+      "red-dev": "tuiuiu/core/pool.js: VNode factory ABI"
+    },
+    "remainingBoundaries": [
+      "general callback promisification",
+      "await suspension",
+      "complete ChildProcess surface and spawn error metadata"
+    ]
   }
 }

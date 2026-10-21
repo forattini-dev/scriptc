@@ -100,6 +100,7 @@ export class RustDynamicFromEmitter {
       }
       case "netServer": return `${name}::NetServer(${value})`;
       case "netSocket": return `${name}::NetSocket(${value})`;
+      case "child": return `${name}::Child(${value})`;
       case "httpReq": return `${name}::HttpRequest(${value})`;
       case "httpRes": return `${name}::HttpResponse(${value})`;
       case "void": return `{ let _ = ${value}; ${name}::Undefined }`;
