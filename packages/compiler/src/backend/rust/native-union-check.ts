@@ -1,4 +1,4 @@
-import { RUNTIME_ERROR_CLASSES, type IrType, type IrUnionDef, type SrcLoc } from "../../ir/ir.js";
+import type { IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
 
 /** Distinct native tags select an arm without a JSON round trip. Two arrays,
@@ -20,7 +20,7 @@ function variants(type: IrType): readonly string[] | null {
     case "record": return ["Object", "Proxy"];
     case "func": return ["function"];
     case "bytes": return type.elem === "u8" ? ["Bytes", "Buffer"] : null;
-    case "object": return RUNTIME_ERROR_CLASSES.has(type.className) ? ["Object"] : null;
+    case "object": return ["Object"];
     case "netSocket": return ["NetSocket"];
     case "netServer": return ["NetServer"];
     case "httpReq": return ["HttpRequest"];

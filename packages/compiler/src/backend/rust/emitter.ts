@@ -725,9 +725,7 @@ class RustEmitter {
         if (!jsonParse) {
           this.usesDyn = true;
           const target = node.type as IrType | undefined;
-          if (target?.kind === "func") {
-            this.registerDynAdapter(target);
-          }
+          if (target) registerDynamicFunctionShapes(target, this.records, this.unions, nested => this.registerDynAdapter(nested));
         }
       }
       const nodeType = node.type as IrType | undefined;

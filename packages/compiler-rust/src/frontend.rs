@@ -943,6 +943,9 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 let obj = self.expression(node.expression())?;
+                if matches!(obj.ty(), Type::Object { .. }) {
+                    return self.class_index_get(node, obj);
+                }
                 if obj.ty() == Type::bytes() {
                     return Err(self.refuse(
                         node,
@@ -1128,6 +1131,12 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::BinaryExpression => {
+                if node.operator_token().kind() == SyntaxKind::EqualsToken
+                    && node.left().kind() == SyntaxKind::PropertyAccessExpression
+                    && node.left().name().kind() == SyntaxKind::PrivateIdentifier
+                {
+                    return self.private_assignment(node);
+                }
                 if node.operator_token().kind() == SyntaxKind::EqualsToken
                     && node.left().kind() == SyntaxKind::PropertyAccessExpression
                     && let Some(value) = self.class_accessor_assignment(node)?

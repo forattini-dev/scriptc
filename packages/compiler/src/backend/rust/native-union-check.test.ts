@@ -18,3 +18,11 @@ test("native union dispatch refuses arms that need structural disambiguation", (
 test("an unclassified dynamic arm cannot become a catch-all native match", () => {
   expect(planNativeUnionVariants({ id: "unknown", arms: [STRING, { kind: "dyn" }] })).toBeNull();
 });
+
+test("class or undefined selects by tag but class alternatives never guess the first identity", () => {
+  const box = { kind: "object", className: "Box" } as const;
+  const other = { kind: "object", className: "Other" } as const;
+  expect(planNativeUnionVariants({ id: "u0", arms: [box, { kind: "undefinedT" }] })).toEqual([["Object"], ["Undefined"]]);
+  expect(planNativeUnionVariants({ id: "u0", arms: [box, other] })).toBeNull();
+  expect(planNativeUnionVariants({ id: "u0", arms: [box, { kind: "record", shapeId: "r0" }] })).toBeNull();
+});

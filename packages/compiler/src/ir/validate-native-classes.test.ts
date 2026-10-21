@@ -1,6 +1,29 @@
 import { expect, test } from "vitest";
-import { BOOL, F64, VOID, type IrExpr, type IrModule } from "./ir.js";
+import { BOOL, DYN, F64, VOID, canDynCheckTo, type IrExpr, type IrModule, type IrType } from "./ir.js";
 import { validateModule } from "./validate.js";
+
+test("owning class handles survive callback and optional-slot checked extraction", () => {
+  const box: IrType = { kind: "object", className: "Box" };
+  const callback: IrType = { kind: "func", params: [], ret: box };
+  const unions = new Map([
+    ["u0", { id: "u0", arms: [box, { kind: "undefinedT" } as IrType] }],
+    ["u1", { id: "u1", arms: [callback, { kind: "undefinedT" } as IrType] }],
+  ]);
+  for (const type of [box, callback, { kind: "union", unionId: "u0" }, { kind: "union", unionId: "u1" }] as IrType[]) {
+    expect(canDynCheckTo(type, () => undefined, id => unions.get(id))).toBe(true);
+  }
+  const loc = { file: "private-slot.ts", start: 0, end: 0 };
+  const input: IrExpr = { kind: "dynObjLit", fields: [], type: DYN, loc };
+  const mod: IrModule = {
+    irVersion: 13, sourceFile: loc.file, entry: "main",
+    classes: [{ name: "Box", jsName: "Box", fields: [], loc }],
+    unions: [...unions.values()],
+    functions: [{ name: "main", params: [], locals: [], returnType: VOID, loc,
+      body: [...unions.keys()].map(unionId => ({ kind: "exprStmt", expr: { kind: "dynCheck", value: input, type: { kind: "union", unionId }, loc }, loc })),
+    }],
+  };
+  expect(validateModule(mod)).toEqual([]);
+});
 
 test("caught tests and trusted extraction admit standalone classes and reject unknown classes", () => {
   const loc = { file: "classes.ts", start: 0, end: 0 };

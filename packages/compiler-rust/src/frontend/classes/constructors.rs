@@ -136,6 +136,10 @@ impl Lowerer<'_> {
             if field.modifier_flags().intersects(ModifierFlags::AMBIENT) {
                 continue;
             }
+            if field.name().kind() == SyntaxKind::PrivateIdentifier {
+                body.push(self.initialize_private_field(field)?);
+                continue;
+            }
             let class_name = self.classes.definitions[index].name.clone();
             let ty = self.field_type(&class_name, field.name().text()).unwrap();
             let value = if field.initializer().is_nil() {

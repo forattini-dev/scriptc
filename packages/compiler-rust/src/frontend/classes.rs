@@ -24,6 +24,7 @@ pub(super) struct ClassGraph {
     layout_active: HashSet<usize>,
     methods: HashMap<(usize, String), Signature>,
     accessors: HashMap<(usize, String, bool), Signature>,
+    private_slots: HashMap<u32, private_slots::Slot>,
     method_queue: VecDeque<Signature>,
 }
 
@@ -419,15 +420,17 @@ impl Lowerer<'_> {
                     ) || !matches!(
                         member.name().kind(),
                         SyntaxKind::Identifier | SyntaxKind::StringLiteral
-                    )))
+                    ) && !(member.kind() == SyntaxKind::PropertyDeclaration
+                        && member.name().kind() == SyntaxKind::PrivateIdentifier)))
             {
                 return Err(self.refuse(
                     member,
-                    "class static/computed/private members and decorators are not ported",
+                    "class static/computed members, private methods/accessors and decorators are not ported",
                 ));
             }
         }
         self.classes.definitions[index].base = base;
+        self.inventory_private_slots(index)?;
         for member in node.members().into_iter().filter(|m| {
             matches!(
                 m.kind(),
@@ -514,6 +517,7 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             });
         }
+        body.extend(self.initialize_private_storage(index, node)?);
         let token = self.classes.definitions[index].token.as_ref().unwrap();
         body.push(Stmt::Assign {
             local_id: token.id.clone(),
@@ -579,7 +583,10 @@ impl Lowerer<'_> {
             .node
             .members()
             .into_iter()
-            .filter(|n| n.kind() == SyntaxKind::PropertyDeclaration)
+            .filter(|n| {
+                n.kind() == SyntaxKind::PropertyDeclaration
+                    && n.name().kind() != SyntaxKind::PrivateIdentifier
+            })
             .map(|n| (n.name().text().to_string(), n))
             .collect::<Vec<_>>();
         // JavaScript fields are introduced by constructor assignments, not by
@@ -601,6 +608,7 @@ impl Lowerer<'_> {
                 let left = node.left();
                 if left.kind() == SyntaxKind::PropertyAccessExpression
                     && left.expression().kind() == SyntaxKind::ThisKeyword
+                    && left.name().kind() != SyntaxKind::PrivateIdentifier
                 {
                     let name = left.name().text().to_string();
                     if !fields.iter().any(|(n, _)| *n == name) {
@@ -739,4 +747,5 @@ impl Lowerer<'_> {
 mod accessors;
 mod constructors;
 mod methods;
+mod private_slots;
 mod values;

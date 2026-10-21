@@ -6301,16 +6301,20 @@ export function canDynCheckTo(
       (t.kind === "set" && t.elem.kind === "dyn") || t.kind === "searchParams") return true;
   if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
   if (t.kind === "object" && t.className === "%Error") return true;
+  if (isDynTypedRefType(t)) return true;
   if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
+    if (def && def.arms.filter(arm => arm.kind === "func").length === 1 &&
+        def.arms.every(arm => arm.kind === "nullT" || arm.kind === "undefinedT" ||
+          arm.kind === "func" && canAdaptDynFuncTo(arm, getRecord, getUnion))) return true;
     return !!def &&
       def.arms.some((a) => a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "symbol" || a.kind === "undefinedT" || (a.kind === "bytes" && a.elem === "u8")) &&
       def.arms.every((a) =>
         a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "symbol" || a.kind === "undefinedT" || (a.kind === "bytes" && a.elem === "u8") ||
         isJsonSafeType(a, getRecord, getUnion) ||
-        (a.kind === "object" && a.className === "%Error")
+        (a.kind === "object" && a.className === "%Error") || isDynTypedRefType(a)
       );
   }
   return false;

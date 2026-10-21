@@ -91,6 +91,14 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-private/main.ts",
+        "rust-native-private/fields.ts",
+        "rust-native-private/brand.ts",
+        "rust-native-private/order.ts",
+        "rust-native-private/inheritance.ts",
+        "rust-native-private/identity.ts",
+        "rust-native-private/modules.ts",
+        "rust-native-private/untyped.js",
         "rust-native-accessors/main.ts",
         "rust-native-accessors/inheritance.ts",
         "rust-native-accessors/order.ts",
@@ -2014,7 +2022,7 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
         "class Box { method() { return 1; } } const unbound = new Box().method; unbound();",
         "class Box { get #value() { return 1; } } new Box();",
         "class Box { ['value'] = 1; } new Box();",
-        "class Box { #value = 1; } new Box();",
+        "class Box { #value() { return 1; } } new Box();",
         "class Box { constructor(public value: number) {} } new Box(1);",
         "class Box { constructor() { return {}; } } new Box();",
         "class Box { '__proto__' = 1; } new Box();",
@@ -2051,6 +2059,99 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn private_field_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "private-boundary");
+    for source in [
+        "class Box { static #value = 1; } new Box();",
+        "class Box { #value() { return 1; } } new Box();",
+        "class Box { get #value() { return 1; } } new Box();",
+        "class Box { set #value(value: number) {} } new Box();",
+        "class Box { #value = 1; update() { this.#value += 1; } } new Box().update();",
+        "class Box { #value = 1; update() { return this.#value++; } } new Box().update();",
+        "class Box { #value = 1; has(other: unknown) { return #value in other; } } new Box().has({});",
+        "class Box { #value = 1; #value = 2; } new Box();",
+        "class Box { declare #value: number; } new Box();",
+        "class Box { #value = 1; constructor() { return {}; } } new Box();",
+        "function factory() { return class Box { #value = 1; }; } new (factory())();",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!result.status.success(), "{source}");
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(stderr.contains("SCN1001"), "{source}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{source}: {stderr}");
+        for artifact in [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn private_fields_keep_declaration_identity_outside_public_layouts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let output = temp.path().join("main.json");
+    fs::write(&input, "class Base { #value = 1; get value(): number { return this.#value; } unused(): number { while (true) {} } } class Child extends Base { #value = 2; get own(): number { return this.#value; } } const child = new Child(); console.log(child.value, child.own);").unwrap();
+    success(
+        &Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--emit", "ir", "--out"])
+            .arg(&output)
+            .output()
+            .unwrap(),
+    );
+    let ir: serde_json::Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(ir["irVersion"], 13);
+    for name in ["Base", "Child"] {
+        let class = ir["classes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|class| class["jsName"] == name)
+            .unwrap();
+        assert!(class["fields"].as_array().unwrap().is_empty());
+    }
+    let slots = ir["globals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|global| global["id"].as_str().unwrap().starts_with("%g.private."))
+        .collect::<Vec<_>>();
+    assert_eq!(slots.len(), 2);
+    assert_ne!(slots[0]["id"], slots[1]["id"]);
+    assert!(slots.iter().all(|global| {
+        global["type"]["className"] == "native_builtin_WeakMap" && global["mutable"] == false
+    }));
+    assert!(
+        !ir["functions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|function| function["name"].as_str().unwrap().ends_with(".unused"))
+    );
 }
 
 #[test]

@@ -66,7 +66,39 @@ impl Lowerer<'_> {
             })?;
         self.resolve_class(index)?;
         let prerequisite = self.class_heritage_value(node)?;
-        self.class_ref(index, node, prerequisite)
+        let mut stmts = Vec::new();
+        if let Some(expr) = prerequisite {
+            stmts.push(Stmt::Expression {
+                expr,
+                loc: self.loc(node),
+            });
+        }
+        stmts.extend(self.initialize_private_storage(index, node)?);
+        let value = self.class_ref(index, node, None)?;
+        if stmts.is_empty() {
+            return Ok(value);
+        }
+        let ty = value.ty();
+        // Global initialization has one top-level statement owner in portable
+        // IR. Execute this definition thunk at the original expression site.
+        let mut helper = helpers::Helper::new(
+            &format!("class_definition_{}", self.classes.definitions[index].name),
+            vec![],
+            ty.clone(),
+            self.loc(node),
+        );
+        helper.function.body = stmts;
+        helper.function.body.push(Stmt::Return {
+            value: Some(value),
+            loc: self.loc(node),
+        });
+        let callee = self.install_helper(helper.function);
+        Ok(Expr::Call {
+            callee,
+            args: vec![],
+            r#type: ty,
+            loc: self.loc(node),
+        })
     }
 
     pub(super) fn class_heritage_value(&mut self, node: Node) -> Result<Option<Expr>, String> {
@@ -301,7 +333,45 @@ impl Lowerer<'_> {
             .map(|f| f.r#type.clone())
     }
 
+    pub(in crate::frontend) fn class_index_get(
+        &mut self,
+        node: Node,
+        obj: Expr,
+    ) -> Result<Expr, String> {
+        let Type::Object { class_name } = obj.ty() else {
+            unreachable!()
+        };
+        if class_name == weak_maps::CLASS || class_name == async_context::CLASS {
+            return Err(self.refuse(node, "builtin class indexed properties are not ported"));
+        }
+        let key = node.argument_expression();
+        if key.kind() != SyntaxKind::StringLiteral {
+            return Err(self.refuse(
+                node,
+                "indexed class reads require a literal public data key",
+            ));
+        }
+        let field = key.text().to_string();
+        let ty = self.field_type(&class_name, &field).ok_or_else(|| {
+            self.refuse(
+                node,
+                "indexed class reads require a represented public data slot",
+            )
+        })?;
+        let value = Expr::FieldGet {
+            obj: Box::new(obj),
+            class_name,
+            field,
+            r#type: ty,
+            loc: self.loc(node),
+        };
+        self.narrowed(value, node)
+    }
+
     pub(in crate::frontend) fn class_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        if node.name().kind() == SyntaxKind::PrivateIdentifier {
+            return self.private_get(node).map(Some);
+        }
         // Probe the type without lowering the receiver twice (calls can enqueue helpers).
         let ty = if matches!(
             node.expression().kind(),
@@ -391,6 +461,13 @@ impl Lowerer<'_> {
     }
 
     pub(in crate::frontend) fn class_set(&mut self, node: Node) -> Result<Option<Stmt>, String> {
+        if node.left().name().kind() == SyntaxKind::PrivateIdentifier {
+            let expr = self.private_assignment(node)?;
+            return Ok(Some(Stmt::Expression {
+                expr,
+                loc: self.loc(node),
+            }));
+        }
         if let Some(expr) = self.class_accessor_assignment(node)? {
             return Ok(Some(Stmt::Expression {
                 expr,

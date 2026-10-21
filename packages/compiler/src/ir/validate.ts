@@ -1,3 +1,4 @@
+import { canDynCheckTo } from "./ir.js";
 import { recordViewPairs } from "./record-views.js";
 import { validationFields, type ValidationFields } from "./validation-fields.js";
 import { BUN_WHICH_SIG, validateBunWhich } from "./bun-which.js";
@@ -5301,7 +5302,9 @@ function validateFunction(
         // Runtime HANDLE targets unwrap the checked-dynamic tree's handle kind by tag (a
         // retained reference, no copy — DYN_HANDLE_KINDS).
         const handleOk = DYN_HANDLE_KINDS.has(e.type.kind);
-        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !classOk && !nativeScalarOk && !brandedOk && !collectionOk && !nativeContainerOk && !funcOk && !handleOk) {
+        const nativeReferenceOk = e.type.kind === "union" &&
+          canDynCheckTo(e.type, id => records.get(id), id => unions.get(id));
+        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !classOk && !nativeScalarOk && !brandedOk && !collectionOk && !nativeContainerOk && !funcOk && !handleOk && !nativeReferenceOk) {
           err(`dynCheck against non-JSON-representable type ${e.type.kind}`, e.loc);
         }
         break;
