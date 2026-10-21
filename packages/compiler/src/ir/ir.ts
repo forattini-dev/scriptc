@@ -1146,6 +1146,9 @@ export interface IrClassDef {
    * erased property reads use it to distinguish a method requiring a receiver
    * ABI from a genuinely missing property; it does not supply executable code. */
   methodNames?: string[];
+  /** Own iteration-symbol descriptors, separate from string property names.
+   * A function identity is present only when its body has been demanded. */
+  symbolMethods?: { key: "iterator" | "asyncIterator"; function?: string }[];
   /** Declared `abstract class` — never instantiated (tsc rejects `new` on
    * it, including through class values), so its own vtable entries for
    * abstract slots may stay empty. */

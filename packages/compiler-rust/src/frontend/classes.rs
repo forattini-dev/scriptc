@@ -23,6 +23,8 @@ pub(super) struct ClassGraph {
     pending: VecDeque<usize>,
     layout_active: HashSet<usize>,
     methods: HashMap<(usize, String), Signature>,
+    symbol_nodes: HashMap<(usize, ir::SymbolMethodKey), Node>,
+    symbol_signatures: HashMap<(usize, ir::SymbolMethodKey), Signature>,
     accessors: HashMap<(usize, String, bool), Signature>,
     private_slots: HashMap<u32, private_slots::Slot>,
     method_queue: VecDeque<Signature>,
@@ -197,6 +199,7 @@ impl Lowerer<'_> {
                             }]
                         },
                         methods: vec![],
+                        symbol_methods: vec![],
                         method_names: if weak {
                             vec!["get".into(), "set".into(), "has".into(), "delete".into()]
                         } else {
@@ -241,6 +244,7 @@ impl Lowerer<'_> {
                         base: None,
                         fields: vec![],
                         methods: vec![],
+                        symbol_methods: vec![],
                         method_names: if name == "TextEncoder" {
                             vec!["encode".into(), "encodeInto".into()]
                         } else {
@@ -300,6 +304,7 @@ impl Lowerer<'_> {
                 base: base.map(|i| self.classes.definitions[i].name.clone()),
                 fields: ir::error_fields(),
                 methods: vec![],
+                symbol_methods: vec![],
                 method_names: vec![],
                 loc: Loc {
                     file: "<builtin>".into(),
@@ -404,6 +409,13 @@ impl Lowerer<'_> {
             self.resolve_class(base)?;
         }
         for member in node.members() {
+            let symbol_method = if member.kind() == SyntaxKind::MethodDeclaration
+                && member.name().kind() == SyntaxKind::ComputedPropertyName
+            {
+                self.class_symbol_key(member.name().expression())
+            } else {
+                None
+            };
             if member.modifier_flags().intersects(ModifierFlags::STATIC)
                 || member
                     .modifiers()
@@ -421,12 +433,16 @@ impl Lowerer<'_> {
                         member.name().kind(),
                         SyntaxKind::Identifier | SyntaxKind::StringLiteral
                     ) && !(member.kind() == SyntaxKind::PropertyDeclaration
-                        && member.name().kind() == SyntaxKind::PrivateIdentifier)))
+                        && member.name().kind() == SyntaxKind::PrivateIdentifier)
+                        && symbol_method.is_none()))
             {
                 return Err(self.refuse(
                     member,
                     "class static/computed members, private methods/accessors and decorators are not ported",
                 ));
+            }
+            if let Some(key) = symbol_method {
+                self.classes.symbol_nodes.insert((index, key), member);
             }
         }
         self.classes.definitions[index].base = base;
@@ -435,7 +451,7 @@ impl Lowerer<'_> {
             matches!(
                 m.kind(),
                 SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor | SyntaxKind::SetAccessor
-            )
+            ) && m.name().kind() != SyntaxKind::ComputedPropertyName
         }) {
             let name = member.name().text();
             if name.starts_with('%')
@@ -456,7 +472,7 @@ impl Lowerer<'_> {
             matches!(
                 m.kind(),
                 SyntaxKind::MethodDeclaration | SyntaxKind::PropertyDeclaration
-            )
+            ) && m.name().kind() != SyntaxKind::ComputedPropertyName
         }) {
             if let Some(base) = base
                 && self.classes.accessor(base, member.name().text()).is_some()
@@ -486,7 +502,8 @@ impl Lowerer<'_> {
                         matches!(
                             m.kind(),
                             SyntaxKind::MethodDeclaration | SyntaxKind::PropertyDeclaration
-                        ) && m.name().text() == name
+                        ) && m.name().kind() != SyntaxKind::ComputedPropertyName
+                            && m.name().text() == name
                     })
                 {
                     return Err(self.refuse(
@@ -568,6 +585,7 @@ impl Lowerer<'_> {
                 .base
                 .map(|base| self.classes.definitions[base].name.clone()),
             methods: vec![],
+            symbol_methods: vec![],
             method_names: vec![],
             fields: definition
                 .base
@@ -696,12 +714,26 @@ impl Lowerer<'_> {
                     SyntaxKind::MethodDeclaration
                         | SyntaxKind::GetAccessor
                         | SyntaxKind::SetAccessor
-                )
+                ) && member.name().kind() != SyntaxKind::ComputedPropertyName
             })
             .map(|member| member.name().text().to_string())
             .collect();
         let mut seen = HashSet::new();
         layout.method_names.retain(|name| seen.insert(name.clone()));
+        for member in definition.node.members() {
+            if member.kind() == SyntaxKind::MethodDeclaration
+                && member.name().kind() == SyntaxKind::ComputedPropertyName
+            {
+                let key = self.class_symbol_key(member.name().expression()).unwrap();
+                // Repeated definitions replace the descriptor without changing its key.
+                if !layout.symbol_methods.iter().any(|method| method.key == key) {
+                    layout.symbol_methods.push(ir::SymbolMethod {
+                        key,
+                        function: None,
+                    });
+                }
+            }
+        }
         if let Some(field) = layout.fields.iter().find(|field| {
             self.classes.method(index, &field.name).is_some()
                 || self.classes.accessor(index, &field.name).is_some()
@@ -748,4 +780,5 @@ mod accessors;
 mod constructors;
 mod methods;
 mod private_slots;
+mod symbol_methods;
 mod values;

@@ -128,6 +128,7 @@ impl Lowerer<'_> {
                 base: None,
                 fields: vec![],
                 methods: vec![],
+                symbol_methods: vec![],
                 method_names: vec!["get".into(), "set".into(), "has".into(), "delete".into()],
                 loc: self.loc(site),
             }));

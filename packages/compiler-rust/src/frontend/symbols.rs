@@ -2,7 +2,7 @@
 use super::*;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 impl Lowerer<'_> {
-    fn standard_symbol(&mut self, node: Node) -> bool {
+    pub(super) fn standard_symbol(&mut self, node: Node) -> bool {
         if node.kind() != SyntaxKind::Identifier {
             return false;
         }

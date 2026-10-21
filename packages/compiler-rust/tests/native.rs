@@ -284,6 +284,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-symbols/registry.ts",
         "rust-native-symbols/containers.ts",
         "rust-native-symbols/erased.ts",
+        "rust-native-symbol-methods/calls.ts",
+        "rust-native-symbol-methods/private.ts",
+        "rust-native-symbol-methods/inheritance.ts",
+        "rust-native-symbol-methods/order.ts",
+        "rust-native-symbol-methods/deferred.ts",
+        "rust-native-symbol-methods/untyped.js",
         "rust-native-well-known-symbols/identity.ts",
         "rust-native-well-known-symbols/storage.ts",
         "rust-native-well-known-symbols/modules.ts",
@@ -396,6 +402,43 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         let ir: serde_json::Value =
             serde_json::from_slice(&fs::read(target.with_extension("ir.json")).unwrap()).unwrap();
         assert_eq!(ir["irVersion"], 13);
+        if name.starts_with("rust-native-symbol-methods/") {
+            let descriptors = ir["classes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|class| class["symbolMethods"].as_array().into_iter().flatten())
+                .collect::<Vec<_>>();
+            assert!(!descriptors.is_empty(), "{name}");
+            if name.ends_with("/deferred.ts") {
+                assert_eq!(descriptors.len(), 2);
+                assert!(
+                    descriptors
+                        .iter()
+                        .all(|descriptor| descriptor.get("function").is_none())
+                );
+                assert!(
+                    !ir["functions"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|function| function["name"].as_str().unwrap().contains(".%symbol."))
+                );
+            } else {
+                assert!(
+                    descriptors
+                        .iter()
+                        .any(|descriptor| descriptor["function"].is_string())
+                );
+            }
+            assert!(ir["classes"].as_array().unwrap().iter().all(|class| {
+                class["methodNames"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .all(|name| !name.as_str().unwrap().contains("%symbol"))
+            }));
+        }
         if name.starts_with("rust-native-process/architecture.") {
             assert!(ir.to_string().contains("process.arch"));
             let generated = fs::read_to_string(target.with_extension("rs")).unwrap();
@@ -2339,7 +2382,18 @@ fn symbol_boundaries_preserve_previous_artifacts() {
     let target = binary(temp.path(), "symbol-boundary");
     for source in [
         "const values = new Map<symbol, number>(); values.set(Symbol.iterator, 1);",
-        "class C { [Symbol.asyncIterator]() { return 1; } }",
+        "class C { *[Symbol.iterator]() { yield 1; } } new C()[Symbol.iterator]();",
+        "class C { async *[Symbol.asyncIterator]() { yield 1; } } new C()[Symbol.asyncIterator]();",
+        "class C { [Symbol.iterator]() { return 1; } } const method = new C()[Symbol.iterator]; console.log(method);",
+        "class C { [Symbol.iterator]() { return 1; } } const value: any = new C(); console.log(value[Symbol.iterator]);",
+        "class C { [Symbol.iterator]() { return 1; } } const value: any = [new C()]; console.log(value);",
+        "const key = Symbol.iterator; class C { [key]() { return 1; } }",
+        "function key(): symbol { console.log('key'); return Symbol.iterator; } class C { [key()]() { return 1; } }",
+        "class C { static [Symbol.iterator]() { return 1; } }",
+        "class C { get [Symbol.iterator]() { return 1; } }",
+        "class C { [Symbol.toPrimitive]() { return 1; } }",
+        "class C { [Symbol.iterator](x: number): number; [Symbol.iterator](x: number): number { return x; } } new C()[Symbol.iterator](1);",
+        "export {}; const Symbol = { iterator: 'iterator' }; class C { [Symbol.iterator]() { return 1; } } console.log(new C());",
         "const value = { [Symbol.iterator]: 1 }; console.log(value);",
         "const value = Symbol.iterator; console.log(value[Symbol.toPrimitive]);",
         "const { iterator } = Symbol; console.log(iterator);",

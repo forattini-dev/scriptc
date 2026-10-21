@@ -1,9 +1,11 @@
 //! The first native subset of the existing scriptc IR v13 wire contract.
 use serde::Serialize;
 pub mod record_views;
+mod symbol_methods;
 mod symbols;
 mod walk;
 use std::collections::HashMap;
+pub use symbol_methods::{SymbolMethod, SymbolMethodKey};
 pub(crate) use symbols::well_known_symbol;
 
 pub const VERSION: u32 = 13;
@@ -225,6 +227,8 @@ pub struct Class {
     /// Full own non-data surface (methods/accessors), including undemanded bodies.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub method_names: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub symbol_methods: Vec<SymbolMethod>,
     pub loc: Loc,
 }
 
@@ -875,6 +879,7 @@ pub fn validate(module: &Module) -> Result<(), String> {
             }
         }
     }
+    symbol_methods::validate(module, &functions)?;
     let entry = functions
         .get(module.entry.as_str())
         .ok_or("missing entry")?;
@@ -1293,6 +1298,11 @@ fn validate_function(
                 Ok(())
             }
             Expr::DynFrom { value, r#type, .. } => {
+                if symbol_methods::contains_symbol_methods(&value.ty(), module) {
+                    return Err(
+                        "erasing symbol methods requires a native descriptor contract".into(),
+                    );
+                }
                 if contains_set(&value.ty(), &module.records, &module.unions) {
                     return Err("Set erasure is not in the shared native value contract".into());
                 }
@@ -2234,8 +2244,21 @@ fn validate_function(
                 r#fn, args, r#type, ..
             } => {
                 if let Some(operation) = r#fn.strip_prefix("weakmap.") {
-                    for arg in args {
-                        expr(arg, locals, initialized, functions, module)?;
+                    for (index, arg) in args.iter().enumerate() {
+                        // Direct typed keys are opaque GC identities, never
+                        // reflective mirrors. Validate the represented key.
+                        if index == 1
+                            && let Expr::DynFrom {
+                                value,
+                                r#type: Type::Dyn,
+                                ..
+                            } = arg
+                            && matches!(value.ty(), Type::Object { .. })
+                        {
+                            expr(value, locals, initialized, functions, module)?;
+                        } else {
+                            expr(arg, locals, initialized, functions, module)?;
+                        }
                     }
                     let expected = match operation {
                         "get" => Some((2, Type::Dyn)),
@@ -3329,6 +3352,7 @@ mod tests {
             base: None,
             fields: error_fields(),
             methods: vec![],
+            symbol_methods: vec![],
             method_names: vec![],
             loc: loc.clone(),
         });
@@ -3339,6 +3363,7 @@ mod tests {
             base: Some("%Error".into()),
             fields: error_fields(),
             methods: vec![],
+            symbol_methods: vec![],
             method_names: vec![],
             loc: loc.clone(),
         });
@@ -3610,6 +3635,7 @@ mod tests {
                 base: base.map(String::from),
                 fields: vec![],
                 methods: vec!["value".into()],
+                symbol_methods: vec![],
                 method_names: vec!["value".into()],
                 loc: loc.clone(),
             });
@@ -3750,6 +3776,7 @@ mod tests {
                 r#type: Type::Union { union_id: 0 },
             }],
             methods: vec![],
+            symbol_methods: vec![],
             method_names: vec![],
             loc: loc.clone(),
         };
@@ -4905,6 +4932,7 @@ mod tests {
             base: None,
             fields: vec![],
             methods: vec![],
+            symbol_methods: vec![],
             method_names: vec![],
             loc: loc.clone(),
         });

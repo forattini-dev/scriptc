@@ -73,7 +73,25 @@
           "rust-native-well-known-symbols/shadows.ts",
           "rust-native-well-known-symbols/untyped.js"
         ],
-        "next": "Represent symbol-valued class method keys separately from public string names, then port generator suspension and iterator completions without erasing demanded bodies."
+        "next": "Port native generator suspension and iterator completions; iteration-symbol method keys now have a separate portable descriptor surface."
+      },
+      "iterationSymbolMethods": {
+        "status": "implemented-subset",
+        "irVersion": 13,
+        "keys": [
+          "Symbol.iterator",
+          "Symbol.asyncIterator"
+        ],
+        "contract": "Own symbolMethods descriptors preserve undemanded bodies. Ordinary direct calls use receiver-explicit functions and closed-hierarchy dispatch, independently of public string names. Direct WeakMap class keys preserve private-slot identity; reflective erasure remains refused.",
+        "fixtures": [
+          "rust-native-symbol-methods/calls.ts",
+          "rust-native-symbol-methods/inheritance.ts",
+          "rust-native-symbol-methods/order.ts",
+          "rust-native-symbol-methods/deferred.ts",
+          "rust-native-symbol-methods/private.ts",
+          "rust-native-symbol-methods/untyped.js"
+        ],
+        "boundaries": "Demanded generators, implicit iteration, aliases/effectful keys, static methods, symbolic accessors and method-value extraction remain explicit refusals."
       }
     },
     {
@@ -485,16 +503,17 @@
     "compilerSourceBaseCommit": "212a353a716308b9fbabbce180d51d15d214adb9",
     "after": "well-known primitive symbol identities; native-reddb-well-known-v84 compile-only attempts",
     "compilerBinarySha256": "023e13dc0a7f2cf71db9e02afa2fd3ead3694ece47d968e5a77c3c8f0e14b1f6",
-    "red-skills-release": "@reddb-io/toon/dist/toonl.js:21575..22416 ToonlReader computed [Symbol.asyncIterator] method; private field inventory is passed",
-    "redskilled": "@reddb-io/toon/dist/toonl.js:21575..22416 ToonlReader computed [Symbol.asyncIterator] method; private field inventory is passed",
+    "red-skills-release": "@reddb-io/toon/dist/toonl.js:33545..33880 private #pushContinuationIfDue method (line 906); ToonlReader [Symbol.asyncIterator] descriptor registration is now passed. No demanded async-generator execution is claimed.",
+    "redskilled": "@reddb-io/toon/dist/toonl.js:33545..33880 private #pushContinuationIfDue method (line 906); ToonlReader [Symbol.asyncIterator] descriptor registration is now passed. No demanded async-generator execution is claimed.",
     "red-dev": "node_modules/tuiuiu.js/dist/core/pool.js:2023..2087 VNode factory arrow returning {type: 'box', props: {}, children: [], key: undefined} has no native function-result representation. Signal getter/setter definition registration is now passed; its demanded behavior is not yet an application acceptance claim.",
     "completedOriginalApplicationBinaries": 0,
-    "nextClassConstraint": "Well-known primitive Symbol reads now have canonical singleton identities. Represent symbol-valued class method keys and a native async-generator/async-iterator contract, preserving lazy execution, suspended frames, next/return/throw, queued steps, backpressure and cleanup on abrupt iteration exits. ToonlReader also depends on decoding state/options and stream consumption. Keep unsupported private methods/accessors explicit. Object.is and Set iteration remain separate demanded dependencies; passing private field inventory does not establish application behavior.",
+    "nextClassConstraint": "Represent private methods with declaration-owned brands, receiver checks and inaccessible function identities. Iteration-symbol descriptors and ordinary calls now preserve string/symbol separation, inheritance, super and private-field keys. Native async generators still require lazy suspended frames, next/return/throw, queued steps and cleanup on abrupt exits; ToonlReader also needs decoding state/options and stream consumption.",
     "nextFactoryConstraint": "Supply owning result contracts for JS callbacks returning records with unit-only properties and empty mutable containers. Minimal lowering probes independently refuse the VNode-shaped arrow, its no-key version and a nonempty-container version with key:undefined, while the concrete-container/numeric-key version emits IR. Preserve present undefined, fresh per-call ownership, mutation, aliases and captured pool state. Returned object-literal methods/getters require their own descriptor/receiver contract; class accessor support does not imply it.",
     "nextCoercionConstraint": "Keep the native undefined fact established by default lowering across body var redeclarations and captures; do not replace it with the checker declaration-file narrowing.",
     "nextModuleConstraint": "Keep canonical defining-module provenance for file-backed metadata and retain declaration-site initialization/module TDZ. Metadata reflection/mutation, import.meta.main/resolve, additional URL overloads, async suspension, direct Promise return adoption, Bun subprocess/Response streams, native namespace descriptors and async iteration remain outstanding.",
     "nextStorageConstraint": "Keep null/undefined JS lexical initialization separate from the permanent storage representation and from public typed call/return contracts. Preserve declaration-site initialization, captures and module TDZ.",
     "nextAsyncContextConstraint": "Keep the implemented run/getStore subset explicit; additional methods need their own context propagation and error contracts, especially disable across previously captured contexts.",
-    "nextCollectionConstraint": "Keep conditional WeakMap reachability and dead-entry cleanup for record keys, including value-to-key and value-to-owner cycles. Other weak-key domains and iterable constructors remain explicit boundaries. Native Set iteration/values().next() is a separate outstanding contract."
+    "nextCollectionConstraint": "Keep conditional WeakMap reachability and dead-entry cleanup for record keys, including value-to-key and value-to-owner cycles. Other weak-key domains and iterable constructors remain explicit boundaries. Native Set iteration/values().next() is a separate outstanding contract.",
+    "referenceCheckpointDebt": "The isolated full IR run on the symbol-method checkpoint stops at existing rust-native-promises/contracts.ts dynCheck of Promise. The working reference tree carries a pending validator prerequisite. New symbol fixtures must also pass from a clean owned snapshot; working-tree full-IR success cannot be reported as complete isolated-checkpoint acceptance. Reconcile this pending legacy contract before shipping."
   }
 }

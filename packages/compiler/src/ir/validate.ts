@@ -1,4 +1,5 @@
 import { WELL_KNOWN_SYMBOL_LIB_SIGS } from "./well-known-symbols.js";
+import { containsSymbolMethods, validateSymbolMethods } from "./symbol-methods.js";
 import { canDynCheckTo } from "./ir.js";
 import { recordViewPairs } from "./record-views.js";
 import { validationFields, type ValidationFields } from "./validation-fields.js";
@@ -1618,6 +1619,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       }
     }
   }
+  errors.push(...validateSymbolMethods(mod));
   // Hierarchy invariants: bases exist, the graph is acyclic, and every
   // derived class's field list starts with its base's EXACTLY (the prefix
   // layout that makes upcasts pointer reinterprets).
@@ -1896,6 +1898,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       fieldIndex,
       functionLengths,
       errors,
+      mod,
     );
   }
   return errors;
@@ -1912,6 +1915,7 @@ function validateFunction(
   fieldIndex: ValidationFields,
   functionLengths: Map<string, number>,
   errors: IrValidationError[],
+  mod: IrModule,
 ): void {
   const locals = new Map(fn.locals.map((l) => [l.id, l]));
   const returnAdoptions = new WeakSet<IrExpr>();
@@ -3516,6 +3520,7 @@ function validateFunction(
         break;
       }
       case "dynFrom": {
+        if (containsSymbolMethods(e.value.type, mod)) err("erasing symbol methods requires a native descriptor contract", e.loc);
         if (e.type.kind !== "dyn") err(`dynFrom must be dyn-typed, got ${e.type.kind}`, e.loc);
         if (e.fnLength !== undefined && (e.value.type.kind !== "func" ||
             !Number.isSafeInteger(e.fnLength) || e.fnLength < 0 || e.fnLength > e.value.type.params.length)) {
@@ -3962,7 +3967,11 @@ function validateFunction(
         break;
       case "libCall": {
         if (e.fn.startsWith("weakmap.")) {
-          e.args.forEach(checkExpr);
+          e.args.forEach((arg, index) => {
+            // The direct class key is an opaque identity, not an object mirror.
+            if (index === 1 && arg.kind === "dynFrom" && arg.type.kind === "dyn" && arg.value.type.kind === "object") checkExpr(arg.value);
+            else checkExpr(arg);
+          });
           const signature = e.fn === "weakmap.get" ? [2, DYN] as const : e.fn === "weakmap.set" ? [3, VOID] as const : e.fn === "weakmap.has" || e.fn === "weakmap.delete" ? [2, BOOL] as const : undefined;
           const owner = e.args[0]?.type;
           if (!signature || e.args.length !== signature[0] || !typeEquals(e.type, signature[1]) || owner?.kind !== "object" || owner.className !== "native_builtin_WeakMap" || e.args.slice(1).some(arg => arg.type.kind !== "dyn")) err("invalid native weak map operation", e.loc);

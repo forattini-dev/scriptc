@@ -215,6 +215,11 @@ impl Lowerer<'_> {
             return self.coerce(value, target, node);
         }
         if target == Type::Dyn {
+            if self.native_type_contains(&value.ty(), |ty| {
+                matches!(ty, Type::Object { class_name } if self.classes.has_symbol_surface(class_name))
+            }) {
+                return Err(self.refuse(node, "erasing symbol methods requires a native descriptor contract"));
+            }
             if self.native_type_contains(&value.ty(), weak_maps::instance) {
                 return Err(self.refuse(
                     node,

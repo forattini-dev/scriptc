@@ -1224,6 +1224,9 @@ impl<'a> Lowerer<'a> {
                 if let Some(value) = self.namespace_call(node)? {
                     return Ok(value);
                 }
+                if let Some(value) = self.class_symbol_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.class_call(node)? {
                     return Ok(value);
                 }

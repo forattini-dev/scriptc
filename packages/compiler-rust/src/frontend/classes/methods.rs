@@ -11,7 +11,9 @@ impl ClassGraph {
             let definition = &self.definitions[owner];
             if !definition.node.is_nil()
                 && let Some(node) = definition.node.members().into_iter().rev().find(|node| {
-                    node.kind() == SyntaxKind::MethodDeclaration && node.name().text() == name
+                    node.kind() == SyntaxKind::MethodDeclaration
+                        && node.name().kind() != SyntaxKind::ComputedPropertyName
+                        && node.name().text() == name
                 })
             {
                 return Some((owner, node));

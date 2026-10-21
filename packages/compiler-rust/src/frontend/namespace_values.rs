@@ -51,6 +51,7 @@ impl Lowerer<'_> {
             base: None,
             fields: vec![],
             methods: vec![],
+            symbol_methods: vec![],
             method_names: vec![],
             loc: loc.clone(),
         });
