@@ -103,6 +103,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-primitives/array-brand.ts",
         "rust-native-primitives/augmented-standard.ts",
         "rust-native-primitives/string-function.ts",
+        "rust-native-primitives/opaque-objects.ts",
+        "rust-native-primitives/opaque-maps.ts",
         "rust-native-primitives/conditions.ts",
         "rust-native-primitives/math-functions.ts",
         "rust-native-primitives/strings.ts",

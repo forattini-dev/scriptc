@@ -2,6 +2,29 @@
 use super::*;
 
 impl Lowerer<'_> {
+    fn opaque_object_type(&self, id: TypeId) -> bool {
+        if self
+            .checker
+            .ty(id)
+            .flags
+            .intersects(TypeFlags::NON_PRIMITIVE)
+        {
+            return true;
+        }
+        let symbol = self.checker.ty(id).symbol();
+        if symbol.0 == 0 {
+            return false;
+        }
+        let symbol = self.checker.sym(symbol);
+        symbol.name.as_ref() == "Object"
+            && symbol.declarations.iter().any(|decl| {
+                decl.kind() == SyntaxKind::InterfaceDeclaration
+                    && source_frontend::frontend::bundled::bundled_lib_name(
+                        &source_file_info(source_frontend::prelude::get_source_file_of_node(*decl))
+                            .file_name,
+                    ) == Some("lib.es5.d.ts")
+            })
+    }
     pub(super) fn primitive_type(&self, flags: TypeFlags) -> Option<Type> {
         if flags.intersects(TypeFlags::NUMBER_LIKE) {
             Some(Type::F64)
@@ -16,6 +39,12 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn type_id(&mut self, id: TypeId) -> Option<Type> {
+        // Broad annotations describe no closed layout. Retain the actual
+        // owning value rather than projecting it into an empty record or
+        // recursively treating Object's prototype methods as data fields.
+        if self.opaque_object_type(id) {
+            return Some(Type::Dyn);
+        }
         if let Some(ty) = self.standard_callable_type(id) {
             return Some(ty);
         }
