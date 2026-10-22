@@ -30,6 +30,7 @@ import { emitRustDynamicKeyWrite } from "./dynamic-key-write.js";
 import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
+import { caughtArrayValues } from "./caught-array-values.js";
 import type { RustClosureShape } from "./model.js";
 import { isSharedRecord, recordCheckName, recordNewName } from "./shared-records.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
@@ -479,6 +480,14 @@ export class RustDynamicEmitter {
     this.context.line(`else if runtime::caught_is::<bool>(&caught) { ${name}::Boolean(runtime::caught_narrow::<bool>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsString>(&caught) { ${name}::String(runtime::caught_narrow::<runtime::JsString>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsSymbol>(&caught) { ${name}::Symbol(runtime::caught_narrow::<runtime::JsSymbol>(&caught)) }`);
+    const caughtArrayAbis = new Set<string>();
+    for (const payload of caughtArrayValues(this.context.module())) {
+      const abi = this.context.rustType(payload.type, payload.loc);
+      if (caughtArrayAbis.has(abi)) continue;
+      caughtArrayAbis.add(abi);
+      const value = this.dynFrom.emit(payload.type, `runtime::caught_narrow::<${abi}>(&caught)`, payload.loc, "", true);
+      this.context.line(`else if runtime::caught_is::<${abi}>(&caught) { ${value} }`);
+    }
     if (usesEmbeddedModules) this.context.line("else if runtime::caught_is::<runtime::IslandValue>(&caught) { sc_dyn_from_island(runtime::caught_narrow::<runtime::IslandValue>(&caught)) }");
     this.context.line(`else if ${caughtErrorTest} { sc_dyn_error_box(&${caughtErrorValue}) }`);
     this.context.line(`else { ${name}::Object(runtime::map_new()) }`);

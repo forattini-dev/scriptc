@@ -53,6 +53,16 @@ impl Lowerer<'_> {
         }
         let name = member.name().text();
         let member_id = self.symbol(member.name());
+        if name == "isArray"
+            && member.expression().kind() == SyntaxKind::Identifier
+            && {
+                let id = self.symbol(member.expression());
+                self.primitive_symbol(id, "Array", None)
+            }
+            && self.primitive_symbol(member_id, name, Some("ArrayConstructor"))
+        {
+            return self.array_brand_call(node).map(Some);
+        }
         let math_operation = crate::builtins::get("Math", name);
         let math = math_operation.is_some()
             && member.expression().kind() == SyntaxKind::Identifier
@@ -85,13 +95,8 @@ impl Lowerer<'_> {
                     "standard primitive iterable argument spreads are not ported",
                 ));
             }
-            let mut value = self.primitive_operand(arg)?;
-            // Unit tags use the existing nullable numeric ABI; they cannot be
-            // passed as standalone Rust value slots. Preserve their evaluation.
-            if matches!(value.ty(), Type::Null | Type::Undefined) {
-                let ty = self.intern_union(vec![Type::F64, value.ty()]).unwrap();
-                value = self.coerce(value, ty, arg)?;
-            }
+            let value = self.primitive_operand(arg)?;
+            let value = self.primitive_capture(value, arg)?;
             values.push(value);
         }
         // Evaluate the receiver and ALL arguments before conversions, errors or
@@ -169,6 +174,124 @@ impl Lowerer<'_> {
             r#type: result,
             loc: self.loc(node),
         }))
+    }
+
+    fn array_brand_call(&mut self, node: Node) -> Result<Expr, String> {
+        let mut values = Vec::new();
+        for arg in node.arguments() {
+            if arg.kind() == SyntaxKind::SpreadElement {
+                return Err(self.refuse(
+                    arg,
+                    "standard primitive iterable argument spreads are not ported",
+                ));
+            }
+            // A predicate observes the live slot, before any checker refinement.
+            let mut value = self.condition_value(primitive_source(arg))?;
+            if value.ty() == Type::Caught {
+                value = self.coerce(value, Type::Dyn, arg)?;
+            }
+            let value = self.primitive_capture(value, arg)?;
+            values.push(value);
+        }
+        let mut helper = Helper::new(
+            "array_is_array",
+            values.iter().map(Expr::ty).collect(),
+            Type::Bool,
+            self.loc(node),
+        );
+        let value = if values.is_empty() {
+            Expr::BoolLit {
+                value: false,
+                r#type: Type::Bool,
+                loc: helper.loc(),
+            }
+        } else {
+            self.array_brand(helper.read(&helper.param(0)), node)
+        };
+        helper.function.body.push(Stmt::Return {
+            value: Some(value),
+            loc: helper.loc(),
+        });
+        let callee = self.install_helper(helper.function);
+        Ok(Expr::Call {
+            callee,
+            args: values,
+            r#type: Type::Bool,
+            loc: self.loc(node),
+        })
+    }
+
+    // Unit tags cannot occupy standalone function ABI slots. A void-valued
+    // source call still evaluates here and contributes JavaScript undefined.
+    fn primitive_capture(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
+        if value.ty() == Type::Void {
+            let ty = self.intern_union(vec![Type::F64, Type::Undefined]).unwrap();
+            let unit = Expr::UnitLit {
+                unit: "undefined",
+                r#type: Type::Undefined,
+                loc: self.loc(node),
+            };
+            return Ok(Expr::Sequence {
+                stmts: vec![Stmt::Expression {
+                    expr: value,
+                    loc: self.loc(node),
+                }],
+                result: Box::new(self.coerce(unit, ty.clone(), node)?),
+                r#type: ty,
+                loc: self.loc(node),
+            });
+        }
+        if matches!(value.ty(), Type::Null | Type::Undefined) {
+            let ty = self.intern_union(vec![Type::F64, value.ty()]).unwrap();
+            return self.coerce(value, ty, node);
+        }
+        Ok(value)
+    }
+
+    fn array_brand(&self, value: Expr, node: Node) -> Expr {
+        let boolean = |value| Expr::BoolLit {
+            value,
+            r#type: Type::Bool,
+            loc: self.loc(node),
+        };
+        match value.ty() {
+            Type::Dyn => Expr::DynTest {
+                value: Box::new(value),
+                test: "array".into(),
+                negated: false,
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            },
+            Type::Array { .. } => boolean(true),
+            Type::Record { shape_id } => boolean(self.records[shape_id].tuple),
+            Type::Union { union_id } => self.unions[union_id].arms.iter().enumerate().rev().fold(
+                boolean(false),
+                |otherwise, (tag, arm)| {
+                    let narrowed = Expr::UnionNarrow {
+                        union_id: format!("u{union_id}"),
+                        tag,
+                        value: Box::new(value.clone()),
+                        r#type: arm.clone(),
+                        loc: self.loc(node),
+                    };
+                    Expr::Ternary {
+                        cond: Box::new(Expr::UnionIsTag {
+                            union_id: format!("u{union_id}"),
+                            tag,
+                            negated: false,
+                            value: Box::new(value.clone()),
+                            r#type: Type::Bool,
+                            loc: self.loc(node),
+                        }),
+                        then: Box::new(self.array_brand(narrowed, node)),
+                        else_: Box::new(otherwise),
+                        r#type: Type::Bool,
+                        loc: self.loc(node),
+                    }
+                },
+            ),
+            _ => boolean(false),
+        }
     }
 
     fn primitive_string_argument(
@@ -268,18 +391,8 @@ impl Lowerer<'_> {
 
     // Type-only wrappers do not perform JavaScript numeric/string conversion.
     // Preserve the operand before applying the actual standard operation.
-    fn primitive_operand(&mut self, mut node: Node) -> Result<Expr, String> {
-        while matches!(
-            node.kind(),
-            SyntaxKind::ParenthesizedExpression
-                | SyntaxKind::AsExpression
-                | SyntaxKind::TypeAssertionExpression
-                | SyntaxKind::SatisfiesExpression
-                | SyntaxKind::NonNullExpression
-        ) {
-            node = node.expression();
-        }
-        self.expression(node)
+    fn primitive_operand(&mut self, node: Node) -> Result<Expr, String> {
+        self.expression(primitive_source(node))
     }
 
     /// Only represented primitives participate. Objects require observable
@@ -316,4 +429,18 @@ impl Lowerer<'_> {
             _ => Err(self.refuse(node, "standard numeric arguments require represented primitives; object coercion hooks are not ported")),
         }
     }
+}
+
+fn primitive_source(mut node: Node) -> Node {
+    while matches!(
+        node.kind(),
+        SyntaxKind::ParenthesizedExpression
+            | SyntaxKind::AsExpression
+            | SyntaxKind::TypeAssertionExpression
+            | SyntaxKind::SatisfiesExpression
+            | SyntaxKind::NonNullExpression
+    ) {
+        node = node.expression();
+    }
+    node
 }

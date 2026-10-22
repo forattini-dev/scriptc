@@ -1412,6 +1412,7 @@ fn validate_function(
                             | "null"
                             | "nullish"
                             | "object"
+                            | "array"
                             | "function"
                             | "truthy"
                     )
@@ -3833,6 +3834,37 @@ mod tests {
             loc,
         }];
         assert_eq!(validate(&m).unwrap_err(), "invalid native value call");
+    }
+
+    #[test]
+    fn array_brand_test_keeps_the_shared_dynamic_boolean_contract() {
+        let mut module = error_module();
+        let loc = module.functions[0].loc.clone();
+        for (test, result, valid) in [
+            ("array", Type::Bool, true),
+            ("array", Type::String, false),
+            ("unknown-brand", Type::Bool, false),
+        ] {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::DynTest {
+                    value: Box::new(Expr::DynObjLit {
+                        fields: vec![],
+                        r#type: Type::Dyn,
+                        loc: loc.clone(),
+                    }),
+                    test: test.into(),
+                    negated: true,
+                    r#type: result,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid);
+            if valid {
+                let wire = serde_json::to_value(&module).unwrap();
+                assert_eq!(wire["functions"][0]["body"][0]["expr"]["test"], "array");
+            }
+        }
     }
 
     #[test]

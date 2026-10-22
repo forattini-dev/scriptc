@@ -138,6 +138,15 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
     out.push_str(include_str!("../map_values_support.rs"));
     out.push_str(include_str!("../promise_values_support.rs"));
     let types = types(module);
+    out.push_str("fn native_value_is_array(value: &NativeValue) -> bool { match value { NativeValue::Array(_) => true,\n");
+    for (index, ty) in types.iter().enumerate() {
+        if matches!(ty, Type::Array { elem } if **elem != Type::Dyn)
+            || matches!(ty, Type::Record { shape_id } if module.records[*shape_id].tuple)
+        {
+            writeln!(out, "NativeValue::V{index}(..) => true,").unwrap();
+        }
+    }
+    out.push_str("_ => false } }\n");
     out.push_str("fn native_value_is_function(value: &NativeValue) -> bool { match value {\n");
     for (i, ty) in types.iter().enumerate() {
         if matches!(ty, Type::Func { .. }) {
@@ -301,7 +310,7 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
         };
         writeln!(out, "(NativeValue::V{i}(a), NativeValue::V{i}(b)) => {eq},").unwrap();
     }
-    out.push_str("_ => false } }\nfn native_value_test(value: &NativeValue, test: &str) -> bool { match test { \"number\" => matches!(value, NativeValue::Number(_)), \"boolean\" => matches!(value, NativeValue::Boolean(_)), \"string\" => matches!(value, NativeValue::String(_)), \"symbol\" => matches!(value, NativeValue::Symbol(_)), \"undefined\" => matches!(value, NativeValue::Undefined), \"null\" => matches!(value, NativeValue::Null), \"nullish\" => matches!(value, NativeValue::Undefined | NativeValue::Null), \"truthy\" => match value { NativeValue::Undefined | NativeValue::Null => false, NativeValue::Number(v) => *v != 0.0 && !v.is_nan(), NativeValue::Boolean(v) => *v, NativeValue::String(v) => !v.is_empty(), _ => true }, \"function\" => match value {\n");
+    out.push_str("_ => false } }\nfn native_value_test(value: &NativeValue, test: &str) -> bool { match test { \"number\" => matches!(value, NativeValue::Number(_)), \"boolean\" => matches!(value, NativeValue::Boolean(_)), \"string\" => matches!(value, NativeValue::String(_)), \"symbol\" => matches!(value, NativeValue::Symbol(_)), \"undefined\" => matches!(value, NativeValue::Undefined), \"null\" => matches!(value, NativeValue::Null), \"nullish\" => matches!(value, NativeValue::Undefined | NativeValue::Null), \"array\" => native_value_is_array(value), \"truthy\" => match value { NativeValue::Undefined | NativeValue::Null => false, NativeValue::Number(v) => *v != 0.0 && !v.is_nan(), NativeValue::Boolean(v) => *v, NativeValue::String(v) => !v.is_empty(), _ => true }, \"function\" => match value {\n");
     for (i, t) in types.iter().enumerate() {
         if matches!(t, Type::Func { .. } | Type::Classval { .. }) {
             writeln!(out, "NativeValue::V{i}(_) => true,").unwrap();

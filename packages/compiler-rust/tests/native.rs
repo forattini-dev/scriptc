@@ -100,6 +100,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-primitives/array-brand.ts",
         "rust-native-primitives/conditions.ts",
         "rust-native-primitives/math-functions.ts",
         "rust-native-primitives/strings.ts",
@@ -3526,6 +3527,10 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
         ),
         (
             "const values = [1, 2]; Math.min(...values);",
+            "standard primitive iterable argument spreads are not ported",
+        ),
+        (
+            "const values: [unknown] = [[]]; Array.isArray(...values);",
             "standard primitive iterable argument spreads are not ported",
         ),
         (
