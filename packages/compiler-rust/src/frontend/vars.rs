@@ -257,6 +257,14 @@ impl Lowerer<'_> {
         if node.kind() == SyntaxKind::Identifier
             && let Ok(local) = self.binding(node)
         {
+            // Catch storage holds a completion payload. Observe its existing
+            // owning value alias rather than boxing or projecting Caught.
+            let local = if local.r#type == Type::Caught {
+                let symbol = self.symbol(node);
+                self.caught_aliases.get(&symbol).cloned().unwrap_or(local)
+            } else {
+                local
+            };
             return Ok(Expr::VarRef {
                 local_id: local.id,
                 r#type: local.r#type,

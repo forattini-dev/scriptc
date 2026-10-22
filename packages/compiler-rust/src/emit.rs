@@ -211,7 +211,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Expr::LibCall { .. }
             | Expr::SetNew { .. }
             | Expr::SetIntrinsic { .. } => true,
-            Expr::ArrayIntrinsic { .. } => true,
+            Expr::ArrayIntrinsic { .. } | Expr::StringIntrinsic { .. } => true,
             Expr::ArrayGet { .. } => true,
             Expr::MapNew { seed, .. } => seed.iter().any(|p| expr(&p.key) || expr(&p.value)),
             Expr::MapIntrinsic { receiver, args, .. } => expr(receiver) || args.iter().any(expr),
@@ -560,6 +560,22 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             format!("runtime::array_new::<{element}>(vec![{values}])")
         }
         Expr::ArrayLit { .. } => unreachable!("IR validated"),
+        Expr::StringIntrinsic {
+            method,
+            receiver,
+            args,
+            ..
+        } => {
+            let receiver = expr(receiver, function, module);
+            match method.as_str() {
+                "length" => format!("runtime::string_len(&runtime::JsString::from({receiver}))"),
+                "repeat" => format!(
+                    "runtime::string_repeat(&runtime::JsString::from({receiver}), {}).to_string()",
+                    expr(&args[0], function, module)
+                ),
+                _ => unreachable!("IR validated"),
+            }
+        }
         Expr::LibCall { r#fn, .. } if r#fn == "dyn.this" => "native_this.clone()".into(),
         Expr::LibCall { r#fn, args, .. } => {
             let builtin = crate::builtins::by_ir(r#fn).expect("IR validated");
@@ -574,7 +590,12 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            let call = format!("runtime::{}({args})", builtin.runtime);
+            let call = match builtin.implementation {
+                crate::builtins::Implementation::Runtime(name) => {
+                    format!("runtime::{name}({args})")
+                }
+                crate::builtins::Implementation::FloatMethod(name) => format!("({args}).{name}()"),
+            };
             if builtin.result == Type::String {
                 format!("({call}).to_string()")
             } else {

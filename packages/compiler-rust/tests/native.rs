@@ -100,6 +100,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-primitives/conditions.ts",
+        "rust-native-primitives/math.ts",
+        "rust-native-primitives/repeat.ts",
+        "rust-native-primitives/order.ts",
+        "rust-native-primitives/errors.ts",
+        "rust-native-primitives/shadows.ts",
+        "rust-native-primitives/contracts.ts",
         "rust-native-receivers/strict.cjs",
         "rust-native-receivers/call.ts",
         "rust-native-receivers/lexical.ts",
@@ -3497,4 +3504,65 @@ fn metadata_project(directory: &Path) {
     fs::write(directory.join("tsconfig.json"), serde_json::to_vec(&serde_json::json!({
         "compilerOptions": { "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext", "lib": ["ES2022"], "types": ["node"], "typeRoots": [root().join("node_modules/@types")], "skipLibCheck": true, "strict": true }
     })).unwrap()).unwrap();
+}
+
+#[test]
+fn standard_primitive_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "primitive-boundary");
+    for (source, expected) in [
+        (
+            "Math.floor({ valueOf: (): number => 2 } as any);",
+            "standard numeric arguments require represented primitives",
+        ),
+        (
+            "Math.floor({ valueOf: (): number => 2 } as unknown as number);",
+            "standard numeric arguments require represented primitives",
+        ),
+        (
+            "const values = [1, 2]; Math.min(...values);",
+            "standard primitive iterable argument spreads are not ported",
+        ),
+        (
+            "'x'.repeat(Symbol('count') as any);",
+            "standard numeric arguments require represented primitives",
+        ),
+        (
+            "'😀'.slice(0, 1);",
+            "property receiver has no closed record representation",
+        ),
+    ] {
+        fs::write(&input, source).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains(expected)
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
 }

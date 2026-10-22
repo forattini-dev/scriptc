@@ -7,6 +7,12 @@ pub fn strings() -> Type {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Implementation {
+    Runtime(&'static str),
+    FloatMethod(&'static str),
+}
+
 #[derive(Clone)]
 pub struct Builtin {
     pub module: &'static str,
@@ -14,12 +20,25 @@ pub struct Builtin {
     pub ir: &'static str,
     pub args: Vec<Type>,
     pub result: Type,
-    pub runtime: &'static str,
+    pub implementation: Implementation,
 }
 
 macro_rules! call {
     ($module:literal, $member:literal, $ir:literal, [$($arg:expr),*], $result:expr, $runtime:literal) => {
-        Builtin { module: $module, member: $member, ir: $ir, args: vec![$($arg),*], result: $result, runtime: $runtime }
+        Builtin { module: $module, member: $member, ir: $ir, args: vec![$($arg),*], result: $result, implementation: Implementation::Runtime($runtime) }
+    };
+}
+
+macro_rules! float_call {
+    ($method:literal) => {
+        Builtin {
+            module: "Math",
+            member: $method,
+            ir: concat!("math.", $method),
+            args: vec![Type::F64],
+            result: Type::F64,
+            implementation: Implementation::FloatMethod($method),
+        }
     };
 }
 
@@ -28,6 +47,54 @@ fn calls() -> &'static [Builtin] {
     static CALLS: std::sync::OnceLock<Vec<Builtin>> = std::sync::OnceLock::new();
     CALLS.get_or_init(|| {
         vec![
+            float_call!("floor"),
+            float_call!("ceil"),
+            float_call!("trunc"),
+            call!(
+                "Math",
+                "round",
+                "math.round",
+                [Type::F64],
+                Type::F64,
+                "math_round"
+            ),
+            float_call!("abs"),
+            call!(
+                "Math",
+                "sign",
+                "math.sign",
+                [Type::F64],
+                Type::F64,
+                "math_sign"
+            ),
+            call!(
+                "Math",
+                "min",
+                "math.minArr",
+                [Type::Array {
+                    elem: Box::new(Type::F64)
+                }],
+                Type::F64,
+                "math_min_array"
+            ),
+            call!(
+                "Math",
+                "max",
+                "math.maxArr",
+                [Type::Array {
+                    elem: Box::new(Type::F64)
+                }],
+                Type::F64,
+                "math_max_array"
+            ),
+            call!(
+                "Number",
+                "fromString",
+                "num.fromString",
+                [String],
+                Type::F64,
+                "number_from_string"
+            ),
             call!(
                 "url",
                 "fileURLToPath",
@@ -307,7 +374,7 @@ mod tests {
             let item = property("process", name).unwrap();
             assert_eq!(item.result, Type::String);
             assert!(item.args.is_empty());
-            assert_eq!(by_ir(item.ir).unwrap().runtime, item.runtime);
+            assert_eq!(by_ir(item.ir).unwrap().implementation, item.implementation);
             assert!(get("process", name).is_none());
         }
     }

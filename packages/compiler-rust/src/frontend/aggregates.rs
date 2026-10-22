@@ -884,7 +884,7 @@ impl Lowerer<'_> {
                 if test.kind() == SyntaxKind::TypeOfExpression
                     && kind.kind() == SyntaxKind::StringLiteral
                 {
-                    let value = self.expression(test.expression())?;
+                    let value = self.condition_value(test.expression())?;
                     if value.ty() == Type::Dyn
                         && matches!(
                             kind.text(),

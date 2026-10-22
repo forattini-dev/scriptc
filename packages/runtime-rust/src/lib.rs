@@ -202,6 +202,7 @@ mod tests {
     include!("tests/event_loop_order.rs");
     include!("tests/crypto.rs");
     include!("tests/language_and_heap.rs");
+    include!("string_repeat.test.rs");
     include!("promise_views.test.rs");
     include!("promise_properties.test.rs");
     include!("promises.test.rs");

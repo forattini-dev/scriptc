@@ -39,6 +39,7 @@ mod modules;
 mod namespace_values;
 mod parameters;
 mod pipeline;
+mod primitives;
 mod process;
 mod promises;
 mod property_keys;
@@ -1040,6 +1041,9 @@ impl<'a> Lowerer<'a> {
                 if let Some(value) = self.class_get(node)? {
                     return Ok(value);
                 }
+                if let Some(value) = self.primitive_get(node)? {
+                    return Ok(value);
+                }
                 self.record_get(node)
             }
             SyntaxKind::NumericLiteral => {
@@ -1183,7 +1187,7 @@ impl<'a> Lowerer<'a> {
                 self.binary(node, op)
             }
             SyntaxKind::TypeOfExpression => {
-                let value = self.expression(node.expression())?;
+                let value = self.condition_value(node.expression())?;
                 if async_context::instance(&value.ty()) || weak_maps::instance(&value.ty()) {
                     return Ok(Expr::Sequence {
                         stmts: vec![Stmt::Expression {
@@ -1208,6 +1212,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.primitive_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.function_receiver_call(node)? {
                     return Ok(value);
                 }

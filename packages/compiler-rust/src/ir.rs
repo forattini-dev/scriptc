@@ -528,6 +528,14 @@ pub enum Expr {
         r#type: Type,
         loc: Loc,
     },
+    #[serde(rename = "strIntrinsic")]
+    StringIntrinsic {
+        method: String,
+        receiver: Box<Expr>,
+        args: Vec<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     StrConcat {
         left: Box<Expr>,
         right: Box<Expr>,
@@ -695,6 +703,7 @@ impl Expr {
             | Self::CallValue { r#type, .. }
             | Self::Logical { r#type, .. }
             | Self::StrEq { r#type, .. }
+            | Self::StringIntrinsic { r#type, .. }
             | Self::StrConcat { r#type, .. }
             | Self::ToString { r#type, .. }
             | Self::UnionEq { r#type, .. }
@@ -1951,6 +1960,30 @@ fn validate_function(
                 }
                 Ok(())
             }
+            Expr::StringIntrinsic {
+                method,
+                receiver,
+                args,
+                r#type,
+                ..
+            } => {
+                expr(receiver, locals, initialized, functions, module)?;
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let valid = match method.as_str() {
+                    "length" => args.is_empty() && *r#type == Type::F64,
+                    "repeat" => {
+                        args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::String
+                    }
+                    _ => false,
+                };
+                if receiver.ty() == Type::String && valid {
+                    Ok(())
+                } else {
+                    Err("invalid native string operation".into())
+                }
+            }
             Expr::StrConcat {
                 left,
                 right,
@@ -2897,6 +2930,112 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standard_primitives_validate_abi_and_visit_nested_operands() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        let string = Expr::StrLit {
+            value: "😀".into(),
+            r#type: Type::String,
+            loc: loc.clone(),
+        };
+        let number = Expr::NumLit {
+            value: 2.0,
+            spelling: None,
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        for (method, receiver, args, result, valid) in [
+            (
+                "repeat",
+                string.clone(),
+                vec![number.clone()],
+                Type::String,
+                true,
+            ),
+            ("repeat", string.clone(), vec![], Type::String, false),
+            (
+                "repeat",
+                number.clone(),
+                vec![number.clone()],
+                Type::String,
+                false,
+            ),
+            (
+                "repeat",
+                string.clone(),
+                vec![string.clone()],
+                Type::String,
+                false,
+            ),
+            (
+                "repeat",
+                string.clone(),
+                vec![number.clone()],
+                Type::F64,
+                false,
+            ),
+            ("length", string.clone(), vec![], Type::F64, true),
+            (
+                "length",
+                string.clone(),
+                vec![number.clone()],
+                Type::F64,
+                false,
+            ),
+            (
+                "slice",
+                string.clone(),
+                vec![number.clone()],
+                Type::String,
+                false,
+            ),
+        ] {
+            let value = Expr::StringIntrinsic {
+                method: method.into(),
+                receiver: Box::new(receiver),
+                args,
+                r#type: result,
+                loc: loc.clone(),
+            };
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: value,
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid, "{method}");
+            if valid {
+                let wire = serde_json::to_value(&module).unwrap();
+                assert_eq!(
+                    wire["functions"][0]["body"][0]["expr"]["kind"],
+                    "strIntrinsic"
+                );
+                let mut types = vec![];
+                module.visit_expressions(&mut |e| types.push(e.ty()));
+                assert_eq!(types.len(), if method == "repeat" { 3 } else { 2 });
+            }
+        }
+        for (name, args, result, valid) in [
+            ("math.floor", vec![number.clone()], Type::F64, true),
+            ("math.floor", vec![string.clone()], Type::F64, false),
+            ("math.floor", vec![], Type::F64, false),
+            ("math.floor", vec![number.clone()], Type::String, false),
+            ("math.minArr", vec![number], Type::F64, false),
+            ("num.fromString", vec![string], Type::F64, true),
+        ] {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: name.into(),
+                    args,
+                    r#type: result,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid, "{name}");
+        }
+    }
 
     #[test]
     fn receiver_contract_validates_arity_result_and_entry_scope() {

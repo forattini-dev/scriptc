@@ -477,11 +477,26 @@ pub fn string_slice(value: &JsString, start: f64, end: f64) -> JsString {
 }
 
 pub fn string_repeat(value: &JsString, count: f64) -> JsString {
-    let count = if count.is_nan() { 0.0 } else { count.trunc() };
-    if !count.is_finite() || count < 0.0 {
-        trap_range_error("Invalid count value".to_owned());
+    let integer = if count.is_nan() { 0.0 } else { count.trunc() };
+    if !integer.is_finite() || integer < 0.0 {
+        throw_range_error(format!("Invalid count value: {}", format_number(count)));
     }
-    { let mut output = JsStringBuilder::new(); for _ in 0..count as usize { output.push_str(value); } output.finish() }
+    if integer == 0.0 || value.is_empty() {
+        return empty_string();
+    }
+    // The pinned 64-bit Node runtime exposes this UTF-16 code-unit ceiling
+    // as buffer.constants.MAX_STRING_LENGTH. Check before casting/allocating.
+    const MAX_STRING_LENGTH: f64 = 536_870_888.0;
+    let length = value.encode_utf16().count() as f64;
+    if integer > MAX_STRING_LENGTH / length {
+        throw_range_error("Invalid string length".to_owned());
+    }
+    let count = integer as usize;
+    if let Some(text) = value.well_formed_utf8() {
+        JsString::from(text.repeat(count))
+    } else {
+        JsString::from_utf16(&value.encode_utf16().collect::<Vec<_>>().repeat(count))
+    }
 }
 
 fn string_pad(value: &JsString, max_length: f64, fill: &JsString, at_start: bool) -> JsString {

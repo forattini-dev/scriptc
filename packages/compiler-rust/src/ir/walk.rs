@@ -139,6 +139,11 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
             args,
             ..
         }
+        | Expr::StringIntrinsic {
+            receiver: recv,
+            args,
+            ..
+        }
         | Expr::ArrayIntrinsic {
             receiver: recv,
             args,

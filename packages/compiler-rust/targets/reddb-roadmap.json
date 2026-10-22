@@ -939,5 +939,45 @@
       "existing Set/WeakMap/namespace and descriptor erasure fences"
     ],
     "deliveryBoundary": "Native and reference Rust parity fixtures are local feature evidence. Original application binary acceptance and full plain/SAN shipping gates remain pending."
+  },
+  "nativePrimitivesCheckpoint": {
+    "date": "2026-10-22",
+    "status": "partial",
+    "compiler": "rust",
+    "engine": "none",
+    "irVersion": 13,
+    "originalAppBinaries": 0,
+    "originalAppsExecuted": false,
+    "fixtures": [
+      "rust-native-primitives/math.ts",
+      "rust-native-primitives/repeat.ts",
+      "rust-native-primitives/order.ts",
+      "rust-native-primitives/errors.ts",
+      "rust-native-primitives/shadows.ts",
+      "rust-native-primitives/contracts.ts",
+      "rust-native-primitives/conditions.ts"
+    ],
+    "resolved": [
+      "Proven standard Math.floor/ceil/trunc/round/abs/sign and fixed variadic min/max, using the existing numeric IR calls.",
+      "Standard String.repeat and UTF-16 length, with eager receiver/all-argument evaluation and represented primitive numeric coercion.",
+      "Catchable repeat range errors, preallocation UTF-16 limits, empty extreme counts and surrogate-preserving runtime repetition.",
+      "Typeof and typeof comparisons inspect live identifier storage without prematurely projecting checker-refined union subsets, including mutation by compiled callbacks."
+    ],
+    "observedFirstRefusals": {
+      "red-skills-release": "json-with-bigint.js:1991..2008: String.slice member has no closed receiver representation; standard repeat/Math indentation and live typeof branch observation now lower.",
+      "redskilled": "death-record.ts:10714..11676: object method ABI",
+      "red-dev": "tuiuiu/core/pool.js:2023..2087: VNode factory ABI"
+    },
+    "nextContract": "Migrate native strings to lossless UTF-16 before enabling String.slice; preserve lone surrogates, once-only evaluation, numeric defaults and index conversion. General checker-proven union subset value conversion remains separately tracked.",
+    "remainingBoundaries": [
+      "object ToPrimitive hooks for numeric arguments",
+      "dynamically typed numeric operands without a represented primitive proof",
+      "iterable argument spreads and extracted primitive functions",
+      "native UTF-16 results including lone surrogates",
+      "source loops and abrupt completion",
+      "constructor/name reflection and BigInt",
+      "application-specific object method and VNode factory ABIs"
+    ],
+    "deliveryBoundary": "Local feature checkpoint only. Original applications and dependencies are unchanged, no original app was executed, no full plain/SAN workspace success or complete application binary acceptance is claimed."
   }
 }
