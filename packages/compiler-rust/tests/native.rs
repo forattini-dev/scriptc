@@ -101,6 +101,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
         "rust-native-primitives/array-brand.ts",
+        "rust-native-primitives/augmented-standard.ts",
         "rust-native-primitives/conditions.ts",
         "rust-native-primitives/math-functions.ts",
         "rust-native-primitives/strings.ts",
@@ -3562,6 +3563,51 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
             !output.status.success()
                 && stderr.contains("SCN1001")
                 && stderr.contains(expected)
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn standard_primitive_declaration_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let declarations = temp.path().join("ambient.d.ts");
+    let target = binary(temp.path(), "primitive-declarations");
+    fs::write(&input, "Array.isArray(1);").unwrap();
+    for source in [
+        "interface ArrayConstructor { isArray(value: never): value is never; }",
+        "declare var Array: { isArray(value: unknown): boolean };",
+    ] {
+        fs::write(&declarations, source).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains("call target has no native representation")
                 && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );

@@ -11,7 +11,20 @@ impl Lowerer<'_> {
         let symbol = self.checker.sym(SymbolId(id));
         symbol.name.as_ref() == name
             && !symbol.declarations.is_empty()
+            // A global value may share its symbol with type-only interface
+            // augmentations (for example Node's Array<T>). They cannot replace
+            // its runtime value. Still prove the value declaration itself and
+            // every member declaration before selecting a native intrinsic.
+            && (owner.is_some()
+                || (!symbol.value_declaration.is_nil()
+                    && source_frontend::frontend::bundled::bundled_lib_name(
+                        &source_file_info(get_source_file_of_node(symbol.value_declaration)).file_name,
+                    )
+                    .is_some()))
             && symbol.declarations.iter().all(|decl| {
+                if owner.is_none() && decl.kind() == SyntaxKind::InterfaceDeclaration {
+                    return true;
+                }
                 let file = source_file_info(get_source_file_of_node(*decl));
                 source_frontend::frontend::bundled::bundled_lib_name(&file.file_name).is_some()
                     && owner.is_none_or(|name| {
