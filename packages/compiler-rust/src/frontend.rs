@@ -42,6 +42,7 @@ mod pipeline;
 mod process;
 mod promises;
 mod property_keys;
+mod receivers;
 mod record_construction;
 mod reflection;
 mod regex;
@@ -164,6 +165,7 @@ struct Lowerer<'a> {
     data_types: HashSet<TypeId>,
     commonjs: commonjs::Graph,
     namespace_values: namespace_values::NamespaceValues,
+    receiver_calls: Vec<receivers::PendingCall>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -206,6 +208,7 @@ impl<'a> Lowerer<'a> {
             data_types: HashSet::new(),
             commonjs: commonjs::Graph::default(),
             namespace_values: namespace_values::NamespaceValues::default(),
+            receiver_calls: Vec::new(),
         }
     }
     fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
@@ -443,6 +446,7 @@ impl<'a> Lowerer<'a> {
             return Err(self.refuse(node, "only named non-generator function bodies are ported"));
         }
         let declared = self.declared(node).cloned();
+        let parameters = receivers::parameters(node);
         let rest = node
             .parameters()
             .iter()
@@ -464,7 +468,7 @@ impl<'a> Lowerer<'a> {
             if let Some(reason) = &hint.reason {
                 return Err(self.refuse(node, reason));
             }
-            if hint.params.len() != node.parameters().len() {
+            if hint.params.len() != parameters.len() {
                 return Err(self.refuse(
                     node,
                     "public JavaScript contract/implementation arity differs",
@@ -472,14 +476,13 @@ impl<'a> Lowerer<'a> {
             }
         }
         let mut params = Vec::new();
-        for (index, param) in node.parameters().into_iter().enumerate() {
+        for (index, param) in parameters.iter().copied().enumerate() {
             if param.name().kind() != SyntaxKind::Identifier
-                || param.name().text() == "this"
-                || (!param.dot_dot_dot_token().is_nil() && index + 1 != node.parameters().len())
+                || (!param.dot_dot_dot_token().is_nil() && index + 1 != parameters.len())
             {
                 return Err(self.refuse(
                     param,
-                    "only native identifier parameters without rest/receiver are ported",
+                    "only native identifier parameters with a terminal rest slot are ported",
                 ));
             }
             let ty = if let Some(hint) = &declared {
@@ -591,9 +594,10 @@ impl<'a> Lowerer<'a> {
             self.bind_parameter(None, &signature.params[0])?;
             self.instance_this = Some(self.locals[0].clone());
         }
-        for (node, param) in signature
-            .node
-            .parameters()
+        if !method {
+            body.extend(self.initialize_receiver(signature.node)?);
+        }
+        for (node, param) in receivers::parameters(signature.node)
             .into_iter()
             .zip(signature.params.iter().skip(usize::from(method)))
         {
@@ -1204,6 +1208,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.function_receiver_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.json_function_call(node)? {
                     return Ok(value);
                 }
@@ -1366,8 +1373,15 @@ impl<'a> Lowerer<'a> {
                             });
                         }
                     }
-                    if owned && matches!(self.ty(member), Ok(Type::Func { .. } | Type::Dyn)) {
-                        return self.call_value(node);
+                    if owned {
+                        let callable = match self.ty(member) {
+                            Ok(Type::Func { .. } | Type::Dyn) => true,
+                            Ok(Type::Record { shape_id }) => self.callables.contains_key(&shape_id),
+                            _ => false,
+                        };
+                        if callable {
+                            return self.call_value(node);
+                        }
                     }
                 }
                 let symbol_node = if member.kind() == SyntaxKind::PropertyAccessExpression {
@@ -1387,6 +1401,12 @@ impl<'a> Lowerer<'a> {
                     if let Some(signature) =
                         self.request_function(symbol, node, functions::UseKind::Call)?
                     {
+                        if namespace_call && receivers::reads_this(signature.node) {
+                            return Err(self.refuse(
+                                node,
+                                "namespace method this requires a native namespace receiver",
+                            ));
+                        }
                         let types = signature
                             .params
                             .iter()

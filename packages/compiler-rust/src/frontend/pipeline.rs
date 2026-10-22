@@ -132,7 +132,8 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             functions.push(function);
         }
         functions[0].body.splice(0..0, lowerer.namespace_prelude());
-        functions.extend(lowerer.lifted);
+        functions.extend(std::mem::take(&mut lowerer.lifted));
+        lowerer.validate_call_receivers(&functions)?;
         Ok(Module {
             ir_version: ir::VERSION,
             source_file: source.clone(),

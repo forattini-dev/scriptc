@@ -138,6 +138,27 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
     out.push_str(include_str!("../map_values_support.rs"));
     out.push_str(include_str!("../promise_values_support.rs"));
     let types = types(module);
+    out.push_str("fn native_value_is_function(value: &NativeValue) -> bool { match value {\n");
+    for (i, ty) in types.iter().enumerate() {
+        if matches!(ty, Type::Func { .. }) {
+            writeln!(out, "NativeValue::V{i}(..) => true,").unwrap();
+        }
+    }
+    out.push_str("_ => false } }\nfn native_value_apply_arguments(value: &NativeValue) -> Vec<NativeValue> { match value { NativeValue::Array(array) => (0..runtime::array_len(array) as usize).map(|i| runtime::array_get(array, i as f64)).collect(),\n");
+    for (i, ty) in types.iter().enumerate() {
+        if let Type::Array { elem } = ty
+            && **elem != Type::Dyn
+        {
+            let item = if **elem == Type::String {
+                "runtime::array_get(array, i as f64).to_string()"
+            } else {
+                "runtime::array_get(array, i as f64)"
+            };
+            let item = boxed(elem, item, module);
+            writeln!(out, "NativeValue::V{i}(array) => (0..runtime::array_len(array) as usize).map(|i| {item}).collect(),").unwrap();
+        }
+    }
+    out.push_str("_ => runtime::throw_type_error(\"scriptc: apply requires a native array argument list\".into()) } }\n");
     out.push_str("#[derive(Clone)]\nenum NativeValue { Record(usize, runtime::Gc<NativeRecordData>), Undefined, Null, Number(f64), Boolean(bool), String(String), Regex(runtime::JsRegex), Symbol(runtime::JsSymbol), Promise(runtime::JsPromise<NativeValue>), Object(runtime::Gc<NativeMap<String, NativeValue>>), Map(runtime::Gc<NativeMap<NativeValue, NativeValue>>), Array(runtime::JsArray<NativeValue>),\n");
     if !module.classes.is_empty() {
         out.push_str("Instance(runtime::Gc<NativeInstance>),\n");
@@ -407,7 +428,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
         }
         out.push_str("_ => unreachable!(\"validated native instance kind\") } },\n");
     }
-    out.push_str("_ => native_value_missing(&key) } }\nfn native_value_call(callee: NativeValue, args: Vec<NativeValue>, name: &str) -> NativeValue { match callee {\n");
+    out.push_str("_ => native_value_missing(&key) } }\nfn native_value_call(callee: NativeValue, args: Vec<NativeValue>, name: &str) -> NativeValue { native_value_call_with_this(callee, NativeValue::Undefined, args, name) }\nfn native_value_call_with_this(callee: NativeValue, receiver: NativeValue, args: Vec<NativeValue>, name: &str) -> NativeValue { match callee {\n");
     for (i, t) in types.iter().enumerate() {
         if let Type::Func { params, ret, rest } = t {
             let args = params
@@ -430,7 +451,10 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
                     )
                 })
                 .collect::<String>();
-            let call = format!("call_{}(function{args})", functions::type_name(t, module));
+            let call = format!(
+                "call_{}_with_this(function, receiver{args})",
+                functions::type_name(t, module)
+            );
             let result = if **ret == Type::Void {
                 format!("{{ {call}; NativeValue::Undefined }}")
             } else {
@@ -575,7 +599,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             args,
             ..
         } => format!(
-            "{{ let recv = {}; let method = native_value_method(recv, {method:?}); native_value_invoke(method, {method:?}, vec![{}], {callee_name:?}) }}",
+            "{{ let recv = {}; let method = native_value_method(recv.clone(), {method:?}); native_value_invoke(recv, method, {method:?}, vec![{}], {callee_name:?}) }}",
             expr(recv, function, module),
             args.iter()
                 .map(|e| expr(e, function, module))
@@ -587,14 +611,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             callee_name,
             args,
             ..
-        } => format!(
-            "native_value_call({}, vec![{}], {callee_name:?})",
-            expr(callee, function, module),
-            args.iter()
-                .map(|e| expr(e, function, module))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+        } => receivers::call(callee, args, Some(callee_name), function, module),
         _ => return None,
     })
 }

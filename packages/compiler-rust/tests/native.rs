@@ -100,6 +100,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-receivers/strict.cjs",
+        "rust-native-receivers/call.ts",
+        "rust-native-receivers/lexical.ts",
+        "rust-native-receivers/effects.ts",
+        "rust-native-receivers/rest.ts",
+        "rust-native-receivers/json.ts",
+        "rust-native-receivers/contracts.ts",
         "rust-native-logical/values.ts",
         "rust-native-logical/identity.ts",
         "rust-native-logical/effects.ts",
@@ -1034,6 +1041,108 @@ fn json_function_boundaries_preserve_previous_native_artifacts() {
         assert!(
             !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
             "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn receiver_boundaries_preserve_previous_native_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = binary(temp.path(), "receiver-boundary");
+    fs::write(temp.path().join("ns.mjs"), "// @ts-nocheck\nexport function declaration() { return this; } export const expression = function() { return this; };").unwrap();
+    for (name, source, reason) in [
+        (
+            "sloppy.cjs",
+            "const f = function() { return this; }; f.call(null);",
+            "sloppy function this",
+        ),
+        (
+            "top.cjs",
+            "const f = () => this === undefined; f();",
+            "top-level arrow this",
+        ),
+        (
+            "async.mts",
+            "async function f(this: any): Promise<any> { return this; } f.call({});",
+            "async function this",
+        ),
+        (
+            "set.mts",
+            "const object = {set: new Set([1]), method: function(this: any): any { return this; }}; object.method();",
+            "erasing Set",
+        ),
+        (
+            "escaped.cjs",
+            "'use\\x20strict'; const f = function() { return this; }; f.call(null);",
+            "sloppy function this",
+        ),
+        (
+            "namespace-declaration.mts",
+            "import * as ns from './ns.mjs'; ns.declaration();",
+            "namespace method this",
+        ),
+        (
+            "namespace-expression.mts",
+            "import * as ns from './ns.mjs'; ns.expression();",
+            "namespace method this",
+        ),
+        (
+            "namespace-alias.mts",
+            "import * as ns from './ns.mjs'; const alias = ns; alias.expression();",
+            "namespace method this",
+        ),
+        (
+            "namespace-parenthesized.mts",
+            "import * as ns from './ns.mjs'; const alias = ns; (alias.expression)();",
+            "namespace method this",
+        ),
+        (
+            "getter.mts",
+            "const callback = function(this: any): any { return this; }; class Holder { get callback() { return callback; } } new Holder().callback();",
+            "getter-returned callable this",
+        ),
+        (
+            "getter-parenthesized.mts",
+            "const callback = function(this: any): any { return this; }; class Holder { get callback() { return callback; } } (new Holder().callback)();",
+            "getter-returned callable this",
+        ),
+        (
+            "directive-suffix.cjs",
+            r#""prefix\"use strict"; const f = function() { return this; }; f.call(null);"#,
+            "sloppy function this",
+        ),
+    ] {
+        let input = temp.path().join(name);
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains(reason)
+                && !stderr.contains("panicked"),
+            "{name}: {stderr}"
         );
         for path in [
             &target,
@@ -2229,7 +2338,6 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
         "class Box { '__proto__' = 1; } new Box();",
         "class Box { constructor() { if (false) return; } } new Box();",
         "class Base {} class Child extends Base { constructor() { if (true) super(); } } new Child();",
-        "class Box { method(): () => number { return () => this.value; } value = 1; } new Box().method();",
         "class Box { *method(): Generator<number> { yield 1; } } new Box().method();",
         "class Box { async method(): Promise<number> { return await Promise.resolve(1); } } new Box().method();",
         "class Base { method(value: number): number { return value; } } class Child extends Base { method(value: number | undefined): number { return 1; } } const value: Base = new Child(); value.method(1);",
@@ -2277,7 +2385,6 @@ fn private_method_boundaries_preserve_previous_artifacts() {
         "class Box { #method<T>(value: T): T { return value; } read() { return this.#method(1); } } new Box().read();",
         "class Box { #method() {} has(value: unknown) { return #method in value; } } new Box().has({});",
         "function factory() { return class Box { #method() {} }; } new (factory())();",
-        "class Box { #method(): number { return 1; } read() { return () => this.#method(); } } new Box().read()();",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
         for artifact in [

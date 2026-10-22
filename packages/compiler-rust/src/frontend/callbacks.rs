@@ -13,9 +13,6 @@ impl Lowerer<'_> {
         }
         let signature = signatures[0];
         let sig = self.checker.sig(signature);
-        if sig.this_parameter.0 != 0 {
-            return None;
-        }
         let rest = sig.has_rest_parameter();
         let generic = !sig.type_parameters.is_empty();
         let symbols = sig.parameters.clone();
@@ -166,13 +163,13 @@ impl Lowerer<'_> {
         if is_async {
             self.refuse_thenable(&body_return, node)?;
         }
-        if node.parameters().len() > types.len() {
+        let parameters = receivers::parameters(node);
+        if parameters.len() > types.len() {
             return Err(self.refuse(
                 node,
                 "callback requires more parameters than its native signature",
             ));
         }
-        let parameters = node.parameters();
         let source_rest = parameters
             .iter()
             .last()
@@ -180,10 +177,9 @@ impl Lowerer<'_> {
         if source_rest != *rest {
             return Err(self.refuse(node, "callback rest ABI differs from its native target"));
         }
-        for (index, param) in parameters.into_iter().enumerate() {
+        for (index, param) in parameters.iter().copied().enumerate() {
             if param.name().kind() != SyntaxKind::Identifier
                 || (!param.dot_dot_dot_token().is_nil() && (!*rest || index + 1 != types.len()))
-                || param.name().text() == "this"
             {
                 return Err(self.refuse(param, "callback parameter form is not ported"));
             }
@@ -208,9 +204,39 @@ impl Lowerer<'_> {
             }
         }
         self.outer.push(captured_scope);
-        let nodes = node.parameters().into_iter().collect::<Vec<_>>();
+        let nodes = parameters;
         let mut params = Vec::new();
         let mut body = Vec::new();
+        let lexical_this =
+            if node.kind() == SyntaxKind::ArrowFunction && receivers::reads_this(node) {
+                if let Some(source) = &saved_this {
+                    let local = Local {
+                        id: "lexical_this".into(),
+                        name: "lexical this".into(),
+                        r#type: source.r#type.clone(),
+                        mutable: false,
+                        boxed: true,
+                    };
+                    self.locals.push(local.clone());
+                    self.instance_this = Some(local.clone());
+                    Some((
+                        source.clone(),
+                        Param {
+                            local_id: local.id,
+                            name: local.name,
+                            r#type: local.r#type,
+                        },
+                    ))
+                } else {
+                    body.extend(self.initialize_module_arrow_receiver(node)?);
+                    None
+                }
+            } else {
+                if node.kind() != SyntaxKind::ArrowFunction {
+                    body.extend(self.initialize_receiver(node)?);
+                }
+                None
+            };
         for (index, ty) in types.iter().enumerate() {
             let name = nodes
                 .get(index)
@@ -256,7 +282,13 @@ impl Lowerer<'_> {
             rest: *rest,
             name: name.clone(),
             params,
-            captures: Some(captures.iter().map(|(_, p)| p.clone()).collect()),
+            captures: Some(
+                captures
+                    .iter()
+                    .map(|(_, p)| p.clone())
+                    .chain(lexical_this.iter().map(|(_, p)| p.clone()))
+                    .collect(),
+            ),
             return_type: body_return,
             locals: std::mem::replace(&mut self.locals, saved_locals),
             body,
@@ -292,6 +324,15 @@ impl Lowerer<'_> {
             } else {
                 self.bindings.get_mut(&symbol).expect("binding").boxed = true;
             }
+            sources.push(source.id);
+        }
+        if let Some((source, _)) = lexical_this {
+            self.locals
+                .iter_mut()
+                .find(|local| local.id == source.id)
+                .expect("lexical receiver local")
+                .boxed = true;
+            self.instance_this.as_mut().expect("lexical receiver").boxed = true;
             sources.push(source.id);
         }
         self.lifted.push(function);
@@ -396,6 +437,33 @@ impl Lowerer<'_> {
         }
         let value = self.expression(node.expression())?;
         let callee = self.callable_body(value, node)?;
+        let member = receivers::reference_node(node.expression());
+        if member.kind() == SyntaxKind::PropertyAccessExpression {
+            let source = self.checker.get_type_at_location(member.expression());
+            let symbol = self.symbol(member.name());
+            let boundary = if self.module_namespace(member.expression())
+                || self.namespace_value_type(source).is_some()
+            {
+                Some(receivers::Boundary::Namespace)
+            } else if symbol != 0
+                && self
+                    .checker
+                    .sym(source_frontend::prelude::SymbolId(symbol))
+                    .flags
+                    .intersects(SymbolFlags::ACCESSOR)
+            {
+                Some(receivers::Boundary::Getter)
+            } else {
+                None
+            };
+            if let Some(boundary) = boundary {
+                self.receiver_calls.push(receivers::PendingCall {
+                    ty: callee.ty(),
+                    loc: self.loc(node),
+                    boundary,
+                });
+            }
+        }
         if callee.ty() == Type::Dyn {
             let args = node
                 .arguments()

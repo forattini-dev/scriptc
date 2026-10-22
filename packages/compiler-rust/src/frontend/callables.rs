@@ -449,16 +449,8 @@ impl Lowerer<'_> {
                 "bind needs a this argument and a fixed prefix before the rest array",
             ));
         }
-        let this = self.expression(arguments[0])?;
-        let mut values = vec![target];
-        if !matches!(this, Expr::UnitLit { .. }) {
-            if this.ty() == Type::Void {
-                return Err(
-                    self.refuse(arguments[0], "void bind receiver sequencing is not ported")
-                );
-            }
-            values.push(this);
-        }
+        let this = self.expected_expression(arguments[0], Type::Dyn)?;
+        let mut values = vec![target, this];
         let prefix_start = values.len();
         for (argument, ty) in arguments.iter().skip(1).zip(&params) {
             values.push(self.expected_expression(*argument, ty.clone())?);
@@ -485,9 +477,7 @@ impl Lowerer<'_> {
         let name = format!("lambda{}", self.next_closure);
         self.next_closure += 1;
         let mut helper = helpers::Helper::new(&key.0, key.1, result.clone(), self.loc(node));
-        let sources = std::iter::once(0)
-            .chain(prefix_start..values.len())
-            .collect::<Vec<_>>();
+        let sources = (0..values.len()).collect::<Vec<_>>();
         let captures = sources
             .iter()
             .enumerate()
@@ -518,17 +508,71 @@ impl Lowerer<'_> {
             r#type: p.r#type.clone(),
             loc: self.loc(node),
         };
-        let args = captures
+        let mut args = captures
             .iter()
-            .skip(1)
+            .skip(2)
             .map(read)
             .chain(body.function.params.iter().map(read))
-            .collect();
-        let call = Expr::CallValue {
-            callee: Box::new(read(&captures[0])),
-            args,
-            r#type: (*ret).clone(),
+            .collect::<Vec<_>>();
+        let rest_arg = rest.then(|| args.pop().expect("rest argument"));
+        let array = Type::Array {
+            elem: Box::new(Type::Dyn),
+        };
+        let list = body.local("bound arguments", array.clone(), false);
+        let elems = args
+            .into_iter()
+            .map(|arg| self.coerce(arg, Type::Dyn, node))
+            .collect::<Result<Vec<_>, _>>()?;
+        body.declare(
+            &list,
+            Expr::ArrayLit {
+                elems,
+                r#type: array,
+                loc: self.loc(node),
+            },
+        );
+        if let Some(rest_arg) = rest_arg {
+            let Type::Array { elem } = rest_arg.ty() else {
+                unreachable!("rest ABI");
+            };
+            let source = body.local("bound rest", rest_arg.ty(), false);
+            body.declare(&source, rest_arg);
+            let index = body.local("bound rest index", Type::F64, true);
+            body.declare(&index, body.number(0.0));
+            let item = self.coerce(body.get(&source, &index, *elem), Type::Dyn, node)?;
+            body.function.body.push(Stmt::While {
+                cond: body.less(&index, body.length(&source)),
+                body: vec![
+                    Stmt::Expression {
+                        expr: Expr::ArrayIntrinsic {
+                            method: "push".into(),
+                            receiver: Box::new(body.read(&list)),
+                            args: vec![item],
+                            r#type: Type::F64,
+                            loc: self.loc(node),
+                        },
+                        loc: self.loc(node),
+                    },
+                    body.advance(&index),
+                ],
+                loc: self.loc(node),
+            });
+        }
+        let call = Expr::DynInvoke {
+            recv: Box::new(self.coerce(read(&captures[0]), Type::Dyn, node)?),
+            method: "apply".into(),
+            callee_name: "bound function".into(),
+            args: vec![
+                read(&captures[1]),
+                self.coerce(body.read(&list), Type::Dyn, node)?,
+            ],
+            r#type: Type::Dyn,
             loc: self.loc(node),
+        };
+        let call = if *ret == Type::Void {
+            call
+        } else {
+            self.coerce(call, (*ret).clone(), node)?
         };
         if *ret == Type::Void {
             body.function.body.push(Stmt::Expression {

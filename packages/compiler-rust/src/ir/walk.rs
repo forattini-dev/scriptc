@@ -1,5 +1,18 @@
 //! Exhaustive owned-IR traversal, including types of temporary expressions.
 use super::*;
+impl Function {
+    pub fn visit_expressions(&self, visitor: &mut impl FnMut(&Expr)) {
+        statements(&self.body, visitor);
+    }
+    /// An explicit receiver is a hidden backend parameter, never a source slot.
+    pub fn reads_receiver(&self) -> bool {
+        let mut found = false;
+        self.visit_expressions(&mut |value| {
+            found |= matches!(value, Expr::LibCall { r#fn, .. } if r#fn == "dyn.this");
+        });
+        found
+    }
+}
 impl Module {
     pub fn visit_expressions(&self, visitor: &mut impl FnMut(&Expr)) {
         for function in &self.functions {
@@ -196,5 +209,23 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
         | Expr::StrLit { .. }
         | Expr::BoolLit { .. }
         | Expr::VarRef { .. } => {}
+    }
+}
+
+impl Expr {
+    /// The callable-data slot is a projection; only a source member owns this.
+    pub fn call_receiver(&self) -> Option<&Expr> {
+        match self {
+            Self::DynCheck { value, .. }
+            | Self::UnionNarrow { value, .. }
+            | Self::Upcast { value, .. }
+            | Self::Downcast { value, .. } => value.call_receiver(),
+            Self::RecordGet { obj, field, .. } if field == "\0scriptc.call" => obj.call_receiver(),
+            Self::RecordGet { obj, .. }
+            | Self::RecordKeyGet { obj, .. }
+            | Self::FieldGet { obj, .. } => Some(obj),
+            Self::DynKeyGet { value, .. } => Some(value),
+            _ => None,
+        }
     }
 }

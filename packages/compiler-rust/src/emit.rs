@@ -9,6 +9,7 @@ mod functions;
 mod json_functions;
 mod layouts;
 mod process;
+mod receivers;
 mod record_construction;
 mod record_storage;
 mod regex;
@@ -131,8 +132,13 @@ pub fn rust(module: &Module) -> Result<String, String> {
                 )
             })
             .collect::<String>();
+        let receiver = if function.reads_receiver() {
+            "native_this: NativeValue, "
+        } else {
+            ""
+        };
         output.push_str(&format!(
-            "\nfn {}({captures}{params}) -> {} {{\n",
+            "\nfn {}({receiver}{captures}{params}) -> {} {{\n",
             function_name(&function.name),
             rust_type(function.call_result(), module)
         ));
@@ -363,14 +369,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             r#type,
             ..
         } => functions::closure(fn_name, captures, r#type, module),
-        Expr::CallValue { callee, args, .. } => format!(
-            "call_{}({}{})",
-            functions::type_name(&callee.ty(), module),
-            expr(callee, function, module),
-            args.iter()
-                .map(|v| format!(", {}", expr(v, function, module)))
-                .collect::<String>()
-        ),
+        Expr::CallValue { callee, args, .. } => {
+            receivers::call(callee, args, None, function, module)
+        }
         Expr::Logical {
             op, left, right, ..
         } => format!(
@@ -559,6 +560,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             format!("runtime::array_new::<{element}>(vec![{values}])")
         }
         Expr::ArrayLit { .. } => unreachable!("IR validated"),
+        Expr::LibCall { r#fn, .. } if r#fn == "dyn.this" => "native_this.clone()".into(),
         Expr::LibCall { r#fn, args, .. } => {
             let builtin = crate::builtins::by_ir(r#fn).expect("IR validated");
             let args = args
@@ -657,8 +659,14 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         Expr::Call { callee, args, .. } => format!(
             "{}({})",
             function_name(callee),
-            args.iter()
-                .map(|v| expr(v, function, module))
+            module
+                .functions
+                .iter()
+                .find(|f| &f.name == callee)
+                .filter(|f| f.reads_receiver())
+                .map(|_| "NativeValue::Undefined".into())
+                .into_iter()
+                .chain(args.iter().map(|v| expr(v, function, module)))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),

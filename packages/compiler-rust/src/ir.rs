@@ -171,19 +171,19 @@ pub struct Union {
     pub id: usize,
     pub arms: Vec<Type>,
 }
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct MapEntry {
     pub key: Expr,
     pub value: Expr,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct DynamicField {
     pub key: Expr,
     pub value: Expr,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct FieldInit {
     pub name: String,
     pub value: Expr,
@@ -293,7 +293,7 @@ pub struct Local {
     pub boxed: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -719,7 +719,7 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -829,6 +829,9 @@ pub fn validate(module: &Module) -> Result<(), String> {
     module.validate_layouts()?;
     let mut functions = HashMap::new();
     for function in &module.functions {
+        if function.name == module.entry && function.reads_receiver() {
+            return Err("native entry cannot read a call receiver".into());
+        }
         if functions.insert(function.name.as_str(), function).is_some() {
             return Err("duplicate function".into());
         }
@@ -2459,6 +2462,13 @@ fn validate_function(
                         Err("invalid native JSON function signature".into())
                     };
                 }
+                if r#fn == "dyn.this" {
+                    return if args.is_empty() && *r#type == Type::Dyn {
+                        Ok(())
+                    } else {
+                        Err("invalid native receiver signature".into())
+                    };
+                }
                 let builtin = crate::builtins::by_ir(r#fn).ok_or("unknown native library call")?;
                 if *r#type != builtin.result || args.len() != builtin.args.len() {
                     return Err("invalid native library signature".into());
@@ -2887,6 +2897,62 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn receiver_contract_validates_arity_result_and_entry_scope() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        for (args, ty, expected) in [
+            (vec![], Type::Dyn, true),
+            (vec![], Type::String, false),
+            (
+                vec![Expr::BoolLit {
+                    value: true,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                }],
+                Type::Dyn,
+                false,
+            ),
+        ] {
+            module.functions[1].body.insert(
+                0,
+                Stmt::Expression {
+                    expr: Expr::LibCall {
+                        r#fn: "dyn.this".into(),
+                        args,
+                        r#type: ty,
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                },
+            );
+            // The helper target may observe this; the module entry may not.
+            assert_eq!(validate(&module).is_ok(), expected);
+            module.functions[1].body.remove(0);
+        }
+        let entry = module
+            .functions
+            .iter_mut()
+            .find(|f| f.name == module.entry)
+            .unwrap();
+        entry.body.insert(
+            0,
+            Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: "dyn.this".into(),
+                    args: vec![],
+                    r#type: Type::Dyn,
+                    loc: loc.clone(),
+                },
+                loc,
+            },
+        );
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "native entry cannot read a call receiver"
+        );
+    }
 
     #[test]
     fn json_function_contract_rejects_typed_or_malformed_argument_packs() {

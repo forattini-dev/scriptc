@@ -39,7 +39,8 @@ export function rustCallReceiver(callee: IrExpr): IrExpr | null {
     case "dynCheck": case "jsExit": case "upcast": case "downcast": case "unionNarrow":
       return rustCallReceiver(callee.value);
     case "dynKeyGet": return callee.value;
-    case "recordGet": case "recordKeyGet": case "fieldGet": return callee.obj;
+    case "recordGet": return callee.field === "\0scriptc.call" ? rustCallReceiver(callee.obj) : callee.obj;
+    case "recordKeyGet": case "fieldGet": return callee.obj;
     default: return null;
   }
 }

@@ -25,7 +25,7 @@ impl runtime::NativeJsonValue for NativeValue {
         keys.sort_by_key(|key| key.parse::<u32>().ok().filter(|i| *i != u32::MAX && i.to_string() == *key).map(|i| (0,i)).unwrap_or((1,0)));
         keys.into_iter().map(runtime::JsString::from).collect()
     }
-    fn json_call(&self, _holder: &Self, args: &[Self]) -> Self { native_value_call(self.clone(), args.to_vec(), "JSON callback") }
+    fn json_call(&self, holder: &Self, args: &[Self]) -> Self { native_value_call_with_this(self.clone(), holder.clone(), args.to_vec(), "JSON callback") }
     fn json_primitive_string(&self) -> runtime::JsString { runtime::string(&native_value_string(self.clone())) }
 }
 fn native_json_text(value: runtime::JsString) -> String {

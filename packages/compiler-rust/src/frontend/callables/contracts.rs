@@ -12,7 +12,7 @@ impl Lowerer<'_> {
         let mut results = Vec::new();
         for signature in signatures {
             let sig = self.checker.sig(signature);
-            if sig.this_parameter.0 != 0 || sig.has_rest_parameter() {
+            if sig.has_rest_parameter() {
                 return None;
             }
             arity = arity.max(sig.parameters.len());

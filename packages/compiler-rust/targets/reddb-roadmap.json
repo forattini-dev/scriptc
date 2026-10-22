@@ -190,22 +190,59 @@
       "nativePrivateFieldMilestone": {
         "status": "partial",
         "implementation": "Each private declaration owns an inaccessible WeakMap table in portable IR v13, keyed by actual instance identity. Table presence is the installation/brand bit and stored undefined remains a value. Initializers interleave with public fields at their original construction point around super. Native helpers keep receiver/RHS order, assignment values, contextual callback signatures, lexical private ownership and pinned TypeError messages. The reference emitter retains typed weak keys without materializing object mirrors.",
-        "fixtures": ["rust-native-private/main.ts", "rust-native-private/fields.ts", "rust-native-private/brand.ts", "rust-native-private/order.ts", "rust-native-private/inheritance.ts", "rust-native-private/identity.ts", "rust-native-private/modules.ts", "rust-native-private/untyped.js"],
-        "boundaries": ["Private accessors, static members, #in, compound/update writes, local class factories and constructor-return stamping remain explicit refusals. Direct private method calls have their own milestone below.", "Public WeakMap class keys and general erased class data reflection remain separate contracts. Literal string reads of represented public data fields retain FieldGet and do not expose private slots.", "Passing private declaration inventory does not establish the parser async generator, Web Streams, decoding options or application acceptance."],
+        "fixtures": [
+          "rust-native-private/main.ts",
+          "rust-native-private/fields.ts",
+          "rust-native-private/brand.ts",
+          "rust-native-private/order.ts",
+          "rust-native-private/inheritance.ts",
+          "rust-native-private/identity.ts",
+          "rust-native-private/modules.ts",
+          "rust-native-private/untyped.js"
+        ],
+        "boundaries": [
+          "Private accessors, static members, #in, compound/update writes, local class factories and constructor-return stamping remain explicit refusals. Direct private method calls have their own milestone below.",
+          "Public WeakMap class keys and general erased class data reflection remain separate contracts. Literal string reads of represented public data fields retain FieldGet and do not expose private slots.",
+          "Passing private declaration inventory does not establish the parser async generator, Web Streams, decoding options or application acceptance."
+        ],
         "evidence": "Eight harmless programs compare typed/JS fields, aliases, absent versus stored undefined, wrong-receiver errors, early reads/writes, inherited same-spelled private names, module/class-expression initialization, record/callback identities and owning cycles with Node 24.15 and both Rust emitters. The original applications remain 0/3 compiled in native-reddb-private-v83 compile-only attempts."
       },
       "nativePrivateMethodMilestone": {
         "status": "partial",
         "implementation": "Declaration-owned ephemeron table presence supplies each method brand. All method brands install before fields/defaults, with derived installation after super. Direct calls brand-check the original receiver before arguments, then invoke a hidden receiver-explicit function selected by lexical declaration identity. Bodies and signatures enter the existing demand queue; private names never enter public method inventories. Existing portable IR v13 and the shared Rust runtime are unchanged.",
-        "fixtures": ["rust-native-private-methods/main.ts", "rust-native-private-methods/brands.ts", "rust-native-private-methods/order.ts", "rust-native-private-methods/inheritance.ts", "rust-native-private-methods/deferred.ts", "rust-native-private-methods/identity.ts", "rust-native-private-methods/modules.ts", "rust-native-private-methods/untyped.js"],
-        "boundaries": ["Demanded generic, overloaded and generator methods; extracted method values and method writes remain explicitly refused.", "Private accessors, static members, #in, local class factories, constructor-return stamping and lexical this in arrows remain separate contracts.", "Deferred generator inventory does not execute generator bodies or implement async iteration."],
+        "fixtures": [
+          "rust-native-private-methods/main.ts",
+          "rust-native-private-methods/brands.ts",
+          "rust-native-private-methods/order.ts",
+          "rust-native-private-methods/inheritance.ts",
+          "rust-native-private-methods/deferred.ts",
+          "rust-native-private-methods/identity.ts",
+          "rust-native-private-methods/modules.ts",
+          "rust-native-private-methods/untyped.js"
+        ],
+        "boundaries": [
+          "Demanded generic, overloaded and generator methods; extracted method values and method writes remain explicitly refused.",
+          "Private accessors, static members, #in, local class factories, constructor-return stamping and lexical this in arrows remain separate contracts.",
+          "Deferred generator inventory does not execute generator bodies or implement async iteration."
+        ],
         "evidence": "Eight harmless programs compare typed/JS receivers, imported constructors, defaults, recursive calls, all-methods-before-fields installation, base/derived brand timing, lexical same-spelled names, public string independence, pinned TypeError messages, receiver/argument ordering and owning cycles against Node 24.15 and both Rust emitters. Original application retries are compile-only and remain independent acceptance gates."
       },
       "nativeAccessorMilestone": {
         "status": "partial",
         "implementation": "Declaration-owned prototype descriptor lookup stays separate from data slots. Getters/setters enter the receiver-explicit demand queue and normalize to ordinary functions, calls, instance tests and branches in IR v13. Closed-hierarchy dispatch and direct super lookup have separate helper identities. A derived descriptor owns both halves and never merges a missing half from its base. Receiver and RHS evaluation occur once in source order; assignment results preserve scalar values and owning record identity. Public JavaScript declaration accessors supply property contracts.",
-        "fixtures": ["rust-native-accessors/main.ts", "rust-native-accessors/inheritance.ts", "rust-native-accessors/order.ts", "rust-native-accessors/contracts.ts", "rust-native-accessors/untyped.js", "rust-native-accessors/identity.ts"],
-        "boundaries": ["Private/static/computed accessors, indexed/erased accessor execution and prototype mutation remain separate contracts.", "Getter-only writes, setter-only reads, missing override halves, compound/update assignments, accessor/data or accessor/method shadowing and incompatible native override ABIs are explicitly refused.", "Object-literal getters/methods in createPool are distinct from source class descriptors. Passing Signal class registration does not establish its tracking/notification behavior."],
+        "fixtures": [
+          "rust-native-accessors/main.ts",
+          "rust-native-accessors/inheritance.ts",
+          "rust-native-accessors/order.ts",
+          "rust-native-accessors/contracts.ts",
+          "rust-native-accessors/untyped.js",
+          "rust-native-accessors/identity.ts"
+        ],
+        "boundaries": [
+          "Private/static/computed accessors, indexed/erased accessor execution and prototype mutation remain separate contracts.",
+          "Getter-only writes, setter-only reads, missing override halves, compound/update assignments, accessor/data or accessor/method shadowing and incompatible native override ABIs are explicitly refused.",
+          "Object-literal getters/methods in createPool are distinct from source class descriptors. Passing Signal class registration does not establish its tracking/notification behavior."
+        ],
         "evidence": "Harmless differential programs cover aliases, getter effects, optional slots, assigned values, record identity/mutation, direct and inherited access, construction-time setter dispatch, direct/super cache separation and thrown getters/setters against Node 24.15 and both Rust emitters. Existing getter refusals become positive corpus cases while private getter refusals and all other boundary assertions are retained. No runtime or IR version change is needed."
       },
       "nativeSetMilestone": {
@@ -354,8 +391,18 @@
       "fileModuleMetadataMilestone": {
         "status": "partial",
         "implementation": "Direct file-backed import.meta.url/filename/dirname reads lower to owned strings from the canonical defining source module, including imported functions and captures. Default-platform one-string fileURLToPath calls reuse url.fileURLToPathStr in IR v13 and the shared Rust runtime. Strict decoding preserves URI errors, error codes, separator precedence, Windows encoded drive letters and Unicode UNC hosts.",
-        "fixtures": ["rust-native-file-urls/paths.ts", "rust-native-file-urls/errors.ts", "rust-native-file-urls/metadata.ts", "rust-native-file-urls/modules.ts", "rust-native-file-urls/order.ts", "rust-native-file-urls/untyped.js"],
-        "boundaries": ["Whole/escaped metadata objects, indexed/destructured reads, mutation and import.meta.resolve/main remain refused.", "URL-object input and explicit fileURLToPath options remain frontend boundaries; runtime string decoding support does not imply those overloads."],
+        "fixtures": [
+          "rust-native-file-urls/paths.ts",
+          "rust-native-file-urls/errors.ts",
+          "rust-native-file-urls/metadata.ts",
+          "rust-native-file-urls/modules.ts",
+          "rust-native-file-urls/order.ts",
+          "rust-native-file-urls/untyped.js"
+        ],
+        "boundaries": [
+          "Whole/escaped metadata objects, indexed/destructured reads, mutation and import.meta.resolve/main remain refused.",
+          "URL-object input and explicit fileURLToPath options remain frontend boundaries; runtime string decoding support does not imply those overloads."
+        ],
         "evidence": "Native and reference Rust differential programs compare canonical module provenance, imported calls, parameter ABI, captures, Unicode/percent paths, validation order and failures against Node 24.15. A native integration compares an unusual source filename from a different working directory. Original red-dev passes dev-warnings.js module path initialization and next refuses the Signal value getter."
       },
       "namespaceMilestone": {
@@ -507,11 +554,11 @@
   ],
   "runtimeOraclePolicy": "Native corpus remains differential against the pinned Node. Original applications and dependency behaviors must be compared against their actual source runtime; Bun-only contracts require explicit separate oracle evidence. Oracles are test tools and are never production fallbacks.",
   "observedFirstRefusals": {
-    "compilerSourceBaseCommit": "d310b1c96db7f8b1a68b31d05d93ece979763870",
-    "after": "invariant closed recursive record equivalence, canonical erased layout tags and nullable source views; native-reddb-equivalent-recursive-v90 compile-only attempts",
-    "compilerBinarySha256": "ae9cfee237c7e8476f9edfeee5a6173a39d9640a65079099da98f80440b1a6fd",
-    "red-skills-release": "SCN1001: /work/redskilled/packages/shared/lane-retention.ts:814..834: native library call 'util.promisify' is not ported (CallExpression); native subset only, no fallback",
-    "redskilled": "SCN1001: /work/redskilled/packages/shared/lane-retention.ts:814..834: native library call 'util.promisify' is not ported (CallExpression); native subset only, no fallback",
+    "compilerSourceBaseCommit": "f8791e4a870a2bd8889f451cb29d5bf9665bf56e",
+    "after": "Explicit native callback receivers, type-only this slots, call/apply/bind and traced lexical arrow captures; native-reddb-receiver-complete-v98 compile-only attempts",
+    "compilerBinarySha256": "ccd61ec39978b3cbbb13ff09df514703d5ea6053e98dcda07a757019b887b669",
+    "red-skills-release": "SCN1001: /work/redskilled/node_modules/.pnpm/json-with-bigint@3.5.10/node_modules/json-with-bigint/json-with-bigint.js:1869..1880: property receiver has no closed record representation (PropertyAccessExpression); native subset only, no fallback",
+    "redskilled": "SCN1001: /work/redskilled/packages/shared/death-record.ts:10714..11676: type has no representation in the first native IR subset (ObjectLiteralExpression); native subset only, no fallback",
     "red-dev": "SCN1001: /work/red-dev/node_modules/tuiuiu.js/dist/core/pool.js:2023..2087: type has no representation in the first native IR subset (ArrowFunction); native subset only, no fallback",
     "completedOriginalApplicationBinaries": 0,
     "nextClassConstraint": "Private instance method registration and direct calls now preserve lexical brands, initialization timing and receiver-before-argument checks. Private accessors, extracted methods, static members and constructor-return stamping remain separate contracts. Native async generators still require lazy suspended frames, next/return/throw, queued steps and cleanup on abrupt exits; ToonlReader also needs decoding state/options and stream consumption.",
@@ -522,7 +569,7 @@
     "nextAsyncContextConstraint": "Keep the implemented run/getStore subset explicit; additional methods need their own context propagation and error contracts, especially disable across previously captured contexts.",
     "nextCollectionConstraint": "Keep conditional WeakMap reachability and dead-entry cleanup for record keys, including value-to-key and value-to-owner cycles. Other weak-key domains and iterable constructors remain explicit boundaries. Native Set iteration/values().next() is a separate outstanding contract.",
     "referenceCheckpointDebt": "The preexisting clean full IR Promise dynCheck refusal remains outside this checkpoint. Recursive-value fixtures and reference API checks are validated from an owned snapshot excluding the pending legacy work. Working-tree full-IR success cannot replace clean full-checkpoint acceptance; reconcile Promise validation and complete full plain/SAN before shipping.",
-    "nextPublicCallableConstraint": "The original release and redskilled now pass the public decode alias with its recursive JsonValue result; both next refuse util.promisify in shared/lane-retention.ts. Preserve custom promisify contracts, callback result ownership and Promise scheduling when implementing that bridge; changing an import name is insufficient. Async suspension and child_process APIs remain separate prerequisites of the original command bodies.",
+    "nextPublicCallableConstraint": "Callback receiver signatures are admitted with explicit runtime this transport. The release next refuses String.repeat in the indentation branch; Math min/max/floor and String.slice are adjacent prerequisites. Source loops, general object protocols and BigInt remain independent constraints.",
     "nextNativeTypeConstraint": "Guarded record/dictionary/array union graphs use stable IDs, transactional completion and owning references. Independently declared closed recursive records now use coinductive invariant field equivalence, canonical erased layout markers and identity-preserving nullable tag remapping. Distinct recursive array/dictionary storage, nested field width changes, bare self-recursive aliases, ambiguous union alternatives and partial-union flow narrowing retain explicit boundaries."
   },
   "deliveryAudit20261021": {
@@ -856,5 +903,41 @@
       "existing Set/WeakMap/namespace and descriptor erasure boundaries",
       "constructor/name and prototype introspection remain a separate object protocol"
     ]
+  },
+  "nativeReceiversCheckpoint": {
+    "date": "2026-10-22",
+    "status": "partial",
+    "compiler": "rust",
+    "engine": "none",
+    "irVersion": 13,
+    "originalAppBinaries": 0,
+    "originalAppsExecuted": false,
+    "fixtures": [
+      "rust-native-receivers/strict.cjs",
+      "rust-native-receivers/call.ts",
+      "rust-native-receivers/lexical.ts",
+      "rust-native-receivers/effects.ts",
+      "rust-native-receivers/rest.ts",
+      "rust-native-receivers/json.ts",
+      "rust-native-receivers/contracts.ts"
+    ],
+    "resolved": "Type-only receiver parameters, explicit native this transport, standard call, array-based apply, receiver-preserving bind/rest, owning lexical arrow captures and JSON callback holders.",
+    "nextFirstRefusals": {
+      "red-skills-release": "json-with-bigint.js:1869..1880: String.repeat member; the surrounding branch also requires Math.min/max/floor and String.slice.",
+      "redskilled": "death-record.ts:10714..11676: object method ABI",
+      "red-dev": "tuiuiu/core/pool.js:2023..2087: VNode factory ABI"
+    },
+    "nextPrimitiveContract": "Prove standard string/Math symbol ownership; evaluate receivers and arguments once in source order; preserve default numeric arguments, nonfinite values, range errors and UTF-16 string semantics. Keep source loops, abrupt completions, constructor/name reflection and BigInt support separately tracked rather than assuming the first primitive operation completes stringification.",
+    "remainingBoundaries": [
+      "sloppy global substitution and primitive this boxing",
+      "top-level CommonJS arrow this",
+      "deferred ordinary-function receivers",
+      "module namespace method receivers",
+      "retaining accessor references when invoking getter-returned receiver-sensitive functions",
+      "general apply array-like objects",
+      "function prototype/descriptor reflection",
+      "existing Set/WeakMap/namespace and descriptor erasure fences"
+    ],
+    "deliveryBoundary": "Native and reference Rust parity fixtures are local feature evidence. Original application binary acceptance and full plain/SAN shipping gates remain pending."
   }
 }

@@ -271,6 +271,36 @@ impl Lowerer<'_> {
         Some(Type::Union { union_id })
     }
 
+    pub(super) fn dynamic_erasure_reason(&self, ty: &Type) -> Option<&'static str> {
+        if self.native_type_contains(ty, |ty| matches!(ty, Type::Object { class_name } if self.classes.has_symbol_surface(class_name))) {
+            return Some("erasing symbol methods requires a native descriptor contract");
+        }
+        if self.native_type_contains(ty, weak_maps::instance) {
+            return Some("erasing WeakMap requires a native property descriptor contract");
+        }
+        if self.native_type_contains(ty, async_context::instance) {
+            return Some(
+                "erasing AsyncLocalStorage requires a native property descriptor contract",
+            );
+        }
+        if self.contains_namespace(ty) {
+            return Some(
+                "erasing module namespaces requires a native namespace descriptor contract",
+            );
+        }
+        if ir::contains_set(ty, &self.records, &self.unions) {
+            return Some("erasing Set requires a shared native Set value contract");
+        }
+        if let Type::Record { shape_id } = ty
+            && self.callables.contains_key(shape_id)
+        {
+            return Some(
+                "erasing callable data properties requires a shared native function property view",
+            );
+        }
+        None
+    }
+
     pub(super) fn coerce(&self, value: Expr, target: Type, node: Node) -> Result<Expr, String> {
         if value.ty() == target {
             return Ok(value);
@@ -280,39 +310,8 @@ impl Lowerer<'_> {
             return self.coerce(value, target, node);
         }
         if target == Type::Dyn {
-            if self.native_type_contains(&value.ty(), |ty| {
-                matches!(ty, Type::Object { class_name } if self.classes.has_symbol_surface(class_name))
-            }) {
-                return Err(self.refuse(node, "erasing symbol methods requires a native descriptor contract"));
-            }
-            if self.native_type_contains(&value.ty(), weak_maps::instance) {
-                return Err(self.refuse(
-                    node,
-                    "erasing WeakMap requires a native property descriptor contract",
-                ));
-            }
-            if self.native_type_contains(&value.ty(), async_context::instance) {
-                return Err(self.refuse(
-                    node,
-                    "erasing AsyncLocalStorage requires a native property descriptor contract",
-                ));
-            }
-            if self.contains_namespace(&value.ty()) {
-                return Err(self.refuse(
-                    node,
-                    "erasing module namespaces requires a native namespace descriptor contract",
-                ));
-            }
-            if ir::contains_set(&value.ty(), &self.records, &self.unions) {
-                return Err(self.refuse(
-                    node,
-                    "erasing Set requires a shared native Set value contract",
-                ));
-            }
-            if let Type::Record { shape_id } = value.ty()
-                && self.callables.contains_key(&shape_id)
-            {
-                return Err(self.refuse(node, "erasing callable data properties requires a shared native function property view"));
+            if let Some(reason) = self.dynamic_erasure_reason(&value.ty()) {
+                return Err(self.refuse(node, reason));
             }
             return Ok(Expr::DynFrom {
                 value: Box::new(value),

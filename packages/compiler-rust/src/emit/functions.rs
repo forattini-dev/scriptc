@@ -9,6 +9,12 @@ fn signature(function: &Function) -> Type {
         ret: Box::new(function.call_result()),
     }
 }
+pub(super) fn reads_receiver(ty: &Type, module: &Module) -> bool {
+    module
+        .functions
+        .iter()
+        .any(|function| signature(function) == *ty && function.reads_receiver())
+}
 fn types(module: &Module) -> Vec<Type> {
     fn visit(ty: &Type, found: &mut Vec<Type>) {
         match ty {
@@ -134,7 +140,12 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             .enumerate()
             .map(|(i, ty)| format!(", p{i}: {}", rust_type(ty.clone(), module)))
             .collect::<String>();
-        writeln!(output, "fn call_{name}(function: runtime::Gc<{name}>{arguments}) -> {} {{ let target = function.with(Clone::clone); match target {{", rust_type((**ret).clone(), module)).unwrap();
+        let result = rust_type((**ret).clone(), module);
+        let forwarded = (0..params.len())
+            .map(|i| format!(", p{i}"))
+            .collect::<String>();
+        writeln!(output, "fn call_{name}(function: runtime::Gc<{name}>{arguments}) -> {result} {{ call_{name}_with_this(function, NativeValue::Undefined{forwarded}) }}").unwrap();
+        writeln!(output, "fn call_{name}_with_this(function: runtime::Gc<{name}>, receiver: NativeValue{arguments}) -> {result} {{ let target = function.with(Clone::clone); match target {{").unwrap();
         if targets.is_empty() {
             output.push_str("Self::Unreachable => unreachable!(\"scriptc: signature without an allocated function\"),\n".replace("Self::", &format!("{name}::")).as_str());
         }
@@ -142,9 +153,15 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             let captures = (0..function.captures.as_ref().map_or(0, Vec::len))
                 .map(|i| format!("c{i}"))
                 .collect::<Vec<_>>();
-            let args = captures
-                .iter()
-                .map(|c| format!("{c}.expect(\"scriptc: cleared function capture\")"))
+            let args = function
+                .reads_receiver()
+                .then(|| "receiver".to_string())
+                .into_iter()
+                .chain(
+                    captures
+                        .iter()
+                        .map(|c| format!("{c}.expect(\"scriptc: cleared function capture\")")),
+                )
                 .chain((0..params.len()).map(|i| format!("p{i}")))
                 .collect::<Vec<_>>()
                 .join(", ");
