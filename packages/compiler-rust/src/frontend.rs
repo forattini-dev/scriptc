@@ -31,6 +31,7 @@ mod exceptions;
 mod functions;
 mod helpers;
 pub mod inspect;
+mod json_functions;
 mod json_modules;
 mod module_metadata;
 mod modules;
@@ -899,6 +900,9 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expression_inner(&mut self, node: Node) -> Result<Expr, String> {
+        if let Some(value) = self.json_function_value(node)? {
+            return Ok(value);
+        }
         if let Some(value) = self.child_builtin_value(node)? {
             return Ok(value);
         }
@@ -1199,6 +1203,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.json_function_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.promisify_call(node)? {
                     return Ok(value);
                 }

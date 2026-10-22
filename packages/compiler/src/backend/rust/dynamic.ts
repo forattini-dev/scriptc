@@ -1,3 +1,4 @@
+import { emitNativeJsonDefinitions } from "./json-functions.js";
 import { emitExecFileDefinitions } from "./exec-file.js";
 import { recursiveNativeReference } from "../../ir/recursive-native.js";
 import { RecursiveNativeChecks } from "./recursive-checks.js";
@@ -937,6 +938,7 @@ export class RustDynamicEmitter {
     emitRustDynamicJsonReplacer(this.context);
     emitRustDynamicErrorAndCloneHelpers(this.context, boxedShapes);
     emitExecFileDefinitions(this.context);
+    emitNativeJsonDefinitions(this.context);
     emitRustDynamicAssertions(this.context, boxedShapes);
     this.context.line("");
   }

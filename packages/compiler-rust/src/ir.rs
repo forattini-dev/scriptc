@@ -2443,6 +2443,22 @@ fn validate_function(
                         Err("invalid native child process signature".into())
                     };
                 }
+                if matches!(r#fn.as_str(), "json.stringifyNative" | "json.parseNative") {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1
+                        && args[0].ty()
+                            == (Type::Array {
+                                elem: Box::new(Type::Dyn),
+                            })
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native JSON function signature".into())
+                    };
+                }
                 let builtin = crate::builtins::by_ir(r#fn).ok_or("unknown native library call")?;
                 if *r#type != builtin.result || args.len() != builtin.args.len() {
                     return Err("invalid native library signature".into());
@@ -2871,6 +2887,48 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_function_contract_rejects_typed_or_malformed_argument_packs() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        for name in ["json.stringifyNative", "json.parseNative"] {
+            for defect in ["none", "arity", "element", "result"] {
+                let mut args = vec![Expr::ArrayLit {
+                    elems: vec![],
+                    r#type: Type::Array {
+                        elem: Box::new(if defect == "element" {
+                            Type::F64
+                        } else {
+                            Type::Dyn
+                        }),
+                    },
+                    loc: loc.clone(),
+                }];
+                if defect == "arity" {
+                    args.clear();
+                }
+                module.functions[0].body = vec![Stmt::Expression {
+                    expr: Expr::LibCall {
+                        r#fn: name.into(),
+                        args,
+                        r#type: if defect == "result" {
+                            Type::String
+                        } else {
+                            Type::Dyn
+                        },
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                }];
+                assert_eq!(
+                    validate(&module).is_ok(),
+                    defect == "none",
+                    "{name}: {defect}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn exec_file_contract_rejects_malformed_capture_and_handle_abis() {

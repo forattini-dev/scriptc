@@ -6,6 +6,7 @@ mod classes;
 mod collections;
 mod exceptions;
 mod functions;
+mod json_functions;
 mod layouts;
 mod process;
 mod record_construction;
@@ -102,6 +103,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         values::definitions(module, &mut output);
         exceptions::definitions(module, &mut output);
         child_process::definitions(module, &mut output);
+        json_functions::definitions(module, &mut output);
     }
     storage::definitions(module, &mut output);
     for function in &module.functions {
@@ -288,6 +290,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         return value;
     }
     if let Some(code) = process::expression(value, function, module) {
+        return code;
+    }
+    if let Some(code) = json_functions::expression(value, function, module) {
         return code;
     }
     if let Some(code) = child_process::expression(value, function, module) {

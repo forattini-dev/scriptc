@@ -100,6 +100,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-json-functions/identity.ts",
+        "rust-native-json-functions/values.ts",
+        "rust-native-json-functions/parse.ts",
+        "rust-native-json-functions/replacer.ts",
+        "rust-native-json-functions/hooks.ts",
+        "rust-native-json-functions/shadows.ts",
+        "rust-native-json-functions/omission.js",
         "rust-native-exec-file/identity.ts",
         "rust-native-exec-file/success.ts",
         "rust-native-exec-file/errors.ts",
@@ -989,6 +996,47 @@ fn template_boundaries_preserve_previous_native_artifacts() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert_eq!(fs::read_to_string(target).unwrap(), "preserve");
+}
+
+#[test]
+fn json_function_boundaries_preserve_previous_native_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "json-boundary");
+    for source in [
+        "const save = JSON; save.stringify(1);",
+        "JSON.stringify = (value: any): string => 'changed'; JSON.stringify(1);",
+        "const read = JSON.parse; read('{}', (key: string, value: any) => value);",
+    ] {
+        fs::write(&input, source).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
 }
 
 #[test]

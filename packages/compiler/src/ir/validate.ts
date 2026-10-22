@@ -137,6 +137,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // Cast result is its mapped promise target, checked in libCall like error.new.
   "island.castFail": { argTypes: [JSVAL, STRING], result: VOID },
   "json.parse": { argTypes: [STRING], result: DYN },
+  "json.stringifyNative": { argTypes: [arrayOf(DYN)], result: DYN },
+  "json.parseNative": { argTypes: [arrayOf(DYN)], result: DYN },
   "dyn.keySet": { argTypes: [DYN, STRING, DYN], result: VOID },
   "dyn.keySetComputed": { argTypes: [DYN, DYN, DYN], result: VOID },
   "dyn.iterPack": { argTypes: [DYN, STRING], result: DYN },

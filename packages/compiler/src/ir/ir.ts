@@ -1974,6 +1974,8 @@ export type IrLibFn =
    * --dynamic only. */
   | "island.castFail"
   | "json.parse"
+  | "json.stringifyNative"
+  | "json.parseNative"
   /** Keyed WRITE on a dyn value — `h.onDone = cb` / `h["k"] = v` on a
    * checked-dynamic object (args: receiver, key string, value — all
    * borrowed; the runtime copies the key and retains the value in). An
@@ -7697,7 +7699,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "bun.writeText",
   "bun.writeBytes",
   "process.exit", "process.exitCodeSet", "process.setExitCode",
-  ...BIGINT_MAY_THROW, "json.stringifyReplacer",
+  ...BIGINT_MAY_THROW, "json.stringifyReplacer", "json.stringifyNative", "json.parseNative",
   "bigint.parse",
   "bigint.fromF64",
   "bigint.div",

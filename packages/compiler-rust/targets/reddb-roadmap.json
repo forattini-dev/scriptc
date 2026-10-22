@@ -797,5 +797,36 @@
       "await suspension",
       "complete ChildProcess surface and spawn error metadata"
     ]
+  },
+  "nativeJsonFunctionsCheckpoint": {
+    "date": "2026-10-21",
+    "status": "partial",
+    "compiler": "rust",
+    "engine": "none",
+    "irVersion": 13,
+    "originalAppBinaries": 0,
+    "originalAppsExecuted": false,
+    "fixtures": [
+      "rust-native-json-functions/identity.ts",
+      "rust-native-json-functions/values.ts",
+      "rust-native-json-functions/parse.ts",
+      "rust-native-json-functions/replacer.ts",
+      "rust-native-json-functions/hooks.ts",
+      "rust-native-json-functions/shadows.ts",
+      "rust-native-json-functions/omission.js"
+    ],
+    "resolved": "First-class standard JSON function identities, aliases and argument packs; shared Rust serialization traversal and owning parsed data.",
+    "nextFirstRefusals": {
+      "red-skills-release": "json-with-bigint.js: mixed object/boolean operands in isRawJSON; constructor/name inspection also needs native object protocols",
+      "redskilled": "death-record.ts: object method ABI",
+      "red-dev": "tuiuiu/core/pool.js: VNode factory ABI"
+    },
+    "remainingBoundaries": [
+      "JSON.parse revivers and source contexts",
+      "boxed coercions and general object/proxy protocols",
+      "global JSON mutation and reflection",
+      "lone UTF-16 strings in the native frontend"
+    ],
+    "deliveryBoundary": "Focused native and reference Rust parity is separate from original application binary emission and full plain/SAN release gates."
   }
 }

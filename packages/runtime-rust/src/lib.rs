@@ -154,6 +154,7 @@ include!("effect_sql.rs");
 include!("effect_http.rs");
 include!("windows_paths.rs");
 include!("json.rs");
+include!("native_json.rs");
 include!("number_format.rs");
 include!("numeric_ops.rs");
 include!("network_listener.rs");

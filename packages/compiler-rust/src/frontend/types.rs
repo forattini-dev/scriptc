@@ -16,6 +16,9 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn type_id(&mut self, id: TypeId) -> Option<Type> {
+        if let Some(ty) = self.json_callable_type(id) {
+            return Some(ty);
+        }
         if self.data_types.contains(&id) {
             return Some(Type::Dyn);
         }
@@ -60,6 +63,9 @@ impl Lowerer<'_> {
         self.aggregate_type(id)
     }
     pub(super) fn ty(&mut self, node: Node) -> Result<Type, String> {
+        if let Some(ty) = self.json_function_type(node) {
+            return Ok(ty);
+        }
         if let Some(ty) = self.child_projected_type(node) {
             return Ok(ty);
         }
