@@ -310,6 +310,28 @@ impl Lowerer<'_> {
             return self.coerce(value, target, node);
         }
         if target == Type::Dyn {
+            if value.ty() == Type::Void {
+                // A call with a void ABI still evaluates in argument position
+                // and contributes the JavaScript undefined value.
+                let undefined = self.coerce(
+                    Expr::UnitLit {
+                        unit: "undefined",
+                        r#type: Type::Undefined,
+                        loc: self.loc(node),
+                    },
+                    Type::Dyn,
+                    node,
+                )?;
+                return Ok(Expr::Sequence {
+                    stmts: vec![Stmt::Expression {
+                        expr: value,
+                        loc: self.loc(node),
+                    }],
+                    result: Box::new(undefined),
+                    r#type: Type::Dyn,
+                    loc: self.loc(node),
+                });
+            }
             if let Some(reason) = self.dynamic_erasure_reason(&value.ty()) {
                 return Err(self.refuse(node, reason));
             }

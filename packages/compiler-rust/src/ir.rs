@@ -1474,7 +1474,9 @@ fn validate_function(
 
             Expr::LibCall {
                 r#fn, args, r#type, ..
-            } if r#fn.starts_with("sym.") || r#fn == "dyn.typeof" => {
+            } if r#fn.starts_with("sym.")
+                || matches!(r#fn.as_str(), "dyn.typeof" | "dyn.stringConstructor") =>
+            {
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
                 }
@@ -1486,7 +1488,9 @@ fn validate_function(
                     "sym.newAnon" => arg_types.is_empty() && *r#type == Type::Symbol,
                     "sym.new" | "sym.for" => arg_types == [Type::String] && *r#type == Type::Symbol,
                     "sym.toString" => arg_types == [Type::Symbol] && *r#type == Type::String,
-                    "dyn.typeof" => arg_types == [Type::Dyn] && *r#type == Type::String,
+                    "dyn.typeof" | "dyn.stringConstructor" => {
+                        arg_types == [Type::Dyn] && *r#type == Type::String
+                    }
                     "sym.desc" | "sym.keyFor" => {
                         arg_types == [Type::Symbol]
                             && matches!(r#type, Type::Union { union_id } if module.unions.get(*union_id).is_some_and(|u| u.arms.len()==2 && u.arms.contains(&Type::String) && u.arms.contains(&Type::Undefined)))
@@ -3864,6 +3868,43 @@ mod tests {
                 let wire = serde_json::to_value(&module).unwrap();
                 assert_eq!(wire["functions"][0]["body"][0]["expr"]["test"], "array");
             }
+        }
+    }
+
+    #[test]
+    fn string_constructor_keeps_the_shared_dynamic_string_contract() {
+        let mut module = error_module();
+        let loc = module.functions[0].loc.clone();
+        let value = Expr::DynObjLit {
+            fields: vec![],
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        for (args, result, valid) in [
+            (vec![value.clone()], Type::String, true),
+            (vec![], Type::String, false),
+            (vec![value.clone(), value.clone()], Type::String, false),
+            (vec![value], Type::Bool, false),
+            (
+                vec![Expr::BoolLit {
+                    value: true,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                }],
+                Type::String,
+                false,
+            ),
+        ] {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: "dyn.stringConstructor".into(),
+                    args,
+                    r#type: result,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid);
         }
     }
 

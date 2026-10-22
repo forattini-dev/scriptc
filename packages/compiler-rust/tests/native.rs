@@ -102,6 +102,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     for (index, name) in [
         "rust-native-primitives/array-brand.ts",
         "rust-native-primitives/augmented-standard.ts",
+        "rust-native-primitives/string-function.ts",
         "rust-native-primitives/conditions.ts",
         "rust-native-primitives/math-functions.ts",
         "rust-native-primitives/strings.ts",
@@ -2938,8 +2939,8 @@ fn array_rest_boundaries_preserve_artifacts() {
     for source in [
         "class C { method(...items: string[]): number { return items.length; } } console.log(new C().method('x'));",
         "const f = (...items: [string, ...string[]]) => items.length; console.log(f('a'));",
+        "console.log([1].map((...items: [number, number, number[]]) => items.length).length);",
         "function f(prefix: string, ...items: string[]): string { return prefix; } const bound = f.bind(null, 'prefix', 'tail'); console.log(bound());",
-        "const callback = (...items: any[]) => 1; console.log([1].map(callback).length);",
         "function f(...items: string[]): number { return items.length; } const source = ['a']; console.log(f(...source));",
         "const callback: (item: string) => string = (...items: string[]) => items.join('|'); console.log(callback('x'));",
         "const f = (...items: string[]) => items.join('|'); const ordinary = f as unknown as (items: string[]) => string; console.log(ordinary(['a']));",
@@ -3533,6 +3534,10 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
         (
             "const values: [unknown] = [[]]; Array.isArray(...values);",
             "standard primitive iterable argument spreads are not ported",
+        ),
+        (
+            "const values = [1]; String(...values);",
+            "iterable call spreads are not ported",
         ),
         (
             "'x'.repeat(Symbol('count') as any);",

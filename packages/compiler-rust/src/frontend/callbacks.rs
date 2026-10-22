@@ -4,6 +4,9 @@ use source_frontend::prelude::SignatureKind;
 
 impl Lowerer<'_> {
     pub(super) fn function_type(&mut self, id: TypeId) -> Option<Type> {
+        if let Some(ty) = self.standard_callable_type(id) {
+            return Some(ty);
+        }
         if self.standard_console_type(id) {
             return Some(console::text_sink_type());
         }

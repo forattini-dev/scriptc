@@ -506,6 +506,10 @@ fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
 
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     Some(match value {
+        Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.stringConstructor" => format!(
+            "{{ let value = {}; match value {{ NativeValue::Symbol(symbol) => runtime::symbol_to_string(&symbol), other => native_value_string(other), }} }}",
+            expr(&args[0], function, module)
+        ),
         Expr::LibCall { r#fn, args, .. } if r#fn == "record.setOwn" => format!(
             "native_record_plan_set({}, {}, {})",
             expr(&args[0], function, module),

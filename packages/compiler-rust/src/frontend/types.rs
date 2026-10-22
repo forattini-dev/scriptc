@@ -16,6 +16,9 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn type_id(&mut self, id: TypeId) -> Option<Type> {
+        if let Some(ty) = self.standard_callable_type(id) {
+            return Some(ty);
+        }
         if let Some(ty) = self.json_callable_type(id) {
             return Some(ty);
         }

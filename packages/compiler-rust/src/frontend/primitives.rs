@@ -4,7 +4,7 @@ use helpers::Helper;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
 impl Lowerer<'_> {
-    fn primitive_symbol(&self, id: u32, name: &str, owner: Option<&str>) -> bool {
+    pub(super) fn primitive_symbol(&self, id: u32, name: &str, owner: Option<&str>) -> bool {
         if id == 0 {
             return false;
         }

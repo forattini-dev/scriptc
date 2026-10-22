@@ -49,6 +49,7 @@ mod reflection;
 mod regex;
 mod sets;
 mod spreads;
+mod standard_functions;
 mod storage;
 mod strings;
 mod symbols;
@@ -906,6 +907,9 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expression_inner(&mut self, node: Node) -> Result<Expr, String> {
+        if let Some(value) = self.standard_function_value(node)? {
+            return Ok(value);
+        }
         if let Some(value) = self.json_function_value(node)? {
             return Ok(value);
         }
@@ -1212,6 +1216,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.standard_function_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.primitive_call(node)? {
                     return Ok(value);
                 }

@@ -80,39 +80,48 @@ impl Lowerer<'_> {
             callback_node.kind(),
             SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression
         ) {
-            if callback_node.parameters().len() > 3 {
-                return Err(self.refuse(
-                    callback_node,
-                    "array.map callback accepts at most three native slots",
-                ));
-            }
-            let params = callback_node
+            if callback_node
                 .parameters()
-                .into_iter()
-                .zip(&inputs)
-                .map(|(node, ty)| self.parameter_type(node, ty.clone()))
-                .collect::<Result<Vec<_>, _>>()?;
-            self.closure(
-                callback_node,
-                Some(Type::Func {
-                    rest: false,
-                    params,
-                    ret: result.clone(),
-                }),
-            )?
+                .iter()
+                .any(|parameter| !parameter.dot_dot_dot_token().is_nil())
+            {
+                let ty = self.ty(callback_node)?;
+                if !matches!(ty, Type::Func { rest: true, .. }) {
+                    return Err(self.refuse(
+                        callback_node,
+                        "array.map tuple-rest callbacks are not ported",
+                    ));
+                }
+                self.closure(callback_node, Some(ty))?
+            } else {
+                if callback_node.parameters().len() > 3 {
+                    return Err(self.refuse(
+                        callback_node,
+                        "array.map callback accepts at most three native slots",
+                    ));
+                }
+                let params = callback_node
+                    .parameters()
+                    .into_iter()
+                    .zip(&inputs)
+                    .map(|(node, ty)| self.parameter_type(node, ty.clone()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.closure(
+                    callback_node,
+                    Some(Type::Func {
+                        rest: false,
+                        params,
+                        ret: result.clone(),
+                    }),
+                )?
+            }
         } else {
             self.expression(callback_node)?
         };
         let Type::Func { params, ret, rest } = callback.ty() else {
             return Err(self.refuse(callback_node, "array.map callback is not a native function"));
         };
-        if rest {
-            return Err(self.refuse(
-                callback_node,
-                "array.map rest callbacks need native callback argument completion",
-            ));
-        }
-        if params.len() > 3 {
+        if params.len() > if rest { 4 } else { 3 } {
             return Err(self.refuse(
                 callback_node,
                 "array.map callback requires unsupported argument slots",
@@ -144,10 +153,31 @@ impl Lowerer<'_> {
             helper.read(&index),
             helper.read(&array),
         ];
-        let args = provided
-            .into_iter()
-            .zip(params)
-            .map(|(value, target)| self.coerce(value, target, callback_node))
+        let args = params
+            .iter()
+            .enumerate()
+            .map(|(index, target)| {
+                if rest && index + 1 == params.len() {
+                    let Type::Array { elem } = target else {
+                        return Err(
+                            self.refuse(callback_node, "array.map rest ABI requires an array slot")
+                        );
+                    };
+                    let elems = provided
+                        .iter()
+                        .skip(index)
+                        .cloned()
+                        .map(|value| self.coerce(value, (**elem).clone(), callback_node))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(Expr::ArrayLit {
+                        elems,
+                        r#type: target.clone(),
+                        loc: helper.loc(),
+                    })
+                } else {
+                    self.coerce(provided[index].clone(), target.clone(), callback_node)
+                }
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let call = Expr::CallValue {
             callee: Box::new(helper.read(&callback_slot)),

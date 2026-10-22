@@ -1,4 +1,4 @@
-use crate::{JsString, string};
+use crate::{JsString, JsStringBuilder, string};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -54,7 +54,13 @@ pub fn symbol_key_for(value: &JsSymbol) -> Option<JsString> {
 
 pub fn symbol_to_string(value: &JsSymbol) -> JsString {
     match &value.description {
-        Some(description) => string(&format!("Symbol({description})")),
+        Some(description) => {
+            let mut output = JsStringBuilder::new();
+            output.push_str("Symbol(");
+            output.push_str(description);
+            output.push_str(")");
+            output.finish()
+        }
         None => string("Symbol()"),
     }
 }
@@ -128,6 +134,32 @@ pub fn symbol_well_known(kind: WellKnownSymbol) -> JsSymbol {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn descriptive_strings_preserve_utf16_units() {
+        for units in [
+            vec![],
+            vec![0xd83d],
+            vec![0xde00],
+            vec![0xd83d, 0xde00],
+            vec![0xfffd],
+        ] {
+            let description = JsString::from_utf16(&units);
+            let mut expected = "Symbol(".encode_utf16().collect::<Vec<_>>();
+            expected.extend(units);
+            expected.push(b')' as u16);
+            assert_eq!(
+                symbol_to_string(&symbol_new(&description))
+                    .encode_utf16()
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+        assert_eq!(
+            symbol_to_string(&symbol_new_anonymous()),
+            string("Symbol()")
+        );
+    }
 
     #[test]
     fn well_known_symbols_have_distinct_persistent_nonregistry_identities() {
