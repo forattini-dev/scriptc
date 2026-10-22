@@ -1,0 +1,1 @@
+{"compilerOptions": {"target": "ESNext", "module": "NodeNext", "moduleResolution": "NodeNext", "strict": true, "allowJs": true, "checkJs": false, "types": ["node"]}, "include": ["*.ts", "*.js"]}

@@ -100,6 +100,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-logical/values.ts",
+        "rust-native-logical/identity.ts",
+        "rust-native-logical/effects.ts",
+        "rust-native-logical/guards.ts",
+        "rust-native-logical/mutations.ts",
+        "rust-native-logical/void.js",
         "rust-native-json-functions/identity.ts",
         "rust-native-json-functions/values.ts",
         "rust-native-json-functions/parse.ts",
@@ -1007,6 +1013,46 @@ fn json_function_boundaries_preserve_previous_native_artifacts() {
         "const save = JSON; save.stringify(1);",
         "JSON.stringify = (value: any): string => 'changed'; JSON.stringify(1);",
         "const read = JSON.parse; read('{}', (key: string, value: any) => value);",
+    ] {
+        fs::write(&input, source).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn logical_boundaries_preserve_previous_native_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "logical-boundary");
+    for source in [
+        "const value: any = 1; value && eval('1');",
+        "const values = new Set([1]); values || 0;",
     ] {
         fs::write(&input, source).unwrap();
         for path in [

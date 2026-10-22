@@ -828,5 +828,33 @@
       "lone UTF-16 strings in the native frontend"
     ],
     "deliveryBoundary": "Focused native and reference Rust parity is separate from original application binary emission and full plain/SAN release gates."
+  },
+  "nativeLogicalCheckpoint": {
+    "date": "2026-10-21",
+    "status": "partial",
+    "compiler": "rust",
+    "engine": "none",
+    "irVersion": 13,
+    "originalAppBinaries": 0,
+    "originalAppsExecuted": false,
+    "fixtures": [
+      "rust-native-logical/values.ts",
+      "rust-native-logical/identity.ts",
+      "rust-native-logical/effects.ts",
+      "rust-native-logical/guards.ts",
+      "rust-native-logical/mutations.ts",
+      "rust-native-logical/void.js"
+    ],
+    "resolved": "Value-preserving logical short circuit, once-only left evaluation, lazy right effects, owning identities and undefined results from void calls.",
+    "nextFirstRefusals": {
+      "red-skills-release": "json-with-bigint.js: stringifyIteratively arrow function signature has no native representation",
+      "redskilled": "death-record.ts: object method ABI",
+      "red-dev": "tuiuiu/core/pool.js: VNode factory ABI"
+    },
+    "remainingBoundaries": [
+      "nullish and logical assignment operators",
+      "existing Set/WeakMap/namespace and descriptor erasure boundaries",
+      "constructor/name and prototype introspection remain a separate object protocol"
+    ]
   }
 }

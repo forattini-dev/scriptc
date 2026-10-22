@@ -33,6 +33,7 @@ mod helpers;
 pub mod inspect;
 mod json_functions;
 mod json_modules;
+mod logical;
 mod module_metadata;
 mod modules;
 mod namespace_values;

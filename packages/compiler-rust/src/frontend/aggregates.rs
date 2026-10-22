@@ -877,6 +877,9 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn binary(&mut self, node: Node, op: &str) -> Result<Expr, String> {
+        if matches!(op, "&&" | "||") {
+            return self.logical(node, op);
+        }
         if matches!(op, "===" | "!==") {
             for (test, kind) in [(node.left(), node.right()), (node.right(), node.left())] {
                 if test.kind() == SyntaxKind::TypeOfExpression
@@ -1084,9 +1087,7 @@ impl Lowerer<'_> {
                 });
             }
         }
-        let supported = if matches!(op, "&&" | "||") {
-            left.ty() == Type::Bool && right.ty() == Type::Bool
-        } else if matches!(op, "===" | "!==") {
+        let supported = if matches!(op, "===" | "!==") {
             left.ty() == right.ty()
                 && matches!(
                     left.ty(),
@@ -1111,15 +1112,6 @@ impl Lowerer<'_> {
         };
         if !supported {
             return Err(self.refuse(node, "binary operand coercion is not ported"));
-        }
-        if matches!(op, "&&" | "||") {
-            return Ok(Expr::Logical {
-                op: op.into(),
-                left: Box::new(left),
-                right: Box::new(right),
-                r#type: Type::Bool,
-                loc: self.loc(node),
-            });
         }
         if left.ty() == Type::String {
             return Ok(Expr::StrEq {
