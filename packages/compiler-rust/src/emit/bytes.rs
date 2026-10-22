@@ -31,9 +31,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             let operation = match method.as_str() {
                 "length" | "byteLength" => "runtime::bytes_len(&bytes)".into(),
                 "byteOffset" => "runtime::bytes_byte_offset(&bytes)".into(),
-                "join" => {
-                    "runtime::bytes_join(&bytes, &runtime::JsString::from(arg0)).to_string()".into()
-                }
+                "join" => "runtime::bytes_join(&bytes, &runtime::JsString::from(arg0))".into(),
                 "slice" | "subarray" => format!(
                     "runtime::bytes_slice(&bytes, {}, {}, {})",
                     if args.is_empty() { "0.0" } else { "arg0" },
@@ -61,7 +59,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             emit(&args[1])
         ),
         Expr::LibCall { r#fn, args, .. } if r#fn == "text.decode" => {
-            format!("runtime::text_decode(&({})).to_string()", emit(&args[0]))
+            format!("runtime::text_decode(&({}))", emit(&args[0]))
         }
         _ => return None,
     })

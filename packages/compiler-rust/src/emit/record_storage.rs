@@ -8,7 +8,7 @@ pub(super) fn shared(record: &crate::ir::Record) -> bool {
 pub(super) fn definitions(out: &mut String) {
     out.push_str(
         r#"
-struct NativeRecordData { entries: Vec<(String, NativeValue)> }
+struct NativeRecordData { entries: Vec<(runtime::JsString, NativeValue)> }
 impl runtime::Trace for NativeRecordData {
     fn trace(&self, tracer: &mut runtime::Tracer<'_>) {
         for (_, value) in &self.entries { value.trace_native(tracer); }
@@ -17,19 +17,21 @@ impl runtime::Trace for NativeRecordData {
 impl runtime::ClearEdges for NativeRecordData {
     fn clear_edges(&mut self) { self.entries.clear(); }
 }
-fn native_record_get(object: &runtime::Gc<NativeRecordData>, key: &str) -> NativeValue {
-    object.with(|data| data.entries.iter().find(|(name,_)| name == key)
+fn native_record_get<K: runtime::JsStringSource + ?Sized>(object: &runtime::Gc<NativeRecordData>, key: &K) -> NativeValue {
+    let key = runtime::string(key);
+    object.with(|data| data.entries.iter().find(|(name,_)| name == &key)
         .map(|(_, value)| value.clone()).unwrap_or(NativeValue::Undefined))
 }
-fn native_record_property(object: &runtime::Gc<NativeRecordData>, key: &str) -> NativeValue {
-    object.with(|data| data.entries.iter().find(|(name,_)| name == key)
-        .map(|(_, value)| value.clone())).unwrap_or_else(|| native_value_missing(key))
+fn native_record_property<K: runtime::JsStringSource + ?Sized>(object: &runtime::Gc<NativeRecordData>, key: &K) -> NativeValue {
+    let key = runtime::string(key);
+    object.with(|data| data.entries.iter().find(|(name,_)| name == &key)
+        .map(|(_, value)| value.clone())).unwrap_or_else(|| native_value_missing(key.well_formed_utf8().unwrap_or("")))
 }
-fn native_record_define(entries: &mut Vec<(String, NativeValue)>, key: String, value: NativeValue) {
+fn native_record_define(entries: &mut Vec<(runtime::JsString, NativeValue)>, key: runtime::JsString, value: NativeValue) {
     if let Some((_, slot)) = entries.iter_mut().find(|(name,_)| *name == key) { *slot = value; }
     else { entries.push((key, value)); }
 }
-fn native_record_set(object: &runtime::Gc<NativeRecordData>, key: String, value: NativeValue) {
+fn native_record_set(object: &runtime::Gc<NativeRecordData>, key: runtime::JsString, value: NativeValue) {
     object.with_mut(|data| native_record_define(&mut data.entries, key, value));
 }
 "#,

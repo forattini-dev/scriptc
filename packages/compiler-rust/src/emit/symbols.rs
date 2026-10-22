@@ -23,7 +23,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             },
             arg()
         ),
-        "sym.toString" => format!("runtime::symbol_to_string(&({})).to_string()", arg()),
+        "sym.toString" => format!("runtime::symbol_to_string(&({}))", arg()),
         "sym.desc" | "sym.keyFor" => {
             let Type::Union { union_id } = r#type else {
                 unreachable!("validated optional string");
@@ -32,7 +32,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             let string = arms.iter().position(|t| *t == Type::String).unwrap();
             let undefined = arms.iter().position(|t| *t == Type::Undefined).unwrap();
             format!(
-                "match runtime::{}(&({})) {{ Some(value) => U{union_id}::V{string}(value.to_string()), None => U{union_id}::V{undefined}(()), }}",
+                "match runtime::{}(&({})) {{ Some(value) => U{union_id}::V{string}(value), None => U{union_id}::V{undefined}(()), }}",
                 if r#fn == "sym.desc" {
                     "symbol_description"
                 } else {
@@ -42,7 +42,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             )
         }
         "dyn.typeof" => format!(
-            "{{ let value = {}; String::from(if native_value_test(&value, \"undefined\") {{ \"undefined\" }} else if native_value_test(&value, \"boolean\") {{ \"boolean\" }} else if native_value_test(&value, \"number\") {{ \"number\" }} else if native_value_test(&value, \"string\") {{ \"string\" }} else if native_value_test(&value, \"symbol\") {{ \"symbol\" }} else if native_value_test(&value, \"function\") {{ \"function\" }} else {{ \"object\" }}) }}",
+            "{{ let value = {}; runtime::JsString::from(if native_value_test(&value, \"undefined\") {{ \"undefined\" }} else if native_value_test(&value, \"boolean\") {{ \"boolean\" }} else if native_value_test(&value, \"number\") {{ \"number\" }} else if native_value_test(&value, \"string\") {{ \"string\" }} else if native_value_test(&value, \"symbol\") {{ \"symbol\" }} else if native_value_test(&value, \"function\") {{ \"function\" }} else {{ \"object\" }}) }}",
             arg()
         ),
         _ => return None,

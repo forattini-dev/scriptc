@@ -53,26 +53,26 @@ impl Lowerer<'_> {
         }
         let name = member.name().text();
         let member_id = self.symbol(member.name());
-        let math = matches!(
-            name,
-            "floor" | "ceil" | "trunc" | "round" | "abs" | "sign" | "min" | "max"
-        ) && member.expression().kind() == SyntaxKind::Identifier
+        let math_operation = crate::builtins::get("Math", name);
+        let math = math_operation.is_some()
+            && member.expression().kind() == SyntaxKind::Identifier
             && {
                 let id = self.symbol(member.expression());
                 self.primitive_symbol(id, "Math", None)
             }
             && self.primitive_symbol(member_id, name, Some("Math"));
-        let repeat = name == "repeat" && self.primitive_symbol(member_id, name, Some("String"));
-        if !math && !repeat {
+        let string = crate::string_builtins::by_method(name)
+            .filter(|_| name != "length" && self.primitive_symbol(member_id, name, Some("String")));
+        if !math && string.is_none() {
             return Ok(None);
         }
         let mut values = Vec::new();
-        if repeat {
+        if string.is_some() {
             let receiver = self.primitive_operand(member.expression())?;
             if receiver.ty() != Type::String {
                 return Err(self.refuse(
                     member,
-                    "standard repeat requires a represented string receiver",
+                    "standard string methods require a represented string receiver",
                 ));
             }
             values.push(receiver);
@@ -96,31 +96,39 @@ impl Lowerer<'_> {
         }
         // Evaluate the receiver and ALL arguments before conversions, errors or
         // reduction. Unused extra arguments still have their source effects.
-        let result = if repeat { Type::String } else { Type::F64 };
+        let result = string.map_or(Type::F64, |operation| operation.result.clone());
         let mut helper = Helper::new(
             &format!("primitive_{name}"),
             values.iter().map(Expr::ty).collect(),
             result.clone(),
             self.loc(node),
         );
-        let operand = if repeat { 1 } else { 0 };
+        let operand = if string.is_some() { 1 } else { 0 };
         let mut numbers = Vec::new();
-        let count = if math && matches!(name, "min" | "max") {
+        let count = if let Some(operation) = string {
+            operation.args.len()
+        } else if math && matches!(name, "min" | "max" | "hypot") {
             values.len()
         } else {
-            1
+            math_operation
+                .as_ref()
+                .map_or(1, |operation| operation.args.len())
         };
         for index in 0..count {
-            let value = if operand + index < values.len() {
+            let value = if let Some(operation) = string {
+                let value = (operand + index < values.len())
+                    .then(|| helper.read(&helper.param(operand + index)));
+                self.primitive_string_argument(value, operation.args[index], node)?
+            } else if operand + index < values.len() {
                 self.primitive_number(helper.read(&helper.param(operand + index)), node)?
             } else {
                 helper.number(f64::NAN)
             };
-            let local = helper.local(&format!("number{index}"), Type::F64, false);
+            let local = helper.local(&format!("argument{index}"), value.ty(), false);
             helper.declare(&local, value);
             numbers.push(helper.read(&local));
         }
-        let value = if repeat {
+        let value = if string.is_some() {
             Expr::StringIntrinsic {
                 method: name.into(),
                 receiver: Box::new(helper.read(&helper.param(0))),
@@ -129,7 +137,7 @@ impl Lowerer<'_> {
                 loc: helper.loc(),
             }
         } else {
-            let (operation, args) = if matches!(name, "min" | "max") {
+            let (operation, args) = if matches!(name, "min" | "max" | "hypot") {
                 (
                     format!("math.{name}Arr"),
                     vec![Expr::ArrayLit {
@@ -161,6 +169,101 @@ impl Lowerer<'_> {
             r#type: result,
             loc: self.loc(node),
         }))
+    }
+
+    fn primitive_string_argument(
+        &mut self,
+        value: Option<Expr>,
+        argument: crate::string_builtins::Argument,
+        node: Node,
+    ) -> Result<Expr, String> {
+        use crate::string_builtins::Argument;
+        let default = match argument {
+            Argument::Number(value) => Expr::NumLit {
+                value,
+                spelling: None,
+                r#type: Type::F64,
+                loc: self.loc(node),
+            },
+            Argument::Text(value) => Expr::StrLit {
+                value: value.into(),
+                r#type: Type::String,
+                loc: self.loc(node),
+            },
+        };
+        let Some(value) = value else {
+            return Ok(default);
+        };
+        if value.ty() == Type::Undefined {
+            return Ok(default);
+        }
+        if let Type::Union { union_id } = value.ty() {
+            let mut helper = Helper::new(
+                "string_argument",
+                vec![value.ty()],
+                argument.ty(),
+                self.loc(node),
+            );
+            let slot = helper.param(0);
+            for (tag, arm) in self.unions[union_id].arms.clone().into_iter().enumerate() {
+                let result = if arm == Type::Undefined {
+                    default.clone()
+                } else {
+                    let narrowed = if arm == Type::Null {
+                        Expr::UnitLit {
+                            unit: "null",
+                            r#type: Type::Null,
+                            loc: helper.loc(),
+                        }
+                    } else {
+                        Expr::UnionNarrow {
+                            union_id: format!("u{union_id}"),
+                            tag,
+                            value: Box::new(helper.read(&slot)),
+                            r#type: arm,
+                            loc: helper.loc(),
+                        }
+                    };
+                    self.primitive_string_argument(Some(narrowed), argument, node)?
+                };
+                helper.function.body.push(Stmt::If {
+                    cond: Expr::UnionIsTag {
+                        union_id: format!("u{union_id}"),
+                        tag,
+                        negated: false,
+                        value: Box::new(helper.read(&slot)),
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    },
+                    then: vec![Stmt::Return {
+                        value: Some(result),
+                        loc: helper.loc(),
+                    }],
+                    else_: None,
+                    loc: helper.loc(),
+                });
+            }
+            helper.function.body.push(Stmt::Return {
+                value: Some(default),
+                loc: helper.loc(),
+            });
+            let callee = self.install_helper(helper.function);
+            return Ok(Expr::Call {
+                callee,
+                args: vec![value],
+                r#type: argument.ty(),
+                loc: self.loc(node),
+            });
+        }
+        match argument {
+            Argument::Number(_) => self.primitive_number(value, node),
+            Argument::Text(_) => match value.ty() {
+                Type::String => Ok(value),
+                Type::Null => Ok(Expr::StrLit { value: "null".into(), r#type: Type::String, loc: self.loc(node) }),
+                Type::Bool | Type::F64 => Ok(Expr::ToString { operand: Box::new(value), r#type: Type::String, loc: self.loc(node) }),
+                _ => Err(self.refuse(node, "standard string arguments require represented primitives; object coercion hooks are not ported")),
+            },
+        }
     }
 
     // Type-only wrappers do not perform JavaScript numeric/string conversion.

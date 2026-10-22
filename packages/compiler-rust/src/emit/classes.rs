@@ -24,7 +24,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
     // Each supported definition executes once at module scope. Constructor
     // values cannot be widened across class identities in this ABI.
     output.push_str("#[derive(Clone, Copy, PartialEq)]\nstruct NativeClass(usize);\nimpl NativeTrace for NativeClass { fn trace_native(&self, _: &mut runtime::Tracer<'_>) {} }\nimpl runtime::ArrayElement for NativeClass {}\n");
-    output.push_str("struct NativeErrorData { name: String, message: String, own: Vec<(String, NativeValue)> }\nstruct NativeInstance { kind: usize, error: Option<NativeErrorData>, fields: NativeInstanceFields }\nenum NativeInstanceFields {\n");
+    output.push_str("struct NativeErrorData { name: runtime::JsString, message: runtime::JsString, own: Vec<(runtime::JsString, NativeValue)> }\nstruct NativeInstance { kind: usize, error: Option<NativeErrorData>, fields: NativeInstanceFields }\nenum NativeInstanceFields {\n");
     for (index, class) in module.classes.iter().enumerate() {
         writeln!(output, "C{index} {{").unwrap();
         for field in class.fields.iter().skip(module.class_header_len(class)) {
@@ -81,7 +81,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
         output.push_str("},\n");
     }
     output.push_str("} } }\n");
-    output.push_str("fn error_string(object: runtime::Gc<NativeInstance>) -> String { object.with(|object| { let e = object.error.as_ref().expect(\"validated Error receiver\"); if e.name.is_empty() { e.message.clone() } else if e.message.is_empty() { e.name.clone() } else { format!(\"{}: {}\", e.name, e.message) } }) }\n");
+    output.push_str("fn error_string(object: runtime::Gc<NativeInstance>) -> runtime::JsString { object.with(|object| { let e = object.error.as_ref().expect(\"validated Error receiver\"); if e.name.is_empty() { e.message.clone() } else if e.message.is_empty() { e.name.clone() } else { runtime::string_concat(&runtime::string_concat(&e.name, &runtime::string(\": \")), &e.message) } }) }\n");
     for (index, class) in module.classes.iter().enumerate() {
         let mut builtin = class;
         while let Some(base) = &builtin.base {
@@ -94,7 +94,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                 native = module.class(native.base.as_ref().unwrap()).unwrap();
             }
             format!(
-                "Some(NativeErrorData {{ name: String::from({:?}), message: String::new(), own: Vec::new() }})",
+                "Some(NativeErrorData {{ name: runtime::JsString::from({:?}), message: runtime::JsString::default(), own: Vec::new() }})",
                 native.js_name
             )
         } else {

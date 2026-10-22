@@ -34,7 +34,7 @@ fn rust_type(ty: Type, module: &Module) -> String {
         Type::Bytes { .. } => "runtime::JsBytes<u8>",
         Type::Object { .. } => "runtime::Gc<NativeInstance>",
         Type::Classval { .. } => "NativeClass",
-        Type::String => "String",
+        Type::String => "runtime::JsString",
         Type::Void => "()",
         Type::Map { key, value } => {
             return format!(
@@ -95,7 +95,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
     );
     output.push_str(include_str!("program_support.rs"));
     if uses_runtime(module) {
-        output.push_str("\nuse scriptc_runtime as runtime;\n");
+        output.push_str("\nuse scriptc_runtime as runtime;\nuse runtime::JsStringSource;\n");
         output.push_str(include_str!("heap_support.rs"));
         output.push_str(include_str!("collections_support.rs"));
         layouts::definitions(module, &mut output);
@@ -185,7 +185,11 @@ pub fn uses_runtime(module: &Module) -> bool {
     }
     fn expr(value: &Expr) -> bool {
         match value {
-            Expr::DynFrom { .. }
+            Expr::StrLit { .. }
+            | Expr::StrConcat { .. }
+            | Expr::StrEq { .. }
+            | Expr::ToString { .. }
+            | Expr::DynFrom { .. }
             | Expr::DynCheck { .. }
             | Expr::DynObjLit { .. }
             | Expr::DynArrLit { .. }
@@ -218,10 +222,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             Expr::RecordKeyGet { obj, key, .. } => expr(obj) || expr(key),
             Expr::Bin { left, right, .. }
             | Expr::UnionEq { left, right, .. }
-            | Expr::Logical { left, right, .. }
-            | Expr::StrEq { left, right, .. } => expr(left) || expr(right),
-            Expr::StrConcat { left, right, .. } => expr(left) || expr(right),
-            Expr::ToString { operand, .. } => expr(operand),
+            | Expr::Logical { left, right, .. } => expr(left) || expr(right),
             Expr::Unary { operand, .. } => expr(operand),
             Expr::Call { args, .. } | Expr::Intrinsic { args, .. } => args.iter().any(expr),
             Expr::Closure { .. } => false,
@@ -266,9 +267,12 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Type::Record { .. }
             | Type::Union { .. }
             | Type::Object { .. } => true,
-            Type::Regex | Type::Symbol | Type::Bytes { .. } | Type::Dyn | Type::Promise { .. } => {
-                true
-            }
+            Type::String
+            | Type::Regex
+            | Type::Symbol
+            | Type::Bytes { .. }
+            | Type::Dyn
+            | Type::Promise { .. } => true,
             Type::Func { params, ret, .. } => params.iter().any(ty) || ty(ret),
             _ => false,
         }
@@ -407,15 +411,15 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             )
         }
         Expr::StrConcat { left, right, .. } => format!(
-            "{{ let mut left = {}; let right = {}; left.push_str(&right); left }}",
+            "{{ let left = {}; let right = {}; runtime::string_concat(&left, &right) }}",
             expr(left, function, module),
             expr(right, function, module)
         ),
         Expr::ToString { operand, .. } => {
             let value = expr(operand, function, module);
             match operand.ty() {
-                Type::F64 => format!("js_string_number({value})"),
-                Type::Bool => format!("({value}).to_string()"),
+                Type::F64 => format!("runtime::JsString::from(js_string_number({value}))"),
+                Type::Bool => format!("runtime::JsString::from(({value}).to_string())"),
                 Type::Dyn => format!("native_value_string({value})"),
                 _ => unreachable!("IR validated"),
             }
@@ -566,19 +570,32 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
             args,
             ..
         } => {
+            let operation = crate::string_builtins::by_method(method).expect("IR validated");
             let receiver = expr(receiver, function, module);
-            match method.as_str() {
-                "length" => format!("runtime::string_len(&runtime::JsString::from({receiver}))"),
-                "repeat" => format!(
-                    "runtime::string_repeat(&runtime::JsString::from({receiver}), {}).to_string()",
-                    expr(&args[0], function, module)
-                ),
-                _ => unreachable!("IR validated"),
-            }
+            let args = args
+                .iter()
+                .map(|arg| {
+                    let value = expr(arg, function, module);
+                    if arg.ty() == Type::String {
+                        format!(", &({value})")
+                    } else {
+                        format!(", {value}")
+                    }
+                })
+                .collect::<String>();
+            format!("runtime::{}(&({receiver}){args})", operation.runtime)
         }
         Expr::LibCall { r#fn, .. } if r#fn == "dyn.this" => "native_this.clone()".into(),
         Expr::LibCall { r#fn, args, .. } => {
             let builtin = crate::builtins::by_ir(r#fn).expect("IR validated");
+            if let crate::builtins::Implementation::FloatBinaryMethod(name) = builtin.implementation
+            {
+                return format!(
+                    "{{ let left = {}; let right = {}; left.{name}(right) }}",
+                    expr(&args[0], function, module),
+                    expr(&args[1], function, module)
+                );
+            }
             let args = args
                 .iter()
                 .map(|arg| match arg.ty() {
@@ -590,20 +607,16 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            let call = match builtin.implementation {
+            match builtin.implementation {
                 crate::builtins::Implementation::Runtime(name) => {
                     format!("runtime::{name}({args})")
                 }
                 crate::builtins::Implementation::FloatMethod(name) => format!("({args}).{name}()"),
-            };
-            if builtin.result == Type::String {
-                format!("({call}).to_string()")
-            } else {
-                call
+                crate::builtins::Implementation::FloatBinaryMethod(_) => unreachable!(),
             }
         }
         Expr::NumLit { value, .. } => format!("f64::from_bits({}_u64)", value.to_bits()),
-        Expr::StrLit { value, .. } => format!("String::from({value:?})"),
+        Expr::StrLit { value, .. } => format!("runtime::JsString::from({value:?})"),
         Expr::BoolLit { value, .. } => value.to_string(),
         Expr::VarRef {
             local_id, r#type, ..
@@ -697,7 +710,10 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                 .map(|arg| match arg.ty() {
                     Type::F64 => format!("js_number({})", expr(arg, function, module)),
                     Type::Bool => format!("({}).to_string()", expr(arg, function, module)),
-                    Type::String => expr(arg, function, module),
+                    Type::String => format!(
+                        "({}).to_utf8_lossy().to_owned()",
+                        expr(arg, function, module)
+                    ),
                     Type::Void => unreachable!("IR validated"),
                     _ => unreachable!("IR validated"),
                 })

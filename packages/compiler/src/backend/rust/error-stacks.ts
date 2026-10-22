@@ -31,7 +31,7 @@ export function emitRustErrorStackDefinitions(context: RustDefinitionContext): v
   for (const root of context.errorClassRoots()) {
     const fieldName = context.classFieldName(root.def.name, "name");
     const fieldMessage = context.classFieldName(root.def.name, "message");
-    context.line(`${name}::${context.errorValueVariant(root)}(error) => runtime::error_stack_gc(error, || error.with(|object| runtime::error_to_string_parts(object.${fieldName}.as_ref(), object.${fieldMessage}.as_ref()))),`);
+    context.line(`${name}::${context.errorValueVariant(root)}(error) => runtime::error_stack_gc(error, || error.with(|object| runtime::error_to_string_parts(&object.${fieldName}, &object.${fieldMessage}))),`);
   }
   context.popIndent();
   context.line("} }");

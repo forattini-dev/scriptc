@@ -857,7 +857,7 @@ export class RustDefinitionEmitter {
     for (const root of roots) {
       const nameField = this.context.classFieldName(root.def.name, "name");
       const messageField = this.context.classFieldName(root.def.name, "message"); const getterRead = emitErrorMessageRead(this.context, root, root.def.name, "value.clone()");
-      this.context.line(`${name}::${this.context.errorValueVariant(root)}(value) => ${getterRead === null ? `value.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), object.${messageField}.as_ref()))` : `{ let sc_message: runtime::JsString = ${getterRead}; value.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), sc_message.as_ref())) }`},`);
+      this.context.line(`${name}::${this.context.errorValueVariant(root)}(value) => ${getterRead === null ? `value.with(|object| runtime::error_to_string_parts(&object.${nameField}, &object.${messageField}))` : `{ let sc_message: runtime::JsString = ${getterRead}; value.with(|object| runtime::error_to_string_parts(&object.${nameField}, &sc_message)) }`},`);
     }
     this.context.popIndent();
     this.context.line("}");

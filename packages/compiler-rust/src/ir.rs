@@ -1971,13 +1971,14 @@ fn validate_function(
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
                 }
-                let valid = match method.as_str() {
-                    "length" => args.is_empty() && *r#type == Type::F64,
-                    "repeat" => {
-                        args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::String
-                    }
-                    _ => false,
-                };
+                let valid = crate::string_builtins::by_method(method).is_some_and(|operation| {
+                    args.len() == operation.args.len()
+                        && *r#type == operation.result
+                        && args
+                            .iter()
+                            .zip(operation.args)
+                            .all(|(value, argument)| value.ty() == argument.ty())
+                });
                 if receiver.ty() == Type::String && valid {
                     Ok(())
                 } else {

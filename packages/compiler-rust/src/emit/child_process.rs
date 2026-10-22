@@ -27,7 +27,7 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
     out.push_str(") }\n");
     out.push_str(include_str!("../child_process_support.rs"));
     if let Some(result) = result {
-        let value = "runtime::Gc::new(NativeRecordData { entries: vec![(\"stdout\".into(), NativeValue::String(output.stdout.to_string())), (\"stderr\".into(), NativeValue::String(output.stderr.to_string()))] })";
+        let value = "runtime::Gc::new(NativeRecordData { entries: vec![(\"stdout\".into(), NativeValue::String(output.stdout.clone())), (\"stderr\".into(), NativeValue::String(output.stderr.clone()))] })";
         let boxed = values::box_value(&result, value, module);
         writeln!(out, "fn native_exec_promise(args: runtime::JsArray<NativeValue>) -> runtime::JsPromise<NativeValue> {{ let request = native_exec_request(args, true); let promise = runtime::promise_new(); let target = promise.clone(); let traced = target.clone(); let child = runtime::child_exec_file_options(&request.command, &request.arguments, request.options, std::rc::Rc::new(move |output| {{ if output.error.is_some() {{ let _ = runtime::promise_reject(&target, runtime::caught_value(native_exec_error(&output, true))); }} else {{ let value = {boxed}; let _ = runtime::promise_fulfill(&target, value); }} }}), std::rc::Rc::new(move |tracer| tracer.edge(&traced))); runtime::promise_own_set(&promise, \"child\", child); promise }}").unwrap();
     }

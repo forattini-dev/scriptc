@@ -456,7 +456,7 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
       const nameField = context.classFieldName(receiverExpr.type.className, "name", expr.loc);
       const messageField = context.classFieldName(receiverExpr.type.className, "message", expr.loc);
       const messageRead = context.errorMessageRead(receiverExpr.type.className, `${receiver}.clone()`);
-      return `{ let ${receiver} = ${context.emitExpr(receiverExpr)}; ${messageRead === null ? `${receiver}.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), object.${messageField}.as_ref()))` : `let sc_message: runtime::JsString = ${messageRead}; ${receiver}.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), sc_message.as_ref()))`} }`;
+      return `{ let ${receiver} = ${context.emitExpr(receiverExpr)}; ${messageRead === null ? `${receiver}.with(|object| runtime::error_to_string_parts(&object.${nameField}, &object.${messageField}))` : `let sc_message: runtime::JsString = ${messageRead}; ${receiver}.with(|object| runtime::error_to_string_parts(&object.${nameField}, &sc_message))`} }`;
     }
     if (context.hasErrorClassRoots()) {
       return `sc_error_to_string(&(${context.emitExpr(arg)}))`;

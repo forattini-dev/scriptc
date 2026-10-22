@@ -38,7 +38,7 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
             .map(|f| format!("{:?}", f.name))
             .collect::<Vec<_>>()
             .join(",");
-        writeln!(out, "fn record_clone_own_{id}(source: runtime::Gc<R{id}>, order: runtime::JsArray<runtime::JsString>) -> runtime::Gc<R{id}> {{ let mut keys: Vec<String> = Vec::new(); let allowed: &[&str] = &[{allowed}]; let mut index = 0.0; while index < runtime::array_len(&order) {{ let key = runtime::array_get(&order, index).to_string(); if !allowed.contains(&key.as_str()) || keys.contains(&key) {{ runtime::throw_type_error(\"scriptc: invalid record own-key plan\".into()); }} keys.push(key); index += 1.0; }}").unwrap();
+        writeln!(out, "fn record_clone_own_{id}(source: runtime::Gc<R{id}>, order: runtime::JsArray<runtime::JsString>) -> runtime::Gc<R{id}> {{ let mut keys: Vec<runtime::JsString> = Vec::new(); let allowed: &[&str] = &[{allowed}]; let mut index = 0.0; while index < runtime::array_len(&order) {{ let key = runtime::array_get(&order, index); if !allowed.iter().any(|allowed| key == *allowed) || keys.contains(&key) {{ runtime::throw_type_error(\"scriptc: invalid record own-key plan\".into()); }} keys.push(key); index += 1.0; }}").unwrap();
         for field in &record.fields {
             let optional = field.r#type == Type::Undefined
                 || matches!(&field.r#type, Type::Union { union_id } if module.unions[*union_id].arms.contains(&Type::Undefined));

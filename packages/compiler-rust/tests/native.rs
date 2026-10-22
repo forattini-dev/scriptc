@@ -101,6 +101,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
         "rust-native-primitives/conditions.ts",
+        "rust-native-primitives/math-functions.ts",
+        "rust-native-primitives/strings.ts",
+        "rust-native-primitives/utf16.ts",
         "rust-native-primitives/math.ts",
         "rust-native-primitives/repeat.ts",
         "rust-native-primitives/order.ts",
@@ -3530,8 +3533,8 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
             "standard numeric arguments require represented primitives",
         ),
         (
-            "'😀'.slice(0, 1);",
-            "property receiver has no closed record representation",
+            "'x'.slice({ valueOf: () => 1 } as any);",
+            "standard numeric arguments require represented primitives",
         ),
     ] {
         fs::write(&input, source).unwrap();
@@ -3565,4 +3568,42 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn utf16_instance_keys_do_not_alias_empty_fields() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    fs::write(
+        &input,
+        r#"
+class EmptyField { "": string = "present"; }
+function read(value: unknown, key: string): unknown { return (value as any)[key]; }
+const high = "😀".slice(0, 1);
+const object = new EmptyField();
+console.log("keys", read(object, "") === "present", read(object, high) === undefined);
+"#,
+    )
+    .unwrap();
+    let target = binary(temp.path(), "utf16-keys");
+    let build = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    success(&build);
+    let metadata: serde_json::Value = serde_json::from_slice(&build.stdout).unwrap();
+    assert_eq!(metadata["engine"], "none");
+    assert_eq!(metadata["compiler"], "rust");
+    let expected = Command::new(oracle()).arg(&input).output().unwrap();
+    let actual = Command::new(&target)
+        .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+        .output()
+        .unwrap();
+    success(&expected);
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(actual.stderr, expected.stderr);
 }

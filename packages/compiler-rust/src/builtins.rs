@@ -11,6 +11,7 @@ pub fn strings() -> Type {
 pub enum Implementation {
     Runtime(&'static str),
     FloatMethod(&'static str),
+    FloatBinaryMethod(&'static str),
 }
 
 #[derive(Clone)]
@@ -31,10 +32,13 @@ macro_rules! call {
 
 macro_rules! float_call {
     ($method:literal) => {
+        float_call!($method, $method)
+    };
+    ($member:literal, $method:literal) => {
         Builtin {
             module: "Math",
-            member: $method,
-            ir: concat!("math.", $method),
+            member: $member,
+            ir: concat!("math.", $member),
             args: vec![Type::F64],
             result: Type::F64,
             implementation: Implementation::FloatMethod($method),
@@ -50,6 +54,44 @@ fn calls() -> &'static [Builtin] {
             float_call!("floor"),
             float_call!("ceil"),
             float_call!("trunc"),
+            float_call!("sqrt"),
+            float_call!("cbrt"),
+            float_call!("log", "ln"),
+            float_call!("log2"),
+            float_call!("log10"),
+            float_call!("exp"),
+            float_call!("sin"),
+            float_call!("cos"),
+            float_call!("tan"),
+            float_call!("asin"),
+            float_call!("acos"),
+            float_call!("atan"),
+            Builtin {
+                module: "Math",
+                member: "atan2",
+                ir: "math.atan2",
+                args: vec![Type::F64, Type::F64],
+                result: Type::F64,
+                implementation: Implementation::FloatBinaryMethod("atan2"),
+            },
+            call!(
+                "Math",
+                "pow",
+                "math.pow",
+                [Type::F64, Type::F64],
+                Type::F64,
+                "math_pow"
+            ),
+            call!(
+                "Math",
+                "hypot",
+                "math.hypotArr",
+                [Type::Array {
+                    elem: Box::new(Type::F64)
+                }],
+                Type::F64,
+                "math_hypot_array"
+            ),
             call!(
                 "Math",
                 "round",

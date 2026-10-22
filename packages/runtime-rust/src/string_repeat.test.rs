@@ -36,3 +36,18 @@ fn repeat_throws_catchable_range_errors_before_allocation() {
         assert_eq!(error_message(&error), message);
     }
 }
+
+#[test]
+fn padding_checks_the_utf16_ceiling_before_allocation() {
+    for pad in [string_pad_start, string_pad_end] {
+        assert_eq!(pad(&string("x"), f64::INFINITY, &string("")), "x");
+        assert_eq!(pad(&string("x"), f64::NAN, &string("y")), "x");
+        for length in [536_870_889.0, f64::INFINITY, 1e300] {
+            let payload = std::panic::catch_unwind(|| pad(&string("x"), length, &string("😀"))).unwrap_err();
+            let error = caught_error_value(&caught_from_panic(payload));
+            assert_eq!(error_name(&error), "RangeError");
+            assert_eq!(error_message(&error), "Invalid string length");
+        }
+    }
+    assert_eq!(string_pad_end(&string("x"), 2.0, &string("😀")).encode_utf16().collect::<Vec<_>>(), vec![120, 0xd83d]);
+}

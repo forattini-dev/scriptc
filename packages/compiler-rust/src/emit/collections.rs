@@ -47,19 +47,12 @@ fn lookup(option: &str, stored: &Type, result: &Type, module: &Module) -> String
 
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     Some(match value {
-        Expr::ArrayGet {
-            arr, index, r#type, ..
-        } => {
-            let value = format!(
+        Expr::ArrayGet { arr, index, .. } => {
+            format!(
                 "{{ let array = {}; let index = {}; runtime::array_get(&array, index) }}",
                 expr(arr, function, module),
                 expr(index, function, module)
-            );
-            if *r#type == Type::String {
-                format!("({value}).to_string()")
-            } else {
-                value
-            }
+            )
         }
         Expr::MapNew {
             seed,

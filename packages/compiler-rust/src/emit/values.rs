@@ -134,7 +134,7 @@ fn checked(ty: &Type, value: &str, module: &Module) -> String {
 
 pub(super) fn definitions(module: &Module, out: &mut String) {
     record_construction::definitions(module, out);
-    out.push_str("fn native_value_string(value: NativeValue) -> String { match value { NativeValue::Undefined => \"undefined\".into(), NativeValue::Null => \"null\".into(), NativeValue::Number(v) => js_string_number(v), NativeValue::Boolean(v) => v.to_string(), NativeValue::String(v) => v, NativeValue::Symbol(_) => runtime::throw_type_error(\"Cannot convert a Symbol value to a string\".into()), _ => runtime::throw_type_error(\"scriptc: object string conversion requires native ToPrimitive support\".into()) } }\n");
+    out.push_str("fn native_value_string(value: NativeValue) -> runtime::JsString { match value { NativeValue::Undefined => \"undefined\".into(), NativeValue::Null => \"null\".into(), NativeValue::Number(v) => runtime::JsString::from(js_string_number(v)), NativeValue::Boolean(v) => runtime::JsString::from(v.to_string()), NativeValue::String(v) => v, NativeValue::Symbol(_) => runtime::throw_type_error(\"Cannot convert a Symbol value to a string\".into()), _ => runtime::throw_type_error(\"scriptc: object string conversion requires native ToPrimitive support\".into()) } }\n");
     out.push_str(include_str!("../map_values_support.rs"));
     out.push_str(include_str!("../promise_values_support.rs"));
     let types = types(module);
@@ -149,17 +149,13 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
         if let Type::Array { elem } = ty
             && **elem != Type::Dyn
         {
-            let item = if **elem == Type::String {
-                "runtime::array_get(array, i as f64).to_string()"
-            } else {
-                "runtime::array_get(array, i as f64)"
-            };
+            let item = "runtime::array_get(array, i as f64)";
             let item = boxed(elem, item, module);
             writeln!(out, "NativeValue::V{i}(array) => (0..runtime::array_len(array) as usize).map(|i| {item}).collect(),").unwrap();
         }
     }
     out.push_str("_ => runtime::throw_type_error(\"scriptc: apply requires a native array argument list\".into()) } }\n");
-    out.push_str("#[derive(Clone)]\nenum NativeValue { Record(usize, runtime::Gc<NativeRecordData>), Undefined, Null, Number(f64), Boolean(bool), String(String), Regex(runtime::JsRegex), Symbol(runtime::JsSymbol), Promise(runtime::JsPromise<NativeValue>), Object(runtime::Gc<NativeMap<String, NativeValue>>), Map(runtime::Gc<NativeMap<NativeValue, NativeValue>>), Array(runtime::JsArray<NativeValue>),\n");
+    out.push_str("#[derive(Clone)]\nenum NativeValue { Record(usize, runtime::Gc<NativeRecordData>), Undefined, Null, Number(f64), Boolean(bool), String(runtime::JsString), Regex(runtime::JsRegex), Symbol(runtime::JsSymbol), Promise(runtime::JsPromise<NativeValue>), Object(runtime::Gc<NativeMap<runtime::JsString, NativeValue>>), Map(runtime::Gc<NativeMap<NativeValue, NativeValue>>), Array(runtime::JsArray<NativeValue>),\n");
     if !module.classes.is_empty() {
         out.push_str("Instance(runtime::Gc<NativeInstance>),\n");
     }
@@ -184,9 +180,9 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
     out.push_str("_ => {} } } }\nimpl runtime::ArrayElement for NativeValue { fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { self.trace_native(tracer); } }\n");
     let record_tags =
         crate::ir::record_equivalence::record_representatives(&module.records, &module.unions);
-    out.push_str("fn native_promise_property(promise: &runtime::JsPromise<NativeValue>, key: &str) -> NativeValue {\n");
+    out.push_str("fn native_promise_property(promise: &runtime::JsPromise<NativeValue>, key: &runtime::JsString) -> NativeValue {\n");
     if types.contains(&Type::Child) {
-        writeln!(out, "if key == \"child\" {{ return runtime::promise_own_get::<_, runtime::JsChild>(promise, key).map(|value| {}).unwrap_or(NativeValue::Undefined); }}", boxed(&Type::Child, "value", module)).unwrap();
+        writeln!(out, "if key == \"child\" {{ return runtime::promise_own_get::<_, runtime::JsChild>(promise, \"child\").map(|value| {}).unwrap_or(NativeValue::Undefined); }}", boxed(&Type::Child, "value", module)).unwrap();
     }
     out.push_str("native_value_missing_kind(key, \"promise\") }\n");
     for (i, ty) in types.iter().enumerate() {
@@ -267,8 +263,9 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
         };
         writeln!(out, "fn native_box_{i}(value: {rt}) -> NativeValue {{ {box_code} }}\nfn native_try_{i}(value: &NativeValue) -> Option<{rt}> {{ {try_code} }}\nfn native_check_{i}(value: &NativeValue) -> {rt} {{ native_try_{i}(value).unwrap_or_else(|| runtime::throw_type_error(\"scriptc: native value does not match the required type\".into())) }}").unwrap();
     }
-    out.push_str(r#"fn native_value_missing(key: &str) -> NativeValue { native_value_missing_kind(key, "object") }
-fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
+    out.push_str(r#"fn native_value_missing<K: runtime::JsStringSource + ?Sized>(key: &K) -> NativeValue { native_value_missing_kind(key, "object") }
+fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind: &str) -> NativeValue {
+    let key = key.well_formed_utf8().unwrap_or("");
     let inherited = matches!(key, "toString" | "valueOf" | "constructor" | "__proto__" | "hasOwnProperty" | "isPrototypeOf" | "propertyIsEnumerable" | "toLocaleString");
     let specialized = match kind {
         "function" => matches!(key, "name" | "length" | "bind" | "call" | "apply" | "prototype" | "caller" | "arguments"),
@@ -311,20 +308,25 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
         }
     }
     out.push_str("_ => false }, \"object\" => !matches!(value, NativeValue::Undefined | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::String(_) | NativeValue::Symbol(_)) && !native_value_test(value, \"function\"), _ => false } }\n");
-    out.push_str("fn native_value_set(value: NativeValue, key: String, field: NativeValue) { match value { NativeValue::Object(object) => object.with_mut(|o| { if let Some((_, current)) = o.entries.iter_mut().find(|(k,_)| *k == key) { *current = field; } else { o.entries.push((key, field)); } }),\n");
+    out.push_str("fn native_value_set(value: NativeValue, key: runtime::JsString, field: NativeValue) { match value { NativeValue::Object(object) => object.with_mut(|o| { if let Some((_, current)) = o.entries.iter_mut().find(|(k,_)| *k == key) { *current = field; } else { o.entries.push((key, field)); } }),\n");
     out.push_str("NativeValue::Record(_,object) => { if key == \"__proto__\" { runtime::throw_type_error(\"scriptc: ordinary prototype writes are not ported\".into()); } native_record_set(&object, key, field); }, _ => runtime::throw_type_error(\"scriptc: property writes require a native plain object\".into()) } }\n");
-    out.push_str("fn native_record_plan_set(plan: NativeValue, key: String, value: NativeValue) { match plan { NativeValue::Object(object) => object.with_mut(|data| native_record_define(&mut data.entries, key, value)), NativeValue::Record(_,object) => native_record_set(&object, key, value), _ => runtime::throw_type_error(\"scriptc: own-value plan must be a native object\".into()) } }\n");
+    out.push_str("fn native_record_plan_set(plan: NativeValue, key: runtime::JsString, value: NativeValue) { match plan { NativeValue::Object(object) => object.with_mut(|data| native_record_define(&mut data.entries, key, value)), NativeValue::Record(_,object) => native_record_set(&object, key, value), _ => runtime::throw_type_error(\"scriptc: own-value plan must be a native object\".into()) } }\n");
     own_key_definitions(&types, module, out);
-    out.push_str("fn native_value_get(value: NativeValue, key: String) -> NativeValue { match value { NativeValue::Record(_,object) => native_record_property(&object, &key), NativeValue::Undefined => runtime::throw_type_error(format!(\"Cannot read properties of undefined (reading '{}')\", key)), NativeValue::Null => runtime::throw_type_error(format!(\"Cannot read properties of null (reading '{}')\", key)), NativeValue::Promise(promise) => native_promise_property(&promise, &key), NativeValue::Map(map) => { if key == \"size\" { NativeValue::Number(map.with(|m| m.entries.len() as f64)) } else { native_value_missing_kind(&key, \"map\") } }, NativeValue::Object(object) => object.with(|o| o.entries.iter().find(|(k,_)| *k == key).map(|(_,v)| v.clone()).unwrap_or_else(|| native_value_missing(&key))), NativeValue::Array(array) => { if key == \"length\" { NativeValue::Number(runtime::array_len(&array)) } else if let Ok(i) = key.parse::<usize>() { if i.to_string() == key && (i as f64) < runtime::array_len(&array) { runtime::array_get(&array, i as f64) } else { NativeValue::Undefined } } else { native_value_missing_kind(&key, \"array\") } }, NativeValue::String(s) => { if key == \"length\" { NativeValue::Number(s.encode_utf16().count() as f64) } else if let Ok(index) = key.parse::<usize>() { if index.to_string() == key { s.encode_utf16().nth(index).map(|unit| NativeValue::String(String::from_utf16(&[unit]).unwrap_or_else(|_| runtime::throw_type_error(\"scriptc: lone UTF-16 surrogates are not ported\".into())))).unwrap_or(NativeValue::Undefined) } else { NativeValue::Undefined } } else { native_value_missing_kind(&key, \"string\") } },\n");
+    out.push_str("fn native_value_get(value: NativeValue, key: runtime::JsString) -> NativeValue { match value { NativeValue::Record(_,object) => native_record_property(&object, &key), NativeValue::Undefined => runtime::throw_type_error(format!(\"Cannot read properties of undefined (reading '{}')\", key)), NativeValue::Null => runtime::throw_type_error(format!(\"Cannot read properties of null (reading '{}')\", key)), NativeValue::Promise(promise) => native_promise_property(&promise, &key), NativeValue::Map(map) => { if key == \"size\" { NativeValue::Number(map.with(|m| m.entries.len() as f64)) } else { native_value_missing_kind(&key, \"map\") } }, NativeValue::Object(object) => object.with(|o| o.entries.iter().find(|(k,_)| *k == key).map(|(_,v)| v.clone()).unwrap_or_else(|| native_value_missing(&key))), NativeValue::Array(array) => { if key == \"length\" { NativeValue::Number(runtime::array_len(&array)) } else if let Ok(i) = key.parse::<usize>() { if key == i.to_string() && (i as f64) < runtime::array_len(&array) { runtime::array_get(&array, i as f64) } else { NativeValue::Undefined } } else { native_value_missing_kind(&key, \"array\") } }, NativeValue::String(s) => { if key == \"length\" { NativeValue::Number(s.encode_utf16().count() as f64) } else if let Ok(index) = key.parse::<usize>() { if key == index.to_string() { s.encode_utf16().nth(index).map(|unit| NativeValue::String(runtime::JsString::from_utf16(&[unit]))).unwrap_or(NativeValue::Undefined) } else { NativeValue::Undefined } } else { native_value_missing_kind(&key, \"string\") } },\n");
     for (i, t) in types.iter().enumerate() {
         if let Type::Record { shape_id } = t {
             let r = &module.records[*shape_id];
             if record_storage::shared(r) {
                 continue;
             }
+            if let Some(value) = &r.index_value {
+                let value = boxed(value, "v.clone()", module);
+                writeln!(out, "NativeValue::V{i}(object) => object.with(|o| o.overflow.iter().find(|(k,_)| *k == key).map(|(_,v)| {value}).unwrap_or_else(|| native_value_missing(&key))),").unwrap();
+                continue;
+            }
             writeln!(
                 out,
-                "NativeValue::V{i}(object) => object.with(|o| {{ match key.as_str() {{"
+                "NativeValue::V{i}(object) => object.with(|o| {{ if !key.is_well_formed() {{ return NativeValue::Undefined; }} match key.well_formed_utf8().unwrap_or_else(|| unreachable!(\"ill-formed keys were checked before fixed-field dispatch\")) {{"
             )
             .unwrap();
             for f in &r.fields {
@@ -337,21 +339,13 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
                 )
                 .unwrap();
             }
-            let fallback = if let Some(t) = &r.index_value {
-                format!(
-                    "o.overflow.iter().find(|(k,_)| *k == key).map(|(_,v)| {}).unwrap_or_else(|| native_value_missing(&key))",
-                    boxed(t, "v.clone()", module)
-                )
-            } else {
-                "native_value_missing(&key)".into()
-            };
-            writeln!(out, "_ => {fallback} }} }}),").unwrap();
+            writeln!(out, "_ => native_value_missing(&key) }} }}),").unwrap();
         }
     }
-    out.push_str("NativeValue::Symbol(symbol) => { if key == \"description\" { runtime::symbol_description(&symbol).map(|s| NativeValue::String(s.to_string())).unwrap_or(NativeValue::Undefined) } else { native_value_missing_kind(&key, \"symbol\") } }, NativeValue::Regex(_) => native_value_missing_kind(&key, \"regex\"), NativeValue::Number(_) => native_value_missing_kind(&key, \"number\"),\n");
+    out.push_str("NativeValue::Symbol(symbol) => { if key == \"description\" { runtime::symbol_description(&symbol).map(|s| NativeValue::String(s)).unwrap_or(NativeValue::Undefined) } else { native_value_missing_kind(&key, \"symbol\") } }, NativeValue::Regex(_) => native_value_missing_kind(&key, \"regex\"), NativeValue::Number(_) => native_value_missing_kind(&key, \"number\"),\n");
     for (i, t) in types.iter().enumerate() {
         if matches!(t, Type::Bytes { .. }) {
-            writeln!(out, "NativeValue::V{i}(bytes) => {{ match key.as_str() {{ \"length\" | \"byteLength\" => NativeValue::Number(runtime::bytes_len(&bytes)), \"byteOffset\" => NativeValue::Number(runtime::bytes_byte_offset(&bytes)), _ => runtime::throw_type_error(\"scriptc: erased Uint8Array member requires a typed receiver\".into()), }} }},").unwrap();
+            writeln!(out, "NativeValue::V{i}(bytes) => {{ if !key.is_well_formed() {{ return NativeValue::Undefined; }} match key.well_formed_utf8().unwrap_or_else(|| unreachable!(\"ill-formed keys were checked before fixed-field dispatch\")) {{ \"length\" | \"byteLength\" => NativeValue::Number(runtime::bytes_len(&bytes)), \"byteOffset\" => NativeValue::Number(runtime::bytes_byte_offset(&bytes)), _ => runtime::throw_type_error(\"scriptc: erased Uint8Array member requires a typed receiver\".into()), }} }},").unwrap();
         }
         if matches!(t, Type::Func { .. } | Type::Classval { .. }) {
             writeln!(
@@ -373,28 +367,27 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
     }
     for (i, t) in types.iter().enumerate() {
         if *t == Type::Child {
-            writeln!(out, "NativeValue::V{i}(child) => match key.as_str() {{ \"pid\" => runtime::child_pid(&child).map(NativeValue::Number).unwrap_or(NativeValue::Undefined), \"exitCode\" => runtime::child_exit_code(&child).map(NativeValue::Number).unwrap_or(NativeValue::Null), \"killed\" => NativeValue::Boolean(runtime::child_killed(&child)), \"then\" => NativeValue::Undefined, _ => runtime::throw_type_error(\"scriptc: ChildProcess member is not ported\".into()) }},").unwrap();
+            writeln!(out, "NativeValue::V{i}(child) => match key.well_formed_utf8().unwrap_or(\"\") {{ \"pid\" => runtime::child_pid(&child).map(NativeValue::Number).unwrap_or(NativeValue::Undefined), \"exitCode\" => runtime::child_exit_code(&child).map(NativeValue::Number).unwrap_or(NativeValue::Null), \"killed\" => NativeValue::Boolean(runtime::child_killed(&child)), \"then\" => NativeValue::Undefined, _ => runtime::throw_type_error(\"scriptc: ChildProcess member is not ported\".into()) }},").unwrap();
         }
     }
     for (i, t) in types.iter().enumerate() {
         if let Type::Array { elem } = t
             && **elem != Type::Dyn
         {
-            let value: String = if **elem == Type::String {
-                "runtime::array_get(&array, index as f64).to_string()".into()
-            } else {
-                "runtime::array_get(&array, index as f64)".into()
-            };
-            let value = boxed(elem, &value, module);
-            writeln!(out, "NativeValue::V{i}(array) => {{ if key == \"length\" {{ NativeValue::Number(runtime::array_len(&array)) }} else if let Ok(index) = key.parse::<usize>() {{ if index.to_string() == key && (index as f64) < runtime::array_len(&array) {{ {value} }} else {{ NativeValue::Undefined }} }} else {{ native_value_missing_kind(&key, \"array\") }} }},").unwrap();
+            let value = boxed(elem, "runtime::array_get(&array, index as f64)", module);
+            writeln!(out, "NativeValue::V{i}(array) => {{ if key == \"length\" {{ NativeValue::Number(runtime::array_len(&array)) }} else if let Ok(index) = key.parse::<usize>() {{ if key == index.to_string() && (index as f64) < runtime::array_len(&array) {{ {value} }} else {{ NativeValue::Undefined }} }} else {{ native_value_missing_kind(&key, \"array\") }} }},").unwrap();
         }
     }
     if !module.classes.is_empty() {
         out.push_str(
-            "NativeValue::Instance(object) => { if let Some(value) = object.with(|o| o.error.as_ref().and_then(|e| e.own.iter().find(|(name,_)| name == &key).map(|(_,v)| v.clone()))) { return value; } let kind = object.with(|o| o.kind); match kind {\n",
+            "NativeValue::Instance(object) => { if let Some(value) = object.with(|o| o.error.as_ref().and_then(|e| e.own.iter().find(|(name,_)| name == &key).map(|(_,v)| v.clone()))) { return value; } if !key.is_well_formed() { return NativeValue::Undefined; } let kind = object.with(|o| o.kind); match kind {\n",
         );
         for (i, c) in module.classes.iter().enumerate() {
-            writeln!(out, "{i} => match key.as_str() {{").unwrap();
+            writeln!(
+                out,
+                "{i} => match key.well_formed_utf8().unwrap_or_else(|| unreachable!(\"ill-formed keys were checked before fixed-field dispatch\")) {{"
+            )
+            .unwrap();
             if c.name.starts_with("native_builtin_Text") {
                 out.push_str("\"encoding\" | \"fatal\" | \"ignoreBOM\" => runtime::throw_type_error(\"scriptc: erased codec properties require a typed receiver\".into()),\n");
             }
@@ -481,7 +474,7 @@ fn native_value_missing_kind(key: &str, kind: &str) -> NativeValue {
 }
 
 fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
-    out.push_str("fn native_value_own_keys(value: &NativeValue) -> Vec<String> { match value { NativeValue::Promise(promise) => runtime::promise_own_keys(promise), NativeValue::Record(_,object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()), NativeValue::Object(object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()),\n");
+    out.push_str("fn native_value_own_keys(value: &NativeValue) -> Vec<runtime::JsString> { match value { NativeValue::Promise(promise) => runtime::promise_own_keys(promise).into_iter().map(runtime::JsString::from).collect(), NativeValue::Record(_,object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()), NativeValue::Object(object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()),\n");
     for (i, ty) in types.iter().enumerate() {
         if let Type::Record { shape_id } = ty {
             let record = &module.records[*shape_id];
@@ -496,10 +489,10 @@ fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
             writeln!(out, "NativeValue::V{i}(object) => object.with(|o| {keys}),").unwrap();
         }
     }
-    out.push_str("_ => runtime::throw_type_error(\"scriptc: own-key reflection requires a native data record\".into()) } }\nfn native_value_has_own(value: NativeValue, key: String) -> bool { native_value_own_keys(&value).iter().any(|k| k == &key) }\n");
+    out.push_str("_ => runtime::throw_type_error(\"scriptc: own-key reflection requires a native data record\".into()) } }\nfn native_value_has_own(value: NativeValue, key: runtime::JsString) -> bool { native_value_own_keys(&value).iter().any(|k| k == &key) }\n");
     // Stable sorting leaves non-index string keys in insertion order. 2^32-1
     // and noncanonical numeric spellings are ordinary string keys.
-    out.push_str("fn native_value_keys(value: NativeValue) -> NativeValue { let mut keys = native_value_own_keys(&value); keys.sort_by_key(|key| key.parse::<u32>().ok().filter(|i| *i != u32::MAX && i.to_string() == *key).map(|i| (0, i)).unwrap_or((1, 0))); NativeValue::Array(runtime::array_new(keys.into_iter().map(NativeValue::String).collect())) }\n");
+    out.push_str("fn native_value_keys(value: NativeValue) -> NativeValue { let mut keys = native_value_own_keys(&value); keys.sort_by_key(|key| key.parse::<u32>().ok().filter(|i| *i != u32::MAX && *key == i.to_string()).map(|i| (0, i)).unwrap_or((1, 0))); NativeValue::Array(runtime::array_new(keys.into_iter().map(NativeValue::String).collect())) }\n");
 }
 
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {

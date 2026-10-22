@@ -18,11 +18,11 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
         }
         if let Some(value) = &record.index_value {
             output.push_str(&format!(
-                "overflow: Vec<(String, {})>,\n",
+                "overflow: Vec<(runtime::JsString, {})>,\n",
                 rust_type(value.clone(), module)
             ));
         } else {
-            output.push_str("own_keys: Vec<String>,\n");
+            output.push_str("own_keys: Vec<runtime::JsString>,\n");
         }
         output.push_str("}\n");
         let trace = record

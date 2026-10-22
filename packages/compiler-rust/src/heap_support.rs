@@ -16,7 +16,7 @@ impl NativeTrace for f64 {
 impl NativeTrace for bool {
     fn trace_native(&self, _: &mut runtime::Tracer<'_>) {}
 }
-impl NativeTrace for String {
+impl NativeTrace for runtime::JsString {
     fn trace_native(&self, _: &mut runtime::Tracer<'_>) {}
 }
 impl NativeTrace for runtime::JsSymbol {

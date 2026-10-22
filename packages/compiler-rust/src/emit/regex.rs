@@ -23,7 +23,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                     "{{ let regex = {receiver}; let text = {}; runtime::regex_test(&regex, &runtime::JsString::from(text)) }}",
                     arg.unwrap()
                 ),
-                "source" | "flags" => format!("runtime::regex_{method}(&({receiver})).to_string()"),
+                "source" | "flags" => format!("runtime::regex_{method}(&({receiver}))"),
                 "lastIndex" => format!("runtime::regex_last_index(&({receiver}))"),
                 "setLastIndex" => format!(
                     "{{ let regex = {receiver}; let index = {}; runtime::regex_set_last_index(&regex, index); index }}",

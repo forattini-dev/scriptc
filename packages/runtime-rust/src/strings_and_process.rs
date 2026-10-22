@@ -476,6 +476,9 @@ pub fn string_slice(value: &JsString, start: f64, end: f64) -> JsString {
     string_from_utf16(&units[start..end])
 }
 
+// Node 24's 64-bit ceiling is measured in UTF-16 units, not UTF-8 bytes.
+const MAX_STRING_UTF16_LENGTH: f64 = 536_870_888.0;
+
 pub fn string_repeat(value: &JsString, count: f64) -> JsString {
     let integer = if count.is_nan() { 0.0 } else { count.trunc() };
     if !integer.is_finite() || integer < 0.0 {
@@ -486,9 +489,8 @@ pub fn string_repeat(value: &JsString, count: f64) -> JsString {
     }
     // The pinned 64-bit Node runtime exposes this UTF-16 code-unit ceiling
     // as buffer.constants.MAX_STRING_LENGTH. Check before casting/allocating.
-    const MAX_STRING_LENGTH: f64 = 536_870_888.0;
     let length = value.encode_utf16().count() as f64;
-    if integer > MAX_STRING_LENGTH / length {
+    if integer > MAX_STRING_UTF16_LENGTH / length {
         throw_range_error("Invalid string length".to_owned());
     }
     let count = integer as usize;
@@ -509,7 +511,7 @@ fn string_pad(value: &JsString, max_length: f64, fill: &JsString, at_start: bool
     if target <= value_units.len() as f64 || fill.is_empty() {
         return value.clone();
     }
-    if !target.is_finite() || target > usize::MAX as f64 {
+    if !target.is_finite() || target > MAX_STRING_UTF16_LENGTH {
         throw_range_error("Invalid string length".to_owned());
     }
     let target = target as usize;

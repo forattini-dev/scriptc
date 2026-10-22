@@ -48,26 +48,27 @@ fn js_map_delete<K: NativeTrace + 'static, V: NativeTrace + 'static>(
         }
     })
 }
-fn js_dict_set<V>(entries: &mut Vec<(String, V)>, key: String, value: V) {
+fn js_dict_set<V>(entries: &mut Vec<(runtime::JsString, V)>, key: runtime::JsString, value: V) {
     if key == "__proto__" {
         panic!("scriptc: dictionary prototype setters are not ported");
     }
     js_data_set(entries, key, value);
 }
 // Own data creation (JSON and dynObjLit) never invokes a prototype setter.
-fn js_data_set<V>(entries: &mut Vec<(String, V)>, key: String, value: V) {
+fn js_data_set<V>(entries: &mut Vec<(runtime::JsString, V)>, key: runtime::JsString, value: V) {
     if let Some((_, stored)) = entries.iter_mut().find(|(stored, _)| *stored == key) {
         *stored = value;
     } else {
         entries.push((key, value));
     }
 }
-fn js_dict_get<V: Clone>(entries: &[(String, V)], key: &str) -> Option<V> {
-    if let Some((_, value)) = entries.iter().find(|(stored, _)| stored == key) {
+fn js_dict_get<V: Clone, K: runtime::JsStringSource + ?Sized>(entries: &[(runtime::JsString, V)], key: &K) -> Option<V> {
+    let key = runtime::string(key);
+    if let Some((_, value)) = entries.iter().find(|(stored, _)| stored == &key) {
         return Some(value.clone());
     }
     if matches!(
-        key,
+        key.well_formed_utf8().unwrap_or(""),
         "constructor"
             | "__proto__"
             | "__defineGetter__"

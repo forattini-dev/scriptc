@@ -5,6 +5,7 @@ mod emit;
 mod frontend;
 mod ir;
 mod project;
+mod string_builtins;
 
 use std::{
     fs,

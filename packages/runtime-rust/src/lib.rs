@@ -203,6 +203,7 @@ mod tests {
     include!("tests/crypto.rs");
     include!("tests/language_and_heap.rs");
     include!("string_repeat.test.rs");
+    include!("error_string.test.rs");
     include!("promise_views.test.rs");
     include!("promise_properties.test.rs");
     include!("promises.test.rs");

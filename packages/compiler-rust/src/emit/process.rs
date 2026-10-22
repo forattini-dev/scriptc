@@ -18,7 +18,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
     let string = arms.iter().position(|t| *t == Type::String).unwrap();
     let undefined = arms.iter().position(|t| *t == Type::Undefined).unwrap();
     Some(format!(
-        "match runtime::process_env_get(&runtime::JsString::from({})) {{ Some(value) => U{union_id}::V{string}(value.to_string()), None => U{union_id}::V{undefined}(()) }}",
+        "match runtime::process_env_get(&runtime::JsString::from({})) {{ Some(value) => U{union_id}::V{string}(value), None => U{union_id}::V{undefined}(()) }}",
         expr(&args[0], function, module)
     ))
 }

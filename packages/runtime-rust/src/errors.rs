@@ -511,14 +511,20 @@ pub fn caught_to_string(caught: &Caught) -> JsString {
     string("[object Object]")
 }
 
-pub fn error_to_string_parts(name: &str, message: &str) -> JsString {
+pub fn error_to_string_parts<N: JsStringSource + ?Sized, M: JsStringSource + ?Sized>(name: &N, message: &M) -> JsString {
+    let name = string(name);
+    let message = string(message);
     if name.is_empty() {
-        return JsString::from(message);
+        return message;
     }
     if message.is_empty() {
-        return JsString::from(name);
+        return name;
     }
-    JsString::from(format!("{name}: {message}"))
+    let mut output = JsStringBuilder::new();
+    output.push_str(&name);
+    output.push_str(": ");
+    output.push_str(&message);
+    output.finish()
 }
 
 pub fn error_to_string(error: &JsError) -> JsString {

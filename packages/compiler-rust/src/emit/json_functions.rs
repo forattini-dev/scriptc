@@ -43,7 +43,7 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
             writeln!(out, "NativeValue::V{index}(v) => {kind},").unwrap();
         }
     }
-    out.push_str("_ => K::Unsupported } }\nfn native_json_typed_keys(value: &NativeValue) -> Vec<String> { match value {\n");
+    out.push_str("_ => K::Unsupported } }\nfn native_json_typed_keys(value: &NativeValue) -> Vec<runtime::JsString> { match value {\n");
     for (index, ty) in values::types(module).iter().enumerate() {
         if let Type::Record { shape_id } = ty
             && !record_storage::shared(&module.records[*shape_id])
@@ -55,7 +55,7 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
             .unwrap();
         }
     }
-    out.push_str("NativeValue::Promise(promise) => runtime::promise_own_keys(promise), _ => Vec::new() } }\n");
+    out.push_str("NativeValue::Promise(promise) => runtime::promise_own_keys(promise).into_iter().map(runtime::JsString::from).collect(), _ => Vec::new() } }\n");
 }
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     let Expr::LibCall { r#fn, args, .. } = value else {
