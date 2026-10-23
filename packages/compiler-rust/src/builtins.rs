@@ -1,5 +1,7 @@
-//! Implemented native library calls, sharing the existing IR/runtime ABI.
+//! Native API contracts and their typed IR -> Rust bindings.
+//! Module recognition, source API identity and internal operations are separate.
 use crate::ir::Type;
+use serde::Serialize;
 
 pub fn strings() -> Type {
     Type::Array {
@@ -7,301 +9,211 @@ pub fn strings() -> Type {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "symbol", rename_all = "kebab-case")]
 pub enum Implementation {
     Runtime(&'static str),
     FloatMethod(&'static str),
     FloatBinaryMethod(&'static str),
 }
-
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Builtin {
-    pub module: &'static str,
-    pub member: &'static str,
     pub ir: &'static str,
     pub args: Vec<Type>,
     pub result: Type,
     pub implementation: Implementation,
 }
-
-macro_rules! call {
-    ($module:literal, $member:literal, $ir:literal, [$($arg:expr),*], $result:expr, $runtime:literal) => {
-        Builtin { module: $module, member: $member, ir: $ir, args: vec![$($arg),*], result: $result, implementation: Implementation::Runtime($runtime) }
-    };
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Stage {
+    NativePartial,
+    RuntimeOnly,
+    Planned,
 }
-
-macro_rules! float_call {
-    ($method:literal) => {
-        float_call!($method, $method)
-    };
-    ($member:literal, $method:literal) => {
-        Builtin {
-            module: "Math",
-            member: $member,
-            ir: concat!("math.", $member),
-            args: vec![Type::F64],
-            result: Type::F64,
-            implementation: Implementation::FloatMethod($method),
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Access {
+    Call,
+    Property,
+    Construct,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Lowering {
+    Direct,
+    Primitive,
+    PathVariadic,
+    PathBasename,
+    Directory,
+    Property,
+    Special,
+    Unported,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpecialBinding {
+    ir: &'static str,
+    runtime: &'static str,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Api {
+    pub module: &'static str,
+    pub member: &'static str,
+    pub stage: Stage,
+    pub access: Access,
+    pub lowering: Lowering,
+    pub operations: Vec<Builtin>,
+    pub runtime_candidates: &'static [&'static str],
+    pub special: Option<SpecialBinding>,
+    pub contract: &'static str,
+    pub evidence: &'static [&'static str],
+}
+impl Api {
+    fn native(
+        module: &'static str,
+        member: &'static str,
+        lowering: Lowering,
+        operations: Vec<Builtin>,
+        contract: &'static str,
+        evidence: &'static [&'static str],
+    ) -> Self {
+        Self {
+            module,
+            member,
+            stage: Stage::NativePartial,
+            access: Access::Call,
+            lowering,
+            operations,
+            runtime_candidates: &[],
+            special: None,
+            contract,
+            evidence,
         }
+    }
+    fn runtime_only(
+        module: &'static str,
+        member: &'static str,
+        access: Access,
+        runtime_candidates: &'static [&'static str],
+        contract: &'static str,
+    ) -> Self {
+        Self {
+            module,
+            member,
+            stage: Stage::RuntimeOnly,
+            access,
+            lowering: Lowering::Unported,
+            operations: vec![],
+            runtime_candidates,
+            special: None,
+            contract,
+            evidence: &[],
+        }
+    }
+    fn special(
+        module: &'static str,
+        member: &'static str,
+        access: Access,
+        ir: &'static str,
+        runtime: &'static str,
+        contract: &'static str,
+        evidence: &'static [&'static str],
+    ) -> Self {
+        Self {
+            module,
+            member,
+            stage: Stage::NativePartial,
+            access,
+            lowering: Lowering::Special,
+            operations: vec![],
+            runtime_candidates: &[],
+            special: Some(SpecialBinding { ir, runtime }),
+            contract,
+            evidence,
+        }
+    }
+}
+macro_rules! call {
+    ($ir:literal, [$($arg:expr),*], $result:expr, $runtime:literal) => {
+        Builtin { ir: $ir, args: vec![$($arg),*], result: $result, implementation: Implementation::Runtime($runtime) }
     };
 }
-
 use Type::{Bool, String};
-fn calls() -> &'static [Builtin] {
-    static CALLS: std::sync::OnceLock<Vec<Builtin>> = std::sync::OnceLock::new();
-    CALLS.get_or_init(|| {
-        vec![
-            float_call!("floor"),
-            float_call!("ceil"),
-            float_call!("trunc"),
-            float_call!("sqrt"),
-            float_call!("cbrt"),
-            float_call!("log", "ln"),
-            float_call!("log2"),
-            float_call!("log10"),
-            float_call!("exp"),
-            float_call!("sin"),
-            float_call!("cos"),
-            float_call!("tan"),
-            float_call!("asin"),
-            float_call!("acos"),
-            float_call!("atan"),
-            Builtin {
-                module: "Math",
-                member: "atan2",
-                ir: "math.atan2",
-                args: vec![Type::F64, Type::F64],
-                result: Type::F64,
-                implementation: Implementation::FloatBinaryMethod("atan2"),
-            },
-            call!(
-                "Math",
-                "pow",
-                "math.pow",
-                [Type::F64, Type::F64],
-                Type::F64,
-                "math_pow"
-            ),
-            call!(
-                "Math",
-                "hypot",
-                "math.hypotArr",
-                [Type::Array {
-                    elem: Box::new(Type::F64)
-                }],
-                Type::F64,
-                "math_hypot_array"
-            ),
-            call!(
-                "Math",
-                "round",
-                "math.round",
-                [Type::F64],
-                Type::F64,
-                "math_round"
-            ),
-            float_call!("abs"),
-            call!(
-                "Math",
-                "sign",
-                "math.sign",
-                [Type::F64],
-                Type::F64,
-                "math_sign"
-            ),
-            call!(
-                "Math",
-                "min",
-                "math.minArr",
-                [Type::Array {
-                    elem: Box::new(Type::F64)
-                }],
-                Type::F64,
-                "math_min_array"
-            ),
-            call!(
-                "Math",
-                "max",
-                "math.maxArr",
-                [Type::Array {
-                    elem: Box::new(Type::F64)
-                }],
-                Type::F64,
-                "math_max_array"
-            ),
-            call!(
-                "Number",
-                "fromString",
-                "num.fromString",
-                [String],
-                Type::F64,
-                "number_from_string"
-            ),
-            call!(
-                "url",
-                "fileURLToPath",
-                "url.fileURLToPathStr",
-                [String],
-                String,
-                "url_string_to_path"
-            ),
-            call!(
-                "path",
-                "join",
-                "path.join",
-                [strings()],
-                String,
-                "path_join"
-            ),
-            call!(
-                "path",
-                "resolve",
-                "path.resolve",
-                [strings()],
-                String,
-                "path_resolve"
-            ),
-            call!(
-                "path",
-                "normalize",
-                "path.normalize",
-                [String],
-                String,
-                "path_normalize"
-            ),
-            call!(
-                "path",
-                "dirname",
-                "path.dirname",
-                [String],
-                String,
-                "path_dirname"
-            ),
-            call!(
-                "path",
-                "basename",
-                "path.basename",
-                [String, String],
-                String,
-                "path_basename"
-            ),
-            call!(
-                "path",
-                "extname",
-                "path.extname",
-                [String],
-                String,
-                "path_extname"
-            ),
-            call!(
-                "path",
-                "isAbsolute",
-                "path.isAbsolute",
-                [String],
-                Bool,
-                "path_is_absolute"
-            ),
-            call!(
-                "path",
-                "relative",
-                "path.relative",
-                [String, String],
-                String,
-                "path_relative"
-            ),
-            call!(
-                "path/win32",
-                "join",
-                "path.win32Join",
-                [strings()],
-                String,
-                "path_win32_join"
-            ),
-            call!(
-                "path/win32",
-                "resolve",
-                "path.win32Resolve",
-                [strings()],
-                String,
-                "path_win32_resolve"
-            ),
-            call!(
-                "path/win32",
-                "normalize",
-                "path.win32Normalize",
-                [String],
-                String,
-                "path_win32_normalize"
-            ),
-            call!(
-                "path/win32",
-                "dirname",
-                "path.win32Dirname",
-                [String],
-                String,
-                "path_win32_dirname"
-            ),
-            call!(
-                "path/win32",
-                "basename",
-                "path.win32Basename",
-                [String, String],
-                String,
-                "path_win32_basename"
-            ),
-            call!(
-                "path/win32",
-                "extname",
-                "path.win32Extname",
-                [String],
-                String,
-                "path_win32_extname"
-            ),
-            call!(
-                "path/win32",
-                "isAbsolute",
-                "path.win32IsAbsolute",
-                [String],
-                Bool,
-                "path_win32_is_absolute"
-            ),
-            call!(
-                "path/win32",
-                "relative",
-                "path.win32Relative",
-                [String, String],
-                String,
-                "path_win32_relative"
-            ),
-            call!(
-                "fs",
-                "existsSync",
-                "fs.existsSync",
-                [String],
-                Bool,
-                "fs_exists"
-            ),
-            call!("os", "homedir", "os.homedir", [], String, "os_homedir"),
-            call!("os", "tmpdir", "os.tmpdir", [], String, "os_tmpdir"),
-            call!(
-                "os",
-                "platform",
-                "process.platform",
-                [],
-                String,
-                "process_platform"
-            ),
-            call!("process", "cwd", "process.cwd", [], String, "process_cwd"),
-            call!(
-                "process",
-                "isTTY",
-                "process.isTTY",
-                [Type::F64],
-                Bool,
-                "process_is_tty"
-            ),
+mod bun;
+mod crypto;
+mod filesystem;
+mod math;
+mod path;
+mod platform;
+mod process;
+#[cfg(test)]
+mod tests;
+
+pub fn apis() -> &'static [Api] {
+    static APIS: std::sync::OnceLock<Vec<Api>> = std::sync::OnceLock::new();
+    APIS.get_or_init(|| {
+        [
+            math::apis(),
+            path::apis(),
+            platform::apis(),
+            filesystem::apis(),
+            process::apis(),
+            crypto::apis(),
+            bun::apis(),
         ]
+        .into_iter()
+        .flatten()
+        .collect()
     })
+}
+pub fn source(module: &str, member: &str) -> Option<&'static Api> {
+    entry(module, member)
+        .filter(|api| api.stage == Stage::NativePartial && api.access == Access::Call)
+}
+pub fn entry(module: &str, member: &str) -> Option<&'static Api> {
+    apis()
+        .iter()
+        .find(|api| api.module == module && api.member == member)
+}
+pub fn get(module: &str, member: &str) -> Option<Builtin> {
+    source(module, member)?.operations.first().cloned()
+}
+pub fn property(module: &str, member: &str) -> Option<Builtin> {
+    apis()
+        .iter()
+        .find(|api| {
+            api.module == module
+                && api.member == member
+                && api.stage == Stage::NativePartial
+                && api.access == Access::Property
+        })?
+        .operations
+        .first()
+        .cloned()
+}
+pub fn by_ir(name: &str) -> Option<Builtin> {
+    apis()
+        .iter()
+        .flat_map(|api| &api.operations)
+        .find(|op| op.ir == name)
+        .cloned()
+        .or_else(|| math::internal().into_iter().find(|op| op.ir == name))
+}
+/// An implementation inventory, not a complete Node/Bun compatibility matrix.
+pub fn manifest() -> serde_json::Value {
+    let strings = crate::string_builtins::OPERATIONS.iter().map(|op| serde_json::json!({
+        "module": "String.prototype", "member": op.method, "stage": "native-partial",
+        "access": if op.method == "length" { "property" } else { "call" },
+        "irNode": "StringIntrinsic", "runtime": op.runtime,
+        "args": op.args.iter().map(|arg| arg.ty()).collect::<Vec<_>>(), "result": op.result,
+        "contract": "Represented string receiver; eager primitive conversion with registered defaults; object coercion and iterable spreads refused",
+        "evidence": ["tests/corpus/rust-native-primitives/strings.ts", "tests/corpus/rust-native-primitives/utf16.ts"]
+    })).collect::<Vec<_>>();
+    serde_json::json!({"schemaVersion": 1, "engine": "none", "fallback": false,
+        "nodeOracle": "24.15.0", "bunOracle": null,
+        "scope": "Tracked native API families only; runtime-only entries are reuse candidates, planned entries are not supported. The Node compatibility census remains in internal/compatibility.",
+        "apis": apis(), "stringIntrinsics": strings})
 }
 
 pub fn module(name: &str) -> Option<&'static str> {
@@ -313,8 +225,8 @@ pub fn module(name: &str) -> Option<&'static str> {
         "fs" => Some("fs"),
         "os" => Some("os"),
         "process" => Some("process"),
-        // Importing these standard modules is inert. Calls remain explicit
-        // refusals until their native ABI is represented in CALLS.
+        // Recognition is independent of implementation. Demand lowering still
+        // refuses members with no native source contract.
         "fs/promises" => Some("fs/promises"),
         "child_process" => Some("child_process"),
         "url" => Some("url"),
@@ -356,68 +268,5 @@ pub fn module(name: &str) -> Option<&'static str> {
         ]
         .into_iter()
         .find(|module| *module == name),
-    }
-}
-
-pub fn get(module: &str, member: &str) -> Option<Builtin> {
-    calls()
-        .iter()
-        .find(|call| call.module == module && call.member == member)
-        .cloned()
-}
-
-// Properties have zero-argument IR calls but must never become source callables.
-fn properties() -> &'static [Builtin] {
-    static PROPERTIES: std::sync::OnceLock<Vec<Builtin>> = std::sync::OnceLock::new();
-    PROPERTIES.get_or_init(|| {
-        vec![
-            call!(
-                "process",
-                "arch",
-                "process.arch",
-                [],
-                String,
-                "process_arch"
-            ),
-            call!(
-                "process",
-                "platform",
-                "process.platform",
-                [],
-                String,
-                "process_platform"
-            ),
-        ]
-    })
-}
-
-pub fn property(module: &str, member: &str) -> Option<Builtin> {
-    properties()
-        .iter()
-        .find(|item| item.module == module && item.member == member)
-        .cloned()
-}
-
-pub fn by_ir(name: &str) -> Option<Builtin> {
-    calls()
-        .iter()
-        .chain(properties())
-        .find(|call| call.ir == name)
-        .cloned()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn process_properties_are_not_source_functions() {
-        for name in ["arch", "platform"] {
-            let item = property("process", name).unwrap();
-            assert_eq!(item.result, Type::String);
-            assert!(item.args.is_empty());
-            assert_eq!(by_ir(item.ir).unwrap().implementation, item.implementation);
-            assert!(get("process", name).is_none());
-        }
     }
 }

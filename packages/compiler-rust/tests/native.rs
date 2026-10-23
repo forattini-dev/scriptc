@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-platform/mkdir.ts",
+        "rust-native-platform/paths.ts",
+        "rust-native-platform/crypto.ts",
         "rust-native-primitives/array-brand.ts",
         "rust-native-primitives/augmented-standard.ts",
         "rust-native-primitives/string-function.ts",
@@ -414,11 +417,21 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         // them before the next program instead of accumulating the whole corpus.
         let artifacts = tempfile::tempdir_in(temp.path()).unwrap();
         let target = binary(artifacts.path(), &format!("case-{index}"));
+        // Filesystem fixtures must not share state between Node and native.
+        let oracle_cwd = artifacts.path().join("oracle-cwd");
+        let native_cwd = artifacts.path().join("native-cwd");
+        let isolated = name.starts_with("rust-native-platform/");
+        if isolated {
+            fs::create_dir(&oracle_cwd).unwrap();
+            fs::create_dir(&native_cwd).unwrap();
+        }
+        let normal_cwd = std::env::current_dir().unwrap();
         let expected = Command::new(oracle())
             .env("SCRIPTC_EXEC_FILE_HELPER", &helper)
             .arg(&input)
             .envs(process_environment(name, false))
             .env_remove("SCRIPTC_NATIVE_PROCESS_MISSING")
+            .current_dir(if isolated { &oracle_cwd } else { &normal_cwd })
             .output()
             .unwrap();
         success(&expected);
@@ -451,6 +464,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
             .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
             .envs(process_environment(name, false))
             .env_remove("SCRIPTC_NATIVE_PROCESS_MISSING")
+            .current_dir(if isolated { &native_cwd } else { &normal_cwd })
             .output()
             .unwrap();
         assert_eq!(actual.status.code(), expected.status.code(), "{name}");
@@ -3531,6 +3545,156 @@ fn metadata_project(directory: &Path) {
     fs::write(directory.join("tsconfig.json"), serde_json::to_vec(&serde_json::json!({
         "compilerOptions": { "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext", "lib": ["ES2022"], "types": ["node"], "typeRoots": [root().join("node_modules/@types")], "skipLibCheck": true, "strict": true }
     })).unwrap()).unwrap();
+}
+
+#[test]
+fn builtin_manifest_reports_native_runtime_only_and_planned_contracts() {
+    let result = Command::new(compiler()).arg("builtins").output().unwrap();
+    success(&result);
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["engine"], "none");
+    assert_eq!(report["fallback"], false);
+    let apis = report["apis"].as_array().unwrap();
+    for (module, member, stage) in [
+        ("fs", "mkdirSync", "native-partial"),
+        ("process", "env", "native-partial"),
+        ("crypto", "createHash", "runtime-only"),
+        ("Bun", "file", "planned"),
+    ] {
+        assert!(apis.iter().any(|row| row["module"] == module
+            && row["member"] == member
+            && row["stage"] == stage));
+    }
+    let bad = Command::new(compiler())
+        .args(["builtins", "unexpected"])
+        .output()
+        .unwrap();
+    assert!(!bad.status.success());
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let source = temp.path().join("main.mts");
+    fs::write(&source, "import {mkdirSync} from 'node:fs'; import {createHash} from 'node:crypto'; mkdirSync('x', {recursive:true}); createHash('sha256');").unwrap();
+    let output = temp.path().join("inspection.json");
+    let result = Command::new(compiler())
+        .arg("inspect")
+        .arg(source)
+        .arg("--out")
+        .arg(&output)
+        .output()
+        .unwrap();
+    success(&result);
+    let report: serde_json::Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(
+        report["builtinCalls"]["fs.mkdirSync"]["signatureAvailable"],
+        true
+    );
+    assert_eq!(
+        report["builtinCalls"]["fs.mkdirSync"]["portStage"],
+        "native-partial"
+    );
+    assert_eq!(
+        report["builtinCalls"]["crypto.createHash"]["signatureAvailable"],
+        false
+    );
+    assert_eq!(
+        report["builtinCalls"]["crypto.createHash"]["portStage"],
+        "runtime-only"
+    );
+    assert!(
+        report["builtinCalls"]["fs.mkdirSync"]["nativeContract"]
+            .as_str()
+            .unwrap()
+            .contains("Statement effects only")
+    );
+    assert!(!temp.path().join("x").exists());
+}
+
+#[test]
+fn native_platform_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "platform-boundary");
+    for (source, diagnostic) in [
+        (
+            "import { mkdirSync } from 'node:fs'; console.log(mkdirSync('x', { recursive: true }));",
+            "first-created-directory",
+        ),
+        (
+            "import { mkdirSync } from 'node:fs'; const options = { recursive: true }; mkdirSync('x', options);",
+            "numeric modes",
+        ),
+        (
+            "import { mkdirSync } from 'node:fs'; let recursive = true; mkdirSync('x', { recursive });",
+            "boolean literal",
+        ),
+        (
+            "import { mkdirSync } from 'node:fs'; mkdirSync(({ toString() { return 'x'; } }) as string);",
+            "represented string paths",
+        ),
+        (
+            "import { mkdirSync } from 'node:fs'; mkdirSync('x', { get mode() { return 448; } });",
+            "plain recursive/mode properties",
+        ),
+        (
+            "import { mkdirSync } from 'node:fs'; mkdirSync('x', { ...{ mode: 448 } });",
+            "plain recursive/mode properties",
+        ),
+        (
+            "import { mkdirSync } from 'node:fs'; mkdirSync(...['x']);",
+            "iterable argument spreads",
+        ),
+        (
+            "import { mkdirSync } from 'node:fs'; mkdirSync('x', undefined);",
+            "numeric modes",
+        ),
+        (
+            "import * as fs from 'node:fs'; fs.mkdirRecursiveModeSync('x', 448);",
+            "not ported",
+        ),
+        (
+            "import * as p from 'node:process'; p.isTTY(1);",
+            "not ported",
+        ),
+        (
+            "import { createHash } from 'node:crypto'; createHash('sha256');",
+            "not ported",
+        ),
+        (
+            "import { randomUUID } from 'node:crypto'; randomUUID({ disableEntropyCache: true });",
+            "overload is not ported",
+        ),
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains(diagnostic)
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+        assert!(!temp.path().join("x").exists());
+    }
 }
 
 #[test]

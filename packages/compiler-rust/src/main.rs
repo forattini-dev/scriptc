@@ -28,7 +28,17 @@ fn execute() -> Result<(), String> {
     let mut args = std::env::args_os().skip(1);
     let command = args
         .next()
-        .ok_or("usage: scriptc build|inspect <file.ts|file.js> [--project <tsconfig>] [--emit bin|ir|rust] --out <path>")?;
+        .ok_or("usage: scriptc build|inspect <file.ts|file.js> [--project <tsconfig>] [--emit bin|ir|rust] --out <path>; scriptc builtins")?;
+    if command == "builtins" {
+        if args.next().is_some() {
+            return Err("SCN0001: builtins takes no arguments".into());
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&builtins::manifest()).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
     if command == "--version" {
         println!(
             "scriptc native 0.1.1-rust.0; frontend {}; IR {}; engine none",
@@ -38,7 +48,7 @@ fn execute() -> Result<(), String> {
         return Ok(());
     }
     if command != "build" && command != "inspect" {
-        return Err("SCN0001: expected build or inspect".into());
+        return Err("SCN0001: expected build, inspect or builtins".into());
     }
     let input = fs::canonicalize(PathBuf::from(
         args.next().ok_or("SCN0001: missing input file")?,

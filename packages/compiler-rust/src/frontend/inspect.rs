@@ -25,6 +25,8 @@ pub struct Report {
 #[serde(rename_all = "camelCase")]
 struct LibraryRequirement {
     signature_available: bool,
+    port_stage: Option<builtins::Stage>,
+    native_contract: Option<&'static str>,
     locations: Vec<Loc>,
 }
 
@@ -319,6 +321,8 @@ fn visit(checker: &mut Checker, node: Node, imports: &Imports, report: &mut Repo
                 .entry(format!("{module}.{member}"))
                 .or_insert_with(|| LibraryRequirement {
                     signature_available: builtins::get(module, &member).is_some(),
+                    port_stage: builtins::entry(module, &member).map(|api| api.stage),
+                    native_contract: builtins::entry(module, &member).map(|api| api.contract),
                     locations: Vec::new(),
                 });
             requirement.locations.push(location());

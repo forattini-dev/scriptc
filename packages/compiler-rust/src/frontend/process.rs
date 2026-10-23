@@ -18,7 +18,7 @@ impl Lowerer<'_> {
             return true;
         }
         if node.kind() == SyntaxKind::Identifier {
-            let symbol = self.symbol(node);
+            let symbol = self.native_symbol(node);
             return self
                 .native_functions
                 .get(&symbol)

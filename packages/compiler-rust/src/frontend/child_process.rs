@@ -59,7 +59,7 @@ impl Lowerer<'_> {
         active: &mut HashSet<u32>,
     ) -> Option<BuiltinFunction> {
         let imported = if node.kind() == SyntaxKind::Identifier {
-            let symbol = self.symbol(node);
+            let symbol = self.native_symbol(node);
             self.native_functions.get(&symbol).cloned()
         } else if node.kind() == SyntaxKind::PropertyAccessExpression {
             self.native_namespace(node.expression())
@@ -203,7 +203,7 @@ impl Lowerer<'_> {
     pub(super) fn child_builtin_value(&mut self, node: Node) -> Result<Option<Expr>, String> {
         // Alias identifiers must read their actual lexical cell (including TDZ).
         let imported = if node.kind() == SyntaxKind::Identifier {
-            let symbol = self.symbol(node);
+            let symbol = self.native_symbol(node);
             self.native_functions
                 .get(&symbol)
                 .is_some_and(|(module, member)| *module == "child_process" && member == "execFile")

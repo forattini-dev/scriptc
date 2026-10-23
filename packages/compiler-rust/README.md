@@ -45,6 +45,20 @@ This is demand lowering of top-level function declarations, not general dead-cod
 
 The checked program and execution program can have different module graphs because package declarations and implementation exports resolve separately. Both use the same runtime-edge classifier; an entire `import type`/`export type` declaration is erased, while inline type specifiers may leave an empty runtime edge. Declaration contracts are owned data, never handles into the checked checker. Module evaluation order is planned once for the execution view before lowering starts.
 
+## Native API registry
+
+`src/builtins.rs` owns native source API lookup and the typed library-call ABI used by IR validation and Rust emission. Its `builtins/` modules group Math, paths, filesystem, process, crypto and platform queries. Each public entry carries its lowering policy, argument/result bindings, Rust implementation, limited contract and differential evidence. `scriptc builtins` exports this registry as JSON and includes the existing String intrinsic table; `inspect` attaches registered port stages and contracts to direct builtin call requirements.
+
+The stages are intentionally separate: `native-partial` means the listed frontend contract is executable, `runtime-only` means reusable Rust functions exist but the frontend contract is missing, and `planned` means no native implementation claim. The Bun entries describe dedicated adapters still to implement; BunFile, subprocess handles and CryptoHasher must retain their own source semantics. No Bun behavior oracle is claimed. This tracked-family registry does not replace the complete Node census in `internal/compatibility` or inherit its legacy/static or dynamic-engine support claims.
+
+Source names and internal IR names are distinct. For example, the single `fs.mkdirSync` export selects four internal effect operations; `mkdirRecursiveModeSync` is never an invented Node export. Similarly, terminal properties select the internal `process.isTTY` helper without exposing a callable of that name on process. Module aliases such as `node:fs`, `path/posix` and `path/win32` resolve before source API selection.
+
+Native import bindings preserve local source identity even when different modules share a checker declaration target. Mixed POSIX/Windows default imports and named aliases therefore retain their own path flavor. A declaration target with conflicting native registrations cannot be used as a forwarded shortcut; unresolved source provenance is refused rather than selected by import order.
+
+The first filesystem contract covers statement-only `mkdirSync` effects with represented string paths and numeric modes or plain inline recursive/mode options. Arguments, duplicate mode initializers and unused extras run before validation or I/O. Mode errors, existing/missing directories and null-byte paths have differential coverage. Result values, dynamic option objects, nonliteral recursion flags, accessors, iterable spreads and non-string paths remain explicit compile refusals; lone UTF-16 paths fail at the runtime boundary. Recursive first-created-directory return values, complete filesystem error fields and the remaining filesystem operations are separate ports. Test harnesses isolate the Node and native working directories for these fixtures.
+
+`crypto.randomUUID()` has a zero-argument native binding with format/version/variant and fresh-value tests; the OS entropy source is Rust's getrandom dependency. Hash/HMAC handles and Buffer operations already present in the shared runtime are recorded as reuse candidates, not advertised as native frontend support. This avoids reimplementing the runtime while making the missing frontend adapters visible.
+
 ## Migration sequence and retirement criteria
 
 1. Establish explicit phase ownership, demand lowering, deterministic worklists and executable roots. Preserve module effects, type diagnostics and native/ref-backend differential tests. These boundaries are implemented in this checkpoint.

@@ -26,6 +26,7 @@ mod commonjs;
 mod console;
 mod data_tables;
 mod declarations;
+mod directories;
 mod enums;
 mod exceptions;
 mod functions;
@@ -143,6 +144,8 @@ struct Lowerer<'a> {
     return_type: Option<Type>,
     native_functions: HashMap<u32, (&'static str, String)>,
     native_namespaces: HashMap<u32, &'static str>,
+    native_local_symbols: HashSet<u32>,
+    ambiguous_native_targets: HashSet<u32>,
     json_imports: HashMap<u32, serde_json::Value>,
     records: Vec<ir::Record>,
     unions: Vec<ir::Union>,
@@ -186,6 +189,8 @@ impl<'a> Lowerer<'a> {
             return_type: None,
             native_functions: HashMap::new(),
             native_namespaces: HashMap::new(),
+            native_local_symbols: HashSet::new(),
+            ambiguous_native_targets: HashSet::new(),
             json_imports: HashMap::new(),
             records: Vec::new(),
             unions: Vec::new(),
@@ -265,6 +270,54 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    fn bind_native_namespace(&mut self, node: Node, module: &'static str) {
+        let local = self.checker.get_symbol_at_location(node, false).0;
+        let target = self.symbol(node);
+        if local == 0 {
+            return;
+        }
+        // Distinct public modules can share declaration targets (path flavors).
+        // Direct imports keep their own local provenance. A forwarded target is
+        // usable only while every registration agrees on the same source API.
+        if !self.ambiguous_native_targets.contains(&target) {
+            if self
+                .native_namespaces
+                .get(&target)
+                .is_some_and(|previous| *previous != module)
+            {
+                self.native_namespaces.remove(&target);
+                self.ambiguous_native_targets.insert(target);
+            } else {
+                self.native_namespaces.insert(target, module);
+            }
+        }
+        self.native_local_symbols.insert(local);
+        self.native_namespaces.insert(local, module);
+    }
+
+    fn bind_native_function(&mut self, node: Node, module: &'static str, member: &str) {
+        let local = self.checker.get_symbol_at_location(node, false).0;
+        let target = self.symbol(node);
+        if local == 0 {
+            return;
+        }
+        let binding = (module, member.to_owned());
+        if !self.ambiguous_native_targets.contains(&target) {
+            if self
+                .native_functions
+                .get(&target)
+                .is_some_and(|previous| *previous != binding)
+            {
+                self.native_functions.remove(&target);
+                self.ambiguous_native_targets.insert(target);
+            } else {
+                self.native_functions.insert(target, binding.clone());
+            }
+        }
+        self.native_local_symbols.insert(local);
+        self.native_functions.insert(local, binding);
+    }
+
     fn native_import(&mut self, node: Node, module: &'static str) {
         fn walk(node: Node, nodes: &mut Vec<Node>) {
             nodes.push(node);
@@ -282,10 +335,7 @@ impl<'a> Lowerer<'a> {
             clause.name()
         };
         if !default.is_nil() {
-            let symbol = self.symbol(default);
-            if symbol != 0 {
-                self.native_namespaces.insert(symbol, module);
-            }
+            self.bind_native_namespace(default, module);
         }
         for node in nodes {
             if node.is_type_only() {
@@ -293,19 +343,14 @@ impl<'a> Lowerer<'a> {
             }
             match node.kind() {
                 SyntaxKind::ImportSpecifier | SyntaxKind::ExportSpecifier => {
-                    let symbol = self.symbol(node.name());
-                    if symbol != 0 {
-                        self.native_functions.insert(
-                            symbol,
-                            (module, node.property_name_or_name().text().to_string()),
-                        );
-                    }
+                    self.bind_native_function(
+                        node.name(),
+                        module,
+                        node.property_name_or_name().text(),
+                    );
                 }
                 SyntaxKind::NamespaceImport => {
-                    let symbol = self.symbol(node.name());
-                    if symbol != 0 {
-                        self.native_namespaces.insert(symbol, module);
-                    }
+                    self.bind_native_namespace(node.name(), module);
                 }
                 _ => {}
             }
@@ -314,7 +359,7 @@ impl<'a> Lowerer<'a> {
 
     fn native_namespace(&mut self, node: Node) -> Option<&'static str> {
         if node.kind() == SyntaxKind::Identifier {
-            let symbol = self.symbol(node);
+            let symbol = self.native_symbol(node);
             if let Some(module) = self.native_namespaces.get(&symbol) {
                 return Some(*module);
             }
@@ -376,18 +421,22 @@ impl<'a> Lowerer<'a> {
     }
 
     fn native_call(&mut self, node: Node, module: &str, member: &str) -> Result<Expr, String> {
-        let builtin = builtins::get(module, member).ok_or_else(|| {
+        let api = builtins::source(module, member).ok_or_else(|| {
             self.refuse(
                 node,
                 &format!("native library call '{module}.{member}' is not ported"),
             )
         })?;
+        if api.lowering == builtins::Lowering::Directory {
+            return self.directory_call(node);
+        }
+        let builtin = api.operations.first().expect("registered callable ABI");
         let mut args = node
             .arguments()
             .into_iter()
             .map(|arg| self.expression(arg))
             .collect::<Result<Vec<_>, _>>()?;
-        if member == "join" || member == "resolve" {
+        if api.lowering == builtins::Lowering::PathVariadic {
             if args.iter().any(|arg| arg.ty() != Type::String) {
                 return Err(self.refuse(node, "path arguments must be primitive strings"));
             }
@@ -396,7 +445,7 @@ impl<'a> Lowerer<'a> {
                 r#type: builtins::strings(),
                 loc: self.loc(node),
             }];
-        } else if member == "basename" && args.len() == 1 {
+        } else if api.lowering == builtins::Lowering::PathBasename && args.len() == 1 {
             args.push(Expr::StrLit {
                 value: String::new(),
                 r#type: Type::String,
@@ -417,6 +466,15 @@ impl<'a> Lowerer<'a> {
             r#type: builtin.result.clone(),
             loc: self.loc(node),
         })
+    }
+
+    fn native_symbol(&mut self, node: Node) -> u32 {
+        let local = self.checker.get_symbol_at_location(node, false).0;
+        if self.native_local_symbols.contains(&local) {
+            local
+        } else {
+            self.symbol(node)
+        }
     }
 
     fn symbol(&mut self, node: Node) -> u32 {
@@ -1340,7 +1398,7 @@ impl<'a> Lowerer<'a> {
                     return self.call_value(node);
                 }
                 if member.kind() == SyntaxKind::Identifier {
-                    let symbol = self.symbol(member);
+                    let symbol = self.native_symbol(member);
                     if let Some((module, name)) = self.native_functions.get(&symbol).cloned() {
                         return self.native_call(node, module, &name);
                     }

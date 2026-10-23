@@ -161,15 +161,19 @@ fn throw_invalid_arg_value(prefix: &str, value: &str) -> ! {
 }
 
 fn fs_creation_mode(mode: f64) -> u32 {
+    fs_creation_mode_named(mode, "mode")
+}
+
+fn fs_creation_mode_named(mode: f64, name: &str) -> u32 {
     let received = format_number(mode);
     if !mode.is_finite() || mode.trunc() != mode {
         throw_out_of_range(format!(
-            "The value of \"mode\" is out of range. It must be an integer. Received {received}"
+            "The value of \"{name}\" is out of range. It must be an integer. Received {received}"
         ));
     }
     if !(0.0..=4_294_967_295.0).contains(&mode) {
         throw_out_of_range(format!(
-            "The value of \"mode\" is out of range. It must be >= 0 && <= 4294967295. Received {received}"
+            "The value of \"{name}\" is out of range. It must be >= 0 && <= 4294967295. Received {received}"
         ));
     }
     mode as u32
@@ -227,9 +231,40 @@ pub fn fs_exists(path: &JsString) -> bool {
     std::fs::exists(path.to_utf8_lossy()).unwrap_or(false)
 }
 
+fn fs_mkdir_path(path: &JsString) {
+    if path.contains('\0') {
+        throw_invalid_arg_value(
+            "The argument 'path' must be a string, Uint8Array, or URL without null bytes. Received ",
+            path,
+        );
+    }
+    if !path.is_well_formed() {
+        throw_type_error("scriptc: lone UTF-16 directory paths are not ported".into());
+    }
+    // create_dir_all("") succeeds in std; Node still reports an absent path.
+    if path.is_empty() {
+        throw_fs_error(
+            "mkdir",
+            path,
+            std::io::Error::from(std::io::ErrorKind::NotFound),
+        );
+    }
+}
+
+fn throw_mkdir_error(path: &JsString, error: std::io::Error) -> ! {
+    // Node's Windows mkdir binding reports the resolved path; POSIX reports
+    // the source spelling. Validation errors above still use the original path.
+    #[cfg(windows)]
+    let resolved = path_win32_resolve(&array_new(vec![path.clone()]));
+    #[cfg(windows)]
+    let path = &resolved;
+    throw_fs_error("mkdir", path, error)
+}
+
 pub fn fs_mkdir(path: &JsString) {
+    fs_mkdir_path(path);
     if let Err(error) = std::fs::create_dir(path.to_utf8_lossy()) {
-        throw_fs_error("mkdir", path, error);
+        throw_mkdir_error(path, error);
     }
 }
 
@@ -314,8 +349,9 @@ pub fn fs_lchmod(path: &JsString, mode: f64) {
 }
 
 pub fn fs_mkdir_recursive(path: &JsString) {
+    fs_mkdir_path(path);
     if let Err(error) = std::fs::create_dir_all(path.to_utf8_lossy()) {
-        throw_fs_error("mkdir", path, error);
+        throw_mkdir_error(path, error);
     }
 }
 
@@ -651,8 +687,6 @@ pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
     }
 }
 
-
-
 pub fn fs_write_file_exclusive_mode(path: &JsString, data: &JsString, mode: f64) {
     use std::io::Write;
     let mode = fs_creation_mode(mode);
@@ -678,18 +712,82 @@ pub fn fs_write_file_exclusive_mode(path: &JsString, data: &JsString, mode: f64)
 pub fn fs_mkdir_mode(path: &JsString, mode: f64, recursive: bool) {
     use std::os::unix::fs::DirBuilderExt;
     let mut builder = std::fs::DirBuilder::new();
-    builder.recursive(recursive).mode(to_uint32(mode));
+    let mode = fs_creation_mode_named(mode, "options.mode");
+    fs_mkdir_path(path);
+    builder.recursive(recursive).mode(mode);
     if let Err(error) = builder.create(path.to_utf8_lossy()) {
-        throw_fs_error("mkdir", path, error);
+        throw_mkdir_error(path, error);
     }
 }
 
 #[cfg(not(unix))]
-pub fn fs_mkdir_mode(path: &JsString, _mode: f64, recursive: bool) {
+pub fn fs_mkdir_mode(path: &JsString, mode: f64, recursive: bool) {
+    let _ = fs_creation_mode_named(mode, "options.mode");
+    fs_mkdir_path(path);
     if recursive {
         fs_mkdir_recursive(path);
     } else {
         fs_mkdir(path);
+    }
+}
+
+pub fn fs_mkdir_mode_sync(path: &JsString, mode: f64) {
+    fs_mkdir_mode(path, mode, false);
+}
+pub fn fs_mkdir_recursive_mode_sync(path: &JsString, mode: f64) {
+    fs_mkdir_mode(path, mode, true);
+}
+
+#[cfg(test)]
+mod directory_tests {
+    use super::*;
+
+    #[test]
+    fn directory_modes_validate_before_paths_or_publication() {
+        for recursive in [false, true] {
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                fs_mkdir_mode(&string("a\0b"), -1.0, recursive);
+            }))
+            .expect_err("mode validation must throw before path validation");
+            let caught = caught_from_panic(payload);
+            assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
+            assert_eq!(
+                caught_error_code(&caught).as_deref(),
+                Some("ERR_OUT_OF_RANGE")
+            );
+            assert!(caught_error_message(&caught).contains("\"options.mode\""));
+        }
+        for recursive in [false, true] {
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                fs_mkdir_mode(&empty_string(), 0o700 as f64, recursive);
+            }))
+            .expect_err("an empty mkdir path must not succeed");
+            let caught = caught_from_panic(payload);
+            assert_eq!(caught_error_code(&caught).as_deref(), Some("ENOENT"));
+        }
+    }
+
+    #[test]
+    fn directory_mode_wrappers_create_private_recursive_directories() {
+        let base = std::env::temp_dir().join(format!("scriptc-mkdir-{}", crypto_random_uuid()));
+        let nested = base.join("a").join("b");
+        fs_mkdir_recursive_mode_sync(&JsString::from(nested.to_str().unwrap()), 0o700 as f64);
+        fs_mkdir_recursive_mode_sync(&JsString::from(nested.to_str().unwrap()), 0o700 as f64);
+        assert!(nested.is_dir());
+        let single = base.join("single");
+        fs_mkdir_mode_sync(&JsString::from(single.to_str().unwrap()), 0o700 as f64);
+        assert!(single.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for path in [&base, &base.join("a"), &nested, &single] {
+                assert_eq!(
+                    std::fs::metadata(path).unwrap().permissions().mode() & 0o077,
+                    0
+                );
+            }
+        }
+        std::fs::remove_dir_all(base).unwrap();
     }
 }
 
@@ -1083,9 +1181,6 @@ fn validate_write_window(length: usize, offset: f64, count: f64) -> (usize, usiz
     }
     (offset, count as usize)
 }
-
-
-
 
 pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, position: f64) -> f64 {
     if !offset.is_finite() || offset.fract() != 0.0 {
