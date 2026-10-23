@@ -40,7 +40,13 @@ impl Lowerer<'_> {
         Ok(ty)
     }
 
-    fn var_storage_type(&mut self, ty: Type, node: Node) -> Result<Type, String> {
+    // The source value contract and its undefined-capable cell are separate.
+    // Both hoisted var and let without an initializer use this representation;
+    // lexical cells still initialize only when their declaration executes.
+    pub(super) fn undefined_storage_type(&mut self, ty: Type, node: Node) -> Result<Type, String> {
+        if ty == Type::Dyn {
+            return Ok(ty);
+        }
         let mut arms = if let Type::Union { union_id } = ty {
             self.unions[union_id].arms.clone()
         } else {
@@ -48,7 +54,7 @@ impl Lowerer<'_> {
         };
         arms.push(Type::Undefined);
         self.intern_union(arms)
-            .ok_or_else(|| self.refuse(node, "var has no undefined representation"))
+            .ok_or_else(|| self.refuse(node, "binding has no undefined representation"))
     }
 
     pub(super) fn var_assignment_fact(&mut self, symbol: u32, value: &Expr) {
@@ -111,7 +117,7 @@ impl Lowerer<'_> {
                     }
                     continue;
                 }
-                let storage = self.var_storage_type(ty.clone(), declaration)?;
+                let storage = self.undefined_storage_type(ty.clone(), declaration)?;
                 let local = self.module_binding(declaration.name(), storage.clone(), true);
                 self.module_vars.insert(symbol, ty.clone());
                 self.var_types.insert(symbol, ty);
@@ -151,7 +157,7 @@ impl Lowerer<'_> {
                 continue;
             }
             let ty = self.var_value_type(declaration)?;
-            let storage = self.var_storage_type(ty.clone(), declaration)?;
+            let storage = self.undefined_storage_type(ty.clone(), declaration)?;
             let local = Local {
                 id: format!("v{}", self.locals.len()),
                 name: declaration.name().text().into(),

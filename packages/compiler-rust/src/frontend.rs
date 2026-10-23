@@ -163,6 +163,7 @@ struct Lowerer<'a> {
     classes: classes::ClassGraph,
     instance_this: Option<Local>,
     module_vars: HashMap<u32, Type>,
+    // Value contracts for undefined-capable var/parameter/deferred let cells.
     var_types: HashMap<u32, Type>,
     var_defined: HashSet<u32>,
     enums: enums::EnumGraph,
@@ -787,23 +788,19 @@ impl<'a> Lowerer<'a> {
                     }
                     let storage = self.storage_type(name);
                     let (ty, init) = if declaration.initializer().is_nil() {
-                        let ty = storage?;
-                        let init = self
-                            .coerce(
-                                Expr::UnitLit {
-                                    unit: "undefined",
-                                    r#type: Type::Undefined,
-                                    loc: self.loc(declaration),
-                                },
-                                ty.clone(),
-                                declaration,
-                            )
-                            .map_err(|_| {
-                                self.refuse(
-                                    declaration,
-                                    "uninitialized lexical storage must represent undefined",
-                                )
-                            })?;
+                        let value_type = storage?;
+                        let ty = self.undefined_storage_type(value_type.clone(), declaration)?;
+                        self.var_types.insert(symbol, value_type);
+                        self.var_defined.remove(&symbol);
+                        let init = self.coerce(
+                            Expr::UnitLit {
+                                unit: "undefined",
+                                r#type: Type::Undefined,
+                                loc: self.loc(declaration),
+                            },
+                            ty.clone(),
+                            declaration,
+                        )?;
                         (ty, init)
                     } else if self.declared(declaration).is_none() && storage.is_err() {
                         let init = self.expression(declaration.initializer())?;

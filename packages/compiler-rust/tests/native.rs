@@ -306,6 +306,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-async-context/shadows.ts",
         "rust-native-async-context/untyped.js",
         "rust-native-lexicals/values.ts",
+        "rust-native-lexicals/deferred.ts",
+        "rust-native-lexicals/completions.ts",
+        "rust-native-lexicals/interruptions.ts",
+        "rust-native-lexicals/deferred-order.ts",
         "rust-native-lexicals/order.ts",
         "rust-native-lexicals/cycles.ts",
         "rust-native-lexicals/plain.js",
@@ -3212,18 +3216,14 @@ fn async_suspension_boundaries_preserve_existing_artifacts() {
 }
 
 #[test]
-fn lexical_initialization_refuses_storage_without_undefined_and_preserves_artifacts() {
+fn lexical_initialization_boundaries_preserve_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "lexical-boundary");
     for (source, expected) in [
         (
-            "let value!: number; console.log(value);",
-            "uninitialized lexical storage must represent undefined",
-        ),
-        (
-            "let callback!: () => number; callback();",
-            "uninitialized lexical storage must represent undefined",
+            "let value!: Map<string, number>; console.log(value);",
+            "binding has no undefined representation",
         ),
         (
             "declare let value: string | undefined; console.log(value === undefined);",

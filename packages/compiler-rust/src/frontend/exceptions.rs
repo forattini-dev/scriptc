@@ -6,6 +6,7 @@ impl Lowerer<'_> {
         let before = self.var_defined.clone();
         let bindings = self.bindings.clone();
         let try_body = self.statements(node.try_block().statements())?;
+        let try_defined = self.var_defined.clone();
         self.bindings = bindings.clone();
         self.var_defined = before.clone();
         self.var_call_effects();
@@ -65,6 +66,17 @@ impl Lowerer<'_> {
         if let Some(symbol) = caught_symbol {
             self.caught_aliases.remove(&symbol);
         }
+        // Only normal completions reach the following statement. An escaping
+        // throw (including a failed assignment RHS) contributes no facts.
+        let normal_defined = match &catch_body {
+            None => try_defined,
+            Some(_) if ir::always_returns(&try_body) => self.var_defined.clone(),
+            Some(body) if ir::always_returns(body) => try_defined,
+            Some(_) => try_defined
+                .intersection(&self.var_defined)
+                .copied()
+                .collect(),
+        };
         self.bindings = bindings.clone();
         self.var_defined = before.clone();
         // A throw can interrupt any assignment, including a call in either
@@ -72,6 +84,7 @@ impl Lowerer<'_> {
         self.var_call_effects();
         let finalizer = node.finally_block();
         let finally_body = if finalizer.is_nil() {
+            self.var_defined = normal_defined;
             None
         } else {
             Some(self.statements(finalizer.statements())?)
