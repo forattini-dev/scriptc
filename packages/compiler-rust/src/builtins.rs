@@ -46,6 +46,7 @@ pub enum Lowering {
     PathBasename,
     Directory,
     AppendFile,
+    ReadFile,
     Descriptor,
     Buffer,
     Property,

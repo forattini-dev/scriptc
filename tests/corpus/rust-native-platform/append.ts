@@ -40,3 +40,8 @@ function ownAppend(path: string, data: string): void { console.log("shadow", pat
 const own = { appendFileSync: ownAppend };
 own.appendFileSync("owned", "value");
 console.log("shadow no file", existsSync("owned"));
+append("read-only", "first", { mode: 0o400 });
+let appended = false;
+try { append("read-only", "second", { mode: 0o600 }); appended = true; }
+catch (error) { const value = error as any; console.log("readonly error", String(value.name), String(value.code)); }
+console.log("readonly outcome", appended);

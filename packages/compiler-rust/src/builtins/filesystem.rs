@@ -37,12 +37,21 @@ pub(super) fn apis() -> Vec<Api> {
             "Statement effects only; well-formed UTF-16 string paths; numeric mode or plain inline options with literal recursive and numeric mode; observed return values, dynamic options and spreads refused",
             &["tests/corpus/rust-native-platform/mkdir.ts"],
         ),
-        Api::runtime_only(
+        Api::native(
             "fs",
             "readFileSync",
-            Access::Call,
-            &["fs_read_file", "fs_read_file_bytes"],
-            "Rust text/bytes I/O exists; native overload selection, encodings and Buffer/URL contracts still need porting",
+            Lowering::ReadFile,
+            vec![call!(
+                "fs.readFileSync",
+                [String, String],
+                String,
+                "fs_read_file_encoded"
+            )],
+            "One well-formed string path with literal utf8/utf-8 encoding or plain inline options containing that encoding and optional literal r flag. Full UTF-8 decoding, argument effects and open/read error name/message/code represented. Descriptor/Buffer/URL paths, omitted/null encodings returning Buffer, other encodings/flags, dynamic options, accessors and spreads refused; large-file limits and error path/syscall/errno pending",
+            &[
+                "tests/corpus/rust-native-platform/read-file.ts",
+                "tests/corpus/rust-native-platform/read-file-errors.ts",
+            ],
         ),
         Api::runtime_only(
             "fs",

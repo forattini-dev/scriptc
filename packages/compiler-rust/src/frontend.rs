@@ -31,6 +31,7 @@ mod directories;
 mod enums;
 mod exceptions;
 mod filesystem;
+mod filesystem_reads;
 mod filesystem_writes;
 mod functions;
 mod helpers;
@@ -440,6 +441,9 @@ impl<'a> Lowerer<'a> {
         }
         if api.lowering == builtins::Lowering::AppendFile {
             return self.append_file_call(node);
+        }
+        if api.lowering == builtins::Lowering::ReadFile {
+            return self.read_file_call(node);
         }
         if module == "fs" && matches!(member, "statSync" | "lstatSync") {
             self.ensure_exception_classes(node)?;

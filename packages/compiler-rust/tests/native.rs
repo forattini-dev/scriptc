@@ -108,6 +108,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-platform/read-file.ts",
+        "rust-native-platform/read-file-errors.ts",
         "rust-native-platform/append.ts",
         "rust-native-platform/append-errors.ts",
         "rust-native-platform/mkdir.ts",
@@ -3562,6 +3564,113 @@ fn append_boundaries_preserve_existing_artifacts() {
         fs::write(
             &input,
             format!("// @ts-nocheck\nimport {{appendFileSync}} from 'node:fs';\n{source}\n"),
+        )
+        .unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains(expected)
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn read_file_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "read-file-boundary");
+    fs::write(
+        &input,
+        "import {readFileSync} from 'node:fs'; console.log(readFileSync('file', 'utf8'));",
+    )
+    .unwrap();
+    success(
+        &Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(temp.path().join("read-file-canary.json"))
+            .output()
+            .unwrap(),
+    );
+    for (source, expected) in [
+        (
+            "readFileSync('x');",
+            "readFileSync needs path and explicit UTF-8 encoding without spreads",
+        ),
+        (
+            "readFileSync(1, 'utf8');",
+            "readFileSync requires a represented string path",
+        ),
+        (
+            "readFileSync('x', null);",
+            "readFileSync requires literal utf8/utf-8 encoding",
+        ),
+        (
+            "readFileSync('x', undefined);",
+            "readFileSync requires literal utf8/utf-8 encoding",
+        ),
+        (
+            "readFileSync('x', 'hex');",
+            "readFileSync requires literal utf8/utf-8 encoding",
+        ),
+        (
+            "const options={encoding:'utf8'}; readFileSync('x',options);",
+            "readFileSync requires literal utf8/utf-8 encoding",
+        ),
+        (
+            "readFileSync('x', {});",
+            "readFileSync requires literal utf8/utf-8 encoding",
+        ),
+        (
+            "readFileSync('x', {encoding:'utf8', flag:'w'});",
+            "readFileSync options require literal utf8/utf-8 encoding",
+        ),
+        (
+            "readFileSync('x', {get encoding(){return 'utf8';}});",
+            "readFileSync options require plain literal encoding/flag properties",
+        ),
+        (
+            "readFileSync('x', {...{encoding:'utf8'}});",
+            "readFileSync options require plain literal encoding/flag properties",
+        ),
+        (
+            "readFileSync(...['x','utf8']);",
+            "readFileSync needs path and explicit UTF-8 encoding without spreads",
+        ),
+        (
+            "readFileSync('x',{encoding:'utf8', ['fl'+'ag']:'r'});",
+            "readFileSync options require literal utf8/utf-8 encoding",
+        ),
+    ] {
+        fs::write(
+            &input,
+            format!("// @ts-nocheck\nimport {{readFileSync}} from 'node:fs';\n{source}\n"),
         )
         .unwrap();
         for artifact in [

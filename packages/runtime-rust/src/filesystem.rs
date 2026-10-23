@@ -180,10 +180,42 @@ fn fs_creation_mode_named(mode: f64, name: &str) -> u32 {
 }
 
 pub fn fs_read_file(path: &JsString) -> JsString {
-    match std::fs::read(path.to_utf8_lossy()) {
-        Ok(bytes) => JsString::from(String::from_utf8_lossy(&bytes).as_ref()),
-        Err(error) => throw_fs_error("open", path, error),
+    JsString::from(String::from_utf8_lossy(&fs_read_all(path)).as_ref())
+}
+
+fn fs_read_all(path: &JsString) -> Vec<u8> {
+    use std::io::Read;
+    if path.contains('\0') {
+        throw_invalid_arg_value(
+            "The argument 'path' must be a string, Uint8Array, or URL without null bytes. Received ",
+            path,
+        );
     }
+    if !path.is_well_formed() {
+        throw_type_error("scriptc: lone UTF-16 read paths are not ported".into());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // libuv opens directories too, then reports EISDIR from the read.
+        options.custom_flags(0x0200_0000); // FILE_FLAG_BACKUP_SEMANTICS
+    }
+    let mut file = options.open(path.to_utf8_lossy()).unwrap_or_else(|error| {
+        #[cfg(windows)]
+        let resolved = if path.is_empty() { path.clone() } else { path_win32_resolve(&array_new(vec![path.clone()])) };
+        #[cfg(windows)]
+        let path = &resolved;
+        throw_fs_error("open", path, error)
+    });
+    let metadata = file.metadata().unwrap_or_else(|error| throw_fs_fd_io_error("fstat", error));
+    if metadata.is_dir() {
+        throw_fs_fd_error("read", "EISDIR", "illegal operation on a directory");
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).unwrap_or_else(|error| throw_fs_fd_io_error("read", error));
+    bytes
 }
 
 pub fn fs_write_file(path: &JsString, data: &JsString) {
@@ -193,10 +225,7 @@ pub fn fs_write_file(path: &JsString, data: &JsString) {
 }
 
 pub fn fs_read_file_bytes(path: &JsString) -> JsBytes<u8> {
-    match std::fs::read(path.to_utf8_lossy()) {
-        Ok(bytes) => bytes_from_vec(bytes),
-        Err(error) => throw_fs_error("open", path, error),
-    }
+    bytes_from_vec(fs_read_all(path))
 }
 
 pub fn fs_write_file_bytes(path: &JsString, data: &JsBytes<u8>) {

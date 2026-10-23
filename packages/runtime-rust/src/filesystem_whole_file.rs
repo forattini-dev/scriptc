@@ -23,19 +23,38 @@ pub fn fs_append_file_mode(path: &JsString, data: &JsString, mode: f64, exclusiv
     }
     #[cfg(not(unix))]
     let _ = mode;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        if mode & 0o200 == 0 {
+            // OPEN_ALWAYS applies creation attributes only when it creates a file.
+            options.attributes(1); // FILE_ATTRIBUTE_READONLY
+        }
+    }
     let mut file = match options.open(path.to_utf8_lossy()) {
         Ok(file) => file,
-        Err(error) => {
-            #[cfg(windows)]
-            let resolved = if path.is_empty() { path.clone() } else { path_win32_resolve(&array_new(vec![path.clone()])) };
-            #[cfg(windows)]
-            let path = &resolved;
-            throw_fs_error("open", path, error)
-        },
+        Err(error) => throw_fs_append_open_error(path, error),
     };
     if let Err(error) = file.write_all(data.as_bytes()) {
         throw_fs_error("write", path, error);
     }
+}
+
+fn throw_fs_append_open_error(path: &JsString, error: std::io::Error) -> ! {
+    #[cfg(windows)]
+    let resolved = if path.is_empty() { path.clone() } else { path_win32_resolve(&array_new(vec![path.clone()])) };
+    #[cfg(windows)]
+    {
+        // libuv distinguishes a readonly file from an ACL access denial.
+        if error.raw_os_error() == Some(5)
+            && std::fs::metadata(path.to_utf8_lossy()).is_ok_and(|m| m.is_file() && m.permissions().readonly())
+        {
+            throw_error_code(format!("EPERM: operation not permitted, open '{resolved}'"), "EPERM");
+        }
+    }
+    #[cfg(windows)]
+    let path = &resolved;
+    throw_fs_error("open", path, error)
 }
 
 /// The byte-taking half of `fs_append_file`, for callers that already

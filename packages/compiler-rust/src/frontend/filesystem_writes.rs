@@ -16,8 +16,18 @@ impl Lowerer<'_> {
         }
         self.ensure_exception_classes(node)?;
         let mut stmts = Vec::new();
-        let path = self.append_argument(arguments[0], Type::String, &mut stmts)?;
-        let data = self.append_argument(arguments[1], Type::String, &mut stmts)?;
+        let path = self.filesystem_argument(
+            arguments[0],
+            Type::String,
+            "appendFileSync needs represented string path/data and numeric mode",
+            &mut stmts,
+        )?;
+        let data = self.filesystem_argument(
+            arguments[1],
+            Type::String,
+            "appendFileSync needs represented string path/data and numeric mode",
+            &mut stmts,
+        )?;
         let mut mode = None;
         if let Some(options) = arguments.get(2).copied() {
             let options = receivers::reference_node(options);
@@ -39,14 +49,14 @@ impl Lowerer<'_> {
                     };
                     let literal = receivers::reference_node(value);
                     match self.data_property_name(property.name()).as_deref() {
-                        Some("mode") => mode = Some(self.append_argument(value, Type::F64, &mut stmts)?),
-                        Some("encoding") if Self::append_utf8_literal(literal) => {},
+                        Some("mode") => mode = Some(self.filesystem_argument(value, Type::F64, "appendFileSync needs represented string path/data and numeric mode", &mut stmts)?),
+                        Some("encoding") if Self::filesystem_utf8_literal(literal) => {},
                         Some("flag") if literal.kind() == SyntaxKind::StringLiteral && literal.text() == "a" => {},
                         Some("flush") if literal.kind() == SyntaxKind::FalseKeyword => {},
                         _ => return Err(self.refuse(property, "appendFileSync options require literal utf8/utf-8 encoding, numeric mode, literal a flag or false flush")),
                     }
                 }
-            } else if !Self::append_utf8_literal(options) {
+            } else if !Self::filesystem_utf8_literal(options) {
                 let value = self.expression(options)?;
                 if !matches!(value.ty(), Type::Null | Type::Undefined) {
                     return Err(self.refuse(
@@ -95,22 +105,20 @@ impl Lowerer<'_> {
         })
     }
 
-    fn append_utf8_literal(node: Node) -> bool {
+    pub(super) fn filesystem_utf8_literal(node: Node) -> bool {
         node.kind() == SyntaxKind::StringLiteral && matches!(node.text(), "utf8" | "utf-8")
     }
 
-    fn append_argument(
+    pub(super) fn filesystem_argument(
         &mut self,
         node: Node,
         ty: Type,
+        requirement: &str,
         stmts: &mut Vec<Stmt>,
     ) -> Result<Expr, String> {
         let value = self.expression(receivers::reference_node(node))?;
         if value.ty() != ty {
-            return Err(self.refuse(
-                node,
-                "appendFileSync needs represented string path/data and numeric mode",
-            ));
+            return Err(self.refuse(node, requirement));
         }
         let local = self.construction_local(ty, false);
         stmts.push(Stmt::VarDecl {

@@ -944,6 +944,50 @@
         assert_eq!(caught_error_message(&caught).as_ref(), "scriptc: lone UTF-16 append paths are not ported");
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn append_mode_sets_readonly_only_on_creation() {
+        let prefix = format!("{}\\scriptc-append-readonly-", std::env::temp_dir().display());
+        let directory = fs_mkdtemp(&string(&prefix));
+        let readonly = string(&format!("{directory}\\readonly"));
+        let existing = string(&format!("{directory}\\existing"));
+        fs_append_file_mode(&readonly, &string("first"), 0o400 as f64, false);
+        assert!(std::fs::metadata(readonly.to_utf8_lossy()).unwrap().permissions().readonly());
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fs_append_file_mode(&readonly, &string("second"), 0o600 as f64, false))).unwrap_err();
+        let caught = caught_from_panic(payload);
+        assert_eq!(caught_error_code(&caught).as_deref(), Some("EPERM"));
+        fs_append_file_mode(&existing, &string("first"), 0o600 as f64, false);
+        fs_append_file_mode(&existing, &string("second"), 0o400 as f64, false);
+        assert!(!std::fs::metadata(existing.to_utf8_lossy()).unwrap().permissions().readonly());
+        assert_eq!(std::fs::read(existing.to_utf8_lossy()).unwrap(), b"firstsecond");
+        fs_chmod(&readonly, 0o600 as f64);
+        fs_rm_options(&directory, true, true);
+    }
+
+    #[test]
+    fn read_whole_utf8_keeps_bom_and_replaces_malformed_bytes() {
+        let suffix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("scriptc-read-{}-{suffix}", std::process::id()));
+        std::fs::write(&path, [0xef, 0xbb, 0xbf, b'A', 0, 0xff, 0xc0, 0xaf, 0xe2, 0x82, b'B']).unwrap();
+        let name = string(path.to_string_lossy().as_ref());
+        let plain = fs_read_file(&name);
+        assert_eq!(plain.to_utf8_lossy(), "\u{feff}A\0\u{fffd}\u{fffd}\u{fffd}\u{fffd}B");
+        assert_eq!(fs_read_file_encoded(&name, &string("utf-8")), plain);
+        std::fs::write(&path, b"changed").unwrap();
+        assert_eq!(fs_read_file(&name).to_utf8_lossy(), "changed");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn read_whole_refuses_lone_surrogate_paths_before_opening() {
+        let path = JsString::from_utf16(&[0xd800]);
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fs_read_file(&path)))
+            .expect_err("lone UTF-16 path must not be read under a replacement spelling");
+        let caught = caught_from_panic(payload);
+        assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
+        assert_eq!(caught_error_message(&caught).as_ref(), "scriptc: lone UTF-16 read paths are not ported");
+    }
+
     #[test]
     fn file_handle_aliases_share_close_state_and_last_drop_closes() {
         let baseline = live_heap_objects();
