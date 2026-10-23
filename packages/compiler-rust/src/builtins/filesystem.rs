@@ -60,12 +60,40 @@ pub(super) fn apis() -> Vec<Api> {
         ),
         stat_api("statSync", "fs.statSync", "fs_stat_sync"),
         stat_api("lstatSync", "fs.lstatSync", "fs_lstat_sync"),
-        Api::runtime_only(
+        Api::native(
             "fs",
             "openSync",
-            Access::Call,
-            &["fs_open"],
-            "Runtime descriptor operations exist; flags, optional modes and descriptor lifecycle need a native ABI",
+            Lowering::Descriptor,
+            vec![call!("fs.openSync", [String, String], Type::F64, "fs_open")],
+            "One well-formed string path and an optional basic literal string flag; numeric/synchronous flags, dynamic flags and mode arguments refused; error name/message/code represented",
+            &["tests/corpus/rust-native-platform/descriptors.ts"],
+        ),
+        Api::native(
+            "fs",
+            "readSync",
+            Lowering::Descriptor,
+            vec![call!(
+                "fs.readSync",
+                [Type::F64, Type::bytes(), Type::F64, Type::F64, Type::F64],
+                Type::F64,
+                "fs_read_sync"
+            )],
+            "Positional numeric offset/length and optional numeric/null/undefined position with represented u8 views; options, BigInt positions and other view types refused; empty-view error inspection branding pending",
+            &[
+                "tests/corpus/rust-native-platform/descriptors.ts",
+                "tests/corpus/rust-native-platform/descriptor-errors.ts",
+            ],
+        ),
+        Api::native(
+            "fs",
+            "closeSync",
+            Lowering::Descriptor,
+            vec![call!("fs.closeSync", [Type::F64], Type::Void, "fs_close")],
+            "One represented numeric descriptor; native lifecycle and numeric validation; standard/inherited descriptor ownership remains a separate contract",
+            &[
+                "tests/corpus/rust-native-platform/descriptors.ts",
+                "tests/corpus/rust-native-platform/descriptor-errors.ts",
+            ],
         ),
     ]
 }

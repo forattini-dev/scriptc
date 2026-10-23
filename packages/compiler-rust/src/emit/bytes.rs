@@ -30,6 +30,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                 .collect::<String>();
             let operation = match method.as_str() {
                 "length" | "byteLength" => "runtime::bytes_len(&bytes)".into(),
+                "get" => "runtime::bytes_get(&bytes, arg0)".into(),
                 "byteOffset" => "runtime::bytes_byte_offset(&bytes)".into(),
                 "join" => "runtime::bytes_join(&bytes, &runtime::JsString::from(arg0))".into(),
                 "slice" | "subarray" => format!(

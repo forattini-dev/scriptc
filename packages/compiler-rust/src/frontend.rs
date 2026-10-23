@@ -29,6 +29,7 @@ mod declarations;
 mod directories;
 mod enums;
 mod exceptions;
+mod filesystem;
 mod functions;
 mod helpers;
 pub mod inspect;
@@ -431,6 +432,9 @@ impl<'a> Lowerer<'a> {
         })?;
         if api.lowering == builtins::Lowering::Directory {
             return self.directory_call(node);
+        }
+        if api.lowering == builtins::Lowering::Descriptor {
+            return self.descriptor_call(node, member);
         }
         if module == "fs" && matches!(member, "statSync" | "lstatSync") {
             self.ensure_exception_classes(node)?;
@@ -963,7 +967,7 @@ impl<'a> Lowerer<'a> {
         if matches!(
             node.kind(),
             SyntaxKind::CallExpression | SyntaxKind::NewExpression
-        ) && !matches!(&value, Ok(Expr::Intrinsic { .. }))
+        ) && !matches!(&value, Ok(Expr::Intrinsic { .. } | Expr::BytesNew { .. }))
         {
             self.var_call_effects();
         }
@@ -1033,10 +1037,7 @@ impl<'a> Lowerer<'a> {
                     return self.class_index_get(node, obj);
                 }
                 if obj.ty() == Type::bytes() {
-                    return Err(self.refuse(
-                        node,
-                        "Uint8Array indexed reads require an undefined-aware byte projection",
-                    ));
+                    return self.bytes_index(node, obj);
                 }
                 if obj.ty() == Type::Dyn {
                     let key = self.property_key_expression(node.argument_expression())?;

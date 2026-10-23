@@ -45,6 +45,7 @@ pub enum Lowering {
     PathVariadic,
     PathBasename,
     Directory,
+    Descriptor,
     Property,
     Special,
     Unported,

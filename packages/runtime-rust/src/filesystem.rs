@@ -878,10 +878,25 @@ fn file_id(_file: &std::fs::File) -> i32 {
 }
 
 pub fn fs_open(path: &JsString, flags: &JsString) -> f64 {
+    if path.contains('\0') {
+        throw_invalid_arg_value(
+            "The argument 'path' must be a string, Uint8Array, or URL without null bytes. Received ",
+            path,
+        );
+    }
+    if !path.is_well_formed() {
+        throw_type_error("scriptc: lone UTF-16 open paths are not ported".into());
+    }
     let options = fs_open_options(flags);
     let file = match options.open(path.to_utf8_lossy()) {
         Ok(file) => file,
-        Err(error) => throw_fs_error("open", path, error),
+        Err(error) => {
+            #[cfg(windows)]
+            let resolved = if path.is_empty() { path.clone() } else { path_win32_resolve(&array_new(vec![path.clone()])) };
+            #[cfg(windows)]
+            let path = &resolved;
+            throw_fs_error("open", path, error)
+        }
     };
     let id = file_id(&file);
     OPEN_FILES.with(|files| {
@@ -1113,12 +1128,8 @@ fn with_preserved_position<T>(
 }
 
 pub fn fs_close(fd: f64) {
-    let id =
-        if fd.is_finite() && fd.fract() == 0.0 && fd >= i32::MIN as f64 && fd <= i32::MAX as f64 {
-            fd as i32
-        } else {
-            throw_fs_fd_error("close", "EBADF", "bad file descriptor")
-        };
+    validate_write_fd(fd);
+    let id = fd as i32;
     let file = OPEN_FILES.with(|files| files.borrow_mut().remove(&id));
     if file.is_none() {
         throw_fs_fd_error("close", "EBADF", "bad file descriptor");
@@ -1182,49 +1193,73 @@ fn validate_write_window(length: usize, offset: f64, count: f64) -> (usize, usiz
     (offset, count as usize)
 }
 
+// JavaScript validation errors group large integer spellings, unlike the
+// descriptor binding's numeric validation messages.
+fn fs_range_number(value: f64) -> String {
+    let spelling = format_number(value);
+    if !value.is_finite() || value.fract() != 0.0 || value.abs() <= 4_294_967_296.0 {
+        return spelling;
+    }
+    let (sign, digits) = spelling.strip_prefix('-').map_or(("", spelling.as_str()), |s| ("-", s));
+    let mut grouped = String::from(sign);
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) { grouped.push('_'); }
+        grouped.push(ch);
+    }
+    grouped
+}
+
 pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, position: f64) -> f64 {
     if !offset.is_finite() || offset.fract() != 0.0 {
         throw_out_of_range(format!(
             "The value of \"offset\" is out of range. It must be an integer. Received {}",
-            format_number(offset)
+            fs_range_number(offset)
         ));
     }
     if !(0.0..=9_007_199_254_740_991.0).contains(&offset) {
         throw_out_of_range(format!(
             "The value of \"offset\" is out of range. It must be >= 0 && <= 9007199254740991. Received {}",
-            format_number(offset)
+            fs_range_number(offset)
         ));
     }
-    if (0.0..1.0).contains(&length) {
-        return 0.0;
+    // Node normalizes length with ToInt32 before checking the window, position
+    // or descriptor. A zero result succeeds even for a closed descriptor.
+    let length = to_int32(length);
+    if length == 0 { return 0.0; }
+    let byte_length = bytes.with(|data| data.length);
+    if byte_length == 0 {
+        throw_value(JsError {
+            identity: Rc::new(()), name: "TypeError".to_owned(),
+            message: "The argument 'buffer' is empty and cannot be written. Received <Buffer >".to_owned(),
+            code: Some("ERR_INVALID_ARG_VALUE".to_owned()), cause: None, dom: None,
+        });
+    }
+    if length < 0 {
+        throw_out_of_range(format!(
+            "The value of \"length\" is out of range. It must be >= 0. Received {length}"
+        ));
+    }
+    let remaining = byte_length as f64 - offset;
+    if length as f64 > remaining {
+        throw_out_of_range(format!(
+            "The value of \"length\" is out of range. It must be <= {}. Received {length}",
+            format_number(remaining)
+        ));
     }
     if !position.is_finite() || position.fract() != 0.0 {
         throw_out_of_range(format!(
             "The value of \"position\" is out of range. It must be an integer. Received {}",
-            format_number(position)
+            fs_range_number(position)
         ));
     }
     if !(-1.0..=9_007_199_254_740_991.0).contains(&position) {
         throw_out_of_range(format!(
             "The value of \"position\" is out of range. It must be >= -1 && <= 9007199254740991. Received {}",
-            format_number(position)
+            fs_range_number(position)
         ));
     }
-    let byte_length = bytes.with(|data| data.length);
-    if offset > byte_length as f64 {
-        throw_out_of_range(format!(
-            "The value of \"offset\" is out of range. It must be >= 0 && <= 9007199254740991. Received {}",
-            format_number(offset)
-        ));
-    }
+    validate_write_fd(fd);
     let offset = offset as usize;
-    let remaining = byte_length - offset;
-    if length < 0.0 || length > remaining as f64 {
-        throw_out_of_range(format!(
-            "The value of \"length\" is out of range. It must be <= {remaining}. Received {}",
-            format_number(length)
-        ));
-    }
     let length = length as usize;
     use std::io::Read;
     bytes.with(|data| {
@@ -1253,4 +1288,47 @@ pub fn fs_read_fd_bytes(fd: f64) -> JsBytes<u8> {
 pub fn fs_read_fd(fd: f64, _encoding: &JsString) -> JsString {
     let bytes = fs_read_fd_bytes(fd);
     bytes_to_string(&bytes, &string("utf8"))
+}
+
+#[cfg(test)]
+mod descriptor_tests {
+    use super::*;
+
+    #[test]
+    fn sync_read_normalizes_length_before_descriptor_validation() {
+        let bytes = bytes_alloc::<u8>(2.0);
+        for length in [0.0, -0.0, 0.5, f64::NAN, f64::INFINITY, 4_294_967_296.0] {
+            assert_eq!(fs_read_sync(-1.0, &bytes, 99.0, length, -99.0), 0.0);
+        }
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fs_read_sync(-1.0, &bytes, 0.0, 4_294_967_297.0, -1.0);
+        })).unwrap_err();
+        let caught = caught_from_panic(failure);
+        assert_eq!(caught_error_code(&caught).as_deref(), Some("ERR_OUT_OF_RANGE"));
+        assert!(caught_error_message(&caught).contains("\"fd\""));
+    }
+
+    #[test]
+    fn sync_read_window_validation_precedes_position_and_fd() {
+        let bytes = bytes_alloc::<u8>(2.0);
+        for (offset, length, expected) in [(3.0, 1.0, "<= -1"), (0.0, -1.0, ">= 0")] {
+            let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                fs_read_sync(-1.0, &bytes, offset, length, -99.0);
+            })).unwrap_err();
+            let caught = caught_from_panic(failure);
+            let message = caught_error_message(&caught);
+            assert!(message.contains("\"length\""), "{message}");
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    #[test]
+    fn sync_close_checks_numeric_contract_before_lookup() {
+        for fd in [-1.0, 0.5, f64::NAN, f64::INFINITY, 2_147_483_648.0] {
+            let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fs_close(fd))).unwrap_err();
+            let caught = caught_from_panic(failure);
+            assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
+            assert_eq!(caught_error_code(&caught).as_deref(), Some("ERR_OUT_OF_RANGE"));
+        }
+    }
 }

@@ -604,7 +604,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     Type::String => {
                         format!("&runtime::JsString::from({})", expr(arg, function, module))
                     }
-                    Type::Array { .. } | Type::Stats => {
+                    Type::Array { .. } | Type::Bytes { .. } | Type::Stats => {
                         format!("&({})", expr(arg, function, module))
                     }
                     _ => expr(arg, function, module),

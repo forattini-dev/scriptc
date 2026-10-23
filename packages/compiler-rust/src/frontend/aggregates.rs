@@ -523,7 +523,7 @@ impl Lowerer<'_> {
         if matches!(
             node.kind(),
             SyntaxKind::CallExpression | SyntaxKind::NewExpression
-        ) && !matches!(&value, Ok(Expr::Intrinsic { .. }))
+        ) && !matches!(&value, Ok(Expr::Intrinsic { .. } | Expr::BytesNew { .. }))
         {
             self.var_call_effects();
         }

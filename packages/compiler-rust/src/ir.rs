@@ -1588,6 +1588,9 @@ fn validate_function(
                         "length" | "byteLength" | "byteOffset" => {
                             args.is_empty() && *r#type == Type::F64
                         }
+                        "get" => {
+                            args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::F64
+                        }
                         "join" => {
                             args.len() == 1
                                 && args[0].ty() == Type::String
@@ -3050,7 +3053,7 @@ mod tests {
         module.functions.truncate(1);
         let loc = module.functions[0].loc.clone();
         let string = Expr::StrLit {
-            value: "😀".into(),
+            value: "ðŸ˜€".into(),
             r#type: Type::String,
             loc: loc.clone(),
         };

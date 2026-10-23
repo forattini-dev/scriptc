@@ -69,6 +69,91 @@ impl Lowerer<'_> {
             loc: self.loc(node),
         }))
     }
+    // The portable byte get traps by design. Source indexing must guard it
+    // and retain undefined rather than fabricate a byte or trust checker bounds.
+    pub(super) fn bytes_index(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
+        let index = self.expression(node.argument_expression())?;
+        if index.ty() != Type::F64 {
+            return Err(self.refuse(node, "byte indexing requires a represented numeric key"));
+        }
+        let result = self.intern_union(vec![Type::F64, Type::Undefined]).unwrap();
+        let mut helper = helpers::Helper::new(
+            "bytes_index",
+            vec![Type::bytes(), Type::F64],
+            result.clone(),
+            self.loc(node),
+        );
+        let bytes = helper.param(0);
+        let index_slot = helper.param(1);
+        let binary = |op: &str, left, right, r#type| Expr::Bin {
+            op: op.into(),
+            left: Box::new(left),
+            right: Box::new(right),
+            r#type,
+            loc: helper.loc(),
+        };
+        let lower = binary(
+            ">=",
+            helper.read(&index_slot),
+            helper.number(0.0),
+            Type::Bool,
+        );
+        let upper = binary(
+            "<",
+            helper.read(&index_slot),
+            self.bytes_operation(node, helper.read(&bytes), "length", vec![], Type::F64),
+            Type::Bool,
+        );
+        let integer = binary(
+            "===",
+            binary("%", helper.read(&index_slot), helper.number(1.0), Type::F64),
+            helper.number(0.0),
+            Type::Bool,
+        );
+        let cond = Expr::Logical {
+            op: "&&".into(),
+            left: Box::new(Expr::Logical {
+                op: "&&".into(),
+                left: Box::new(lower),
+                right: Box::new(upper),
+                r#type: Type::Bool,
+                loc: helper.loc(),
+            }),
+            right: Box::new(integer),
+            r#type: Type::Bool,
+            loc: helper.loc(),
+        };
+        let byte = self.bytes_operation(
+            node,
+            helper.read(&bytes),
+            "get",
+            vec![helper.read(&index_slot)],
+            Type::F64,
+        );
+        let missing = Expr::UnitLit {
+            unit: "undefined",
+            r#type: Type::Undefined,
+            loc: self.loc(node),
+        };
+        let value = Expr::Ternary {
+            cond: Box::new(cond),
+            then: Box::new(self.coerce(byte, result.clone(), node)?),
+            else_: Box::new(self.coerce(missing, result.clone(), node)?),
+            r#type: result.clone(),
+            loc: self.loc(node),
+        };
+        helper.function.body.push(Stmt::Return {
+            value: Some(value),
+            loc: self.loc(node),
+        });
+        let callee = self.install_helper(helper.function);
+        Ok(Expr::Call {
+            callee,
+            args: vec![receiver, index],
+            r#type: result,
+            loc: self.loc(node),
+        })
+    }
     pub(super) fn bytes_operation(
         &self,
         node: Node,

@@ -113,6 +113,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-platform/crypto.ts",
         "rust-native-platform/stats.ts",
         "rust-native-platform/stat-errors.ts",
+        "rust-native-platform/descriptors.ts",
+        "rust-native-platform/descriptor-errors.ts",
+        "rust-native-codecs/indexing.ts",
         "rust-native-primitives/array-brand.ts",
         "rust-native-primitives/augmented-standard.ts",
         "rust-native-primitives/string-function.ts",
@@ -1890,7 +1893,7 @@ fn module_slots_check_tdz_on_reads_writes_defaults_and_cycles() {
 #[test]
 fn emit_modes_and_paths_with_spaces_preserve_sources_and_failed_outputs() {
     let temp = tempfile::tempdir().unwrap();
-    let input = temp.path().join("aÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o entry.ts");
+    let input = temp.path().join("aÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o entry.ts");
     fs::write(&input, "console.log('ok', 42);").unwrap();
     for (kind, extension) in [("ir", "json"), ("rust", "rs")] {
         let target = temp.path().join(format!("result.{extension}"));
@@ -3326,6 +3329,61 @@ fn stats_boundaries_preserve_existing_artifacts() {
 }
 
 #[test]
+fn descriptor_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "descriptor-boundary");
+    for source in [
+        "openSync('unused', 'rs');",
+        "openSync('unused', 0);",
+        "const flags = 'r'; openSync('unused', flags);",
+        "openSync('unused', 'w', 0o600);",
+        "openSync(new Uint8Array(1), 'r');",
+        "closeSync('1');",
+        "closeSync(1, 2);",
+        "readSync(1, new Uint8Array(1), {offset: 0});",
+        "readSync(1, new Uint8Array(1), 0, 1, 1n);",
+        "readSync(1, new Uint16Array(1), 0, 1, 0);",
+        "const bytes = new Uint8Array(1); console.log(bytes['0']);",
+        "const bytes = new Uint8Array(1); const value: number = bytes[99]; console.log(value);",
+        "function bad(bytes: Uint8Array): number { return bytes[99]; } bad(new Uint8Array(1));",
+    ] {
+        fs::write(
+            &input,
+            format!("// @ts-nocheck\nimport {{openSync, readSync, closeSync}} from 'node:fs';\n{source}\n"),
+        )
+        .unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
 fn async_context_boundaries_preserve_existing_artifacts() {
     let parent = root().join(".scriptc");
     fs::create_dir_all(&parent).unwrap();
@@ -3570,7 +3628,7 @@ fn unsupported_recursive_layouts_preserve_previous_artifacts() {
 fn module_metadata_keeps_source_paths_after_changing_working_directory() {
     let temp = tempfile::tempdir().unwrap();
     metadata_project(temp.path());
-    let input = temp.path().join("source # % café.mts");
+    let input = temp.path().join("source # % cafÃƒÂ©.mts");
     fs::write(&input, "import { fileURLToPath } from 'node:url'; console.log(import.meta.url); console.log(import.meta.filename); console.log(import.meta.dirname); console.log(fileURLToPath(import.meta.url));").unwrap();
     let target = binary(temp.path(), "different-output-name");
     success(
@@ -3915,7 +3973,7 @@ fn utf16_instance_keys_do_not_alias_empty_fields() {
         r#"
 class EmptyField { "": string = "present"; }
 function read(value: unknown, key: string): unknown { return (value as any)[key]; }
-const high = "😀".slice(0, 1);
+const high = "Ã°Å¸Ëœâ‚¬".slice(0, 1);
 const object = new EmptyField();
 console.log("keys", read(object, "") === "present", read(object, high) === undefined);
 "#,
