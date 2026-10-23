@@ -22,6 +22,10 @@ pub trait NativeJsonValue: Clone {
     fn json_keys(&self) -> Vec<JsString>;
     fn json_call(&self, holder: &Self, args: &[Self]) -> Self;
     fn json_primitive_string(&self) -> JsString;
+    fn json_raw_json(&self) -> Option<JsRawJson> { None }
+    fn json_from_raw_json(_value: JsRawJson) -> Self {
+        throw_type_error("scriptc: raw JSON values are not ported by this adapter".into())
+    }
 }
 
 struct NativeJsonSerialization<V> {
@@ -72,6 +76,10 @@ impl<V: NativeJsonValue> JsonValue for NativeJsonSerialization<V> {
     }
     fn write_json(&self, writer: &mut JsonWriter) {
         use NativeJsonKind as K;
+        if let Some(raw) = self.value.json_raw_json() {
+            raw.write_json(writer);
+            return;
+        }
         match self.value.json_kind() {
             K::Undefined | K::Null | K::Function | K::Symbol => writer.write_null(),
             K::Boolean(value) => value.write_json(writer),
@@ -190,19 +198,17 @@ pub fn native_json_stringify<V: NativeJsonValue>(args: Vec<V>) -> V {
     };
     let space = args.get(2).cloned().unwrap_or_else(V::json_undefined);
     let indent = match space.json_kind() {
-        K::Number(value) => " ".repeat(if value.is_nan() || value < 0.0 {
+        K::Number(value) => JsString::from(" ".repeat(if value.is_nan() || value < 0.0 {
             0
         } else {
             value.min(10.0) as usize
-        }),
+        })),
         K::String(value) => {
             let units = value.utf16_units().take(10).collect::<Vec<_>>();
-            String::from_utf16(&units).unwrap_or_else(|_| {
-                throw_type_error("scriptc: lone UTF-16 JSON indentation is not ported".into())
-            })
+            JsString::from_utf16(&units)
         }
         K::Unsupported => throw_type_error("scriptc: boxed JSON indentation is not ported".into()),
-        _ => String::new(),
+        _ => JsString::default(),
     };
     let root = V::json_root(value);
     let result = native_json_prepare(&root, &empty_string(), &callback, &properties);

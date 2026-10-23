@@ -73,7 +73,7 @@ pub(super) fn reads_this(node: Node) -> bool {
     visit(node, true)
 }
 
-fn strict(node: Node) -> bool {
+pub(super) fn strict(node: Node) -> bool {
     let file = get_source_file_of_node(node);
     let info = source_file_info(file);
     let format = program::get_source_file_meta_data(&info.path).implied_node_format;

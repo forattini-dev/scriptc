@@ -2,6 +2,8 @@
 // ordering, indentation and cycle tracking live in the shared Rust runtime.
 impl runtime::NativeJsonValue for NativeValue {
     fn json_kind(&self) -> runtime::NativeJsonKind { native_json_kind(self) }
+    fn json_raw_json(&self) -> Option<runtime::JsRawJson> { if let Self::RawJson(value) = self { Some(value.clone()) } else { None } }
+    fn json_from_raw_json(value: runtime::JsRawJson) -> Self { Self::RawJson(value) }
     fn json_undefined() -> Self { Self::Undefined }
     fn json_from_node(node: runtime::JsonNode) -> Self {
         match node {

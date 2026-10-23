@@ -41,14 +41,14 @@ struct JsonSeen {
 }
 
 pub struct JsonWriter {
-    output: String,
+    output: JsStringBuilder,
     stack: Vec<JsonSeen>,
 }
 
 impl JsonWriter {
     fn new() -> Self {
         Self {
-            output: String::new(),
+            output: JsStringBuilder::new(),
             stack: Vec::new(),
         }
     }
@@ -342,66 +342,57 @@ pub fn json_stringify<T: JsonValue>(value: &T) -> JsString {
     }
     let mut writer = JsonWriter::new();
     value.write_json(&mut writer);
-    JsString::from(writer.output)
+    writer.output.finish()
 }
 
-pub fn json_stringify_indented<T: JsonValue>(value: &T, indent: &str) -> JsString {
+pub fn json_stringify_indented<T: JsonValue, S: JsStringSource + ?Sized>(value: &T, indent: &S) -> JsString {
     let compact = json_stringify(value);
-    if indent.is_empty() {
-        return compact;
-    }
-    let mut output = String::with_capacity(compact.len() + indent.len() * 4);
-    let mut chars = compact.chars().peekable();
+    let indent = indent.to_js_string();
+    if indent.is_empty() { return compact; }
+    let mut output = JsStringBuilder::new();
+    let mut units = compact.encode_utf16().peekable();
     let mut depth = 0_usize;
     let mut in_string = false;
     let mut escaped = false;
-    while let Some(ch) = chars.next() {
+    let mut previous = None;
+    while let Some(unit) = units.next() {
         if in_string {
-            output.push(ch);
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
+            output.push_unit(unit);
+            if escaped { escaped = false; }
+            else if unit == 0x5c { escaped = true; }
+            else if unit == 0x22 { in_string = false; }
+            previous = Some(unit);
             continue;
         }
-        match ch {
-            '"' => {
-                in_string = true;
-                output.push(ch);
-            }
-            '{' | '[' => {
-                output.push(ch);
-                depth += 1;
-                let close = if ch == '{' { '}' } else { ']' };
-                if chars.peek() != Some(&close) {
+        match unit {
+            0x22 => { in_string = true; output.push_unit(unit); }
+            0x7b | 0x5b => {
+                output.push_unit(unit); depth += 1;
+                let close = if unit == 0x7b { 0x7d } else { 0x5d };
+                if units.peek() != Some(&close) {
                     output.push('\n');
-                    output.push_str(&indent.repeat(depth));
+                    for _ in 0..depth { output.push_str(&indent); }
                 }
             }
-            '}' | ']' => {
-                depth = depth
-                    .checked_sub(1)
-                    .expect("scriptc: malformed compact JSON nesting");
-                let open = if ch == '}' { '{' } else { '[' };
-                if !output.ends_with(open) {
+            0x7d | 0x5d => {
+                depth = depth.checked_sub(1).expect("scriptc: malformed compact JSON nesting");
+                let open = if unit == 0x7d { 0x7b } else { 0x5b };
+                if previous != Some(open) {
                     output.push('\n');
-                    output.push_str(&indent.repeat(depth));
+                    for _ in 0..depth { output.push_str(&indent); }
                 }
-                output.push(ch);
+                output.push_unit(unit);
             }
-            ',' => {
-                output.push(',');
-                output.push('\n');
-                output.push_str(&indent.repeat(depth));
+            0x2c => {
+                output.push_str(",\n");
+                for _ in 0..depth { output.push_str(&indent); }
             }
-            ':' => output.push_str(": "),
-            _ => output.push(ch),
+            0x3a => output.push_str(": "),
+            _ => output.push_unit(unit),
         }
+        previous = Some(unit);
     }
-    JsString::from(output)
+    output.finish()
 }
 
 pub enum JsonNode {

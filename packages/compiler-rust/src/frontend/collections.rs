@@ -227,6 +227,7 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn dictionary_set(&mut self, node: Node) -> Result<Stmt, String> {
+        self.guard_raw_json_write(node)?;
         let member = node.left();
         let obj = self.expression(member.expression())?;
         self.dictionary_set_value(node, obj)

@@ -846,6 +846,7 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn record_set(&mut self, node: Node) -> Result<Stmt, String> {
+        self.guard_raw_json_write(node)?;
         let member = node.left();
         if member.name().text() == "__proto__" {
             return Err(self.refuse(member, "ordinary prototype writes are not ported"));

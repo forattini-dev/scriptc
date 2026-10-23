@@ -42,7 +42,7 @@ impl Lowerer<'_> {
         // Broad annotations describe no closed layout. Retain the actual
         // owning value rather than projecting it into an empty record or
         // recursively treating Object's prototype methods as data fields.
-        if self.opaque_object_type(id) {
+        if self.opaque_object_type(id) || self.raw_json_type(id) {
             return Some(Type::Dyn);
         }
         if let Some(ty) = self.standard_callable_type(id) {
@@ -95,6 +95,9 @@ impl Lowerer<'_> {
         self.aggregate_type(id)
     }
     pub(super) fn ty(&mut self, node: Node) -> Result<Type, String> {
+        if let Some(ty) = self.raw_json_property_type(node) {
+            return Ok(ty);
+        }
         if let Some(ty) = self.json_function_type(node) {
             return Ok(ty);
         }

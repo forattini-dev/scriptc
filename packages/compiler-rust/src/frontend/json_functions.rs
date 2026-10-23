@@ -3,14 +3,84 @@ use super::*;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
 impl Lowerer<'_> {
+    pub(super) fn guard_raw_json_write(&mut self, node: Node) -> Result<(), String> {
+        fn branded(lowerer: &mut Lowerer<'_>, node: Node, active: &mut HashSet<u32>) -> bool {
+            let node = receivers::reference_node(node);
+            let ty = lowerer.checker.get_type_at_location(node);
+            if lowerer.raw_json_type(ty) {
+                return true;
+            }
+            if node.kind() == SyntaxKind::CallExpression {
+                return lowerer.json_function_origin(node.expression(), &mut HashSet::new())
+                    == Some("rawJSON");
+            }
+            if node.kind() != SyntaxKind::Identifier {
+                return false;
+            }
+            let symbol = lowerer.symbol(node);
+            if symbol == 0 || !active.insert(symbol) {
+                return false;
+            }
+            let decl = lowerer.checker.sym(SymbolId(symbol)).value_declaration;
+            !decl.is_nil()
+                && decl.kind() == SyntaxKind::VariableDeclaration
+                && decl.parent().flags().intersects(NodeFlags::CONST)
+                && !decl.initializer().is_nil()
+                && branded(lowerer, decl.initializer(), active)
+        }
+        if !receivers::strict(node) && branded(self, node.left().expression(), &mut HashSet::new())
+        {
+            return Err(self.refuse(
+                node,
+                "sloppy raw JSON writes require a native integrity contract; not ported",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn raw_json_property_type(&mut self, node: Node) -> Option<Type> {
+        if node.kind() != SyntaxKind::PropertyAccessExpression {
+            return None;
+        }
+        let receiver = self.checker.get_type_at_location(node.expression());
+        if !self.raw_json_type(receiver) {
+            return None;
+        }
+        // The standard declaration inherits Object's types, but the actual
+        // branded object has a null prototype and one frozen own data field.
+        Some(if node.name().text() == "rawJSON" {
+            Type::String
+        } else {
+            Type::Dyn
+        })
+    }
+
+    pub(super) fn raw_json_type(&self, id: TypeId) -> bool {
+        let symbol = self.checker.ty(id).symbol();
+        if symbol.0 == 0 {
+            return false;
+        }
+        let symbol = self.checker.sym(symbol);
+        symbol.name.as_ref() == "RawJSON"
+            && !symbol.declarations.is_empty()
+            && symbol.declarations.iter().all(|decl| {
+                decl.kind() == SyntaxKind::InterfaceDeclaration
+                    && source_frontend::frontend::bundled::bundled_lib_name(
+                        &source_file_info(get_source_file_of_node(*decl)).file_name,
+                    ) == Some("lib.es2026.json.d.ts")
+            })
+    }
+
     pub(super) fn json_callable_type(&self, id: TypeId) -> Option<Type> {
         let symbol = self.checker.ty(id).symbol().0;
         if symbol == 0 {
             return None;
         }
         let symbol = self.checker.sym(SymbolId(symbol));
-        if !matches!(symbol.name.as_ref(), "stringify" | "parse")
-            || symbol.declarations.is_empty()
+        if !matches!(
+            symbol.name.as_ref(),
+            "stringify" | "parse" | "rawJSON" | "isRawJSON"
+        ) || symbol.declarations.is_empty()
             || !symbol.declarations.iter().all(|decl| {
                 let file = source_file_info(get_source_file_of_node(*decl));
                 let owner = decl.parent();
@@ -39,25 +109,20 @@ impl Lowerer<'_> {
         let member = match node.name().text() {
             "stringify" => "stringify",
             "parse" => "parse",
+            "rawJSON" => "rawJSON",
+            "isRawJSON" => "isRawJSON",
             _ => return None,
         };
-        for (id, expected) in [
-            (self.symbol(node.expression()), "JSON"),
-            (self.symbol(node.name()), member),
-        ] {
-            if id == 0 {
-                return None;
-            }
-            let symbol = self.checker.sym(SymbolId(id));
-            if symbol.name.as_ref() != expected
-                || symbol.declarations.is_empty()
-                || !symbol.declarations.iter().all(|decl| {
-                    let file = source_file_info(get_source_file_of_node(*decl));
-                    source_frontend::frontend::bundled::bundled_lib_name(&file.file_name).is_some()
-                })
-            {
-                return None;
-            }
+        let global = self.symbol(node.expression());
+        if !self.primitive_symbol(global, "JSON", None) {
+            return None;
+        }
+        let symbol = self.symbol(node.name());
+        // Newer APIs can be used from unchecked JavaScript with older lib
+        // declarations. The proven global still owns the pinned native member.
+        // A declared override must always retain the standard member proof.
+        if symbol != 0 && !self.primitive_symbol(symbol, member, Some("JSON")) {
+            return None;
         }
         Some(member)
     }

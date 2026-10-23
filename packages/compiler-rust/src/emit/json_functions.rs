@@ -5,14 +5,20 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
     let mut used = false;
     module.visit_expressions(&mut |expr| {
         if let Expr::LibCall { r#fn, .. } = expr {
-            used |= matches!(r#fn.as_str(), "json.stringifyNative" | "json.parseNative");
+            used |= matches!(
+                r#fn.as_str(),
+                "json.stringifyNative"
+                    | "json.parseNative"
+                    | "json.rawJSONNative"
+                    | "json.isRawJSONNative"
+            );
         }
     });
     if !used {
         return;
     }
     out.push_str(include_str!("../json_values_support.rs"));
-    out.push_str("fn native_json_kind(value: &NativeValue) -> runtime::NativeJsonKind { use runtime::NativeJsonKind as K; match value { NativeValue::Undefined => K::Undefined, NativeValue::Null => K::Null, NativeValue::Boolean(v) => K::Boolean(*v), NativeValue::Number(v) => K::Number(*v), NativeValue::String(v) => K::String(runtime::string(v)), NativeValue::Symbol(_) => K::Symbol, NativeValue::Array(v) => K::Array { identity: v.identity(), length: runtime::array_len(v) as usize }, NativeValue::Object(v) => K::Object { identity: v.identity() }, NativeValue::Record(_,v) => K::Object { identity: v.identity() }, NativeValue::Map(v) => K::Object { identity: v.identity() }, NativeValue::Promise(v) => K::Object { identity: runtime::promise_view_identity(v) }, NativeValue::Regex(v) => K::Object { identity: std::rc::Rc::as_ptr(v) as usize },\n");
+    out.push_str("fn native_json_kind(value: &NativeValue) -> runtime::NativeJsonKind { use runtime::NativeJsonKind as K; match value { NativeValue::Undefined => K::Undefined, NativeValue::Null => K::Null, NativeValue::Boolean(v) => K::Boolean(*v), NativeValue::Number(v) => K::Number(*v), NativeValue::String(v) => K::String(runtime::string(v)), NativeValue::Symbol(_) => K::Symbol, NativeValue::Array(v) => K::Array { identity: v.identity(), length: runtime::array_len(v) as usize }, NativeValue::RawJson(v) => K::Object { identity: v.identity() }, NativeValue::Object(v) => K::Object { identity: v.identity() }, NativeValue::Record(_,v) => K::Object { identity: v.identity() }, NativeValue::Map(v) => K::Object { identity: v.identity() }, NativeValue::Promise(v) => K::Object { identity: runtime::promise_view_identity(v) }, NativeValue::Regex(v) => K::Object { identity: std::rc::Rc::as_ptr(v) as usize },\n");
     for (index, ty) in values::types(module).iter().enumerate() {
         if let Type::Record { shape_id } = ty
             && module.records[*shape_id].tuple
@@ -64,6 +70,8 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
     let runtime = match r#fn.as_str() {
         "json.stringifyNative" => "native_json_stringify",
         "json.parseNative" => "native_json_parse",
+        "json.rawJSONNative" => "native_json_raw_json",
+        "json.isRawJSONNative" => "native_json_is_raw_json",
         _ => return None,
     };
     Some(format!(

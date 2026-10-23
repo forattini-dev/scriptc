@@ -114,6 +114,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-primitives/opaque-objects.ts",
         "rust-native-primitives/string-addition.ts",
         "rust-native-primitives/json-presence.ts",
+        "rust-native-primitives/raw-json.ts",
+        "rust-native-primitives/raw-json-plain.js",
         "rust-native-primitives/opaque-maps.ts",
         "rust-native-primitives/conditions.ts",
         "rust-native-primitives/math-functions.ts",
@@ -3578,6 +3580,10 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
         (
             "const data = {}; console.log('rawJSON' in data);",
             "in operator requires a proven standard JSON object",
+        ),
+        (
+            "// @ts-nocheck\nconst value = JSON.rawJSON('1'); const alias = value; alias.rawJSON = '2';",
+            "sloppy raw JSON writes require a native integrity contract",
         ),
     ] {
         fs::write(&input, source).unwrap();
