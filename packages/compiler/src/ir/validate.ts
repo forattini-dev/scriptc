@@ -375,6 +375,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "crypto.x509ValidTo": { argTypes: [BYTES_U8], result: STRING },
   "crypto.x509ValidToStr": { argTypes: [STRING], result: STRING },
   "fs.closeSync": { argTypes: [F64], result: VOID },
+  "fs.appendFileSync": { argTypes: [STRING, STRING], result: VOID },
+  "fs.appendFileModeSync": { argTypes: [STRING, STRING, F64, BOOL], result: VOID },
   "stats.isFile": { argTypes: [STATS_T], result: BOOL },
   "stats.isDirectory": { argTypes: [STATS_T], result: BOOL },
   "stats.isSymbolicLink": { argTypes: [STATS_T], result: BOOL },

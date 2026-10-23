@@ -43,6 +43,7 @@ fn internal_operations_never_manufacture_source_exports() {
         assert!(by_ir(&format!("stats.{member}")).is_some());
     }
     for name in [
+        "appendFileModeSync",
         "mkdirModeSync",
         "mkdirRecursiveSync",
         "mkdirRecursiveModeSync",

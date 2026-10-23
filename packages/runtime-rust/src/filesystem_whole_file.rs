@@ -4,9 +4,18 @@
 /// OpenOptions applies the host umask and never chmods an existing file.
 pub fn fs_append_file_mode(path: &JsString, data: &JsString, mode: f64, exclusive: bool) {
     use std::io::Write;
+    if path.contains('\0') {
+        throw_invalid_arg_value(
+            "The argument 'path' must be a string, Uint8Array, or URL without null bytes. Received ",
+            path,
+        );
+    }
+    if !path.is_well_formed() {
+        throw_type_error("scriptc: lone UTF-16 append paths are not ported".into());
+    }
     let mode = fs_creation_mode(mode);
     let mut options = std::fs::OpenOptions::new();
-    options.append(true).create(true).create_new(exclusive);
+    options.create(true).append(true).create_new(exclusive);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -16,7 +25,13 @@ pub fn fs_append_file_mode(path: &JsString, data: &JsString, mode: f64, exclusiv
     let _ = mode;
     let mut file = match options.open(path.to_utf8_lossy()) {
         Ok(file) => file,
-        Err(error) => throw_fs_error("open", path, error),
+        Err(error) => {
+            #[cfg(windows)]
+            let resolved = if path.is_empty() { path.clone() } else { path_win32_resolve(&array_new(vec![path.clone()])) };
+            #[cfg(windows)]
+            let path = &resolved;
+            throw_fs_error("open", path, error)
+        },
     };
     if let Err(error) = file.write_all(data.as_bytes()) {
         throw_fs_error("write", path, error);

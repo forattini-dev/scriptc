@@ -108,6 +108,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-platform/append.ts",
+        "rust-native-platform/append-errors.ts",
         "rust-native-platform/mkdir.ts",
         "rust-native-platform/paths.ts",
         "rust-native-platform/crypto.ts",
@@ -3472,6 +3474,113 @@ fn buffer_boundaries_preserve_existing_artifacts() {
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(
             !result.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains(expected)
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn append_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "append-boundary");
+    fs::write(&input, "import {appendFileSync} from 'node:fs'; appendFileSync('file', 'data', {encoding:'utf8',mode:0o600});").unwrap();
+    success(
+        &Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(temp.path().join("append-canary.json"))
+            .output()
+            .unwrap(),
+    );
+    for (source, expected) in [
+        (
+            "appendFileSync('x');",
+            "appendFileSync needs path/data arguments without spreads",
+        ),
+        (
+            "appendFileSync(1, 'x');",
+            "appendFileSync needs represented string path/data and numeric mode",
+        ),
+        (
+            "appendFileSync('x', new Uint8Array(1));",
+            "appendFileSync needs represented string path/data and numeric mode",
+        ),
+        (
+            "appendFileSync('x', 'y', 'hex');",
+            "appendFileSync requires inline options or literal utf8/utf-8 encoding",
+        ),
+        (
+            "const options = {mode: 0o600}; appendFileSync('x', 'y', options);",
+            "appendFileSync requires inline options or literal utf8/utf-8 encoding",
+        ),
+        (
+            "appendFileSync('x', 'y', {encoding:'latin1'});",
+            "appendFileSync options require literal",
+        ),
+        (
+            "appendFileSync('x', 'y', {mode:'600'});",
+            "appendFileSync needs represented string path/data and numeric mode",
+        ),
+        (
+            "appendFileSync('x', 'y', {flag:'w'});",
+            "appendFileSync options require literal",
+        ),
+        (
+            "appendFileSync('x', 'y', {flush:true});",
+            "appendFileSync options require literal",
+        ),
+        (
+            "appendFileSync('x', 'y', {get mode(){return 0o600;}});",
+            "appendFileSync options require plain data properties",
+        ),
+        (
+            "appendFileSync('x', 'y', {...{mode:0o600}});",
+            "appendFileSync options require plain data properties",
+        ),
+        (
+            "appendFileSync(...['x','y']);",
+            "appendFileSync needs path/data arguments without spreads",
+        ),
+        (
+            "appendFileSync('x', 'y', {['mo'+'de']:0o600});",
+            "appendFileSync options require literal",
+        ),
+    ] {
+        fs::write(
+            &input,
+            format!("// @ts-nocheck\nimport {{appendFileSync}} from 'node:fs';\n{source}\n"),
+        )
+        .unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
                 && stderr.contains("SCN1001")
                 && stderr.contains(expected)
                 && !stderr.contains("panicked"),

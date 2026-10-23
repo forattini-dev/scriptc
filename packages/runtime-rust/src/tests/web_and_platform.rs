@@ -908,6 +908,43 @@
     }
 
     #[test]
+    fn append_creates_empty_files_and_keeps_existing_content_and_permissions() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("scriptc-append-{}-{suffix}", std::process::id()));
+        let name = JsString::from(path.to_string_lossy().as_ref());
+        fs_append_file_mode(&name, &string(""), 0o600 as f64, false);
+        assert_eq!(std::fs::read(&path).unwrap(), b"");
+        #[cfg(unix)]
+        let initial_mode = {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode & 0o077, 0);
+            mode
+        };
+        fs_append_file_mode(&name, &string("first"), 0o777 as f64, false);
+        fs_append_file(&name, &string("last"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"firstlast");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, initial_mode);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn append_does_not_replace_lone_surrogate_paths() {
+        let path = JsString::from_utf16(&[0xd800]);
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fs_append_file(&path, &string("data"));
+        })).expect_err("unsupported path must fail before opening a lossy spelling");
+        let caught = caught_from_panic(payload);
+        assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
+        assert_eq!(caught_error_message(&caught).as_ref(), "scriptc: lone UTF-16 append paths are not ported");
+    }
+
+    #[test]
     fn file_handle_aliases_share_close_state_and_last_drop_closes() {
         let baseline = live_heap_objects();
         let suffix = std::time::SystemTime::now()

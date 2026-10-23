@@ -51,12 +51,29 @@ pub(super) fn apis() -> Vec<Api> {
             &["fs_write_file", "fs_write_file_bytes", "fs_write_file_mode"],
             "Rust text/bytes I/O exists; native flags, encoding, descriptor and error contracts still need porting",
         ),
-        Api::runtime_only(
+        Api::native(
             "fs",
             "appendFileSync",
-            Access::Call,
-            &["fs_append_file"],
-            "Rust append exists; native options, descriptor and publication contracts still need porting",
+            Lowering::AppendFile,
+            vec![
+                call!(
+                    "fs.appendFileSync",
+                    [String, String],
+                    Type::Void,
+                    "fs_append_file"
+                ),
+                call!(
+                    "fs.appendFileModeSync",
+                    [String, String, Type::F64, Bool],
+                    Type::Void,
+                    "fs_append_file_mode"
+                ),
+            ],
+            "Well-formed string paths and string data; default/literal utf8 or utf-8 encoding, null/undefined options or plain inline options with numeric mode, literal a flag and false flush. Source effects precede validation; create-only mode and append semantics. Descriptor/Buffer/URL paths, byte data, other encodings/flags, dynamic options, getters, spreads and flush=true refused; error name/message/code represented",
+            &[
+                "tests/corpus/rust-native-platform/append.ts",
+                "tests/corpus/rust-native-platform/append-errors.ts",
+            ],
         ),
         stat_api("statSync", "fs.statSync", "fs_stat_sync"),
         stat_api("lstatSync", "fs.lstatSync", "fs_lstat_sync"),

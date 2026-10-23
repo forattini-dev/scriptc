@@ -165,7 +165,7 @@ fn fs_creation_mode(mode: f64) -> u32 {
 }
 
 fn fs_creation_mode_named(mode: f64, name: &str) -> u32 {
-    let received = format_number(mode);
+    let received = bytes_received_number(mode);
     if !mode.is_finite() || mode.trunc() != mode {
         throw_out_of_range(format!(
             "The value of \"{name}\" is out of range. It must be an integer. Received {received}"
@@ -213,18 +213,7 @@ pub fn fs_write_file_bytes(path: &JsString, data: &JsBytes<u8>) {
 }
 
 pub fn fs_append_file(path: &JsString, data: &JsString) {
-    use std::io::Write;
-    let mut file = match std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path.to_utf8_lossy())
-    {
-        Ok(file) => file,
-        Err(error) => throw_fs_error("open", path, error),
-    };
-    if let Err(error) = file.write_all(data.as_bytes()) {
-        throw_fs_error("write", path, error);
-    }
+    fs_append_file_mode(path, data, 0o666 as f64, false);
 }
 
 pub fn fs_exists(path: &JsString) -> bool {
