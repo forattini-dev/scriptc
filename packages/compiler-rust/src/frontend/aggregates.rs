@@ -933,21 +933,7 @@ impl Lowerer<'_> {
         let mut left = self.expression(node.left())?;
         let mut right = self.expression(node.right())?;
         if op == "+" && (left.ty() == Type::String || right.ty() == Type::String) {
-            // Addition uses the default ToPrimitive hint. Only primitives
-            // share the template's string conversion semantics here.
-            if ![left.ty(), right.ty()].iter().all(|t| {
-                matches!(
-                    t,
-                    Type::String | Type::F64 | Type::Bool | Type::Null | Type::Undefined
-                )
-            }) {
-                return Err(
-                    self.refuse(node, "object ToPrimitive for string addition is not ported")
-                );
-            }
-            let left = self.string_value(left, node.left(), strings::Context::Template)?;
-            let right = self.string_value(right, node.right(), strings::Context::Template)?;
-            return Ok(self.string_concat(left, right, node));
+            return self.string_addition(left, right, node);
         }
         let data_records = |ty: Type| {
             let arms = match ty.clone() {

@@ -6,7 +6,15 @@ use std::{
 };
 
 fn compiler() -> &'static str {
-    env!("CARGO_BIN_EXE_scriptc")
+    // A frozen compiler lets a long differential run keep one implementation
+    // and runtime snapshot while development continues in the checkout.
+    static COMPILER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    COMPILER
+        .get_or_init(|| {
+            std::env::var("SCRIPTC_NATIVE_COMPILER_BIN")
+                .unwrap_or_else(|_| env!("CARGO_BIN_EXE_scriptc").into())
+        })
+        .as_str()
 }
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -104,6 +112,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-primitives/augmented-standard.ts",
         "rust-native-primitives/string-function.ts",
         "rust-native-primitives/opaque-objects.ts",
+        "rust-native-primitives/string-addition.ts",
         "rust-native-primitives/opaque-maps.ts",
         "rust-native-primitives/conditions.ts",
         "rust-native-primitives/math-functions.ts",
@@ -3548,6 +3557,14 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
         (
             "'x'.slice({ valueOf: () => 1 } as any);",
             "standard numeric arguments require represented primitives",
+        ),
+        (
+            "const value = { valueOf: () => 1 }; console.log(value + 'x');",
+            "object ToPrimitive for string addition is not ported",
+        ),
+        (
+            "console.log('x' + [1, 2]);",
+            "object ToPrimitive for string addition is not ported",
         ),
     ] {
         fs::write(&input, source).unwrap();

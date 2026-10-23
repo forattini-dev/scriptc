@@ -10,6 +10,75 @@ pub(super) enum Context {
 }
 
 impl Lowerer<'_> {
+    pub(super) fn string_addition(
+        &mut self,
+        left: Expr,
+        right: Expr,
+        node: Node,
+    ) -> Result<Expr, String> {
+        if left.ty() == Type::String && right.ty() == Type::String {
+            return Ok(self.string_concat(left, right, node));
+        }
+        for ty in [left.ty(), right.ty()] {
+            if self.native_type_contains(&ty, |ty| {
+                !matches!(
+                    ty,
+                    Type::String
+                        | Type::F64
+                        | Type::Bool
+                        | Type::Null
+                        | Type::Undefined
+                        | Type::Void
+                        | Type::Symbol
+                        | Type::Dyn
+                        | Type::Caught
+                        | Type::Union { .. }
+                )
+            }) {
+                return Err(
+                    self.refuse(node, "object ToPrimitive for string addition is not ported")
+                );
+            }
+        }
+        self.ensure_exception_classes(node)?;
+        let capture = |value: Expr, site: Node| {
+            if value.ty() == Type::Caught {
+                Ok(Expr::CaughtToDyn {
+                    value: Box::new(value),
+                    r#type: Type::Dyn,
+                    loc: self.loc(site),
+                })
+            } else {
+                self.coerce(value, Type::Dyn, site)
+            }
+        };
+        // Both operand values are captured before ToString can throw. In
+        // particular a left-hand Symbol must not suppress right-hand effects.
+        let args = vec![capture(left, node.left())?, capture(right, node.right())?];
+        let mut helper = Helper::new(
+            "string_addition",
+            vec![Type::Dyn, Type::Dyn],
+            Type::String,
+            self.loc(node),
+        );
+        let text = |index| Expr::ToString {
+            operand: Box::new(helper.read(&helper.param(index))),
+            r#type: Type::String,
+            loc: helper.loc(),
+        };
+        let value = self.string_concat(text(0), text(1), node);
+        helper.function.body.push(Stmt::Return {
+            value: Some(value),
+            loc: helper.loc(),
+        });
+        Ok(Expr::Call {
+            callee: self.install_helper(helper.function),
+            args,
+            r#type: Type::String,
+            loc: self.loc(node),
+        })
+    }
+
     fn string_literal(&self, value: &str, node: Node) -> Expr {
         Expr::StrLit {
             value: value.into(),
