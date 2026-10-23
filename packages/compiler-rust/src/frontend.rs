@@ -50,6 +50,7 @@ mod regex;
 mod sets;
 mod spreads;
 mod standard_functions;
+mod standard_objects;
 mod storage;
 mod strings;
 mod symbols;
@@ -1186,6 +1187,7 @@ impl<'a> Lowerer<'a> {
                     SyntaxKind::ExclamationEqualsEqualsToken => "!==",
                     SyntaxKind::AmpersandAmpersandToken => "&&",
                     SyntaxKind::BarBarToken => "||",
+                    SyntaxKind::InKeyword => "in",
                     _ => return Err(self.refuse(node, "binary operator is not ported")),
                 };
                 self.binary(node, op)

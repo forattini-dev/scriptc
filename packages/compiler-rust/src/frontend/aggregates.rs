@@ -898,6 +898,9 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn binary(&mut self, node: Node, op: &str) -> Result<Expr, String> {
+        if op == "in" {
+            return self.standard_object_presence(node);
+        }
         if matches!(op, "&&" | "||") {
             return self.logical(node, op);
         }

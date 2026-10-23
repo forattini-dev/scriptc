@@ -113,6 +113,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-primitives/string-function.ts",
         "rust-native-primitives/opaque-objects.ts",
         "rust-native-primitives/string-addition.ts",
+        "rust-native-primitives/json-presence.ts",
         "rust-native-primitives/opaque-maps.ts",
         "rust-native-primitives/conditions.ts",
         "rust-native-primitives/math-functions.ts",
@@ -3565,6 +3566,18 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
         (
             "console.log('x' + [1, 2]);",
             "object ToPrimitive for string addition is not ported",
+        ),
+        (
+            "// @ts-nocheck\nconst key = { toString: () => 'rawJSON' }; console.log(key in JSON);",
+            "object ToPropertyKey for standard object presence is not ported",
+        ),
+        (
+            "export {}; const JSON = { rawJSON: false }; console.log('stringify' in JSON);",
+            "in operator requires a proven standard JSON object",
+        ),
+        (
+            "const data = {}; console.log('rawJSON' in data);",
+            "in operator requires a proven standard JSON object",
         ),
     ] {
         fs::write(&input, source).unwrap();
