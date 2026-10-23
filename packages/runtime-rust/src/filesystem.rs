@@ -1193,33 +1193,17 @@ fn validate_write_window(length: usize, offset: f64, count: f64) -> (usize, usiz
     (offset, count as usize)
 }
 
-// JavaScript validation errors group large integer spellings, unlike the
-// descriptor binding's numeric validation messages.
-fn fs_range_number(value: f64) -> String {
-    let spelling = format_number(value);
-    if !value.is_finite() || value.fract() != 0.0 || value.abs() <= 4_294_967_296.0 {
-        return spelling;
-    }
-    let (sign, digits) = spelling.strip_prefix('-').map_or(("", spelling.as_str()), |s| ("-", s));
-    let mut grouped = String::from(sign);
-    for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) { grouped.push('_'); }
-        grouped.push(ch);
-    }
-    grouped
-}
-
 pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, position: f64) -> f64 {
     if !offset.is_finite() || offset.fract() != 0.0 {
         throw_out_of_range(format!(
             "The value of \"offset\" is out of range. It must be an integer. Received {}",
-            fs_range_number(offset)
+            bytes_received_number(offset)
         ));
     }
     if !(0.0..=9_007_199_254_740_991.0).contains(&offset) {
         throw_out_of_range(format!(
             "The value of \"offset\" is out of range. It must be >= 0 && <= 9007199254740991. Received {}",
-            fs_range_number(offset)
+            bytes_received_number(offset)
         ));
     }
     // Node normalizes length with ToInt32 before checking the window, position
@@ -1230,7 +1214,7 @@ pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, posi
     if byte_length == 0 {
         throw_value(JsError {
             identity: Rc::new(()), name: "TypeError".to_owned(),
-            message: "The argument 'buffer' is empty and cannot be written. Received <Buffer >".to_owned(),
+            message: format!("The argument 'buffer' is empty and cannot be written. Received {}", if bytes_is_buffer(bytes) { "<Buffer >" } else { "Uint8Array(0) []" }),
             code: Some("ERR_INVALID_ARG_VALUE".to_owned()), cause: None, dom: None,
         });
     }
@@ -1249,13 +1233,13 @@ pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, posi
     if !position.is_finite() || position.fract() != 0.0 {
         throw_out_of_range(format!(
             "The value of \"position\" is out of range. It must be an integer. Received {}",
-            fs_range_number(position)
+            bytes_received_number(position)
         ));
     }
     if !(-1.0..=9_007_199_254_740_991.0).contains(&position) {
         throw_out_of_range(format!(
             "The value of \"position\" is out of range. It must be >= -1 && <= 9007199254740991. Received {}",
-            fs_range_number(position)
+            bytes_received_number(position)
         ));
     }
     validate_write_fd(fd);

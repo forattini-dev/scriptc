@@ -996,6 +996,22 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     const accessor = expr.fn.slice("spawnRes.".length);
     return `match runtime::spawn_result_${accessor}(&(${context.emitExpr(arg)})) { Some(value) => ${name}::${context.unionVariant(valueTag)}(value), None => ${name}::${context.unionVariant(emptyTag)}, }`;
   }
+  if (expr.fn === "buffer.alloc" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::buffer_alloc(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "buffer.isBuffer" && expr.args.length === 1 && arg !== undefined) {
+    const dyn = context.dynTypeName();
+    return `match &(${context.emitExpr(arg)}) { ${dyn}::Buffer(_) => true, ${dyn}::Bytes(value) => runtime::bytes_is_buffer(value), _ => false }`;
+  }
+  if (expr.fn === "bytes.offset" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::bytes_source_offset(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "bytes.sliceDispatch" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+    const value = context.nextTemporary();
+    const start = context.nextTemporary();
+    const end = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; let ${start} = ${context.emitExpr(expr.args[1])}; let ${end} = ${context.emitExpr(expr.args[2])}; runtime::bytes_slice_method(&${value}, ${start}, ${end}) }`;
+  }
   if (expr.fn === "buffer.fromStr" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
     return `runtime::buffer_from_string(&(${context.emitExpr(arg)}), &(${context.emitExpr(expr.args[1])}))`;
   }

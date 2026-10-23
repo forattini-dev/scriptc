@@ -16,6 +16,7 @@ use std::{
 mod aggregates;
 mod arrays;
 mod async_context;
+mod buffers;
 mod callables;
 mod callbacks;
 mod child_process;
@@ -968,6 +969,7 @@ impl<'a> Lowerer<'a> {
             node.kind(),
             SyntaxKind::CallExpression | SyntaxKind::NewExpression
         ) && !matches!(&value, Ok(Expr::Intrinsic { .. } | Expr::BytesNew { .. }))
+            && !matches!(&value, Ok(Expr::LibCall { r#fn, .. }) if r#fn == "buffer.alloc")
         {
             self.var_call_effects();
         }
@@ -1285,6 +1287,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.buffer_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.stats_call(node)? {
                     return Ok(value);
                 }

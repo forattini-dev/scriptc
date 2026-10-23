@@ -54,6 +54,9 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                 emit(receiver)
             )
         }
+        Expr::LibCall { r#fn, args, .. } if r#fn == "buffer.isBuffer" => {
+            format!("native_value_is_buffer(&({}))", emit(&args[0]))
+        }
         Expr::LibCall { r#fn, args, .. } if r#fn == "buffer.fromStr" => format!(
             "{{ let value = {}; let encoding = {}; runtime::buffer_from_string(&runtime::JsString::from(value), &runtime::JsString::from(encoding)) }}",
             emit(&args[0]),

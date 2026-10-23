@@ -157,6 +157,7 @@ pub struct BytesData<T: ByteElement> {
     backing: Option<ByteBacking>,
     offset: usize,
     length: usize,
+    buffer: bool,
 }
 
 impl<T: ByteElement> Trace for BytesData<T> {
@@ -292,6 +293,7 @@ pub fn typed_bytes_join(value: &JsTypedBytes, separator: &JsString) -> JsString 
 
 fn bytes_from_elements<T: ByteElement>(elements: Vec<T>) -> JsBytes<T> {
     Gc::new(BytesData {
+        buffer: false,
         length: elements.len(),
         storage: Rc::new(RefCell::new(elements)),
         backing: None,
@@ -310,6 +312,7 @@ pub fn bytes_alloc<T: ByteElement>(length: f64) -> JsBytes<T> {
     }
     let length = length as usize;
     Gc::new(BytesData {
+        buffer: false,
         storage: Rc::new(RefCell::new(vec![T::default(); length])),
         backing: None,
         offset: 0,

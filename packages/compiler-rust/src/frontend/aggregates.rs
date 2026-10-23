@@ -524,6 +524,7 @@ impl Lowerer<'_> {
             node.kind(),
             SyntaxKind::CallExpression | SyntaxKind::NewExpression
         ) && !matches!(&value, Ok(Expr::Intrinsic { .. } | Expr::BytesNew { .. }))
+            && !matches!(&value, Ok(Expr::LibCall { r#fn, .. }) if r#fn == "buffer.alloc")
         {
             self.var_call_effects();
         }

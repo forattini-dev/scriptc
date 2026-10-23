@@ -46,6 +46,7 @@ pub enum Lowering {
     PathBasename,
     Directory,
     Descriptor,
+    Buffer,
     Property,
     Special,
     Unported,
@@ -141,6 +142,7 @@ macro_rules! call {
     };
 }
 use Type::{Bool, String};
+mod buffer;
 mod bun;
 mod crypto;
 mod filesystem;
@@ -156,6 +158,7 @@ pub fn apis() -> &'static [Api] {
     APIS.get_or_init(|| {
         [
             math::apis(),
+            buffer::apis(),
             path::apis(),
             platform::apis(),
             filesystem::apis(),
@@ -199,7 +202,12 @@ pub fn by_ir(name: &str) -> Option<Builtin> {
         .flat_map(|api| &api.operations)
         .find(|op| op.ir == name)
         .cloned()
-        .or_else(|| math::internal().into_iter().find(|op| op.ir == name))
+        .or_else(|| {
+            math::internal()
+                .into_iter()
+                .chain(buffer::internal())
+                .find(|op| op.ir == name)
+        })
 }
 /// An implementation inventory, not a complete Node/Bun compatibility matrix.
 pub fn manifest() -> serde_json::Value {

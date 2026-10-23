@@ -148,6 +148,17 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
         }
     }
     out.push_str("_ => false } }\n");
+    out.push_str("fn native_value_is_buffer(value: &NativeValue) -> bool { match value {\n");
+    for (index, ty) in types.iter().enumerate() {
+        if matches!(ty, Type::Bytes { .. }) {
+            writeln!(
+                out,
+                "NativeValue::V{index}(bytes) => runtime::bytes_is_buffer(bytes),"
+            )
+            .unwrap();
+        }
+    }
+    out.push_str("_ => false } }\n");
     out.push_str("fn native_value_is_function(value: &NativeValue) -> bool { match value {\n");
     for (i, ty) in types.iter().enumerate() {
         if matches!(ty, Type::Func { .. }) {

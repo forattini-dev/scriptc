@@ -29,6 +29,7 @@ impl Lowerer<'_> {
     pub(super) fn standard_byte_type(&self, id: TypeId) -> bool {
         self.standard_name(self.checker.ty(id).symbol().0, &["Uint8Array"])
             .is_some()
+            || self.standard_buffer_type(id)
     }
     pub(super) fn codec_new(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let symbol = self.symbol(node.expression());
@@ -214,6 +215,21 @@ impl Lowerer<'_> {
                 ));
             }
             let receiver = self.expected_expression(node.expression(), Type::bytes())?;
+            if node.name().text() == "byteOffset" {
+                let source_type = self.checker.get_type_at_location(node.expression());
+                if self.standard_buffer_type(source_type) {
+                    return Err(self.refuse(
+                        node,
+                        "Buffer pool and byteOffset observations are not ported",
+                    ));
+                }
+                return Ok(Some(Expr::LibCall {
+                    r#fn: "bytes.offset".into(),
+                    args: vec![receiver],
+                    r#type: Type::F64,
+                    loc: self.loc(node),
+                }));
+            }
             return Ok(Some(self.bytes_operation(
                 node,
                 receiver,
@@ -306,6 +322,32 @@ impl Lowerer<'_> {
                 }
                 _ => return Err(self.refuse(node, "Uint8Array method/arity is not ported")),
             };
+            if method == "slice" {
+                let mut args = vec![receiver];
+                args.extend(values);
+                if args.len() == 1 {
+                    args.push(Expr::NumLit {
+                        value: 0.0,
+                        spelling: None,
+                        r#type: Type::F64,
+                        loc: self.loc(node),
+                    });
+                }
+                if args.len() == 2 {
+                    args.push(Expr::NumLit {
+                        value: f64::MAX,
+                        spelling: None,
+                        r#type: Type::F64,
+                        loc: self.loc(node),
+                    });
+                }
+                return Ok(Some(Expr::LibCall {
+                    r#fn: "bytes.sliceDispatch".into(),
+                    args,
+                    r#type: result,
+                    loc: self.loc(node),
+                }));
+            }
             return Ok(Some(
                 self.bytes_operation(node, receiver, method, values, result),
             ));

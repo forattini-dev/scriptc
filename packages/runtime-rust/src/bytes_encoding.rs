@@ -39,6 +39,7 @@ pub fn bytes_slice<T: ByteElement>(
         let end = bytes_relative_index(end, data.length, data.length).max(start);
         if view {
             Gc::new(BytesData {
+                buffer: data.buffer,
                 storage: data.storage.clone(),
                 backing: data.backing.clone(),
                 offset: data.offset + start,
@@ -53,6 +54,7 @@ pub fn bytes_slice<T: ByteElement>(
                 data.storage.borrow()[data.offset + start..data.offset + end].to_vec()
             };
             Gc::new(BytesData {
+                buffer: false,
                 length: copied.len(),
                 storage: Rc::new(RefCell::new(copied)),
                 backing: None,
@@ -63,6 +65,9 @@ pub fn bytes_slice<T: ByteElement>(
 }
 
 pub fn bytes_byte_offset(bytes: &JsBytes<u8>) -> f64 {
+    if bytes_is_buffer(bytes) {
+        throw_type_error("scriptc: Buffer pool and byteOffset observations are not ported".into());
+    }
     bytes.with(|data| data.offset as f64)
 }
 
@@ -113,6 +118,7 @@ pub fn data_view_new<T: ByteElement>(
         total - start
     };
     Gc::new(BytesData {
+        buffer: false,
         storage: Rc::new(RefCell::new(Vec::new())),
         backing: Some(backing),
         offset: start,
@@ -501,6 +507,7 @@ pub fn string_decoder_end(encoding: &JsString, pending: f64) -> JsString {
 
 fn bytes_from_vec(values: Vec<u8>) -> JsBytes<u8> {
     Gc::new(BytesData {
+        buffer: false,
         length: values.len(),
         storage: Rc::new(RefCell::new(values)),
         backing: None,
@@ -912,4 +919,94 @@ pub fn bytes_write_num_var(
     } as u64;
     bytes_write_unsigned(bytes, offset, width, little_endian, value);
     (offset + width) as f64
+}
+
+/// Buffer's unsafe allocation permits unspecified contents. Rust keeps them
+/// initialized without exposing uninitialized memory or a JavaScript engine.
+pub fn buffer_alloc(size: f64) -> JsBytes<u8> {
+    if !size.is_finite() || !(0.0..=9_007_199_254_740_991.0).contains(&size) {
+        throw_value(JsError {
+            identity: Rc::new(()),
+            name: "RangeError".to_owned(),
+            message: format!(
+                "The value of \"size\" is out of range. It must be >= 0 && <= 9007199254740991. Received {}",
+                bytes_received_number(size)
+            ),
+            code: Some("ERR_OUT_OF_RANGE".to_owned()),
+            cause: None,
+            dom: None,
+        });
+    }
+    let count = size.trunc() as usize;
+    let mut storage = Vec::new();
+    if storage.try_reserve_exact(count).is_err() {
+        throw_range_error("Array buffer allocation failed".to_owned());
+    }
+    storage.resize(count, 0);
+    Gc::new(BytesData {
+        storage: Rc::new(RefCell::new(storage)),
+        backing: None,
+        offset: 0,
+        length: count,
+        buffer: true,
+    })
+}
+
+pub fn bytes_is_buffer(bytes: &JsBytes<u8>) -> bool {
+    bytes.with(|data| data.buffer)
+}
+
+pub fn bytes_slice_method(bytes: &JsBytes<u8>, start: f64, end: f64) -> JsBytes<u8> {
+    bytes_slice(bytes, start, end, bytes_is_buffer(bytes))
+}
+
+pub fn bytes_source_offset(bytes: &JsBytes<u8>) -> f64 {
+    bytes_byte_offset(bytes)
+}
+
+#[cfg(test)]
+mod buffer_allocation_tests {
+    use super::*;
+    #[test]
+    fn brands_follow_views_but_not_typed_array_copies() {
+        let owner = buffer_alloc(4.0);
+        assert!(bytes_is_buffer(&owner));
+        bytes_set(&owner, 1.0, 20.0);
+        let view = bytes_slice_method(&owner, 1.0, 3.0);
+        assert!(bytes_is_buffer(&view));
+        bytes_set(&view, 0.0, 91.0);
+        assert_eq!(bytes_get(&owner, 1.0), 91.0);
+        let copied = bytes_copy(&owner);
+        assert!(!bytes_is_buffer(&copied));
+        bytes_set(&copied, 1.0, 7.0);
+        assert_eq!(bytes_get(&owner, 1.0), 91.0);
+        let intrinsic_copy = bytes_slice(&owner, 1.0, 3.0, false);
+        assert!(!bytes_is_buffer(&intrinsic_copy));
+        let plain = bytes_from_array::<u8>(&array_new(vec![1.0, 2.0]));
+        let sliced = bytes_slice_method(&plain, 0.0, 1.0);
+        assert!(!bytes_is_buffer(&sliced));
+        bytes_set(&sliced, 0.0, 9.0);
+        assert_eq!(bytes_get(&plain, 0.0), 1.0);
+    }
+    #[test]
+    fn fresh_buffers_are_initialized_and_do_not_share_owners() {
+        let first = buffer_alloc(2.9);
+        let second = buffer_alloc(2.0);
+        assert_eq!(bytes_len(&first), 2.0);
+        assert!(!first.ptr_eq(&second));
+        assert_eq!(bytes_join(&first, &string(",")).as_ref(), "0,0");
+        bytes_set(&first, 0.0, 99.0);
+        assert_eq!(bytes_get(&second, 0.0), 0.0);
+        assert!(bytes_is_buffer(&buffer_alloc(-0.0)));
+    }
+    #[test]
+    fn unsupported_pool_offsets_fail_explicitly_through_typed_aliases() {
+        let value = buffer_alloc(1.0);
+        let failure =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bytes_source_offset(&value)))
+                .unwrap_err();
+        let caught = caught_from_panic(failure);
+        assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
+        assert!(caught_error_message(&caught).contains("not ported"));
+    }
 }

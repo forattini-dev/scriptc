@@ -114,6 +114,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-platform/stats.ts",
         "rust-native-platform/stat-errors.ts",
         "rust-native-platform/descriptors.ts",
+        "rust-native-platform/buffers.ts",
+        "rust-native-platform/buffer-errors.ts",
         "rust-native-platform/descriptor-errors.ts",
         "rust-native-codecs/indexing.ts",
         "rust-native-primitives/array-brand.ts",
@@ -1893,7 +1895,7 @@ fn module_slots_check_tdz_on_reads_writes_defaults_and_cycles() {
 #[test]
 fn emit_modes_and_paths_with_spaces_preserve_sources_and_failed_outputs() {
     let temp = tempfile::tempdir().unwrap();
-    let input = temp.path().join("aÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o entry.ts");
+    let input = temp.path().join("ação entry.ts");
     fs::write(&input, "console.log('ok', 42);").unwrap();
     for (kind, extension) in [("ir", "json"), ("rust", "rs")] {
         let target = temp.path().join(format!("result.{extension}"));
@@ -3384,6 +3386,108 @@ fn descriptor_boundaries_preserve_existing_artifacts() {
 }
 
 #[test]
+fn buffer_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "buffer-boundary");
+    fs::write(
+        &input,
+        "import {Buffer} from 'node:buffer'; console.log(Buffer.alloc(1).length);",
+    )
+    .unwrap();
+    let canary = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--emit", "ir", "--out"])
+        .arg(temp.path().join("buffer-canary.json"))
+        .output()
+        .unwrap();
+    success(&canary);
+    for (source, expected) in [
+        ("Buffer.alloc();", "Buffer factory overload is not ported"),
+        (
+            "Buffer.alloc(2, 7);",
+            "Buffer factory overload is not ported",
+        ),
+        (
+            "Buffer.allocUnsafe('2');",
+            "Buffer allocation requires a represented numeric size",
+        ),
+        (
+            "Buffer.allocUnsafe(2, 1);",
+            "Buffer factory overload is not ported",
+        ),
+        ("Buffer.from([1]);", "Buffer static is not ported"),
+        ("Buffer.allocUnsafeSlow(1);", "Buffer static is not ported"),
+        (
+            "const alloc = Buffer.allocUnsafe; alloc(1);",
+            "Uint8Array property or extracted method is not ported",
+        ),
+        (
+            "Buffer.alloc(1).buffer;",
+            "Uint8Array property or extracted method is not ported",
+        ),
+        (
+            "Buffer.allocUnsafe(1).byteOffset;",
+            "Buffer pool and byteOffset observations are not ported",
+        ),
+        (
+            "Buffer.alloc(1).toString();",
+            "Uint8Array method/arity is not ported",
+        ),
+        (
+            "Buffer.alloc(1).readUInt8(0);",
+            "Uint8Array method/arity is not ported",
+        ),
+        (
+            "const value = Buffer.alloc(1); value[0] = 4;",
+            "indexed writes need a native dictionary",
+        ),
+        ("new Buffer(1);", "native subset only, no fallback"),
+        (
+            "const sizes = [2]; Buffer.alloc(...sizes);",
+            "Buffer factory overload is not ported",
+        ),
+    ] {
+        fs::write(
+            &input,
+            format!("// @ts-nocheck\nimport {{Buffer}} from 'node:buffer';\n{source}\n"),
+        )
+        .unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains(expected)
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
 fn async_context_boundaries_preserve_existing_artifacts() {
     let parent = root().join(".scriptc");
     fs::create_dir_all(&parent).unwrap();
@@ -3628,7 +3732,7 @@ fn unsupported_recursive_layouts_preserve_previous_artifacts() {
 fn module_metadata_keeps_source_paths_after_changing_working_directory() {
     let temp = tempfile::tempdir().unwrap();
     metadata_project(temp.path());
-    let input = temp.path().join("source # % cafÃƒÂ©.mts");
+    let input = temp.path().join("source # % café.mts");
     fs::write(&input, "import { fileURLToPath } from 'node:url'; console.log(import.meta.url); console.log(import.meta.filename); console.log(import.meta.dirname); console.log(fileURLToPath(import.meta.url));").unwrap();
     let target = binary(temp.path(), "different-output-name");
     success(
@@ -3973,7 +4077,7 @@ fn utf16_instance_keys_do_not_alias_empty_fields() {
         r#"
 class EmptyField { "": string = "present"; }
 function read(value: unknown, key: string): unknown { return (value as any)[key]; }
-const high = "Ã°Å¸Ëœâ‚¬".slice(0, 1);
+const high = "😀".slice(0, 1);
 const object = new EmptyField();
 console.log("keys", read(object, "") === "present", read(object, high) === undefined);
 "#,

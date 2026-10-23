@@ -953,6 +953,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The Buffer statics and the fs/zlib Buffer forms: fixed always-u8
   // signatures (Buffer IS a Uint8Array — one bytes kind).
   "buffer.fromStr": { argTypes: [STRING, STRING], result: BYTES_U8 },
+  "buffer.alloc": { argTypes: [F64], result: BYTES_U8 },
+  "buffer.isBuffer": { argTypes: [DYN], result: BOOL },
+  "bytes.sliceDispatch": { argTypes: [BYTES_U8, F64, F64], result: BYTES_U8 },
+  "bytes.offset": { argTypes: [BYTES_U8], result: F64 },
   "buffer.fromDyn": { argTypes: [DYN, STRING], result: BYTES_U8 },
   "buffer.concat": { argTypes: [arrayOf(BYTES_U8)], result: BYTES_U8 },
   "buffer.byteLenStr": { argTypes: [STRING, STRING], result: F64 },

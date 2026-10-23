@@ -3330,8 +3330,17 @@ export type IrLibFn =
    * encoding to "utf8" and fences non-literal/unsupported ones; hex and
    * base64 decode Node-leniently, so it never throws. concat takes ONE
    * bytes<u8>[] arg (the list) and returns a fresh copy. `Buffer.from(u8)`
-   * and `Buffer.alloc(n)` need no libFn — they lower to bytesNew. */
+   * and legacy `Buffer.alloc(n)` lower to bytesNew. Native factories use
+   * buffer.alloc to retain a runtime Buffer brand. */
   | "buffer.fromStr"
+  /** Native owning Buffer allocation; safe zero initialization also represents
+   * allocUnsafe's unspecified initial contents. */
+  | "buffer.alloc"
+  | "buffer.isBuffer"
+  /** Source method dispatch preserves Buffer views through Uint8Array slots;
+   * the lower-level bytesIntrinsic slice remains an unconditional copy. */
+  | "bytes.sliceDispatch"
+  | "bytes.offset"
   /** Buffer.from over a checked native value, with a canonical literal
    * encoding. Runtime kind dispatch validates the first argument. */
   | "buffer.fromDyn"
@@ -8061,6 +8070,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "crypto.pbkdf2Cb",
   "buffer.concat",
   "buffer.concatLen",
+  "buffer.alloc",
+  "bytes.offset",
   "buffer.fromDyn",
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.
