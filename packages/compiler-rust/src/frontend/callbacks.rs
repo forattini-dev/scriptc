@@ -133,7 +133,9 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn closure(&mut self, node: Node, expected: Option<Type>) -> Result<Expr, String> {
-        if !node.name().is_nil()
+        let object_method = node.kind() == SyntaxKind::MethodDeclaration
+            && node.parent().kind() == SyntaxKind::ObjectLiteralExpression;
+        if (!node.name().is_nil() && !object_method)
             || !node.asterisk_token().is_nil()
             || !node.type_parameters().is_empty()
         {

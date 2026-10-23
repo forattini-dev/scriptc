@@ -37,6 +37,7 @@ mod logical;
 mod module_metadata;
 mod modules;
 mod namespace_values;
+mod object_methods;
 mod parameters;
 mod pipeline;
 mod primitives;
@@ -1331,6 +1332,7 @@ impl<'a> Lowerer<'a> {
                 } else if matches!(
                     member.kind(),
                     SyntaxKind::ParenthesizedExpression
+                        | SyntaxKind::ElementAccessExpression
                         | SyntaxKind::CallExpression
                         | SyntaxKind::ArrowFunction
                         | SyntaxKind::FunctionExpression

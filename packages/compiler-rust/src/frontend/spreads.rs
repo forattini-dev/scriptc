@@ -95,7 +95,9 @@ impl Lowerer<'_> {
         }
         if !matches!(
             property.kind(),
-            SyntaxKind::PropertyAssignment | SyntaxKind::ShorthandPropertyAssignment
+            SyntaxKind::PropertyAssignment
+                | SyntaxKind::ShorthandPropertyAssignment
+                | SyntaxKind::MethodDeclaration
         ) {
             return Err(self.refuse(property, "object spread requires named data properties"));
         }
@@ -111,12 +113,7 @@ impl Lowerer<'_> {
             .find(|f| f.name == name)
             .cloned()
             .ok_or_else(|| self.refuse(property, "object spread width projection is not ported"))?;
-        let source = if property.kind() == SyntaxKind::ShorthandPropertyAssignment {
-            property.name()
-        } else {
-            property.initializer()
-        };
-        let value = self.expected_expression(source, field.r#type)?;
+        let value = self.object_property_value(property, field.r#type)?;
         Ok(vec![Stmt::RecordSet {
             obj: self.spread_read(local, property),
             shape_id: format!("r{shape_id}"),

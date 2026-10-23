@@ -21,9 +21,12 @@ impl Lowerer<'_> {
         for property in node.properties() {
             if !matches!(
                 property.kind(),
-                SyntaxKind::PropertyAssignment | SyntaxKind::ShorthandPropertyAssignment
+                SyntaxKind::PropertyAssignment
+                    | SyntaxKind::ShorthandPropertyAssignment
+                    | SyntaxKind::MethodDeclaration
             ) || self.data_property_name(property.name()).is_none()
-                || property.name().text() == "__proto__"
+                || (property.name().text() == "__proto__"
+                    && property.kind() == SyntaxKind::PropertyAssignment)
             {
                 return Err(self.refuse(
                     property,
@@ -42,12 +45,7 @@ impl Lowerer<'_> {
                 r#type: Type::String,
                 loc: self.loc(property),
             };
-            let source = if property.kind() == SyntaxKind::ShorthandPropertyAssignment {
-                property.name()
-            } else {
-                property.initializer()
-            };
-            let value = self.expected_expression(source, Type::Dyn)?;
+            let value = self.object_property_value(property, Type::Dyn)?;
             fields.push(ir::DynamicField { key, value });
         }
         Ok(Expr::DynObjLit {

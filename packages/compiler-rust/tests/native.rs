@@ -115,6 +115,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-primitives/string-addition.ts",
         "rust-native-primitives/json-presence.ts",
         "rust-native-primitives/raw-json.ts",
+        "rust-native-primitives/object-methods.ts",
+        "rust-native-primitives/object-method-rest.ts",
         "rust-native-primitives/raw-json-plain.js",
         "rust-native-primitives/opaque-maps.ts",
         "rust-native-primitives/conditions.ts",
@@ -1106,6 +1108,11 @@ fn receiver_boundaries_preserve_previous_native_artifacts() {
             "erasing Set",
         ),
         (
+            "set.mts",
+            "const object = {set: new Set([1]), method(this: unknown): unknown { return this; }}; object.method();",
+            "erasing Set",
+        ),
+        (
             "escaped.cjs",
             "'use\\x20strict'; const f = function() { return this; }; f.call(null);",
             "sloppy function this",
@@ -1635,8 +1642,8 @@ fn diagnostics_refuse_invalid_and_unported_sources_without_publishing_artifacts(
             "SCN1001",
         ),
         (
-            "record-method",
-            "const record = { value(): number { return 1; } }; console.log(record.value());",
+            "record-generator-method",
+            "const record = { *value(): Generator<number> { yield 1; } }; console.log(record.value());",
             "SCN1001",
         ),
         (
@@ -3533,6 +3540,14 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "primitive-boundary");
     for (source, expected) in [
+        (
+            "const value = { read(): string { return super.toString(); } }; value.read();",
+            "object method super requires a native home-object contract",
+        ),
+        (
+            "const value = { id<T>(input: T): T { return input; } }; value.id(1);",
+            "generic and generator object methods are not ported",
+        ),
         (
             "Math.floor({ valueOf: (): number => 2 } as any);",
             "standard numeric arguments require represented primitives",

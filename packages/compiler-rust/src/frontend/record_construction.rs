@@ -199,7 +199,9 @@ impl Lowerer<'_> {
         }
         if !matches!(
             property.kind(),
-            SyntaxKind::PropertyAssignment | SyntaxKind::ShorthandPropertyAssignment
+            SyntaxKind::PropertyAssignment
+                | SyntaxKind::ShorthandPropertyAssignment
+                | SyntaxKind::MethodDeclaration
         ) {
             return Err(self.refuse(
                 property,
@@ -218,12 +220,7 @@ impl Lowerer<'_> {
                 "record construction width projection is not ported",
             )
         })?;
-        let source = if property.kind() == SyntaxKind::ShorthandPropertyAssignment {
-            property.name()
-        } else {
-            property.initializer()
-        };
-        let value = self.expected_expression(source, slot.ty.clone())?;
+        let value = self.object_property_value(property, slot.ty.clone())?;
         Ok((
             self.construction_write(property, plan, slot, value)?,
             HashSet::from([name]),

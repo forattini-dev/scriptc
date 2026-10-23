@@ -1,4 +1,4 @@
-//! Closed structural records and tagged native unions; no dynamic values.
+//! Closed structural records, function-valued fields and tagged native unions.
 use super::*;
 use source_frontend::prelude::{ObjectFlags, SignatureKind};
 
@@ -168,13 +168,13 @@ impl Lowerer<'_> {
         let mut fields = Vec::new();
         for property in properties {
             let name = self.checker.sym(property).name.to_string();
-            // Accessors/methods carry evaluation or receiver semantics that a
-            // plain slot cannot preserve. Refuse them even if unused.
+            // Accessors need descriptor storage. Ordinary object methods use
+            // owning function fields and the existing call-site receiver ABI.
             if self
                 .checker
                 .sym(property)
                 .flags
-                .intersects(SymbolFlags::METHOD | SymbolFlags::ACCESSOR)
+                .intersects(SymbolFlags::ACCESSOR)
             {
                 return None;
             }
@@ -538,7 +538,9 @@ impl Lowerer<'_> {
         if target == Type::Dyn
             && matches!(
                 node.kind(),
-                SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression
+                SyntaxKind::ArrowFunction
+                    | SyntaxKind::FunctionExpression
+                    | SyntaxKind::MethodDeclaration
             )
         {
             let value = self.closure(node, None)?;
@@ -598,7 +600,9 @@ impl Lowerer<'_> {
                 };
                 self.coerce(value, target, node)
             }
-            SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression => {
+            SyntaxKind::ArrowFunction
+            | SyntaxKind::FunctionExpression
+            | SyntaxKind::MethodDeclaration => {
                 if let Type::Union { union_id } = target {
                     let functions = self.unions[union_id]
                         .arms
@@ -713,7 +717,9 @@ impl Lowerer<'_> {
         for property in properties {
             if !matches!(
                 property.kind(),
-                SyntaxKind::PropertyAssignment | SyntaxKind::ShorthandPropertyAssignment
+                SyntaxKind::PropertyAssignment
+                    | SyntaxKind::ShorthandPropertyAssignment
+                    | SyntaxKind::MethodDeclaration
             ) || self.data_property_name(property.name()).is_none()
             {
                 return Err(self.refuse(property, "only named data properties are ported"));
@@ -731,12 +737,7 @@ impl Lowerer<'_> {
             if !seen.insert(name.clone()) {
                 return Err(self.refuse(property, "duplicate record properties are not ported"));
             }
-            let source = if property.kind() == SyntaxKind::ShorthandPropertyAssignment {
-                property.name()
-            } else {
-                property.initializer()
-            };
-            let value = self.expected_expression(source, target)?;
+            let value = self.object_property_value(property, target)?;
             fields.push(ir::FieldInit {
                 name,
                 value,
