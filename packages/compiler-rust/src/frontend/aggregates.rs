@@ -63,7 +63,7 @@ impl Lowerer<'_> {
             let elem = self.type_id(element)?;
             if matches!(
                 elem,
-                Type::Void | Type::Null | Type::Undefined | Type::Func { .. }
+                Type::Void | Type::Null | Type::Undefined | Type::Func { .. } | Type::Stats
             ) {
                 return None;
             }
@@ -159,7 +159,12 @@ impl Lowerer<'_> {
             let ty = self.type_id(source)?;
             if matches!(
                 ty,
-                Type::Null | Type::Undefined | Type::Void | Type::Func { .. } | Type::Map { .. }
+                Type::Null
+                    | Type::Undefined
+                    | Type::Void
+                    | Type::Func { .. }
+                    | Type::Map { .. }
+                    | Type::Stats
             ) {
                 return None;
             }
@@ -251,7 +256,7 @@ impl Lowerer<'_> {
             || arms.iter().filter(|a| matches!(a, Type::Object { .. })).count() > 1
             || arms
                 .iter()
-                .any(|a| matches!(a, Type::Void | Type::Map { .. }))
+                .any(|a| matches!(a, Type::Void | Type::Map { .. } | Type::Stats))
         {
             return None;
         }
@@ -272,6 +277,9 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn dynamic_erasure_reason(&self, ty: &Type) -> Option<&'static str> {
+        if ir::contains_stats(ty, &self.records, &self.unions) {
+            return Some("Stats erasure requires a shared native Stats value contract");
+        }
         if self.native_type_contains(ty, |ty| matches!(ty, Type::Object { class_name } if self.classes.has_symbol_surface(class_name))) {
             return Some("erasing symbol methods requires a native descriptor contract");
         }
@@ -342,6 +350,12 @@ impl Lowerer<'_> {
             });
         }
         if value.ty() == Type::Dyn && !matches!(target, Type::Null | Type::Undefined | Type::Void) {
+            if ir::contains_stats(&target, &self.records, &self.unions) {
+                return Err(self.refuse(
+                    node,
+                    "Stats extraction requires a shared native Stats value contract",
+                ));
+            }
             return Ok(Expr::DynCheck {
                 value: Box::new(value),
                 r#type: target,

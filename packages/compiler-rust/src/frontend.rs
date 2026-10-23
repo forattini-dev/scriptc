@@ -53,6 +53,7 @@ mod sets;
 mod spreads;
 mod standard_functions;
 mod standard_objects;
+mod stats;
 mod storage;
 mod strings;
 mod symbols;
@@ -431,6 +432,9 @@ impl<'a> Lowerer<'a> {
         if api.lowering == builtins::Lowering::Directory {
             return self.directory_call(node);
         }
+        if module == "fs" && matches!(member, "statSync" | "lstatSync") {
+            self.ensure_exception_classes(node)?;
+        }
         let builtin = api.operations.first().expect("registered callable ABI");
         let mut args = node
             .arguments()
@@ -802,7 +806,10 @@ impl<'a> Lowerer<'a> {
                             declaration,
                         )?;
                         (ty, init)
-                    } else if self.declared(declaration).is_none() && storage.is_err() {
+                    } else if self.declared(declaration).is_none()
+                        && declaration.type_().is_nil()
+                        && storage.is_err()
+                    {
                         let init = self.expression(declaration.initializer())?;
                         if matches!(init.ty(), Type::Void | Type::Null | Type::Undefined) {
                             return Err(
@@ -1099,6 +1106,9 @@ impl<'a> Lowerer<'a> {
                 if let Some(value) = self.regex_get(node)? {
                     return Ok(value);
                 }
+                if let Some(value) = self.stats_get(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.class_get(node)? {
                     return Ok(value);
                 }
@@ -1274,6 +1284,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.stats_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.standard_function_call(node)? {
                     return Ok(value);
                 }

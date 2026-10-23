@@ -15,42 +15,69 @@ pub const VERSION: u32 = 13;
 /// Typed Sets have a portable reference ABI, but the shared dynamic value
 /// contract cannot box them (including inside a composite or callback ABI).
 pub fn contains_set(ty: &Type, records: &[Record], unions: &[Union]) -> bool {
+    contains_type(ty, records, unions, |ty| matches!(ty, Type::Set { .. }))
+}
+
+pub fn contains_stats(ty: &Type, records: &[Record], unions: &[Union]) -> bool {
+    contains_type(ty, records, unions, |ty| *ty == Type::Stats)
+}
+
+fn contains_type(
+    ty: &Type,
+    records: &[Record],
+    unions: &[Union],
+    predicate: fn(&Type) -> bool,
+) -> bool {
     fn visit(
         ty: &Type,
         records: &[Record],
         unions: &[Union],
         seen: &mut std::collections::HashSet<Type>,
+        predicate: fn(&Type) -> bool,
     ) -> bool {
         if !seen.insert(ty.clone()) {
             return false;
         }
+        if predicate(ty) {
+            return true;
+        }
         match ty {
-            Type::Set { .. } => true,
-            Type::Array { elem } | Type::Promise { inner: elem } => {
-                visit(elem, records, unions, seen)
+            Type::Array { elem } | Type::Set { elem } | Type::Promise { inner: elem } => {
+                visit(elem, records, unions, seen, predicate)
             }
             Type::Map { key, value } => {
-                visit(key, records, unions, seen) || visit(value, records, unions, seen)
+                visit(key, records, unions, seen, predicate)
+                    || visit(value, records, unions, seen, predicate)
             }
             Type::Func { params, ret, .. } => {
-                params.iter().any(|t| visit(t, records, unions, seen))
-                    || visit(ret, records, unions, seen)
+                params
+                    .iter()
+                    .any(|t| visit(t, records, unions, seen, predicate))
+                    || visit(ret, records, unions, seen, predicate)
             }
             Type::Record { shape_id } => records.get(*shape_id).is_some_and(|r| {
                 r.fields
                     .iter()
-                    .any(|f| visit(&f.r#type, records, unions, seen))
+                    .any(|f| visit(&f.r#type, records, unions, seen, predicate))
                     || r.index_value
                         .as_ref()
-                        .is_some_and(|t| visit(t, records, unions, seen))
+                        .is_some_and(|t| visit(t, records, unions, seen, predicate))
             }),
-            Type::Union { union_id } => unions
-                .get(*union_id)
-                .is_some_and(|u| u.arms.iter().any(|t| visit(t, records, unions, seen))),
+            Type::Union { union_id } => unions.get(*union_id).is_some_and(|u| {
+                u.arms
+                    .iter()
+                    .any(|t| visit(t, records, unions, seen, predicate))
+            }),
             _ => false,
         }
     }
-    visit(ty, records, unions, &mut std::collections::HashSet::new())
+    visit(
+        ty,
+        records,
+        unions,
+        &mut std::collections::HashSet::new(),
+        predicate,
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
@@ -68,6 +95,7 @@ pub enum Type {
     Regex,
     Symbol,
     Child,
+    Stats,
     Bytes {
         elem: String,
     },
@@ -1020,14 +1048,14 @@ impl Module {
             }
             Type::Void | Type::Null | Type::Undefined | Type::Caught => false,
             Type::Array { elem } => {
-                !matches!(*elem, Type::Func { .. }) && self.valid_type(*elem, active)
+                !matches!(*elem, Type::Func { .. } | Type::Stats) && self.valid_type(*elem, active)
             }
             Type::Bytes { elem } => elem == "u8",
             Type::Promise { inner } => *inner == Type::Void || self.valid_type(*inner, active),
             Type::Set { elem } => elem.set_element() && self.valid_type(*elem, active),
             Type::Map { key, value } => {
                 matches!(*key, Type::F64 | Type::String | Type::Dyn)
-                    && !matches!(*value, Type::Func { .. } | Type::Map { .. })
+                    && !matches!(*value, Type::Func { .. } | Type::Map { .. } | Type::Stats)
                     && !matches!(*value, Type::Bytes { .. })
                     && self.valid_type(*value, active)
             }
@@ -1035,7 +1063,7 @@ impl Module {
                 r.id == shape_id
                     && r.index_value.as_ref().is_none_or(|v| {
                         r.fields.is_empty()
-                            && !matches!(v, Type::Func { .. } | Type::Map { .. })
+                            && !matches!(v, Type::Func { .. } | Type::Map { .. } | Type::Stats)
                             && self.valid_type(v.clone(), active)
                     })
                     && r.fields
@@ -1062,7 +1090,7 @@ impl Module {
                         <= 1
                     && u.arms.iter().all(|arm| {
                         matches!(arm, Type::Null | Type::Undefined)
-                            || (!matches!(arm, Type::Union { .. } | Type::Map { .. })
+                            || (!matches!(arm, Type::Union { .. } | Type::Map { .. } | Type::Stats)
                                 && self.valid_type(arm.clone(), active))
                     })
             }),
@@ -1321,6 +1349,9 @@ fn validate_function(
                 Ok(())
             }
             Expr::DynFrom { value, r#type, .. } => {
+                if contains_stats(&value.ty(), &module.records, &module.unions) {
+                    return Err("Stats erasure is not in the shared native value contract".into());
+                }
                 if symbol_methods::contains_symbol_methods(&value.ty(), module) {
                     return Err(
                         "erasing symbol methods requires a native descriptor contract".into(),
@@ -1347,6 +1378,11 @@ fn validate_function(
                 }
             }
             Expr::DynCheck { value, r#type, .. } => {
+                if contains_stats(r#type, &module.records, &module.unions) {
+                    return Err(
+                        "Stats extraction is not in the shared native value contract".into(),
+                    );
+                }
                 expr(value, locals, initialized, functions, module)?;
                 if value.ty() == Type::Dyn
                     && *r#type != Type::Dyn
@@ -2942,6 +2978,71 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stats_library_calls_keep_nominal_layouts_and_fence_erasure() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        let stat = Expr::LibCall {
+            r#fn: "fs.statSync".into(),
+            args: vec![Expr::StrLit {
+                value: "path".into(),
+                r#type: Type::String,
+                loc: loc.clone(),
+            }],
+            r#type: Type::Stats,
+            loc: loc.clone(),
+        };
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "stats.size".into(),
+                args: vec![stat.clone()],
+                r#type: Type::F64,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert!(validate(&module).is_ok());
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::DynFrom {
+                value: Box::new(stat),
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "Stats erasure is not in the shared native value contract"
+        );
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "stats.size".into(),
+                args: vec![Expr::StrLit {
+                    value: "fake".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                }],
+                r#type: Type::F64,
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert!(validate(&module).is_err());
+        let records = vec![Record {
+            id: 0,
+            fields: vec![Field {
+                name: "snapshot".into(),
+                r#type: Type::Stats,
+            }],
+            declared_order: vec!["snapshot".into()],
+            tuple: false,
+            index_value: None,
+        }];
+        assert!(contains_stats(&Type::Record { shape_id: 0 }, &records, &[]));
+        assert!(!contains_set(&Type::Record { shape_id: 0 }, &records, &[]));
+    }
 
     #[test]
     fn standard_primitives_validate_abi_and_visit_nested_operands() {

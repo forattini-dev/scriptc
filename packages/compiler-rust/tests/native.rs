@@ -111,6 +111,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-platform/mkdir.ts",
         "rust-native-platform/paths.ts",
         "rust-native-platform/crypto.ts",
+        "rust-native-platform/stats.ts",
+        "rust-native-platform/stat-errors.ts",
         "rust-native-primitives/array-brand.ts",
         "rust-native-primitives/augmented-standard.ts",
         "rust-native-primitives/string-function.ts",
@@ -3265,6 +3267,65 @@ fn lexical_initialization_boundaries_preserve_artifacts() {
 }
 
 #[test]
+fn stats_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "stats-boundary");
+    for source in [
+        "statSync('unused', {bigint: true});",
+        "statSync('unused', {throwIfNoEntry: false});",
+        "statSync(1);",
+        "statSync('unused').mode;",
+        "const method = statSync('unused').isFile; method();",
+        "statSync('unused').isFile(1);",
+        "const value = statSync('unused'); value.size = 1;",
+        "const value: unknown = statSync('unused'); console.log(value);",
+        "const value: unknown = {snapshot: statSync('unused')}; console.log(value);",
+        "const value: unknown = [statSync('unused')]; console.log(value);",
+        "const value = statSync('unused'); console.log(value === statSync('unused'));",
+        "const value: Stats[] = [statSync('unused')]; console.log(value.length);",
+        "const value = new Map<string, Stats>(); value.set('key', statSync('unused'));",
+        "const value: Record<string, Stats> = {key: statSync('unused')}; console.log(value.key.size);",
+        "let value!: Stats; value = statSync('unused');",
+        "const value = ({} as unknown) as Stats; console.log(value.size);",
+        "const callback: () => unknown = () => statSync('unused'); callback();",
+    ] {
+        fs::write(
+            &input,
+            format!("// @ts-nocheck\nimport {{statSync, type Stats}} from 'node:fs';\n{source}\n"),
+        )
+        .unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
 fn async_context_boundaries_preserve_existing_artifacts() {
     let parent = root().join(".scriptc");
     fs::create_dir_all(&parent).unwrap();
@@ -3557,6 +3618,8 @@ fn builtin_manifest_reports_native_runtime_only_and_planned_contracts() {
     let apis = report["apis"].as_array().unwrap();
     for (module, member, stage) in [
         ("fs", "mkdirSync", "native-partial"),
+        ("fs", "statSync", "native-partial"),
+        ("fs", "lstatSync", "native-partial"),
         ("process", "env", "native-partial"),
         ("crypto", "createHash", "runtime-only"),
         ("Bun", "file", "planned"),

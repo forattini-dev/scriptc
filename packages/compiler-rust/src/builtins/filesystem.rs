@@ -58,18 +58,8 @@ pub(super) fn apis() -> Vec<Api> {
             &["fs_append_file"],
             "Rust append exists; native options, descriptor and publication contracts still need porting",
         ),
-        Api::runtime_only(
-            "fs",
-            "statSync",
-            Access::Call,
-            &[
-                "fs_stat",
-                "stats_size",
-                "stats_is_file",
-                "stats_is_directory",
-            ],
-            "Runtime stat projections exist; the owning Stats object, BigInt options and error fields are not a native frontend contract",
-        ),
+        stat_api("statSync", "fs.statSync", "fs_stat_sync"),
+        stat_api("lstatSync", "fs.lstatSync", "fs_lstat_sync"),
         Api::runtime_only(
             "fs",
             "openSync",
@@ -78,4 +68,39 @@ pub(super) fn apis() -> Vec<Api> {
             "Runtime descriptor operations exist; flags, optional modes and descriptor lifecycle need a native ABI",
         ),
     ]
+}
+
+fn stat_api(member: &'static str, ir: &'static str, runtime: &'static str) -> Api {
+    Api::native(
+        "fs",
+        member,
+        Lowering::Direct,
+        vec![
+            Builtin {
+                ir,
+                args: vec![String],
+                result: Type::Stats,
+                implementation: Implementation::Runtime(runtime),
+            },
+            call!("stats.size", [Type::Stats], Type::F64, "stats_size"),
+            call!("stats.isFile", [Type::Stats], Bool, "stats_is_file"),
+            call!(
+                "stats.isDirectory",
+                [Type::Stats],
+                Bool,
+                "stats_is_directory"
+            ),
+            call!(
+                "stats.isSymbolicLink",
+                [Type::Stats],
+                Bool,
+                "stats_is_symlink"
+            ),
+        ],
+        "One well-formed UTF-16 string path; owning Stats snapshots, size and zero-argument isFile/isDirectory/isSymbolicLink reads. Options, Buffer/URL paths, other members, writes, method values, equality, direct array/Map/dictionary values, unions and erasure refused. Error name/message/code represented; path/syscall/errno pending",
+        &[
+            "tests/corpus/rust-native-platform/stats.ts",
+            "tests/corpus/rust-native-platform/stat-errors.ts",
+        ],
+    )
 }

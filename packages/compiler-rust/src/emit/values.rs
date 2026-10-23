@@ -123,6 +123,7 @@ fn specialized(ty: &Type, module: &Module) -> bool {
             | Type::Classval { .. }
             | Type::Bytes { .. }
             | Type::Child
+            | Type::Stats
     )
 }
 fn boxed(ty: &Type, value: &str, module: &Module) -> String {
@@ -377,6 +378,9 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
     for (i, t) in types.iter().enumerate() {
         if *t == Type::Child {
             writeln!(out, "NativeValue::V{i}(child) => match key.well_formed_utf8().unwrap_or(\"\") {{ \"pid\" => runtime::child_pid(&child).map(NativeValue::Number).unwrap_or(NativeValue::Undefined), \"exitCode\" => runtime::child_exit_code(&child).map(NativeValue::Number).unwrap_or(NativeValue::Null), \"killed\" => NativeValue::Boolean(runtime::child_killed(&child)), \"then\" => NativeValue::Undefined, _ => runtime::throw_type_error(\"scriptc: ChildProcess member is not ported\".into()) }},").unwrap();
+        }
+        if *t == Type::Stats {
+            writeln!(out, "NativeValue::V{i}(_) => runtime::throw_type_error(\"scriptc: erased Stats members require a shared native value contract\".into()),").unwrap();
         }
     }
     for (i, t) in types.iter().enumerate() {

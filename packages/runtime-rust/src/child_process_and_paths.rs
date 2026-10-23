@@ -560,6 +560,15 @@ fn stats_platform_fields(_metadata: &std::fs::Metadata) -> (f64, f64) {
 }
 
 pub fn fs_stat(path: &JsString, follow: bool) -> JsStats {
+    if path.contains('\0') {
+        throw_invalid_arg_value(
+            "The argument 'path' must be a string, Uint8Array, or URL without null bytes. Received ",
+            path,
+        );
+    }
+    if !path.is_well_formed() {
+        throw_type_error("scriptc: lone UTF-16 filesystem paths are not ported".into());
+    }
     let result = if follow {
         std::fs::metadata(path.to_utf8_lossy())
     } else {
@@ -567,9 +576,27 @@ pub fn fs_stat(path: &JsString, follow: bool) -> JsStats {
     };
     let metadata = match result {
         Ok(metadata) => metadata,
-        Err(error) => throw_fs_error(if follow { "stat" } else { "lstat" }, path, error),
+        Err(error) => {
+            #[cfg(windows)]
+            let resolved = if path.is_empty() {
+                path.clone()
+            } else {
+                path_win32_resolve(&array_new(vec![path.clone()]))
+            };
+            #[cfg(windows)]
+            let path = &resolved;
+            throw_fs_error(if follow { "stat" } else { "lstat" }, path, error)
+        }
     };
     stats_from_metadata(metadata, !follow)
+}
+
+pub fn fs_stat_sync(path: &JsString) -> JsStats {
+    fs_stat(path, true)
+}
+
+pub fn fs_lstat_sync(path: &JsString) -> JsStats {
+    fs_stat(path, false)
 }
 
 fn stats_from_metadata(metadata: std::fs::Metadata, is_symlink: bool) -> JsStats {

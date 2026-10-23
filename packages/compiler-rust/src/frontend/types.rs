@@ -39,6 +39,11 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn type_id(&mut self, id: TypeId) -> Option<Type> {
+        // This structural platform interface is a view of a thrown owning
+        // value. Its annotation must not turn Error into a checked record.
+        if self.standard_errno_type(id) {
+            return Some(Type::Dyn);
+        }
         // Broad annotations describe no closed layout. Retain the actual
         // owning value rather than projecting it into an empty record or
         // recursively treating Object's prototype methods as data fields.
@@ -66,6 +71,9 @@ impl Lowerer<'_> {
             return Some(ty);
         }
         let symbol = self.checker.ty(id).symbol().0;
+        if self.standard_stats_type(id) {
+            return Some(Type::Stats);
+        }
         if symbol != 0
             && self
                 .checker

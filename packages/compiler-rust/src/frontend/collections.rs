@@ -36,7 +36,12 @@ impl Lowerer<'_> {
         if !matches!(key, Type::String | Type::F64 | Type::Dyn)
             || matches!(
                 value,
-                Type::Void | Type::Null | Type::Undefined | Type::Func { .. } | Type::Map { .. }
+                Type::Void
+                    | Type::Null
+                    | Type::Undefined
+                    | Type::Func { .. }
+                    | Type::Map { .. }
+                    | Type::Stats
             )
         {
             return None;

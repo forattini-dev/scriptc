@@ -24,6 +24,7 @@ fn rust_type(ty: Type, module: &Module) -> String {
         Type::Dyn | Type::Caught => "NativeValue",
         Type::Promise { .. } => "runtime::JsPromise<NativeValue>",
         Type::Child => "runtime::JsChild",
+        Type::Stats => "runtime::JsStats",
         ty @ Type::Func { .. } => {
             return format!("runtime::Gc<{}>", functions::type_name(&ty, module));
         }
@@ -269,6 +270,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Type::Object { .. } => true,
             Type::String
             | Type::Regex
+            | Type::Stats
             | Type::Symbol
             | Type::Bytes { .. }
             | Type::Dyn
@@ -602,7 +604,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     Type::String => {
                         format!("&runtime::JsString::from({})", expr(arg, function, module))
                     }
-                    Type::Array { .. } => format!("&({})", expr(arg, function, module)),
+                    Type::Array { .. } | Type::Stats => {
+                        format!("&({})", expr(arg, function, module))
+                    }
                     _ => expr(arg, function, module),
                 })
                 .collect::<Vec<_>>()
@@ -646,6 +650,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Symbol
                     | Type::Promise { .. }
                     | Type::Child
+                    | Type::Stats
             ) {
                 format!("{local_id}.clone()")
             } else {
@@ -665,6 +670,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Func { .. }
                     | Type::Bytes { .. }
                     | Type::Child
+                    | Type::Stats
             );
             let record = matches!(left.ty(), Type::Regex);
             let promise = matches!(left.ty(), Type::Promise { .. });

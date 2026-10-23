@@ -1,6 +1,19 @@
 //! Protected regions retain pending completions; finally may replace them.
 use super::*;
+use source_frontend::prelude::get_source_file_of_node;
 impl Lowerer<'_> {
+    pub(super) fn standard_errno_type(&self, id: TypeId) -> bool {
+        let symbol = self.checker.ty(id).symbol();
+        symbol.0 != 0
+            && self.checker.sym(symbol).name.as_ref() == "ErrnoException"
+            && self.checker.sym(symbol).declarations.iter().any(|decl| {
+                let file = source_file_info(get_source_file_of_node(*decl));
+                file.file_name.ends_with("/globals.d.ts")
+                    && (file.file_name.contains("/@types/node/")
+                        || file.file_name.contains("/bun-types/"))
+            })
+    }
+
     pub(super) fn try_statement(&mut self, node: Node) -> Result<Vec<Stmt>, String> {
         let catch = node.catch_clause();
         let before = self.var_defined.clone();

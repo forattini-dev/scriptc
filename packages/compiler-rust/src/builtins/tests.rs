@@ -38,6 +38,10 @@ fn source_contracts_are_unique_and_bind_only_implemented_operations() {
 
 #[test]
 fn internal_operations_never_manufacture_source_exports() {
+    for member in ["size", "isFile", "isDirectory", "isSymbolicLink"] {
+        assert!(get("fs", member).is_none());
+        assert!(by_ir(&format!("stats.{member}")).is_some());
+    }
     for name in [
         "mkdirModeSync",
         "mkdirRecursiveSync",

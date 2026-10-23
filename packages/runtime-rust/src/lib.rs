@@ -216,6 +216,7 @@ mod tests {
     include!("array_sparse.test.rs");
     include!("filesystem_windows.test.rs");
     include!("filesystem_realpath.test.rs");
+    include!("filesystem_stat.test.rs");
     include!("readline.test.rs");
     include!("tests/heap_pressure.rs");
     include!("effect_state.test.rs");
