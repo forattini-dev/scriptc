@@ -2,6 +2,58 @@
 use super::*;
 
 impl Lowerer<'_> {
+    pub(super) fn process_write(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let member = node.expression();
+        let write = match member.kind() {
+            SyntaxKind::PropertyAccessExpression => member.name().text() == "write",
+            SyntaxKind::ElementAccessExpression => {
+                member.argument_expression().kind() == SyntaxKind::StringLiteral
+                    && member.argument_expression().text() == "write"
+            }
+            _ => false,
+        };
+        if !write {
+            return Ok(None);
+        }
+        let stream = member.expression();
+        let name = if self.process_member(stream, "stdout") {
+            "stdout.write"
+        } else if self.process_member(stream, "stderr") {
+            "stderr.write"
+        } else {
+            return Ok(None);
+        };
+        // The synchronous runtime sink has no Node queue/backpressure state.
+        // Accept effects only, including a contextually void arrow body.
+        let mut parent = node.parent();
+        while parent.kind() == SyntaxKind::ParenthesizedExpression {
+            parent = parent.parent();
+        }
+        if parent.kind() != SyntaxKind::ExpressionStatement
+            && !(parent.kind() == SyntaxKind::ArrowFunction && self.return_type == Some(Type::Void))
+        {
+            return Err(self.refuse(
+                node,
+                "process stream write result/backpressure is not ported; discard the result",
+            ));
+        }
+        let arguments = node.arguments().into_iter().collect::<Vec<_>>();
+        if arguments.len() != 1 || arguments[0].kind() == SyntaxKind::SpreadElement {
+            return Err(self.refuse(node, "process stream write needs one primitive string; encodings, completion callbacks and spreads are not ported"));
+        }
+        let value = self.expression(arguments[0])?;
+        if value.ty() != Type::String {
+            return Err(self.refuse(node, "process stream write needs a primitive string"));
+        }
+        let binding = builtins::get("process", name).expect("registered process write");
+        Ok(Some(Expr::LibCall {
+            r#fn: binding.ir.into(),
+            args: vec![value],
+            r#type: binding.result,
+            loc: self.loc(node),
+        }))
+    }
+
     fn process_member(&mut self, node: Node, name: &str) -> bool {
         let member = match node.kind() {
             SyntaxKind::PropertyAccessExpression => Some(node.name()),

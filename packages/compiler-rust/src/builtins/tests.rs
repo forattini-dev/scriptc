@@ -53,6 +53,14 @@ fn internal_operations_never_manufacture_source_exports() {
     }
     assert!(get("process", "isTTY").is_none());
     assert!(by_ir("process.isTTY").is_some());
+    for name in ["stdout", "stderr"] {
+        assert!(get("process", &format!("{name}Write")).is_none());
+        assert!(by_ir(&format!("process.{name}Write")).is_some());
+        assert_eq!(
+            get("process", &format!("{name}.write")).unwrap().result,
+            Type::Bool
+        );
+    }
     assert!(get("Number", "fromString").is_none());
     assert!(by_ir("num.fromString").is_some());
     for name in ["arch", "platform"] {

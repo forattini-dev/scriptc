@@ -1373,6 +1373,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.process_write(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.buffer_call(node)? {
                     return Ok(value);
                 }

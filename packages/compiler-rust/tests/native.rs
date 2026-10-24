@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-process-writes/contracts.ts",
+        "rust-native-process-writes/callbacks.ts",
+        "rust-native-process-writes/order.ts",
         "rust-native-array-spread/contracts.ts",
         "rust-native-array-spread/order.ts",
         "rust-native-array-spread/identity.ts",
@@ -4061,8 +4064,27 @@ fn owning_set_boundaries_preserve_existing_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "owning-set-boundary");
+    fs::write(
+        &input,
+        "const set = new Set<unknown>(['a', ...['b']]); console.log(set.size, set.has('b'));",
+    )
+    .unwrap();
+    let expected = Command::new(oracle()).arg(&input).output().unwrap();
+    success(&expected);
+    let built = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    success(&built);
+    let actual = Command::new(&target).output().unwrap();
+    success(&actual);
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(actual.stderr, expected.stderr);
     for source in [
-        "const set = new Set<unknown>(['a', ...['b']]);",
+        "const set = new Set<unknown>(['a', ...new Set(['b'])]);",
         "const set = new Set<unknown>([,]);",
         "const seed: unknown[] = ['a']; const set = new Set<unknown>(seed);",
         "const seed = [() => 1]; const set = new Set(seed);",
@@ -4612,4 +4634,56 @@ console.log("keys", read(object, "") === "present", read(object, high) === undef
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(actual.stdout, expected.stdout);
     assert_eq!(actual.stderr, expected.stderr);
+}
+
+#[test]
+fn process_write_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "process-write-boundary");
+    for source in [
+        "import p from 'node:process'; const result = p.stderr.write('x');",
+        "import p from 'node:process'; console.log(p.stdout.write('x'));",
+        "import p from 'node:process'; const f = () => p.stderr.write('x'); f();",
+        "import p from 'node:process'; function f(): boolean { return p.stderr.write('x'); } f();",
+        "import p from 'node:process'; p.stderr.write('x', 'utf8');",
+        "import p from 'node:process'; p.stderr.write('x', () => {});",
+        "import p from 'node:process'; p.stdout.write(new Uint8Array([65]));",
+        "import p from 'node:process'; p.stdout.write(42);",
+        "import p from 'node:process'; p.stdout.write(...['x']);",
+        "import p from 'node:process'; const stream = p.stderr; stream.write('x');",
+        "import p from 'node:process'; const write = p.stderr.write; write('x');",
+        "import p from 'node:process'; p.stderr.write = (text: string) => true;",
+        "import p from 'node:process'; p.stderr?.write('x');",
+        "import p from 'node:process'; p.stderrWrite('x');",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
 }

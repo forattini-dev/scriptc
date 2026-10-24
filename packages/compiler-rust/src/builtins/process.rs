@@ -42,6 +42,32 @@ pub(super) fn apis() -> Vec<Api> {
         ));
         entries.last_mut().unwrap().access = Access::Property;
     }
+    for (name, op) in [
+        (
+            "stdout.write",
+            call!(
+                "process.stdoutWrite",
+                [Type::String],
+                Bool,
+                "process_stdout_write"
+            ),
+        ),
+        (
+            "stderr.write",
+            call!(
+                "process.stderrWrite",
+                [Type::String],
+                Bool,
+                "process_stderr_write"
+            ),
+        ),
+    ] {
+        entries.push(Api::native(
+            "process", name, Lowering::Special, vec![op],
+            "Discarded direct string write, including contextually void arrow bodies; default UTF-8, no automatic newline. Stream values, result/backpressure, encodings, completion callbacks, mutation and error events are not ported",
+            &["tests/corpus/rust-native-process-writes/contracts.ts", "tests/corpus/rust-native-process-writes/callbacks.ts", "tests/corpus/rust-native-process-writes/order.ts"],
+        ));
+    }
     entries.extend([
         Api::runtime_only("process", "argv", Access::Property, &["process_argv"],
             "Runtime argv exists; native executable argv conventions must be exposed deliberately, not assumed equal to Node's interpreter paths"),
