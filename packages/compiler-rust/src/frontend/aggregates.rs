@@ -621,6 +621,14 @@ impl Lowerer<'_> {
                 let Type::Array { elem } = &array else {
                     unreachable!()
                 };
+                if node
+                    .elements()
+                    .into_iter()
+                    .any(|element| element.kind() == SyntaxKind::SpreadElement)
+                {
+                    let value = self.array_spread_literal(node, array)?;
+                    return self.coerce(value, target, node);
+                }
                 let elems = node
                     .elements()
                     .into_iter()

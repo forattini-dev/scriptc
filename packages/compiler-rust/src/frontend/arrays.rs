@@ -3,6 +3,177 @@ use super::*;
 use helpers::Helper;
 
 impl Lowerer<'_> {
+    /// Each spread is consumed before the next source element is evaluated.
+    /// Passing all sources to one eager helper would observe later mutations
+    /// too early, or copy a source only after its following element changed it.
+    pub(super) fn array_spread_literal(&mut self, node: Node, ty: Type) -> Result<Expr, String> {
+        let Type::Array { elem } = &ty else {
+            unreachable!()
+        };
+        let output = Local {
+            id: format!("array_literal{}", self.locals.len()),
+            name: "array construction".into(),
+            r#type: ty.clone(),
+            mutable: false,
+            boxed: false,
+        };
+        self.locals.push(output.clone());
+        let read = |loc: Loc| Expr::VarRef {
+            local_id: output.id.clone(),
+            r#type: ty.clone(),
+            loc,
+        };
+        let mut stmts = vec![Stmt::VarDecl {
+            local_id: output.id.clone(),
+            init: Expr::ArrayLit {
+                elems: vec![],
+                r#type: ty.clone(),
+                loc: self.loc(node),
+            },
+            loc: self.loc(node),
+        }];
+        for element in node.elements() {
+            if element.kind() == SyntaxKind::OmittedExpression {
+                return Err(self.refuse(
+                    element,
+                    "array construction with holes requires a sparse iterator contract",
+                ));
+            }
+            let expr = if element.kind() == SyntaxKind::SpreadElement {
+                // Observe the live slot, including any undefined tag left by a
+                // preceding callback. Unknown/custom iterators stay refused.
+                let source_node = primitives::primitive_source(element.expression());
+                let source = if source_node.kind() == SyntaxKind::ArrayLiteralExpression {
+                    // Empty literals have never[] in the checker. Their
+                    // elements are contextual at this construction boundary.
+                    self.expected_expression(source_node, ty.clone())?
+                } else {
+                    self.condition_value(source_node)?
+                };
+                match source.ty() {
+                    Type::Array { .. } => self.array_extend(element, read(self.loc(element)), source)?,
+                    Type::Record { shape_id } if self.records[shape_id].tuple => {
+                        self.tuple_extend(element, read(self.loc(element)), source)?
+                    }
+                    _ => return Err(self.refuse(element, "array spread requires a native array or fixed tuple; general iterators are not ported")),
+                }
+            } else {
+                let value = self.expected_expression(element, (**elem).clone())?;
+                Expr::ArrayIntrinsic {
+                    method: "push".into(),
+                    receiver: Box::new(read(self.loc(element))),
+                    args: vec![value],
+                    r#type: Type::F64,
+                    loc: self.loc(element),
+                }
+            };
+            stmts.push(Stmt::Expression {
+                expr,
+                loc: self.loc(element),
+            });
+        }
+        Ok(Expr::Sequence {
+            stmts,
+            result: Box::new(read(self.loc(node))),
+            r#type: ty.clone(),
+            loc: self.loc(node),
+        })
+    }
+
+    fn array_extend(&mut self, node: Node, output: Expr, source: Expr) -> Result<Expr, String> {
+        let Type::Array { elem: target } = output.ty() else {
+            unreachable!()
+        };
+        let Type::Array { elem } = source.ty() else {
+            unreachable!()
+        };
+        let mut helper = Helper::new(
+            "array_extend",
+            vec![output.ty(), source.ty()],
+            output.ty(),
+            self.loc(node),
+        );
+        let result = helper.param(0);
+        let input = helper.param(1);
+        let index = helper.local("index", Type::F64, true);
+        helper.declare(&index, helper.number(0.0));
+        let item = self.coerce(helper.get(&input, &index, *elem), *target, node)?;
+        let push = Expr::ArrayIntrinsic {
+            method: "push".into(),
+            receiver: Box::new(helper.read(&result)),
+            args: vec![item],
+            r#type: Type::F64,
+            loc: helper.loc(),
+        };
+        helper.function.body.push(Stmt::While {
+            cond: helper.less(&index, helper.length(&input)),
+            body: vec![
+                Stmt::Expression {
+                    expr: push,
+                    loc: helper.loc(),
+                },
+                helper.advance(&index),
+            ],
+            loc: helper.loc(),
+        });
+        let callee = self.install_helper(helper.finish(&result));
+        Ok(Expr::Call {
+            callee,
+            args: vec![output, source],
+            r#type: result.r#type,
+            loc: self.loc(node),
+        })
+    }
+
+    fn tuple_extend(&mut self, node: Node, output: Expr, source: Expr) -> Result<Expr, String> {
+        let Type::Array { elem } = output.ty() else {
+            unreachable!()
+        };
+        let Type::Record { shape_id } = source.ty() else {
+            unreachable!()
+        };
+        let mut helper = Helper::new(
+            "tuple_extend",
+            vec![output.ty(), source.ty()],
+            output.ty(),
+            self.loc(node),
+        );
+        let result = helper.param(0);
+        let input = helper.param(1);
+        for name in self.records[shape_id].declared_order.clone() {
+            let field = self.records[shape_id]
+                .fields
+                .iter()
+                .find(|field| field.name == name)
+                .expect("required tuple position");
+            let item = Expr::RecordGet {
+                obj: Box::new(helper.read(&input)),
+                shape_id: format!("r{shape_id}"),
+                field: name,
+                r#type: field.r#type.clone(),
+                loc: helper.loc(),
+            };
+            let item = self.coerce(item, (*elem).clone(), node)?;
+            helper.function.body.push(Stmt::Expression {
+                expr: Expr::ArrayIntrinsic {
+                    method: "push".into(),
+                    receiver: Box::new(helper.read(&result)),
+                    args: vec![item],
+                    r#type: Type::F64,
+                    loc: helper.loc(),
+                },
+                loc: helper.loc(),
+            });
+        }
+        let callee = self.install_helper(helper.finish(&result));
+        Ok(Expr::Call {
+            callee,
+            args: vec![output, source],
+            r#type: result.r#type,
+            loc: self.loc(node),
+        })
+    }
+
     pub(super) fn is_array_map(&mut self, node: Node) -> bool {
         if node.kind() != SyntaxKind::CallExpression {
             return false;

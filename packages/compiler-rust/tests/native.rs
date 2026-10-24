@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-array-spread/contracts.ts",
+        "rust-native-array-spread/order.ts",
+        "rust-native-array-spread/identity.ts",
         "rust-native-optional-access/contracts.ts",
         "rust-native-optional-access/effects.ts",
         "rust-native-optional-access/chains.ts",
@@ -3700,6 +3703,67 @@ fn read_file_boundaries_preserve_existing_artifacts() {
             !output.status.success()
                 && stderr.contains("SCN1001")
                 && stderr.contains(expected)
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn array_spread_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "array-spread-boundary");
+    fs::write(&input, "const input:number[]=[1,2]; const seen=new Set([0,...input]); console.log(seen.size,seen.has(2));").unwrap();
+    success(
+        &Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(temp.path().join("canary.json"))
+            .output()
+            .unwrap(),
+    );
+    for source in [
+        "const input:any=[1,2]; const copy=[...input]; console.log(copy.length);",
+        "const input='ab'; const copy=[...input]; console.log(copy.length);",
+        "const input=new Set([1]); const copy=[...input]; console.log(copy.length);",
+        "const input={0:1,length:1}; const copy=[...input]; console.log(copy.length);",
+        "const input:number[]|undefined=undefined; const copy=[...input]; console.log(copy.length);",
+        "const copy=[1,,...[2]]; console.log(copy.length);",
+        "const input=[1,,2]; const copy=[...input]; console.log(copy.length);",
+        "const input:readonly [number,...number[]]=[1,2]; const copy=[...input]; console.log(copy.length);",
+        "const copy:[number,number]=[...[1,2]]; console.log(copy.length);",
+        "const cb=()=>1; const input=[cb]; const seen=new Set([cb,...input]); console.log(seen.size);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
                 && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );

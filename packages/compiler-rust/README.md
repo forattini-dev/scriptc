@@ -60,6 +60,20 @@ The first filesystem contract covers statement-only `mkdirSync` effects with rep
 
 `crypto.randomUUID()` has a zero-argument native binding with format/version/variant and fresh-value tests; the OS entropy source is Rust's getrandom dependency. Hash/HMAC handles and Buffer operations already present in the shared runtime are recorded as reuse candidates, not advertised as native frontend support. This avoids reimplementing the runtime while making the missing frontend adapters visible.
 
+## Native standard library contracts
+
+The native standard library is implemented as JavaScript semantics in Rust. Host containers are implementation tools: Rust `String` is not the JavaScript UTF-16 string contract, and an unordered `HashSet` is not the JavaScript Set ordering and equality contract. Reuse the shared `runtime-rust` values and operations; add a runtime operation only when its observable behavior is missing there.
+
+| Layer | Responsibility | Evidence required |
+| --- | --- | --- |
+| Source frontend | Resolve standard declarations, argument/default conversions and syntax such as array spreads | Differential source programs, including shadowed names and evaluation order |
+| Owned IR | Carry value layouts, identity, calls, exceptions and ordered construction | Native validation and interoperability with the reference Rust emitter |
+| Rust runtime | Implement strings, numbers, collections and host APIs with JavaScript behavior | Runtime unit tests and native binaries compared with the pinned Node oracle |
+
+Implement ECMAScript value families (`String`, numeric operations, `Array`, `Map`, `Set`, errors and promises) separately from host API families (`fs`, `process`, `crypto` and Bun APIs). A runtime implementation alone does not establish frontend support, and an accepted TypeScript declaration alone does not establish runtime behavior. The native API registry records those distinctions for its tracked families; it is not a claim that every builtin is complete.
+
+Array literal spreads are construction syntax shared by ordinary arrays and Set/Map seeds. The frontend consumes each supported native array or fixed tuple before evaluating the next literal element, preserves shallow element identity, and builds through portable array operations. Custom iterators, string iteration, sparse sources, nullable/untyped sources and tuple-rest layouts require their own contracts and remain refused by this adapter.
+
 ## Migration sequence and retirement criteria
 
 1. Establish explicit phase ownership, demand lowering, deterministic worklists and executable roots. Preserve module effects, type diagnostics and native/ref-backend differential tests. These boundaries are implemented in this checkpoint.

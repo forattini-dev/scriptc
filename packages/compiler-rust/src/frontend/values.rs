@@ -5,6 +5,19 @@ impl Lowerer<'_> {
     pub(super) fn dynamic_literal(&mut self, node: Node) -> Result<Expr, String> {
         let loc = self.loc(node);
         if node.kind() == SyntaxKind::ArrayLiteralExpression {
+            if node
+                .elements()
+                .into_iter()
+                .any(|element| element.kind() == SyntaxKind::SpreadElement)
+            {
+                let array = self.array_spread_literal(
+                    node,
+                    Type::Array {
+                        elem: Box::new(Type::Dyn),
+                    },
+                )?;
+                return self.coerce(array, Type::Dyn, node);
+            }
             let elems = node
                 .elements()
                 .into_iter()

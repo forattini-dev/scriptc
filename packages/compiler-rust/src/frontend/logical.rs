@@ -23,7 +23,17 @@ impl Lowerer<'_> {
         if let Some(symbol) = guard {
             self.var_defined.insert(symbol);
         }
-        let right = self.expression(node.right());
+        // An empty fallback is never[] on its own. The checked expression
+        // supplies its array element contract without evaluating the fallback.
+        let right = if op == "??"
+            && node.right().kind() == SyntaxKind::ArrayLiteralExpression
+            && node.right().elements().is_empty()
+            && let Ok(ty @ Type::Array { .. }) = self.ty(node)
+        {
+            self.expected_expression(node.right(), ty)
+        } else {
+            self.expression(node.right())
+        };
         // The right side may not execute. Only facts true on both paths survive.
         self.var_defined = before.intersection(&self.var_defined).copied().collect();
         let right = right?;
