@@ -254,6 +254,43 @@ impl Lowerer<'_> {
         None
     }
 
+    // Combine only pure presence tests. Calls or other effects inside a
+    // condition can invalidate an earlier test and must not restore its facts.
+    fn guarded_vars(&mut self, node: Node, truth: bool) -> Option<HashSet<u32>> {
+        if node.kind() == SyntaxKind::ParenthesizedExpression {
+            return self.guarded_vars(node.expression(), truth);
+        }
+        if node.kind() != SyntaxKind::BinaryExpression {
+            return None;
+        }
+        let op = node.operator_token().kind();
+        if matches!(
+            op,
+            SyntaxKind::AmpersandAmpersandToken | SyntaxKind::BarBarToken
+        ) {
+            let left = self.guarded_vars(node.left(), truth)?;
+            let right = self.guarded_vars(node.right(), truth)?;
+            return Some(if (op == SyntaxKind::AmpersandAmpersandToken) == truth {
+                left.union(&right).copied().collect()
+            } else {
+                left.intersection(&right).copied().collect()
+            });
+        }
+        if !matches!(
+            op,
+            SyntaxKind::EqualsEqualsEqualsToken | SyntaxKind::ExclamationEqualsEqualsToken
+        ) {
+            return None;
+        }
+        // A recognized comparison remains pure even on the outcome that does
+        // not prove definedness, represented by the empty fact set.
+        let defined = self.guarded_var(node, truth);
+        if defined.is_some() || self.guarded_var(node, !truth).is_some() {
+            return Some(defined.into_iter().collect());
+        }
+        None
+    }
+
     // A presence test observes the live slot, even when a checker refinement
     // survives a call that can mutate a captured or module binding.
     pub(super) fn condition_value(&mut self, node: Node) -> Result<Expr, String> {
@@ -302,14 +339,14 @@ impl Lowerer<'_> {
         let value = self.condition_value(node.expression())?;
         let cond = self.condition(value, node.expression())?;
         let before = self.var_defined.clone();
-        if let Some(symbol) = self.guarded_var(node.expression(), true) {
-            self.var_defined.insert(symbol);
+        if let Some(symbols) = self.guarded_vars(node.expression(), true) {
+            self.var_defined.extend(symbols);
         }
         let then = self.statement(node.then_statement())?;
         let then_defined = self.var_defined.clone();
         self.var_defined = before;
-        if let Some(symbol) = self.guarded_var(node.expression(), false) {
-            self.var_defined.insert(symbol);
+        if let Some(symbols) = self.guarded_vars(node.expression(), false) {
+            self.var_defined.extend(symbols);
         }
         let else_ = if node.else_statement().is_nil() {
             None

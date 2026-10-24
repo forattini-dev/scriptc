@@ -141,7 +141,7 @@ impl Lowerer<'_> {
         let index_value = if indexes.is_empty() {
             None
         } else {
-            // Mixed declared/indexed shapes and non-string signatures need
+            // Mixed declared/indexed shapes and other key domains need
             // separate projection/prototype handling; don't erase their fields.
             if indexes.len() != 1 || !properties.is_empty() {
                 return None;
@@ -151,7 +151,7 @@ impl Lowerer<'_> {
                 .checker
                 .ty(index.key_type)
                 .flags
-                .intersects(TypeFlags::STRING)
+                .intersects(TypeFlags::STRING | TypeFlags::NUMBER)
             {
                 return None;
             }
@@ -918,7 +918,7 @@ impl Lowerer<'_> {
         if op == "in" {
             return self.standard_object_presence(node);
         }
-        if matches!(op, "&&" | "||") {
+        if matches!(op, "&&" | "||" | "??") {
             return self.logical(node, op);
         }
         if matches!(op, "===" | "!==") {

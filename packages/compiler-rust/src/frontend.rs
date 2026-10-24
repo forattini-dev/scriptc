@@ -830,6 +830,26 @@ impl<'a> Lowerer<'a> {
                             );
                         }
                         (init.ty(), init)
+                    } else if self.declared(declaration).is_none()
+                        && declaration.type_().is_nil()
+                        && matches!(
+                            declaration.initializer().kind(),
+                            SyntaxKind::PropertyAccessExpression
+                                | SyntaxKind::ElementAccessExpression
+                        )
+                    {
+                        let init = self.expression(declaration.initializer())?;
+                        if matches!(init, Expr::RecordKeyGet { .. }) {
+                            // An inferred slot retains an index lookup's actual
+                            // undefined arm, even if the checker omits it.
+                            self.var_types.insert(symbol, storage?);
+                            self.var_defined.remove(&symbol);
+                            (init.ty(), init)
+                        } else {
+                            let ty = storage?;
+                            let init = self.coerce(init, ty.clone(), declaration.initializer())?;
+                            (ty, init)
+                        }
                     } else {
                         let ty = storage?;
                         let init =
@@ -1062,6 +1082,51 @@ impl<'a> Lowerer<'a> {
                         loc: self.loc(node),
                     });
                 }
+                if let Type::Union { union_id } = obj.ty() {
+                    let arms = self.unions[union_id].arms.clone();
+                    let arrays = arms
+                        .iter()
+                        .filter_map(|arm| {
+                            if let Type::Array { elem } = arm {
+                                Some((**elem).clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    if arrays.len() == 1
+                        && arms.iter().all(|arm| {
+                            matches!(arm, Type::Array { .. } | Type::Null | Type::Undefined)
+                        })
+                    {
+                        // A nullable dictionary payload still needs the source
+                        // property read: an absent receiver throws, while a
+                        // present array may return undefined for a missing key.
+                        let index = self.expression(node.argument_expression())?;
+                        if index.ty() != Type::F64 {
+                            return Err(self.refuse(
+                                node,
+                                "nullable array indexing requires a represented numeric key",
+                            ));
+                        }
+                        let key = Expr::ToString {
+                            operand: Box::new(index),
+                            r#type: Type::String,
+                            loc: self.loc(node.argument_expression()),
+                        };
+                        let object = self.coerce(obj, Type::Dyn, node.expression())?;
+                        let value = self.dynamic_get(node, object, key);
+                        let result = self
+                            .intern_union(vec![arrays[0].clone(), Type::Undefined])
+                            .ok_or_else(|| {
+                                self.refuse(
+                                    node,
+                                    "array lookup result has no undefined representation",
+                                )
+                            })?;
+                        return self.coerce(value, result, node);
+                    }
+                }
                 if let Type::Record { shape_id } = obj.ty()
                     && self.records[shape_id].tuple
                 {
@@ -1264,6 +1329,7 @@ impl<'a> Lowerer<'a> {
                     SyntaxKind::ExclamationEqualsEqualsToken => "!==",
                     SyntaxKind::AmpersandAmpersandToken => "&&",
                     SyntaxKind::BarBarToken => "||",
+                    SyntaxKind::QuestionQuestionToken => "??",
                     SyntaxKind::InKeyword => "in",
                     _ => return Err(self.refuse(node, "binary operator is not ported")),
                 };

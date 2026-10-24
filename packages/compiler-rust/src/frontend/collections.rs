@@ -228,7 +228,10 @@ impl Lowerer<'_> {
             r#type: ty,
             loc: self.loc(node),
         };
-        self.narrowed(value, node)
+        // An index signature describes stored values, not key presence. The
+        // checker can omit undefined when noUncheckedIndexedAccess is false.
+        // Preserve the lookup tag until a source guard proves its payload.
+        Ok(value)
     }
 
     pub(super) fn dictionary_set(&mut self, node: Node) -> Result<Stmt, String> {

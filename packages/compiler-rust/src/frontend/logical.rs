@@ -5,18 +5,21 @@ impl Lowerer<'_> {
     pub(super) fn logical(&mut self, node: Node, op: &str) -> Result<Expr, String> {
         let left = self.condition_value(node.left())?;
         let before = self.var_defined.clone();
-        let guard = self.guarded_var(node.left(), op == "&&").or_else(|| {
-            let mut source = node.left();
-            while source.kind() == SyntaxKind::ParenthesizedExpression {
-                source = source.expression();
-            }
-            if op == "&&" && source.kind() == SyntaxKind::Identifier {
-                let symbol = self.symbol(source);
-                self.var_types.contains_key(&symbol).then_some(symbol)
-            } else {
-                None
-            }
-        });
+        let guard = (op != "??")
+            .then(|| self.guarded_var(node.left(), op == "&&"))
+            .flatten()
+            .or_else(|| {
+                let mut source = node.left();
+                while source.kind() == SyntaxKind::ParenthesizedExpression {
+                    source = source.expression();
+                }
+                if op == "&&" && source.kind() == SyntaxKind::Identifier {
+                    let symbol = self.symbol(source);
+                    self.var_types.contains_key(&symbol).then_some(symbol)
+                } else {
+                    None
+                }
+            });
         if let Some(symbol) = guard {
             self.var_defined.insert(symbol);
         }
@@ -24,7 +27,7 @@ impl Lowerer<'_> {
         // The right side may not execute. Only facts true on both paths survive.
         self.var_defined = before.intersection(&self.var_defined).copied().collect();
         let right = right?;
-        if left.ty() == Type::Bool && right.ty() == Type::Bool {
+        if op != "??" && left.ty() == Type::Bool && right.ty() == Type::Bool {
             return Ok(Expr::Logical {
                 op: op.into(),
                 left: Box::new(left),
@@ -56,8 +59,18 @@ impl Lowerer<'_> {
             r#type: result_type.clone(),
             loc: self.loc(node.left()),
         };
-        let cond = self.condition(read(), node.left())?;
-        let (then, else_) = if op == "&&" {
+        let cond = if op == "??" {
+            Expr::DynTest {
+                value: Box::new(self.coerce(read(), Type::Dyn, node.left())?),
+                test: "nullish".into(),
+                negated: false,
+                r#type: Type::Bool,
+                loc: self.loc(node.left()),
+            }
+        } else {
+            self.condition(read(), node.left())?
+        };
+        let (then, else_) = if matches!(op, "&&" | "??") {
             (right, read())
         } else {
             (read(), right)

@@ -169,6 +169,39 @@ impl Lowerer<'_> {
                 )
             });
         }
+        if node.parent().kind() == SyntaxKind::VariableDeclaration
+            && !node.parent().initializer().is_nil()
+        {
+            let declaration = node.parent();
+            let initial = receivers::reference_node(declaration.initializer());
+            if matches!(
+                initial.kind(),
+                SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression
+            ) {
+                let source = self.checker.get_type_at_location(initial.expression());
+                if let Some(Type::Record { shape_id }) = self.type_id(source)
+                    && let Some(value) = self.records[shape_id].index_value.clone()
+                {
+                    // Reserve the true lookup layout before module storage and
+                    // function captures are allocated; checker inference may
+                    // omit undefined or narrow after a preceding property write.
+                    let storage = if declaration.type_().is_nil() {
+                        self.undefined_storage_type(value, initial)?
+                    } else {
+                        self.ty(node)?
+                    };
+                    if storage == Type::Dyn
+                        || matches!(storage, Type::Union { union_id } if self.unions[union_id].arms.contains(&Type::Undefined))
+                    {
+                        self.var_types.entry(symbol).or_insert(storage.clone());
+                        if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                            self.module_vars.entry(symbol).or_insert(storage.clone());
+                        }
+                    }
+                    return Ok(storage);
+                }
+            }
+        }
         let ty = self.ty(node)?;
         if matches!(ty, Type::Dyn | Type::Null | Type::Undefined)
             && node.parent().kind() == SyntaxKind::VariableDeclaration

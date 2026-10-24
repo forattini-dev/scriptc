@@ -160,23 +160,171 @@ impl Lowerer<'_> {
         for arg in node.arguments() {
             args.push(self.expression(arg)?);
         }
-        if args
-            .iter()
-            .any(|arg| !matches!(arg.ty(), Type::F64 | Type::String | Type::Bool))
-        {
-            return Err(self.refuse(node, "non-primitive console argument values are not ported"));
-        }
         if args.len() > 1
-            && args[0].ty() == Type::String
+            && (args[0].ty() == Type::String
+                || matches!(args[0].ty(), Type::Union { union_id } if self.unions[union_id].arms.contains(&Type::String)))
             && !matches!(&args[0], Expr::StrLit { value, .. } if !value.contains('%'))
         {
             return Err(self.refuse(node, "Node console format substitution is not ported"));
         }
+        let args = args
+            .into_iter()
+            .map(|value| self.console_argument(value, node))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Some(Expr::Intrinsic {
             name: output_intrinsic(name).into(),
             args,
             r#type: Type::Void,
             loc: self.loc(node),
         }))
+    }
+
+    fn console_argument(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
+        if matches!(value.ty(), Type::F64 | Type::String | Type::Bool) {
+            return Ok(value);
+        }
+        let arms = match value.ty() {
+            Type::Union { union_id } => self.unions[union_id].arms.clone(),
+            Type::Null => {
+                return Ok(Expr::StrLit {
+                    value: "null".into(),
+                    r#type: Type::String,
+                    loc: self.loc(node),
+                });
+            }
+            Type::Undefined => {
+                return Ok(Expr::StrLit {
+                    value: "undefined".into(),
+                    r#type: Type::String,
+                    loc: self.loc(node),
+                });
+            }
+            _ => {
+                return Err(
+                    self.refuse(node, "non-primitive console argument values are not ported")
+                );
+            }
+        };
+        if arms.iter().any(|ty| {
+            !matches!(
+                ty,
+                Type::F64 | Type::String | Type::Bool | Type::Null | Type::Undefined
+            )
+        }) {
+            return Err(self.refuse(node, "non-primitive console argument values are not ported"));
+        }
+        let Type::Union { union_id } = value.ty() else {
+            unreachable!()
+        };
+        let mut helper = helpers::Helper::new(
+            "console_primitive",
+            vec![value.ty()],
+            Type::String,
+            self.loc(node),
+        );
+        let parameter = helper.param(0);
+        for (tag, arm) in arms.into_iter().enumerate() {
+            let read = Expr::UnionNarrow {
+                union_id: format!("u{union_id}"),
+                tag,
+                value: Box::new(helper.read(&parameter)),
+                r#type: arm.clone(),
+                loc: helper.loc(),
+            };
+            let formatted = match arm {
+                Type::Null | Type::Undefined => Expr::StrLit {
+                    value: if arm == Type::Null {
+                        "null"
+                    } else {
+                        "undefined"
+                    }
+                    .into(),
+                    r#type: Type::String,
+                    loc: helper.loc(),
+                },
+                Type::String => read,
+                Type::F64 => {
+                    // Console displays -0; String(-0) deliberately does not.
+                    let zero = Expr::Bin {
+                        op: "===".into(),
+                        left: Box::new(read.clone()),
+                        right: Box::new(helper.number(0.0)),
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    };
+                    let inverse = Expr::Bin {
+                        op: "/".into(),
+                        left: Box::new(helper.number(1.0)),
+                        right: Box::new(read.clone()),
+                        r#type: Type::F64,
+                        loc: helper.loc(),
+                    };
+                    let negative = Expr::Bin {
+                        op: "<".into(),
+                        left: Box::new(inverse),
+                        right: Box::new(helper.number(0.0)),
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    };
+                    Expr::Ternary {
+                        cond: Box::new(Expr::Logical {
+                            op: "&&".into(),
+                            left: Box::new(zero),
+                            right: Box::new(negative),
+                            r#type: Type::Bool,
+                            loc: helper.loc(),
+                        }),
+                        then: Box::new(Expr::StrLit {
+                            value: "-0".into(),
+                            r#type: Type::String,
+                            loc: helper.loc(),
+                        }),
+                        else_: Box::new(Expr::ToString {
+                            operand: Box::new(read),
+                            r#type: Type::String,
+                            loc: helper.loc(),
+                        }),
+                        r#type: Type::String,
+                        loc: helper.loc(),
+                    }
+                }
+                _ => Expr::ToString {
+                    operand: Box::new(read),
+                    r#type: Type::String,
+                    loc: helper.loc(),
+                },
+            };
+            helper.function.body.push(Stmt::If {
+                cond: Expr::UnionIsTag {
+                    union_id: format!("u{union_id}"),
+                    tag,
+                    value: Box::new(helper.read(&parameter)),
+                    negated: false,
+                    r#type: Type::Bool,
+                    loc: helper.loc(),
+                },
+                then: vec![Stmt::Return {
+                    value: Some(formatted),
+                    loc: helper.loc(),
+                }],
+                else_: None,
+                loc: helper.loc(),
+            });
+        }
+        helper.function.body.push(Stmt::Return {
+            value: Some(Expr::StrLit {
+                value: String::new(),
+                r#type: Type::String,
+                loc: helper.loc(),
+            }),
+            loc: helper.loc(),
+        });
+        let callee = self.install_helper(helper.function);
+        Ok(Expr::Call {
+            callee,
+            args: vec![value],
+            r#type: Type::String,
+            loc: self.loc(node),
+        })
     }
 }

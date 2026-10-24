@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-numeric-dictionaries/contracts.ts",
+        "rust-native-numeric-dictionaries/coalesce.ts",
+        "rust-native-numeric-dictionaries/storage.ts",
         "rust-native-platform/read-file.ts",
         "rust-native-platform/read-file-errors.ts",
         "rust-native-platform/append.ts",
@@ -3673,6 +3676,97 @@ fn read_file_boundaries_preserve_existing_artifacts() {
             format!("// @ts-nocheck\nimport {{readFileSync}} from 'node:fs';\n{source}\n"),
         )
         .unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains(expected)
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn numeric_dictionary_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "numeric-dictionary-boundary");
+    fs::write(
+        &input,
+        "const d: Record<number,string>={2:'two'}; console.log(String(d[2]));",
+    )
+    .unwrap();
+    success(
+        &Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(temp.path().join("numeric-dictionary-canary.json"))
+            .output()
+            .unwrap(),
+    );
+    for (source, expected) in [
+        (
+            "interface Mixed {[key:number]:string; label:string} const d:Mixed={2:'two',label:'name'}; console.log(d.label);",
+            "type has no representation",
+        ),
+        (
+            "interface Mixed {[key:string]:string|number;[key:number]:string} const d:Mixed={2:'two'}; console.log(d[2]);",
+            "type has no representation",
+        ),
+        (
+            "const d:Record<symbol,string>={}; console.log(d);",
+            "type has no representation",
+        ),
+        (
+            "const d:Record<number,()=>number>={2:()=>2}; console.log(d);",
+            "type has no representation",
+        ),
+        (
+            "const d:Record<number,string>={}; const value:string=d[99]; console.log(value);",
+            "native representation coercion is not ported",
+        ),
+        (
+            "const d:Record<number,string>={}; const key={toString(){return '2';}}; console.log(d[key]);",
+            "native representation coercion is not ported",
+        ),
+        (
+            "const d:Record<number,string>={}; console.log(d[Symbol('key')]);",
+            "native representation coercion is not ported",
+        ),
+        (
+            "const d:Record<number,string>={}; console.log(d[2], 'value');",
+            "Node console format substitution is not ported",
+        ),
+        (
+            "console.log('object', {value:1});",
+            "non-primitive console argument values are not ported",
+        ),
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         for artifact in [
             &target,
             &target.with_extension("ir.json"),

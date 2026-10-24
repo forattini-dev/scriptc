@@ -46,7 +46,17 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             })
         } else {
-            self.expected_expression(node, Type::String)
+            let value = self.expression(node)?;
+            if value.ty() == Type::F64 {
+                // Object keys use NumberToString, not Map's numeric identity.
+                Ok(Expr::ToString {
+                    operand: Box::new(value),
+                    r#type: Type::String,
+                    loc: self.loc(node),
+                })
+            } else {
+                self.coerce(value, Type::String, node)
+            }
         }
     }
 }
