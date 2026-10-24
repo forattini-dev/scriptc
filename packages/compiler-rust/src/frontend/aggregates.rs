@@ -55,6 +55,16 @@ impl Lowerer<'_> {
 
     fn aggregate_type_inner(&mut self, id: TypeId) -> Option<Type> {
         let flags = self.checker.ty(id).flags;
+        if flags.intersects(TypeFlags::INTERSECTION)
+            && self
+                .checker
+                .ty(id)
+                .types()
+                .iter()
+                .any(|part| self.checker.is_tuple_type(*part))
+        {
+            return self.tuple_intersection_type(id);
+        }
         if self.checker.is_tuple_type(id) {
             return self.tuple_type(id);
         }

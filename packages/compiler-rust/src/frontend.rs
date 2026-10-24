@@ -1444,9 +1444,12 @@ impl<'a> Lowerer<'a> {
                         return self.array_call(node);
                     }
                     if matches!(receiver_type, Some(Type::Record { shape_id }) if self.records[shape_id].tuple)
-                        && member.name().text() == "join"
                     {
-                        return self.array_join(node);
+                        return match member.name().text() {
+                            "join" => self.array_join(node),
+                            "includes" => self.tuple_includes(node),
+                            _ => Err(self.refuse(node, "tuple method is not ported")),
+                        };
                     }
                     if matches!(receiver_type, Some(Type::Map { .. })) {
                         let receiver = self.expression(member.expression())?;

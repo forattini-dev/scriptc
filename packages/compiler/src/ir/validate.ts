@@ -1724,7 +1724,6 @@ export function validateModule(mod: IrModule): IrValidationError[] {
     if (rec.tuple) {
       const names = new Set(rec.fields.map((f) => f.name));
       if (
-        rec.fields.length === 0 ||
         names.size !== rec.fields.length ||
         [...Array(rec.fields.length).keys()].some((i) => !names.has(String(i)))
       ) {

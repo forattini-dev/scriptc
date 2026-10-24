@@ -236,7 +236,7 @@ impl Lowerer<'_> {
 
     // Unit tags cannot occupy standalone function ABI slots. A void-valued
     // source call still evaluates here and contributes JavaScript undefined.
-    fn primitive_capture(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
+    pub(super) fn primitive_capture(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
         if value.ty() == Type::Void {
             let ty = self.intern_union(vec![Type::F64, Type::Undefined]).unwrap();
             let unit = Expr::UnitLit {
@@ -410,7 +410,7 @@ impl Lowerer<'_> {
 
     /// Only represented primitives participate. Objects require observable
     /// ToPrimitive hooks; a numeric type assertion must never erase that work.
-    fn primitive_number(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
+    pub(super) fn primitive_number(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
         let number = |n| Expr::NumLit {
             value: n,
             spelling: None,
@@ -444,7 +444,7 @@ impl Lowerer<'_> {
     }
 }
 
-fn primitive_source(mut node: Node) -> Node {
+pub(super) fn primitive_source(mut node: Node) -> Node {
     while matches!(
         node.kind(),
         SyntaxKind::ParenthesizedExpression
