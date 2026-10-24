@@ -174,6 +174,18 @@ impl Lowerer<'_> {
         {
             let declaration = node.parent();
             let initial = receivers::reference_node(declaration.initializer());
+            if declaration.type_().is_nil() && optional_access::is_access(initial) {
+                // An optional index lookup can be absent even when the checker
+                // omits undefined under noUncheckedIndexedAccess=false. Reserve
+                // this layout before module cells and closures are allocated.
+                let value = self.ty(initial)?;
+                let storage = self.optional_result_type(value, initial)?;
+                self.var_types.entry(symbol).or_insert(storage.clone());
+                if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                    self.module_vars.entry(symbol).or_insert(storage.clone());
+                }
+                return Ok(storage);
+            }
             if matches!(
                 initial.kind(),
                 SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression

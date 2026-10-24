@@ -542,6 +542,14 @@ impl Lowerer<'_> {
     }
 
     fn expected_expression_inner(&mut self, node: Node, target: Type) -> Result<Expr, String> {
+        if node.kind() == SyntaxKind::CallExpression
+            && node.flags().intersects(NodeFlags::OPTIONAL_CHAIN)
+        {
+            return Err(self.refuse(
+                node,
+                "optional calls require a native receiver-call contract",
+            ));
+        }
         if matches!(target, Type::Promise { .. })
             && node.kind() == SyntaxKind::CallExpression
             && let Some(value) = self.promise_call_expected(node, Some(target.clone()))?

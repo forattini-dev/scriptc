@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-optional-access/contracts.ts",
+        "rust-native-optional-access/effects.ts",
+        "rust-native-optional-access/chains.ts",
         "rust-native-tuple-includes/contracts.ts",
         "rust-native-tuple-includes/order.ts",
         "rust-native-numeric-dictionaries/contracts.ts",
@@ -3697,6 +3700,68 @@ fn read_file_boundaries_preserve_existing_artifacts() {
             !output.status.success()
                 && stderr.contains("SCN1001")
                 && stderr.contains(expected)
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn optional_access_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "optional-access-boundary");
+    fs::write(&input, "function read(d:Record<string,number>|undefined){return (d?.['x']??0)>0} console.log(read(undefined),read({x:1}));").unwrap();
+    success(
+        &Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(temp.path().join("canary.json"))
+            .output()
+            .unwrap(),
+    );
+    for source in [
+        "const f=()=>1; console.log(f?.());",
+        "const d={f(){return 1}}; console.log(d?.f());",
+        "const d={f(){return 1}}; console.log(d.f?.());",
+        "const a:number[]=[1]; const b:number[]=a?.map(x=>x); console.log(b);",
+        "const d:Record<string,number>={}; const value:number=d?.['absent']; console.log(value);",
+        "const d:Record<string,number>={}; console.log(d?.[Symbol('key')]);",
+        "const d:Record<string,number>={}; console.log(d?.[{toString(){return 'x'}}]);",
+        "function f(d:{a:number}|{b:number}|undefined){return d?.a} console.log(f(undefined));",
+        "class Example {get x(){return 1}} const e=new Example(); console.log(e?.x);",
+        "const a=[1] as const; console.log(a?.[0]);",
+        "function f(d:{child:{value:number}}|undefined){return (d?.child).value} console.log(f(undefined));",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
                 && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );

@@ -43,6 +43,7 @@ mod module_metadata;
 mod modules;
 mod namespace_values;
 mod object_methods;
+mod optional_access;
 mod parameters;
 mod pipeline;
 mod primitives;
@@ -1005,6 +1006,17 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expression_inner(&mut self, node: Node) -> Result<Expr, String> {
+        if optional_access::is_access(node) {
+            return self.optional_access(node);
+        }
+        if node.kind() == SyntaxKind::CallExpression
+            && node.flags().intersects(NodeFlags::OPTIONAL_CHAIN)
+        {
+            return Err(self.refuse(
+                node,
+                "optional calls require a native receiver-call contract",
+            ));
+        }
         if let Some(value) = self.standard_function_value(node)? {
             return Ok(value);
         }

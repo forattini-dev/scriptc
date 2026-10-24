@@ -38,25 +38,50 @@ impl Lowerer<'_> {
         }
         let left = self.logical_value(left, node.left());
         let right = self.logical_value(right, node.right());
-        let result_type =
-            if left.ty() == right.ty() && !matches!(left.ty(), Type::Null | Type::Undefined) {
-                left.ty()
+        let defined_arm = if op == "??" {
+            if let Type::Union { union_id } = left.ty() {
+                let arms = self.unions[union_id]
+                    .arms
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, ty)| !matches!(ty, Type::Null | Type::Undefined))
+                    .collect::<Vec<_>>();
+                if let [(tag, ty)] = arms.as_slice() {
+                    (*ty == &right.ty()).then_some((union_id, *tag, (*ty).clone()))
+                } else {
+                    None
+                }
             } else {
-                Type::Dyn
-            };
-        let left = self.coerce(left, result_type.clone(), node.left())?;
+                None
+            }
+        } else {
+            None
+        };
+        let result_type = if let Some((_, _, ty)) = &defined_arm {
+            ty.clone()
+        } else if left.ty() == right.ty() && !matches!(left.ty(), Type::Null | Type::Undefined) {
+            left.ty()
+        } else {
+            Type::Dyn
+        };
+        let left = if defined_arm.is_some() {
+            left
+        } else {
+            self.coerce(left, result_type.clone(), node.left())?
+        };
+        let left_type = left.ty();
         let right = self.coerce(right, result_type.clone(), node.right())?;
         let local = Local {
             id: format!("logical{}", self.locals.len()),
             name: "logical left operand".into(),
-            r#type: result_type.clone(),
+            r#type: left_type.clone(),
             mutable: false,
             boxed: false,
         };
         self.locals.push(local.clone());
         let read = || Expr::VarRef {
             local_id: local.id.clone(),
-            r#type: result_type.clone(),
+            r#type: left_type.clone(),
             loc: self.loc(node.left()),
         };
         let cond = if op == "??" {
@@ -70,8 +95,19 @@ impl Lowerer<'_> {
         } else {
             self.condition(read(), node.left())?
         };
+        let retained = if let Some((union_id, tag, ty)) = defined_arm {
+            Expr::UnionNarrow {
+                union_id: format!("u{union_id}"),
+                tag,
+                value: Box::new(read()),
+                r#type: ty,
+                loc: self.loc(node.left()),
+            }
+        } else {
+            read()
+        };
         let (then, else_) = if matches!(op, "&&" | "??") {
-            (right, read())
+            (right, retained)
         } else {
             (read(), right)
         };
