@@ -86,11 +86,13 @@ impl Lowerer<'_> {
             && self.primitive_symbol(member_id, name, Some("Math"));
         let string = crate::string_builtins::by_method(name)
             .filter(|_| name != "length" && self.primitive_symbol(member_id, name, Some("String")));
-        if !math && string.is_none() {
+        let string_identity = matches!(name, "toString" | "valueOf")
+            && self.primitive_symbol(member_id, name, Some("String"));
+        if !math && string.is_none() && !string_identity {
             return Ok(None);
         }
         let mut values = Vec::new();
-        if string.is_some() {
+        if string.is_some() || string_identity {
             let receiver = self.primitive_operand(member.expression())?;
             if receiver.ty() != Type::String {
                 return Err(self.refuse(
@@ -99,7 +101,9 @@ impl Lowerer<'_> {
                 ));
             }
             values.push(receiver);
-            self.ensure_exception_classes(node)?;
+            if string.is_some() {
+                self.ensure_exception_classes(node)?;
+            }
         }
         for arg in node.arguments() {
             if arg.kind() == SyntaxKind::SpreadElement {
@@ -114,16 +118,26 @@ impl Lowerer<'_> {
         }
         // Evaluate the receiver and ALL arguments before conversions, errors or
         // reduction. Unused extra arguments still have their source effects.
-        let result = string.map_or(Type::F64, |operation| operation.result.clone());
+        let result = if string_identity {
+            Type::String
+        } else {
+            string.map_or(Type::F64, |operation| operation.result.clone())
+        };
         let mut helper = Helper::new(
             &format!("primitive_{name}"),
             values.iter().map(Expr::ty).collect(),
             result.clone(),
             self.loc(node),
         );
-        let operand = if string.is_some() { 1 } else { 0 };
+        let operand = if string.is_some() || string_identity {
+            1
+        } else {
+            0
+        };
         let mut numbers = Vec::new();
-        let count = if let Some(operation) = string {
+        let count = if string_identity {
+            0
+        } else if let Some(operation) = string {
             operation.args.len()
         } else if math && matches!(name, "min" | "max" | "hypot") {
             values.len()
@@ -146,7 +160,11 @@ impl Lowerer<'_> {
             helper.declare(&local, value);
             numbers.push(helper.read(&local));
         }
-        let value = if string.is_some() {
+        // These two methods return the primitive string unchanged. Keep the
+        // helper call: eliminating it would discard unused argument effects.
+        let value = if string_identity {
+            helper.read(&helper.param(0))
+        } else if string.is_some() {
             Expr::StringIntrinsic {
                 method: name.into(),
                 receiver: Box::new(helper.read(&helper.param(0))),

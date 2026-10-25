@@ -433,6 +433,18 @@ impl Lowerer<'_> {
     }
     pub(in crate::frontend) fn boxed_call(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let member = receivers::reference_node(node.expression());
+        // A proven primitive string call has a typed identity adapter. Leave
+        // boxed and erased valueOf receivers on their existing lookup path.
+        if member.kind() == SyntaxKind::PropertyAccessExpression
+            && matches!(member.name().text(), "toString" | "valueOf")
+            && {
+                let id = self.symbol(member.name());
+                self.primitive_symbol(id, member.name().text(), Some("String"))
+            }
+            && self.ty(member.expression()).ok() == Some(Type::String)
+        {
+            return Ok(None);
+        }
         if !valueof_member(member) {
             if matches!(
                 member.kind(),
