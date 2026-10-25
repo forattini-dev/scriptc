@@ -1,4 +1,4 @@
-//! Own-key reflection for closed native data records.
+//! Own-key reflection over represented data, without evaluating property values.
 use super::*;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
@@ -30,17 +30,36 @@ impl Lowerer<'_> {
             return Ok(None);
         }
         let args = node.arguments().into_iter().collect::<Vec<_>>();
-        if args.len() != if name == "keys" { 1 } else { 2 } {
+        if args
+            .iter()
+            .any(|arg| arg.kind() == SyntaxKind::SpreadElement)
+        {
+            return Err(self.refuse(node, "reflection argument spreads are not ported"));
+        }
+        if name == "hasOwn" && args.len() != 2 {
             return Err(self.refuse(
                 node,
                 "native record reflection argument count is not ported",
             ));
         }
-        let value = self.expression(args[0])?;
-        if !self.reflected_record(&value.ty()) {
+        let value = if let Some(arg) = args.first() {
+            self.expression(*arg)?
+        } else {
+            Expr::UnitLit {
+                unit: "undefined",
+                r#type: Type::Undefined,
+                loc: self.loc(node),
+            }
+        };
+        let value = self.primitive_capture(value, node)?;
+        if !(if name == "keys" {
+            self.reflected_keys(&value.ty())
+        } else {
+            self.reflected_record(&value.ty())
+        }) {
             return Err(self.refuse(node, "own-key reflection requires a closed data record"));
         }
-        let value = self.coerce(value, Type::Dyn, args[0])?;
+        let value = self.coerce(value, Type::Dyn, node)?;
         if name == "hasOwn" {
             let key = self.expected_expression(args[1], Type::String)?;
             return Ok(Some(Expr::LibCall {
@@ -55,9 +74,17 @@ impl Lowerer<'_> {
         let array = Type::Array {
             elem: Box::new(Type::String),
         };
+        // A call evaluates every argument before ToObject. Keep ignored extras
+        // as ordinary typed parameters, including their exceptions and effects.
+        let mut values = vec![value];
+        for arg in args.iter().skip(1) {
+            let value = self.expression(*arg)?;
+            let value = self.primitive_capture(value, *arg)?;
+            values.push(self.coerce(value, Type::Dyn, *arg)?);
+        }
         let mut helper = helpers::Helper::new(
             "record_keys",
-            vec![Type::Dyn],
+            values.iter().map(Expr::ty).collect(),
             array.clone(),
             self.loc(node),
         );
@@ -120,10 +147,33 @@ impl Lowerer<'_> {
         let callee = self.install_helper(helper.finish(&result));
         Ok(Some(Expr::Call {
             callee,
-            args: vec![value],
+            args: values,
             r#type: array,
             loc: self.loc(node),
         }))
+    }
+
+    fn reflected_keys(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Dyn
+            | Type::F64
+            | Type::Bool
+            | Type::String
+            | Type::Symbol
+            | Type::Null
+            | Type::Undefined
+            | Type::Array { .. }
+            | Type::Bytes { .. }
+            | Type::Promise { .. } => true,
+            Type::Record { shape_id } => {
+                !self.enum_shape(*shape_id) && !self.callables.contains_key(shape_id)
+            }
+            Type::Union { union_id } => self.unions[*union_id]
+                .arms
+                .iter()
+                .all(|arm| self.reflected_keys(arm)),
+            _ => false,
+        }
     }
 
     fn reflected_record(&self, ty: &Type) -> bool {

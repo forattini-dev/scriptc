@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-object-keys/contracts.ts",
+        "rust-native-object-keys/order.ts",
+        "rust-native-object-keys/shadows.ts",
         "rust-native-boxed/contracts.ts",
         "rust-native-boxed/identity.ts",
         "rust-native-boxed/methods.ts",
@@ -4661,6 +4664,52 @@ fn process_write_boundaries_preserve_existing_artifacts() {
         "import p from 'node:process'; p.stderr.write = (text: string) => true;",
         "import p from 'node:process'; p.stderr?.write('x');",
         "import p from 'node:process'; p.stderrWrite('x');",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn object_keys_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "keys-boundary");
+    for source in [
+        "Object.keys(...[{ x: 1 }]);",
+        "const keys = Object.keys; keys({ x: 1 });",
+        "class C { x = 1; } Object.keys(new C());",
+        "Object.keys(new String('one'));",
+        "Object.keys(new Map<string, number>());",
+        "Object.keys(new Set<string>());",
+        "Object.keys(function f() { return 1; });",
+        "Object.keys({ get x() { return 1; } });",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
         let artifacts = [

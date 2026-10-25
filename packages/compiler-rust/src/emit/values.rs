@@ -520,7 +520,22 @@ fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
     out.push_str("_ => runtime::throw_type_error(\"scriptc: own-key reflection requires a native data record\".into()) } }\nfn native_value_has_own(value: NativeValue, key: runtime::JsString) -> bool { native_value_own_keys(&value).iter().any(|k| k == &key) }\n");
     // Stable sorting leaves non-index string keys in insertion order. 2^32-1
     // and noncanonical numeric spellings are ordinary string keys.
-    out.push_str("fn native_value_keys(value: NativeValue) -> NativeValue { let mut keys = native_value_own_keys(&value); keys.sort_by_key(|key| key.parse::<u32>().ok().filter(|i| *i != u32::MAX && *key == i.to_string()).map(|i| (0, i)).unwrap_or((1, 0))); NativeValue::Array(runtime::array_new(keys.into_iter().map(NativeValue::String).collect())) }\n");
+    // ToObject/enumerability belongs to Object.keys, not the internal own-key
+    // reader shared with hasOwn, JSON and process environment validation.
+    out.push_str("fn native_index_keys(length: usize) -> Vec<runtime::JsString> { (0..length).map(|index| index.to_string().into()).collect() }\nfn native_value_keys(value: NativeValue) -> NativeValue { let mut keys = match &value { NativeValue::Undefined | NativeValue::Null => runtime::throw_type_error(\"Cannot convert undefined or null to object\".into()), NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::Symbol(_) => Vec::new(), NativeValue::String(text) => native_index_keys(text.encode_utf16().count()), NativeValue::Array(array) => native_index_keys(runtime::array_len(array) as usize),\n");
+    for (index, ty) in types.iter().enumerate() {
+        let length = match ty {
+            Type::Array { elem } if **elem != Type::Dyn => "runtime::array_len(value)",
+            Type::Bytes { .. } => "runtime::bytes_len(value)",
+            _ => continue,
+        };
+        writeln!(
+            out,
+            "NativeValue::V{index}(value) => native_index_keys({length} as usize),"
+        )
+        .unwrap();
+    }
+    out.push_str("_ => native_value_own_keys(&value) }; keys.sort_by_key(|key| key.parse::<u32>().ok().filter(|i| *i != u32::MAX && *key == i.to_string()).map(|i| (0, i)).unwrap_or((1, 0))); NativeValue::Array(runtime::array_new(keys.into_iter().map(NativeValue::String).collect())) }\n");
 }
 
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
