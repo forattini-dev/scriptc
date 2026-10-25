@@ -46,6 +46,7 @@ mod modules;
 mod namespace_values;
 mod object_methods;
 mod optional_access;
+mod parameter_abi;
 mod parameters;
 mod pipeline;
 mod primitives;
@@ -175,6 +176,7 @@ struct Lowerer<'a> {
     // Value contracts for undefined-capable var/parameter/deferred let cells.
     var_types: HashMap<u32, Type>,
     var_defined: HashSet<u32>,
+    js_absence_parameters: HashSet<u32>,
     enums: enums::EnumGraph,
     callables: HashMap<usize, Type>,
     polymorphic_callables: HashMap<u32, usize>,
@@ -220,6 +222,7 @@ impl<'a> Lowerer<'a> {
             module_vars: HashMap::new(),
             var_types: HashMap::new(),
             var_defined: HashSet::new(),
+            js_absence_parameters: HashSet::new(),
             enums: enums::EnumGraph::default(),
             callables: HashMap::new(),
             polymorphic_callables: HashMap::new(),

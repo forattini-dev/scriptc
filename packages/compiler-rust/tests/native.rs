@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-js-parameter-abi/contracts.js",
+        "rust-native-js-parameter-abi/aliases.js",
+        "rust-native-js-parameter-abi/order.js",
         "rust-native-array-length/contracts.ts",
         "rust-native-array-length/errors.ts",
         "rust-native-array-length/aliases.ts",
@@ -4741,6 +4744,66 @@ catch (error) { if (error instanceof Error) console.log('boundary', error.messag
         "boundary scriptc: relational object coercion requires native ToPrimitive support"
     );
     assert!(actual.stderr.is_empty());
+}
+
+#[test]
+fn javascript_parameter_abi_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let config_path = temp.path().join("tsconfig.json");
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["compilerOptions"]["allowJs"] = serde_json::json!(true);
+    fs::write(config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+    let target = binary(temp.path(), "javascript-parameter-boundary");
+    for (extension, source) in [
+        (
+            "mts",
+            "const f = (key: string): void => { console.log(key); }; f(undefined);",
+        ),
+        (
+            "mjs",
+            "/** @param {string} key @returns {string} */ function f(key) { return key; } f(undefined);",
+        ),
+        (
+            "mjs",
+            "/** @type {(key: string) => void} */ const f = (key) => console.log(key); f(undefined);",
+        ),
+        (
+            "mjs",
+            "/** @param {string} key */ const f = (key) => console.log(key.trim()); f(undefined);",
+        ),
+    ] {
+        let input = temp.path().join(format!("main.{extension}"));
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+        fs::remove_file(input).unwrap();
+    }
 }
 
 #[test]

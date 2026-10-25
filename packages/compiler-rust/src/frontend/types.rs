@@ -181,6 +181,21 @@ impl Lowerer<'_> {
         {
             let declaration = node.parent();
             let initial = receivers::reference_node(declaration.initializer());
+            if declaration.type_().is_nil()
+                && initial.kind() == SyntaxKind::Identifier
+                && parameter_abi::is_javascript(declaration)
+                && self.argument_may_be_absent(initial, &mut HashSet::new())
+            {
+                let ty = self.ty(node)?;
+                if matches!(ty, Type::String | Type::F64 | Type::Bool) {
+                    let storage = self.undefined_storage_type(ty, initial)?;
+                    self.var_types.entry(symbol).or_insert(storage.clone());
+                    if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                        self.module_vars.entry(symbol).or_insert(storage.clone());
+                    }
+                    return Ok(storage);
+                }
+            }
             if declaration.type_().is_nil() && optional_access::is_access(initial) {
                 // An optional index lookup can be absent even when the checker
                 // omits undefined under noUncheckedIndexedAccess=false. Reserve

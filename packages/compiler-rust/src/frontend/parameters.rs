@@ -3,7 +3,12 @@ use super::*;
 
 impl Lowerer<'_> {
     pub(super) fn parameter_type(&mut self, node: Node, ty: Type) -> Result<Type, String> {
-        if node.question_token().is_nil() && node.initializer().is_nil() {
+        let symbol = self.symbol(node.name());
+        if node.question_token().is_nil()
+            && node.initializer().is_nil()
+            && !(self.js_absence_parameters.contains(&symbol)
+                && matches!(ty, Type::String | Type::F64 | Type::Bool))
+        {
             return Ok(ty);
         }
         let mut arms = match ty {
@@ -171,6 +176,15 @@ impl Lowerer<'_> {
             .undefined_tag(&param.r#type)
             .filter(|_| !node.initializer().is_nil())
         else {
+            if parameter_abi::is_javascript(node) && self.optional_storage(&local.r#type) {
+                let source = self.checker.get_type_at_location(node.name());
+                if !self.source_has_undefined(source) {
+                    // A planned/contextual input can be wider than its JS
+                    // annotation. Read its live tags until a presence test.
+                    self.var_types.insert(symbol, local.r#type.clone());
+                    self.var_defined.remove(&symbol);
+                }
+            }
             self.bindings.insert(symbol, local);
             return Ok(vec![]);
         };
