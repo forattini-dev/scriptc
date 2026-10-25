@@ -23,6 +23,18 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                     "{{ let regex = {receiver}; let text = {}; runtime::regex_test(&regex, &runtime::JsString::from(text)) }}",
                     arg.unwrap()
                 ),
+                "replace" | "replaceAll" => {
+                    let replacement = expr(&args[1], function, module);
+                    let operation = if method == "replace" {
+                        "regex_replace"
+                    } else {
+                        "regex_replace_all"
+                    };
+                    format!(
+                        "{{ let subject = {receiver}; let regex = {}; let replacement = {replacement}; runtime::{operation}(&subject, &regex, &replacement) }}",
+                        arg.unwrap()
+                    )
+                }
                 "source" | "flags" => format!("runtime::regex_{method}(&({receiver}))"),
                 "lastIndex" => format!("runtime::regex_last_index(&({receiver}))"),
                 "setLastIndex" => format!(

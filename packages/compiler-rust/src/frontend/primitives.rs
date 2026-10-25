@@ -123,6 +123,11 @@ impl Lowerer<'_> {
         } else {
             string.map_or(Type::F64, |operation| operation.result.clone())
         };
+        // A represented RegExp selects the existing regex overload, never
+        // ToString(search). Ordinary strings retain the literal-search path.
+        let regex_replace = string.is_some()
+            && matches!(name, "replace" | "replaceAll")
+            && values.get(1).is_some_and(|value| value.ty() == Type::Regex);
         let mut helper = Helper::new(
             &format!("primitive_{name}"),
             values.iter().map(Expr::ty).collect(),
@@ -147,7 +152,9 @@ impl Lowerer<'_> {
                 .map_or(1, |operation| operation.args.len())
         };
         for index in 0..count {
-            let value = if let Some(operation) = string {
+            let value = if regex_replace && index == 0 {
+                helper.read(&helper.param(1))
+            } else if let Some(operation) = string {
                 let value = (operand + index < values.len())
                     .then(|| helper.read(&helper.param(operand + index)));
                 self.primitive_string_argument(value, operation.args[index], node)?
@@ -164,6 +171,14 @@ impl Lowerer<'_> {
         // helper call: eliminating it would discard unused argument effects.
         let value = if string_identity {
             helper.read(&helper.param(0))
+        } else if regex_replace {
+            Expr::RegexIntrinsic {
+                method: name.into(),
+                receiver: Box::new(helper.read(&helper.param(0))),
+                args: numbers,
+                r#type: Type::String,
+                loc: helper.loc(),
+            }
         } else if string.is_some() {
             Expr::StringIntrinsic {
                 method: name.into(),

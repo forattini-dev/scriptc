@@ -1666,18 +1666,28 @@ fn validate_function(
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
                 }
-                let valid = receiver.ty() == Type::Regex
-                    && match method.as_str() {
-                        "test" => {
-                            args.len() == 1 && args[0].ty() == Type::String && *r#type == Type::Bool
+                let valid = if matches!(method.as_str(), "replace" | "replaceAll") {
+                    receiver.ty() == Type::String
+                        && args.len() == 2
+                        && args[0].ty() == Type::Regex
+                        && args[1].ty() == Type::String
+                        && *r#type == Type::String
+                } else {
+                    receiver.ty() == Type::Regex
+                        && match method.as_str() {
+                            "test" => {
+                                args.len() == 1
+                                    && args[0].ty() == Type::String
+                                    && *r#type == Type::Bool
+                            }
+                            "source" | "flags" => args.is_empty() && *r#type == Type::String,
+                            "lastIndex" => args.is_empty() && *r#type == Type::F64,
+                            "setLastIndex" => {
+                                args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::F64
+                            }
+                            _ => false,
                         }
-                        "source" | "flags" => args.is_empty() && *r#type == Type::String,
-                        "lastIndex" => args.is_empty() && *r#type == Type::F64,
-                        "setLastIndex" => {
-                            args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::F64
-                        }
-                        _ => false,
-                    };
+                };
                 if valid {
                     Ok(())
                 } else {
@@ -3958,6 +3968,78 @@ mod tests {
             *flags = "gg".into();
         }
         assert_eq!(validate(&m).unwrap_err(), "invalid native regex flags");
+    }
+
+    #[test]
+    fn regex_replacement_contracts_reject_malformed_operands() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let text = Expr::StrLit {
+            value: "x".into(),
+            r#type: Type::String,
+            loc: loc.clone(),
+        };
+        let regex = Expr::RegexLit {
+            pattern: "x".into(),
+            flags: "g".into(),
+            r#type: Type::Regex,
+            loc: loc.clone(),
+        };
+        for method in ["replace", "replaceAll"] {
+            for (receiver, args, result, valid) in [
+                (
+                    text.clone(),
+                    vec![regex.clone(), text.clone()],
+                    Type::String,
+                    true,
+                ),
+                (
+                    regex.clone(),
+                    vec![regex.clone(), text.clone()],
+                    Type::String,
+                    false,
+                ),
+                (
+                    text.clone(),
+                    vec![text.clone(), regex.clone()],
+                    Type::String,
+                    false,
+                ),
+                (text.clone(), vec![regex.clone()], Type::String, false),
+                (
+                    text.clone(),
+                    vec![regex.clone(), text.clone(), text.clone()],
+                    Type::String,
+                    false,
+                ),
+                (
+                    text.clone(),
+                    vec![regex.clone(), text.clone()],
+                    Type::F64,
+                    false,
+                ),
+            ] {
+                module.functions[0].body = vec![Stmt::Expression {
+                    expr: Expr::RegexIntrinsic {
+                        method: method.into(),
+                        receiver: Box::new(receiver),
+                        args,
+                        r#type: result,
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                }];
+                assert_eq!(validate(&module).is_ok(), valid, "{method}");
+                if valid {
+                    let wire = serde_json::to_value(&module).unwrap();
+                    assert_eq!(wire["irVersion"], VERSION);
+                    assert_eq!(
+                        wire["functions"][0]["body"][0]["expr"]["kind"],
+                        "regexIntrinsic"
+                    );
+                }
+            }
+        }
     }
 
     fn error_module() -> Module {
