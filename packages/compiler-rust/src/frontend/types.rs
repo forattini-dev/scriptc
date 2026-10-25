@@ -109,7 +109,51 @@ impl Lowerer<'_> {
         }
         self.aggregate_type(id)
     }
+    fn owning_rest_call(&mut self, node: Node) -> bool {
+        if node.kind() != SyntaxKind::CallExpression {
+            return false;
+        }
+        let callee = receivers::reference_node(node.expression());
+        let name = if callee.kind() == SyntaxKind::PropertyAccessExpression {
+            callee.name()
+        } else {
+            callee
+        };
+        let symbol = self.symbol(name);
+        let native = self
+            .bindings
+            .get(&symbol)
+            .or_else(|| self.module_bindings.get(&symbol))
+            .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
+            .map(|local| local.r#type.clone())
+            .or_else(|| {
+                if symbol == 0 {
+                    return None;
+                }
+                let declaration = self
+                    .checker
+                    .sym(source_frontend::prelude::SymbolId(symbol))
+                    .value_declaration;
+                let hint = self.declared(declaration)?;
+                hint.value_type.clone().or_else(|| hint.function_type())
+            });
+        if let Some(ty @ Type::Func { .. }) = native
+            && parameters::erased_rest(&ty)
+            && let Type::Func { ret, .. } = ty
+            && *ret == Type::Dyn
+        {
+            // The implementation ABI owns every possible return tag.
+            // The checker declaration may project away undefined (for
+            // example typeof JSON.stringify). Retain the native result.
+            return true;
+        }
+        false
+    }
+
     pub(super) fn ty(&mut self, node: Node) -> Result<Type, String> {
+        if self.owning_rest_call(node) {
+            return Ok(Type::Dyn);
+        }
         if let Some(ty) = self.raw_json_property_type(node) {
             return Ok(ty);
         }
@@ -181,6 +225,19 @@ impl Lowerer<'_> {
         {
             let declaration = node.parent();
             let initial = receivers::reference_node(declaration.initializer());
+            if declaration.type_().is_nil()
+                && initial.kind() == SyntaxKind::CallExpression
+                && self.owning_rest_call(initial)
+            {
+                // Inferred storage follows the owning call ABI. A checked
+                // string projection must not discard a possible undefined
+                // return from a public erased callable (including aliases).
+                self.var_types.entry(symbol).or_insert(Type::Dyn);
+                if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                    self.module_vars.entry(symbol).or_insert(Type::Dyn);
+                }
+                return Ok(Type::Dyn);
+            }
             if declaration.type_().is_nil()
                 && matches!(
                     initial.kind(),

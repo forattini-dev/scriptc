@@ -4,7 +4,10 @@ use source_frontend::prelude::SignatureKind;
 
 impl Lowerer<'_> {
     pub(super) fn function_type(&mut self, id: TypeId) -> Option<Type> {
-        if let Some(ty) = self.standard_callable_type(id) {
+        if let Some(ty) = self
+            .standard_callable_type(id)
+            .or_else(|| self.json_callable_type(id))
+        {
             return Some(ty);
         }
         if self.standard_console_type(id) {
@@ -169,17 +172,21 @@ impl Lowerer<'_> {
             self.refuse_thenable(&body_return, node)?;
         }
         let parameters = receivers::parameters(node);
-        if parameters.len() > types.len() {
+        let source_rest = parameters
+            .iter()
+            .last()
+            .is_some_and(|p| !p.dot_dot_dot_token().is_nil());
+        // Public erased rest contracts keep their owning vector ABI. A JS
+        // implementation may still declare ordinary fixed source formals.
+        let unpack_rest =
+            parameter_abi::is_javascript(node) && !source_rest && parameters::erased_rest(&ty);
+        if !unpack_rest && parameters.len() > types.len() {
             return Err(self.refuse(
                 node,
                 "callback requires more parameters than its native signature",
             ));
         }
-        let source_rest = parameters
-            .iter()
-            .last()
-            .is_some_and(|p| !p.dot_dot_dot_token().is_nil());
-        if source_rest != *rest {
+        if !unpack_rest && source_rest != *rest {
             return Err(self.refuse(node, "callback rest ABI differs from its native target"));
         }
         for (index, param) in parameters.iter().copied().enumerate() {
@@ -242,7 +249,7 @@ impl Lowerer<'_> {
                 }
                 None
             };
-        for (index, ty) in types.iter().enumerate() {
+        for (index, ty) in types.iter().enumerate().filter(|_| !unpack_rest) {
             let name = nodes
                 .get(index)
                 .map(|n| n.name().text().to_string())
@@ -254,6 +261,16 @@ impl Lowerer<'_> {
             };
             body.extend(self.bind_parameter(nodes.get(index).copied(), &param)?);
             params.push(param);
+        }
+        if unpack_rest {
+            let incoming = Param {
+                local_id: "p0".into(),
+                name: "arguments".into(),
+                r#type: types[0].clone(),
+            };
+            body.extend(self.bind_parameter(None, &incoming)?);
+            body.extend(self.bind_erased_rest_formals(&nodes, &incoming)?);
+            params.push(incoming);
         }
         let loc = self.loc(node);
         if node.body().kind() == SyntaxKind::Block {

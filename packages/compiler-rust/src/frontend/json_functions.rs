@@ -159,12 +159,18 @@ impl Lowerer<'_> {
         result
     }
     pub(super) fn json_function_type(&mut self, node: Node) -> Option<Type> {
-        if node.kind() == SyntaxKind::CallExpression
-            && self
-                .json_function_origin(node.expression(), &mut HashSet::new())
-                .is_some()
-        {
-            return Some(Type::Dyn);
+        if node.kind() == SyntaxKind::CallExpression {
+            let callee = self.checker.get_type_at_location(node.expression());
+            // A declaration can reuse a standard JSON callable contract for
+            // another implementation. Its native result is still owning and
+            // may be undefined, unlike the declaration's string projection.
+            if self.json_callable_type(callee).is_some()
+                || self
+                    .json_function_origin(node.expression(), &mut HashSet::new())
+                    .is_some()
+            {
+                return Some(Type::Dyn);
+            }
         }
         self.json_function_origin(node, &mut HashSet::new())?;
         Some(Type::Func {

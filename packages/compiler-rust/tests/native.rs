@@ -108,6 +108,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-rest-entry/contracts.ts",
+        "rust-native-rest-entry/effects.ts",
+        "rust-native-rest-entry/captures.ts",
+        "rust-native-rest-entry/compatibility.ts",
         "rust-native-record-abi/contracts.js",
         "rust-native-record-abi/aliases.js",
         "rust-native-record-abi/effects.js",
@@ -4875,6 +4879,89 @@ fn inferred_record_array_boundaries_preserve_existing_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
         fs::remove_file(input).unwrap();
+    }
+}
+
+#[test]
+fn erased_rest_entry_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    fs::write(temp.path().join("package.json"), r#"{"type":"module"}"#).unwrap();
+    let package = temp.path().join("node_modules/rest-entry");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(
+        package.join("package.json"),
+        r#"{"name":"rest-entry","type":"module","main":"index.js","types":"index.d.ts"}"#,
+    )
+    .unwrap();
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "erased-rest-entry-boundary");
+    for (declaration, implementation, caller) in [
+        (
+            "export const f: (...args: any[]) => any;",
+            "export const f = ({ value }) => value;",
+            "import { f } from 'rest-entry'; f({value: 1});",
+        ),
+        (
+            "export const f: (...args: number[]) => number;",
+            "export const f = (a, b) => a + b;",
+            "import { f } from 'rest-entry'; f(1, 2);",
+        ),
+        (
+            "export const f: (...args: any[]) => any;",
+            "export const f = (first, ...tail) => first;",
+            "import { f } from 'rest-entry'; f(1, 2);",
+        ),
+        (
+            "export const f: (...args: any[]) => any;",
+            "export const f = function () { return arguments.length; };",
+            "import { f } from 'rest-entry'; f(1);",
+        ),
+        (
+            "export const f: (...args: any[]) => any;",
+            "export const f = (a = a) => a;",
+            "import { f } from 'rest-entry'; f();",
+        ),
+        (
+            "export const f: (...args: any[]) => any;",
+            "export const f = (a = b, b = 1) => a;",
+            "import { f } from 'rest-entry'; f();",
+        ),
+        (
+            "export const f: (...args: any[]) => any;",
+            "export const f = () => 1;",
+            "// @ts-nocheck\nconst f: (...args: any[]) => any = (a: any, b: any) => a; f(1, 2);",
+        ),
+    ] {
+        fs::write(package.join("index.d.ts"), declaration).unwrap();
+        fs::write(package.join("index.js"), implementation).unwrap();
+        fs::write(&input, caller).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{implementation}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
     }
 }
 

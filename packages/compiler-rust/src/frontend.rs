@@ -542,6 +542,12 @@ impl<'a> Lowerer<'a> {
             .iter()
             .last()
             .is_some_and(|p| !p.dot_dot_dot_token().is_nil());
+        let public_type = declared
+            .as_ref()
+            .and_then(|hint| hint.value_type.clone().or_else(|| hint.function_type()));
+        let unpack_rest = parameter_abi::is_javascript(node)
+            && !rest
+            && public_type.as_ref().is_some_and(parameters::erased_rest);
         if rest && !node.type_parameters().is_empty() {
             return Err(self.refuse(node, "generic source rest parameters are not ported"));
         }
@@ -549,7 +555,7 @@ impl<'a> Lowerer<'a> {
             return Err(self.refuse(node, "array-rest instance methods are not ported"));
         }
         if let Some(hint) = &declared {
-            if hint.rest != rest {
+            if !unpack_rest && hint.rest != rest {
                 return Err(self.refuse(
                     node,
                     "public JavaScript contract/implementation rest ABI differs",
@@ -558,7 +564,7 @@ impl<'a> Lowerer<'a> {
             if let Some(reason) = &hint.reason {
                 return Err(self.refuse(node, reason));
             }
-            if hint.params.len() != parameters.len() {
+            if !unpack_rest && hint.params.len() != parameters.len() {
                 return Err(self.refuse(
                     node,
                     "public JavaScript contract/implementation arity differs",
@@ -574,6 +580,9 @@ impl<'a> Lowerer<'a> {
                     param,
                     "only native identifier parameters with a terminal rest slot are ported",
                 ));
+            }
+            if unpack_rest {
+                continue;
             }
             let ty = if let Some(hint) = &declared {
                 hint.params[index].clone().ok_or_else(|| {
@@ -592,6 +601,15 @@ impl<'a> Lowerer<'a> {
                 local_id: format!("p{index}"),
                 name: param.name().text().into(),
                 r#type: self.parameter_type(param, ty)?,
+            });
+        }
+        if unpack_rest {
+            params.push(Param {
+                local_id: "p0".into(),
+                name: "arguments".into(),
+                r#type: Type::Array {
+                    elem: Box::new(Type::Dyn),
+                },
             });
         }
         let erase_private_result = declared.is_none()
@@ -617,6 +635,11 @@ impl<'a> Lowerer<'a> {
             Type::Void
         } else if erase_private_result {
             Type::Dyn
+        } else if unpack_rest {
+            let Some(Type::Func { ret, .. }) = public_type else {
+                unreachable!("erased rest public contract")
+            };
+            *ret
         } else if let Some(hint) = declared {
             hint.ret.ok_or_else(|| {
                 self.refuse(
@@ -643,7 +666,7 @@ impl<'a> Lowerer<'a> {
         }
         Ok(Signature {
             is_async: node.modifier_flags().intersects(ModifierFlags::ASYNC),
-            rest,
+            rest: rest || unpack_rest,
             node,
             file: self.file.clone(),
             name: format!("f{ordinal}"),
@@ -687,9 +710,20 @@ impl<'a> Lowerer<'a> {
         if !method {
             body.extend(self.initialize_receiver(signature.node)?);
         }
-        for (node, param) in receivers::parameters(signature.node)
+        let source_parameters = receivers::parameters(signature.node);
+        let unpack_rest = signature.rest
+            && parameter_abi::is_javascript(signature.node)
+            && source_parameters
+                .last()
+                .is_none_or(|param| param.dot_dot_dot_token().is_nil());
+        if unpack_rest {
+            body.extend(self.bind_parameter(None, &signature.params[0])?);
+            body.extend(self.bind_erased_rest_formals(&source_parameters, &signature.params[0])?);
+        }
+        for (node, param) in source_parameters
             .into_iter()
             .zip(signature.params.iter().skip(usize::from(method)))
+            .filter(|_| !unpack_rest)
         {
             body.extend(self.bind_parameter(Some(node), param)?);
         }

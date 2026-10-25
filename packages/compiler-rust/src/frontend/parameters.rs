@@ -1,7 +1,86 @@
 //! Fixed native call slots; omission is an undefined tag, defaults run in the callee.
 use super::*;
 
+pub(super) fn erased_rest(ty: &Type) -> bool {
+    matches!(ty, Type::Func { rest: true, params, .. }
+        if matches!(params.as_slice(), [Type::Array { elem }] if **elem == Type::Dyn))
+}
+
 impl Lowerer<'_> {
+    /// Unpack a public (...args: any[]) contract without changing callable
+    /// identity or exposing its transport vector as a source parameter.
+    pub(super) fn bind_erased_rest_formals(
+        &mut self,
+        nodes: &[Node],
+        incoming: &Param,
+    ) -> Result<Vec<Stmt>, String> {
+        let mut body = Vec::new();
+        for (index, node) in nodes.iter().copied().enumerate() {
+            let loc = self.loc(node);
+            let read = || Expr::VarRef {
+                local_id: incoming.local_id.clone(),
+                r#type: incoming.r#type.clone(),
+                loc: loc.clone(),
+            };
+            let offset = || Expr::NumLit {
+                value: index as f64,
+                spelling: None,
+                r#type: Type::F64,
+                loc: loc.clone(),
+            };
+            let value = Expr::Ternary {
+                cond: Box::new(Expr::Bin {
+                    op: "<".into(),
+                    left: Box::new(offset()),
+                    right: Box::new(Expr::ArrayIntrinsic {
+                        method: "length".into(),
+                        receiver: Box::new(read()),
+                        args: vec![],
+                        r#type: Type::F64,
+                        loc: loc.clone(),
+                    }),
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                }),
+                then: Box::new(Expr::ArrayGet {
+                    arr: Box::new(read()),
+                    index: Box::new(offset()),
+                    r#type: Type::Dyn,
+                    loc: loc.clone(),
+                }),
+                else_: Box::new(self.coerce(
+                    Expr::UnitLit {
+                        unit: "undefined",
+                        r#type: Type::Undefined,
+                        loc: loc.clone(),
+                    },
+                    Type::Dyn,
+                    node,
+                )?),
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            };
+            let formal = Param {
+                local_id: format!("v{}", self.locals.len()),
+                name: node.name().text().into(),
+                r#type: Type::Dyn,
+            };
+            // Incoming values must exist before the default reads the slot.
+            body.push(Stmt::VarDecl {
+                local_id: formal.local_id.clone(),
+                init: value,
+                loc,
+            });
+            body.extend(self.bind_parameter(Some(node), &formal)?);
+            // JS annotations do not prove that an omitted public argument is
+            // present. Keep its live value for tests, defaults and captures.
+            let symbol = self.symbol(node.name());
+            self.var_types.insert(symbol, Type::Dyn);
+            self.var_defined.remove(&symbol);
+        }
+        Ok(body)
+    }
+
     pub(super) fn parameter_type(&mut self, node: Node, ty: Type) -> Result<Type, String> {
         let symbol = self.symbol(node.name());
         if node.question_token().is_nil()
