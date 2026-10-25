@@ -149,6 +149,7 @@ mod bun;
 mod crypto;
 mod filesystem;
 mod math;
+mod number;
 mod path;
 mod platform;
 mod process;
@@ -160,6 +161,7 @@ pub fn apis() -> &'static [Api] {
     APIS.get_or_init(|| {
         [
             math::apis(),
+            number::apis(),
             buffer::apis(),
             path::apis(),
             platform::apis(),

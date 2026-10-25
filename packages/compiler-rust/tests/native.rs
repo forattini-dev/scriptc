@@ -240,6 +240,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-json-functions/identity.ts",
         "rust-native-json-functions/values.ts",
         "rust-native-json-functions/parse.ts",
+        "rust-native-number-string/contracts.ts",
+        "rust-native-number-string/order.ts",
+        "rust-native-number-string/errors.ts",
         "rust-native-json-reviver/source.ts",
         "rust-native-json-reviver/delete.ts",
         "rust-native-json-reviver/mutations.ts",
@@ -4545,6 +4548,18 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
         (
             "Math.floor({ valueOf: (): number => 2 } as any);",
             "standard numeric arguments require represented primitives",
+        ),
+        (
+            "(255).toString({ valueOf: (): number => 16 } as any);",
+            "standard numeric arguments require represented primitives",
+        ),
+        (
+            "('7' as unknown as number).toString();",
+            "Number.toString requires a represented numeric receiver",
+        ),
+        (
+            "(255).toString(...[16]);",
+            "Number.toString iterable argument spreads are not ported",
         ),
         (
             "Math.floor({ valueOf: (): number => 2 } as unknown as number);",

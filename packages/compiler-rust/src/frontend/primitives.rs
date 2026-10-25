@@ -92,6 +92,9 @@ impl Lowerer<'_> {
         }
         let name = member.name().text();
         let member_id = self.symbol(member.name());
+        if name == "toString" && self.primitive_symbol(member_id, name, Some("Number")) {
+            return self.number_string_call(node, member).map(Some);
+        }
         if name == "isArray"
             && member.expression().kind() == SyntaxKind::Identifier
             && {
@@ -318,6 +321,55 @@ impl Lowerer<'_> {
             return self.coerce(value, ty, node);
         }
         Ok(value)
+    }
+
+    fn number_string_call(&mut self, node: Node, member: Node) -> Result<Expr, String> {
+        self.ensure_exception_classes(node)?;
+        let receiver = self.primitive_operand(member.expression())?;
+        if receiver.ty() != Type::F64 {
+            return Err(self.refuse(
+                member,
+                "Number.toString requires a represented numeric receiver",
+            ));
+        }
+        let mut values = vec![receiver];
+        for argument in node.arguments() {
+            if argument.kind() == SyntaxKind::SpreadElement {
+                return Err(self.refuse(
+                    argument,
+                    "Number.toString iterable argument spreads are not ported",
+                ));
+            }
+            let value = self.primitive_operand(argument)?;
+            values.push(self.primitive_capture(value, argument)?);
+        }
+        let mut helper = Helper::new(
+            "number_to_string",
+            values.iter().map(Expr::ty).collect(),
+            Type::String,
+            self.loc(node),
+        );
+        let radix = self.primitive_string_argument(
+            (values.len() > 1).then(|| helper.read(&helper.param(1))),
+            crate::string_builtins::Argument::Number(10.0),
+            node,
+        )?;
+        helper.function.body.push(Stmt::Return {
+            value: Some(Expr::LibCall {
+                r#fn: "num.toRadixString".into(),
+                args: vec![helper.read(&helper.param(0)), radix],
+                r#type: Type::String,
+                loc: helper.loc(),
+            }),
+            loc: helper.loc(),
+        });
+        let callee = self.install_helper(helper.function);
+        Ok(Expr::Call {
+            callee,
+            args: values,
+            r#type: Type::String,
+            loc: self.loc(node),
+        })
     }
 
     fn array_brand(&self, value: Expr, node: Node) -> Expr {
