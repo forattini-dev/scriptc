@@ -28,14 +28,22 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
         output.push_str("fn native_caught(caught: runtime::Caught) -> NativeValue { if runtime::caught_is::<NativeValue>(&caught) { return runtime::caught_narrow::<NativeValue>(&caught); } runtime::throw_type_error(\"scriptc: native exception conversion requires Error classes\".into()) }\n");
     }
 }
-fn region(body: &[Stmt], function: &Function, module: &Module, output: &mut String) {
+fn region(
+    body: &[Stmt],
+    function: &Function,
+    module: &Module,
+    output: &mut String,
+    flow: &FlowContext,
+) {
+    let mut inner = flow.clone();
+    inner.region += 1;
     writeln!(
         output,
         "match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{"
     )
     .unwrap();
     for stmt in body {
-        statement_in(stmt, function, module, output, true);
+        statement_with_flow(stmt, function, module, output, &inner);
     }
     writeln!(output, "runtime::Completion::<{}>::Normal\n}})) {{ Ok(completion) => completion, Err(payload) => runtime::Completion::Throw(runtime::caught_from_panic(payload)), }}", rust_type(function.return_type.clone(), module)).unwrap();
 }
@@ -44,7 +52,7 @@ pub(super) fn statement(
     function: &Function,
     module: &Module,
     output: &mut String,
-    protected: bool,
+    flow: &FlowContext,
 ) {
     let Stmt::TryCatch {
         try_body,
@@ -57,7 +65,7 @@ pub(super) fn statement(
         unreachable!()
     };
     output.push_str("{ let pending = ");
-    region(try_body, function, module, output);
+    region(try_body, function, module, output, flow);
     output.push_str(";\n");
     if let Some(body) = catch_body {
         output.push_str("let pending = match pending { runtime::Completion::Throw(caught) => { ");
@@ -75,12 +83,12 @@ pub(super) fn statement(
         } else {
             output.push_str("drop(caught); ");
         }
-        region(body, function, module, output);
+        region(body, function, module, output, flow);
         output.push_str(" }, completion => completion };\n");
     }
     if let Some(body) = finally_body {
         output.push_str("let final_completion = ");
-        region(body, function, module, output);
+        region(body, function, module, output, flow);
         output.push_str("; let pending = match final_completion { runtime::Completion::Normal => pending, completion => completion };\n");
     }
     let normal = if crate::ir::always_returns(std::slice::from_ref(stmt)) {
@@ -88,12 +96,23 @@ pub(super) fn statement(
     } else {
         "()"
     };
-    let returned = if protected {
+    let returned = if flow.region != 0 {
         "return runtime::Completion::Return(value)"
     } else {
         "return value"
     };
-    writeln!(output, "match pending {{ runtime::Completion::Normal => {normal}, runtime::Completion::Return(value) => {{ {returned} }}, runtime::Completion::Throw(caught) => runtime::rethrow_caught(caught), runtime::Completion::Break(_) | runtime::Completion::Continue(_) => unreachable!(\"validated completion target\"), }} }}").unwrap();
+    writeln!(output, "match pending {{ runtime::Completion::Normal => {normal}, runtime::Completion::Return(value) => {{ {returned} }}, runtime::Completion::Throw(caught) => runtime::rethrow_caught(caught),").unwrap();
+    for (id, region) in flow.loops.iter().enumerate() {
+        if *region == flow.region {
+            writeln!(output, "runtime::Completion::Break({id}) => break 'native_loop_{id}, runtime::Completion::Continue({id}) => continue 'native_loop_{id},").unwrap();
+        }
+    }
+    let jump = if flow.region != 0 {
+        "completion => return completion"
+    } else {
+        "_ => unreachable!(\"validated completion target\")"
+    };
+    writeln!(output, "{jump}, }} }}").unwrap();
 }
 
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {

@@ -1,6 +1,7 @@
 //! The first native subset of the existing scriptc IR v13 wire contract.
 use serde::Serialize;
 mod child_process;
+mod control_flow;
 pub mod record_equivalence;
 pub mod record_views;
 mod symbol_methods;
@@ -763,6 +764,12 @@ impl Expr {
     rename_all_fields = "camelCase"
 )]
 pub enum Stmt {
+    Break {
+        loc: Loc,
+    },
+    Continue {
+        loc: Loc,
+    },
     Throw {
         value: Expr,
         loc: Loc,
@@ -2867,6 +2874,7 @@ fn validate_function(
                 Stmt::Expression { expr: value, .. } => {
                     expr(value, locals, initialized, functions, module)?
                 }
+                Stmt::Break { .. } | Stmt::Continue { .. } => {}
                 Stmt::Return { value, .. } => {
                     if let Some(value) = value {
                         expr(value, locals, initialized, functions, module)?;
@@ -2933,6 +2941,7 @@ fn validate_function(
         }
         Ok(())
     }
+    control_flow::validate_targets(&f.body, 0)?;
     if f.return_type != Type::Void && !always_returns(&f.body) {
         return Err("non-void function can fall through".into());
     }
@@ -2954,28 +2963,7 @@ fn validate_function(
 }
 
 pub fn always_returns(stmts: &[Stmt]) -> bool {
-    stmts.iter().any(|stmt| match stmt {
-        Stmt::Return { .. } | Stmt::Throw { .. } => true,
-        Stmt::TryCatch {
-            try_body,
-            catch_body,
-            finally_body,
-            ..
-        } => {
-            finally_body
-                .as_ref()
-                .is_some_and(|body| always_returns(body))
-                || (always_returns(try_body)
-                    && catch_body.as_ref().is_none_or(|body| always_returns(body)))
-        }
-        Stmt::Block { body, .. } => always_returns(body),
-        Stmt::If {
-            then,
-            else_: Some(other),
-            ..
-        } => always_returns(then) && always_returns(other),
-        _ => false,
-    })
+    control_flow::function_exits(stmts)
 }
 
 #[cfg(test)]

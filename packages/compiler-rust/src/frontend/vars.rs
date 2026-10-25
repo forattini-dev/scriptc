@@ -256,7 +256,7 @@ impl Lowerer<'_> {
 
     // Combine only pure presence tests. Calls or other effects inside a
     // condition can invalidate an earlier test and must not restore its facts.
-    fn guarded_vars(&mut self, node: Node, truth: bool) -> Option<HashSet<u32>> {
+    pub(super) fn guarded_vars(&mut self, node: Node, truth: bool) -> Option<HashSet<u32>> {
         if node.kind() == SyntaxKind::ParenthesizedExpression {
             return self.guarded_vars(node.expression(), truth);
         }

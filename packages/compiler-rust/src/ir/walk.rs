@@ -49,6 +49,7 @@ fn statements(body: &[Stmt], visitor: &mut impl FnMut(&Expr)) {
                 expression(key, visitor);
                 expression(value, visitor);
             }
+            Stmt::Break { .. } | Stmt::Continue { .. } => {}
             Stmt::VarDecl { init, .. } => expression(init, visitor),
             Stmt::Assign { value, .. } => expression(value, visitor),
             Stmt::Expression { expr, .. } => expression(expr, visitor),

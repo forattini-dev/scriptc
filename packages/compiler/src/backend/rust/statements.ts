@@ -802,6 +802,15 @@ class RustStatementEmitter {
     this.context.line("},");
     this.context.line("runtime::Completion::Throw(caught) => runtime::rethrow_caught(caught),");
     for (const target of this.context.loopTargets) {
+      // An enclosing catch-unwind closure still separates this dispatch from
+      // the target's Rust label. Propagate until that closure has completed.
+      if (this.crossesCompletionBoundary(target)) {
+        this.context.line(`runtime::Completion::Break(${target.id}) => return runtime::Completion::Break(${target.id}),`);
+        if (target.allowsContinue) {
+          this.context.line(`runtime::Completion::Continue(${target.id}) => return runtime::Completion::Continue(${target.id}),`);
+        }
+        continue;
+      }
       this.context.line(`runtime::Completion::Break(${target.id}) => break '${target.breakLabel},`);
       if (target.allowsContinue) {
         this.context.line(`runtime::Completion::Continue(${target.id}) => ${target.continueBlock === null

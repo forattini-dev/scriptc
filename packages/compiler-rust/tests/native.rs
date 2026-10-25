@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-loops/contracts.ts",
+        "rust-native-loops/captures.ts",
+        "rust-native-loops/finally.ts",
         "rust-native-weak-sets/contracts.ts",
         "rust-native-weak-sets/order.ts",
         "rust-native-weak-sets/shadows.ts",
@@ -1949,7 +1952,7 @@ fn emit_modes_and_paths_with_spaces_preserve_sources_and_failed_outputs() {
     assert_eq!(fs::read(&input).unwrap(), original);
     let target = binary(temp.path(), "old");
     fs::write(&target, "previous artifact").unwrap();
-    fs::write(&input, "while (true) {}").unwrap();
+    fs::write(&input, "for (;;) {}").unwrap();
     let result = Command::new(compiler())
         .arg("build")
         .arg(&input)
@@ -1958,6 +1961,7 @@ fn emit_modes_and_paths_with_spaces_preserve_sources_and_failed_outputs() {
         .output()
         .unwrap();
     assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("SCN1001"));
     assert_eq!(fs::read_to_string(target).unwrap(), "previous artifact");
 }
 
@@ -4667,6 +4671,55 @@ fn process_write_boundaries_preserve_existing_artifacts() {
         "import p from 'node:process'; p.stderr.write = (text: string) => true;",
         "import p from 'node:process'; p.stderr?.write('x');",
         "import p from 'node:process'; p.stderrWrite('x');",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn loop_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "loop-boundary");
+    for source in [
+        "outer: while (true) { break outer; }",
+        "outer: while (true) { continue outer; }",
+        "break;",
+        "continue;",
+        "while (true) { const f = () => { break; }; f(); break; }",
+        "while (true) { const f = () => { continue; }; f(); break; }",
+        "do { break; } while (false);",
+        "for (let i = 0; i < 1; i = i + 1) { break; }",
+        "while (true) { switch (1) { case 1: break; } break; }",
+        "function f(): number { while (true) { try { return 1; } finally { break; } } } f();",
+        "while (true) { const f = () => value; let value = 1; f(); break; }",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
         let artifacts = [

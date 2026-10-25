@@ -242,6 +242,7 @@ pub fn uses_runtime(module: &Module) -> bool {
     }
     fn body(stmts: &[Stmt]) -> bool {
         stmts.iter().any(|stmt| match stmt {
+            Stmt::Break { .. } | Stmt::Continue { .. } => false,
             Stmt::FieldSet { .. } | Stmt::Throw { .. } | Stmt::TryCatch { .. } => true,
             Stmt::RecordKeySet {
                 obj, key, value, ..
@@ -740,7 +741,33 @@ fn statement_in(
     output: &mut String,
     protected: bool,
 ) {
+    statement_with_flow(
+        stmt,
+        function,
+        module,
+        output,
+        &FlowContext {
+            region: usize::from(protected),
+            loops: vec![],
+        },
+    );
+}
+
+#[derive(Clone, Default)]
+struct FlowContext {
+    region: usize,
+    loops: Vec<usize>,
+}
+
+fn statement_with_flow(
+    stmt: &Stmt,
+    function: &Function,
+    module: &Module,
+    output: &mut String,
+    flow: &FlowContext,
+) {
     use std::fmt::Write;
+    let protected = flow.region != 0;
     match stmt {
         Stmt::Throw { value, .. } => {
             writeln!(
@@ -750,7 +777,7 @@ fn statement_in(
             )
             .unwrap();
         }
-        Stmt::TryCatch { .. } => exceptions::statement(stmt, function, module, output, protected),
+        Stmt::TryCatch { .. } => exceptions::statement(stmt, function, module, output, flow),
         Stmt::FieldSet {
             obj,
             class_name,
@@ -863,29 +890,59 @@ fn statement_in(
         } => {
             writeln!(output, "if {} {{", expr(cond, function, module)).unwrap();
             for stmt in then {
-                statement_in(stmt, function, module, output, protected);
+                statement_with_flow(stmt, function, module, output, flow);
             }
             output.push('}');
             if let Some(other) = else_ {
                 output.push_str(" else {\n");
                 for stmt in other {
-                    statement_in(stmt, function, module, output, protected);
+                    statement_with_flow(stmt, function, module, output, flow);
                 }
                 output.push('}');
             }
             output.push('\n');
         }
         Stmt::While { cond, body, .. } => {
-            writeln!(output, "while {} {{", expr(cond, function, module)).unwrap();
+            let id = flow.loops.len();
+            let head = if matches!(cond, Expr::BoolLit { value: true, .. }) {
+                "loop".into()
+            } else {
+                format!("while {}", expr(cond, function, module))
+            };
+            writeln!(output, "'native_loop_{id}: {head} {{").unwrap();
+            let mut inner = flow.clone();
+            inner.loops.push(flow.region);
             for stmt in body {
-                statement_in(stmt, function, module, output, protected);
+                statement_with_flow(stmt, function, module, output, &inner);
             }
             output.push_str("}\n");
+        }
+        Stmt::Break { .. } | Stmt::Continue { .. } => {
+            let id = flow
+                .loops
+                .len()
+                .checked_sub(1)
+                .expect("validated loop target");
+            if flow.loops[id] == flow.region {
+                let jump = if matches!(stmt, Stmt::Break { .. }) {
+                    "break"
+                } else {
+                    "continue"
+                };
+                writeln!(output, "{jump} 'native_loop_{id};").unwrap();
+            } else {
+                let jump = if matches!(stmt, Stmt::Break { .. }) {
+                    "Break"
+                } else {
+                    "Continue"
+                };
+                writeln!(output, "return runtime::Completion::{jump}({id});").unwrap();
+            }
         }
         Stmt::Block { body, .. } => {
             output.push_str("{\n");
             for stmt in body {
-                statement_in(stmt, function, module, output, protected);
+                statement_with_flow(stmt, function, module, output, flow);
             }
             output.push_str("}\n");
         }

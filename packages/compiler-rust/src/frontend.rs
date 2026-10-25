@@ -39,6 +39,7 @@ pub mod inspect;
 mod json_functions;
 mod json_modules;
 mod logical;
+mod loops;
 mod module_metadata;
 mod modules;
 mod namespace_values;
@@ -747,6 +748,8 @@ impl<'a> Lowerer<'a> {
             }
             SyntaxKind::ImportDeclaration | SyntaxKind::ExportDeclaration => return Ok(vec![]),
             SyntaxKind::TryStatement => return self.try_statement(node),
+            SyntaxKind::WhileStatement => return self.while_statement(node),
+            SyntaxKind::BreakStatement | SyntaxKind::ContinueStatement => self.loop_jump(node)?,
             SyntaxKind::ThrowStatement => {
                 let value = self.expression(node.expression())?;
                 let value = if matches!(value.ty(), Type::Null | Type::Undefined) {
