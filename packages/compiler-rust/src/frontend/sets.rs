@@ -185,6 +185,77 @@ impl Lowerer<'_> {
         let Type::Set { elem } = receiver.ty() else {
             return Err(self.refuse(node, "Set receiver may be undefined"));
         };
+        if matches!(method, "has" | "delete")
+            && arguments.len() == 1
+            && matches!(*elem, Type::String | Type::F64)
+        {
+            let key = self.condition_value(primitives::primitive_source(arguments[0]))?;
+            if key.ty() == *elem {
+                return Ok(Expr::SetIntrinsic {
+                    method: method.into(),
+                    receiver: Box::new(receiver),
+                    args: vec![key],
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                });
+            }
+            // A query never converts its key to the stored element type.
+            // Capture both arguments first, then guard the typed Set ABI.
+            let key = self.coerce(key, Type::Dyn, arguments[0])?;
+            let mut helper = helpers::Helper::new(
+                &format!("set_query_{method}"),
+                vec![receiver.ty(), Type::Dyn],
+                Type::Bool,
+                self.loc(node),
+            );
+            let set = helper.param(0);
+            let query = helper.param(1);
+            helper.function.body.push(Stmt::If {
+                cond: Expr::DynTest {
+                    value: Box::new(helper.read(&query)),
+                    test: if *elem == Type::String {
+                        "string"
+                    } else {
+                        "number"
+                    }
+                    .into(),
+                    negated: false,
+                    r#type: Type::Bool,
+                    loc: helper.loc(),
+                },
+                then: vec![Stmt::Return {
+                    value: Some(Expr::SetIntrinsic {
+                        method: method.into(),
+                        receiver: Box::new(helper.read(&set)),
+                        args: vec![Expr::DynCheck {
+                            value: Box::new(helper.read(&query)),
+                            r#type: *elem,
+                            loc: helper.loc(),
+                        }],
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    }),
+                    loc: helper.loc(),
+                }],
+                else_: None,
+                loc: helper.loc(),
+            });
+            helper.function.body.push(Stmt::Return {
+                value: Some(Expr::BoolLit {
+                    value: false,
+                    r#type: Type::Bool,
+                    loc: helper.loc(),
+                }),
+                loc: helper.loc(),
+            });
+            let callee = self.install_helper(helper.function);
+            return Ok(Expr::Call {
+                callee,
+                args: vec![receiver, key],
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            });
+        }
         let (types, result) = match method {
             "add" => (vec![*elem], Type::Void),
             "has" | "delete" => (vec![*elem], Type::Bool),

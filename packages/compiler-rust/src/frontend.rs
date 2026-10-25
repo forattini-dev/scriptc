@@ -845,7 +845,11 @@ impl<'a> Lowerer<'a> {
                         )
                     {
                         let init = self.expression(declaration.initializer())?;
-                        if matches!(init, Expr::RecordKeyGet { .. }) {
+                        if matches!(init, Expr::RecordKeyGet { .. })
+                            || (declaration.initializer().kind()
+                                == SyntaxKind::ElementAccessExpression
+                                && self.optional_storage(&init.ty()))
+                        {
                             // An inferred slot retains an index lookup's actual
                             // undefined arm, even if the checker omits it.
                             self.var_types.insert(symbol, storage?);
@@ -1089,6 +1093,15 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 let obj = self.expression(node.expression())?;
+                let obj = self.live_array_receiver(node.expression(), obj);
+                if self.array_view(&obj.ty())
+                    && self
+                        .literal_property_key(node.argument_expression())
+                        .as_deref()
+                        == Some("length")
+                {
+                    return self.array_length(node, obj);
+                }
                 if matches!(obj.ty(), Type::Object { .. }) {
                     return self.class_index_get(node, obj);
                 }

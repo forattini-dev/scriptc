@@ -3,6 +3,150 @@ use super::*;
 use helpers::Helper;
 
 impl Lowerer<'_> {
+    pub(super) fn nullable_array_element(&self, ty: &Type) -> Option<Type> {
+        let Type::Union { union_id } = ty else {
+            return None;
+        };
+        let arms = &self.unions[*union_id].arms;
+        let mut arrays = arms.iter().filter_map(|arm| match arm {
+            Type::Array { elem } => Some(elem.as_ref().clone()),
+            _ => None,
+        });
+        let element = arrays.next()?;
+        (arrays.next().is_none()
+            && arms
+                .iter()
+                .all(|arm| matches!(arm, Type::Array { .. } | Type::Null | Type::Undefined)))
+        .then_some(element)
+    }
+
+    pub(super) fn array_view(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Array { .. } => true,
+            Type::Union { union_id } => {
+                let arms = &self.unions[*union_id].arms;
+                arms.iter().any(|arm| matches!(arm, Type::Array { .. }))
+                    && arms
+                        .iter()
+                        .all(|arm| matches!(arm, Type::Array { .. } | Type::Null | Type::Undefined))
+            }
+            _ => false,
+        }
+    }
+
+    pub(super) fn live_array_receiver(&mut self, node: Node, value: Expr) -> Expr {
+        let source_node = receivers::reference_node(node);
+        let tracked_symbol = if source_node.kind() == SyntaxKind::Identifier {
+            self.symbol(source_node)
+        } else {
+            0
+        };
+        if self.var_defined.contains(&tracked_symbol) {
+            // Retain a live presence proof for a tracked local. Calls and
+            // writes invalidate these facts before the next receiver read.
+            return value;
+        }
+        if let Expr::UnionNarrow { value: source, .. } = &value
+            && self.array_view(&source.ty())
+        {
+            // A checker refinement can outlive an alias/callback mutation.
+            // Keep the actual nullable receiver for the property read.
+            return source.as_ref().clone();
+        }
+        value
+    }
+
+    pub(super) fn array_length(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
+        if matches!(receiver.ty(), Type::Array { .. }) {
+            return Ok(Expr::ArrayIntrinsic {
+                method: "length".into(),
+                receiver: Box::new(receiver),
+                args: vec![],
+                r#type: Type::F64,
+                loc: self.loc(node),
+            });
+        }
+        let Type::Union { union_id } = receiver.ty() else {
+            unreachable!()
+        };
+        let arms = self.unions[union_id].arms.clone();
+        let mut helper = Helper::new(
+            "array_length",
+            vec![receiver.ty()],
+            Type::F64,
+            self.loc(node),
+        );
+        let input = helper.param(0);
+        for (tag, arm) in arms.iter().enumerate() {
+            let value = if matches!(arm, Type::Array { .. }) {
+                // Keep array ownership typed; length does not require erasing
+                // the element layout into a generic object representation.
+                Expr::ArrayIntrinsic {
+                    method: "length".into(),
+                    receiver: Box::new(Expr::UnionNarrow {
+                        value: Box::new(helper.read(&input)),
+                        union_id: format!("u{union_id}"),
+                        tag,
+                        r#type: arm.clone(),
+                        loc: helper.loc(),
+                    }),
+                    args: vec![],
+                    r#type: Type::F64,
+                    loc: helper.loc(),
+                }
+            } else {
+                let receiver = self.coerce(
+                    Expr::UnitLit {
+                        unit: if *arm == Type::Null {
+                            "null"
+                        } else {
+                            "undefined"
+                        },
+                        r#type: arm.clone(),
+                        loc: helper.loc(),
+                    },
+                    Type::Dyn,
+                    node,
+                )?;
+                let key = Expr::StrLit {
+                    value: "length".into(),
+                    r#type: Type::String,
+                    loc: helper.loc(),
+                };
+                let read = self.dynamic_get(node, receiver, key);
+                self.coerce(read, Type::F64, node)?
+            };
+            let ret = Stmt::Return {
+                value: Some(value),
+                loc: helper.loc(),
+            };
+            if tag + 1 == arms.len() {
+                helper.function.body.push(ret);
+            } else {
+                helper.function.body.push(Stmt::If {
+                    cond: Expr::UnionIsTag {
+                        value: Box::new(helper.read(&input)),
+                        union_id: format!("u{union_id}"),
+                        tag,
+                        negated: false,
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    },
+                    then: vec![ret],
+                    else_: None,
+                    loc: helper.loc(),
+                });
+            }
+        }
+        let callee = self.install_helper(helper.function);
+        Ok(Expr::Call {
+            callee,
+            args: vec![receiver],
+            r#type: Type::F64,
+            loc: self.loc(node),
+        })
+    }
+
     /// Each spread is consumed before the next source element is evaluated.
     /// Passing all sources to one eager helper would observe later mutations
     /// too early, or copy a source only after its following element changed it.

@@ -821,6 +821,7 @@ impl Lowerer<'_> {
 
     pub(super) fn record_get(&mut self, node: Node) -> Result<Expr, String> {
         let obj = self.expression(node.expression())?;
+        let obj = self.live_array_receiver(node.expression(), obj);
         if obj.ty() == Type::Dyn {
             let key = Expr::StrLit {
                 value: node.name().text().into(),
@@ -828,6 +829,9 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             };
             return Ok(self.dynamic_get(node, obj, key));
+        }
+        if self.array_view(&obj.ty()) && node.name().text() == "length" {
+            return self.array_length(node, obj);
         }
         if matches!(obj.ty(), Type::Union { .. }) {
             return self.union_record_get(node, obj, node.name().text());
@@ -837,15 +841,6 @@ impl Lowerer<'_> {
         }
         if matches!(obj.ty(), Type::Set { .. }) && node.name().text() == "size" {
             return self.set_intrinsic(node, obj, "size", vec![]);
-        }
-        if matches!(obj.ty(), Type::Array { .. }) && node.name().text() == "length" {
-            return Ok(Expr::ArrayIntrinsic {
-                method: "length".into(),
-                receiver: Box::new(obj),
-                args: vec![],
-                r#type: Type::F64,
-                loc: self.loc(node),
-            });
         }
         let Type::Record { shape_id } = obj.ty() else {
             return Err(self.refuse(

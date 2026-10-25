@@ -108,6 +108,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-array-length/contracts.ts",
+        "rust-native-array-length/errors.ts",
+        "rust-native-array-length/aliases.ts",
+        "rust-native-array-length/queries.ts",
         "rust-native-relational/contracts.ts",
         "rust-native-relational/effects.ts",
         "rust-native-relational/unions.ts",
@@ -4737,6 +4741,52 @@ catch (error) { if (error instanceof Error) console.log('boundary', error.messag
         "boundary scriptc: relational object coercion requires native ToPrimitive support"
     );
     assert!(actual.stderr.is_empty());
+}
+
+#[test]
+fn array_length_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "array-length-boundary");
+    for source in [
+        "function f(x: number[] | string): number { return x.length; } f('a');",
+        "function f(x: { length: number } | null): number { return x.length; } f(null);",
+        "function f(x: number[] | null): number { const key = () => 'length'; return x[key()]; } f(null);",
+        "function f(x: number[] | null): void { x.length = 0; } f(null);",
+        "function f(x: number[] | null): void { x.push(1); } f(null);",
+        "function f(x: number[] | null): number | undefined { return x?.length; } f(null);",
+        "function f(x: number[] | null): void { x.length(); } f(null);",
+        "function f(x: string[] | null): void { const value: string = x[0]; console.log(value); } f(null);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
 }
 
 #[test]

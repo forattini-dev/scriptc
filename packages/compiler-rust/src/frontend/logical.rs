@@ -37,6 +37,31 @@ impl Lowerer<'_> {
         // The right side may not execute. Only facts true on both paths survive.
         self.var_defined = before.intersection(&self.var_defined).copied().collect();
         let right = right?;
+        if op == "&&" && right.ty() == Type::Bool {
+            if matches!(left.ty(), Type::Set { .. }) {
+                return Ok(Expr::Sequence {
+                    stmts: vec![Stmt::Expression {
+                        expr: left,
+                        loc: self.loc(node.left()),
+                    }],
+                    result: Box::new(right),
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                });
+            }
+            if let Type::Union { union_id } = left.ty()
+                && self.unions[union_id]
+                    .arms
+                    .iter()
+                    .any(|arm| matches!(arm, Type::Set { .. }))
+                && self.unions[union_id]
+                    .arms
+                    .iter()
+                    .all(|arm| matches!(arm, Type::Set { .. } | Type::Null | Type::Undefined))
+            {
+                return self.nullable_set_predicate(node, left, right, union_id);
+            }
+        }
         if op != "??" && left.ty() == Type::Bool && right.ty() == Type::Bool {
             return Ok(Expr::Logical {
                 op: op.into(),
@@ -135,6 +160,75 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             }),
             r#type: result_type,
+            loc: self.loc(node),
+        })
+    }
+
+    fn nullable_set_predicate(
+        &mut self,
+        node: Node,
+        left: Expr,
+        right: Expr,
+        union_id: usize,
+    ) -> Result<Expr, String> {
+        // Only nullish left arms can be returned by &&. The owning Set stays
+        // in its native layout and never needs to cross an erased value ABI.
+        let local = Local {
+            id: format!("set_predicate{}", self.locals.len()),
+            name: "logical Set receiver".into(),
+            r#type: left.ty(),
+            mutable: false,
+            boxed: false,
+        };
+        self.locals.push(local.clone());
+        let mut result = self.coerce(right, Type::Dyn, node.right())?;
+        for (tag, arm) in self.unions[union_id]
+            .arms
+            .clone()
+            .into_iter()
+            .enumerate()
+            .rev()
+        {
+            let unit = match arm {
+                Type::Null => "null",
+                Type::Undefined => "undefined",
+                _ => continue,
+            };
+            result = Expr::Ternary {
+                cond: Box::new(Expr::UnionIsTag {
+                    value: Box::new(Expr::VarRef {
+                        local_id: local.id.clone(),
+                        r#type: local.r#type.clone(),
+                        loc: self.loc(node.left()),
+                    }),
+                    union_id: format!("u{union_id}"),
+                    tag,
+                    negated: false,
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                }),
+                then: Box::new(self.coerce(
+                    Expr::UnitLit {
+                        unit,
+                        r#type: arm,
+                        loc: self.loc(node.left()),
+                    },
+                    Type::Dyn,
+                    node.left(),
+                )?),
+                else_: Box::new(result),
+                r#type: Type::Dyn,
+                loc: self.loc(node),
+            };
+        }
+        Ok(Expr::Sequence {
+            stmts: vec![Stmt::VarDecl {
+                local_id: local.id,
+                init: left,
+                loc: self.loc(node.left()),
+            }],
+            result: Box::new(result),
+            r#type: Type::Dyn,
             loc: self.loc(node),
         })
     }

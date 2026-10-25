@@ -198,6 +198,52 @@ impl Lowerer<'_> {
                 SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression
             ) {
                 let source = self.checker.get_type_at_location(initial.expression());
+                if initial.kind() == SyntaxKind::ElementAccessExpression
+                    && self
+                        .literal_property_key(initial.argument_expression())
+                        .as_deref()
+                        != Some("length")
+                {
+                    let receiver = receivers::reference_node(initial.expression());
+                    let name = if receiver.kind() == SyntaxKind::PropertyAccessExpression {
+                        receiver.name()
+                    } else {
+                        receiver
+                    };
+                    let receiver_symbol = self.symbol(name);
+                    let declared =
+                        if receiver_symbol != 0 {
+                            let source = self.checker.get_type_of_symbol(
+                                source_frontend::prelude::SymbolId(receiver_symbol),
+                            );
+                            self.type_id(source)
+                                .and_then(|ty| self.nullable_array_element(&ty))
+                        } else {
+                            None
+                        };
+                    let element = declared.or_else(|| {
+                        self.type_id(source)
+                            .and_then(|ty| self.nullable_array_element(&ty))
+                    });
+                    if let Some(element) = element {
+                        // Reserve the owning lookup's undefined arm before
+                        // allocating module cells or callback capture layouts.
+                        let storage = if declaration.type_().is_nil() {
+                            self.undefined_storage_type(element, initial)?
+                        } else {
+                            self.ty(node)?
+                        };
+                        if storage == Type::Dyn || self.optional_storage(&storage) {
+                            self.var_types.entry(symbol).or_insert(storage.clone());
+                            if declaration.parent().parent().parent().kind()
+                                == SyntaxKind::SourceFile
+                            {
+                                self.module_vars.entry(symbol).or_insert(storage.clone());
+                            }
+                        }
+                        return Ok(storage);
+                    }
+                }
                 if let Some(Type::Record { shape_id }) = self.type_id(source)
                     && let Some(value) = self.records[shape_id].index_value.clone()
                 {

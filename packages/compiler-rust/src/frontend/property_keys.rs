@@ -54,6 +54,20 @@ impl Lowerer<'_> {
                     r#type: Type::String,
                     loc: self.loc(node),
                 })
+            } else if !self.native_type_contains(&value.ty(), |ty| {
+                !matches!(
+                    ty,
+                    Type::String
+                        | Type::Bool
+                        | Type::Null
+                        | Type::Undefined
+                        | Type::F64
+                        | Type::Union { .. }
+                )
+            }) {
+                // Property keys stringify represented primitives. This is
+                // separate from SameValueZero queries in Map/Set containers.
+                self.string_value(value, node, strings::Context::Template)
             } else {
                 self.coerce(value, Type::String, node)
             }
