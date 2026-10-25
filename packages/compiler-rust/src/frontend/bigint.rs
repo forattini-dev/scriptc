@@ -78,6 +78,7 @@ impl Lowerer<'_> {
                 Type::String => self.bigint_operation("bigint.fromString", vec![value], node),
                 Type::F64 => self.bigint_operation("bigint.fromNumber", vec![value], node),
                 Type::Bool => self.bigint_operation("bigint.fromBool", vec![value], node),
+                Type::Dyn | Type::Union { .. } => self.bigint_from_owning(value, node)?,
                 _ => return Err(self.refuse(node, "BigInt constructor coercion requires represented string, number, boolean or bigint")),
             }
         } else if values.len() == 1 {
@@ -106,5 +107,98 @@ impl Lowerer<'_> {
             r#type: result,
             loc: self.loc(node),
         }))
+    }
+
+    fn bigint_from_owning(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
+        let value = self.coerce(value, Type::Dyn, node)?;
+        let mut helper = Helper::new(
+            "bigint_primitive",
+            vec![Type::Dyn],
+            Type::Bigint,
+            self.loc(node),
+        );
+        let slot = helper.param(0);
+        let test = |name: &str| Expr::DynTest {
+            value: Box::new(helper.read(&slot)),
+            test: name.into(),
+            negated: false,
+            r#type: Type::Bool,
+            loc: helper.loc(),
+        };
+        let mut branches = Vec::new();
+        for (name, ty, operation) in [
+            ("string", Type::String, Some("bigint.fromString")),
+            ("number", Type::F64, Some("bigint.fromNumber")),
+            ("boolean", Type::Bool, Some("bigint.fromBool")),
+            ("bigint", Type::Bigint, None),
+        ] {
+            let payload = self.coerce(helper.read(&slot), ty, node)?;
+            let result = operation.map_or_else(
+                || payload.clone(),
+                |operation| self.bigint_operation(operation, vec![payload.clone()], node),
+            );
+            branches.push(Stmt::If {
+                cond: test(name),
+                then: vec![Stmt::Return {
+                    value: Some(result),
+                    loc: helper.loc(),
+                }],
+                else_: None,
+                loc: helper.loc(),
+            });
+        }
+        let text = |value: &str| Expr::StrLit {
+            value: value.into(),
+            r#type: Type::String,
+            loc: helper.loc(),
+        };
+        let failure = |message| Stmt::Throw {
+            value: Expr::LibCall {
+                r#fn: "error.new".into(),
+                args: vec![message],
+                r#type: Type::Object {
+                    class_name: "%TypeError".into(),
+                },
+                loc: helper.loc(),
+            },
+            loc: helper.loc(),
+        };
+        for name in ["undefined", "null"] {
+            branches.push(Stmt::If {
+                cond: test(name),
+                then: vec![failure(text(&format!("Cannot convert {name} to a BigInt")))],
+                else_: None,
+                loc: helper.loc(),
+            });
+        }
+        let symbol = self.coerce(helper.read(&slot), Type::Symbol, node)?;
+        let display = Expr::LibCall {
+            r#fn: "sym.toString".into(),
+            args: vec![symbol],
+            r#type: Type::String,
+            loc: helper.loc(),
+        };
+        let message = self.string_concat(
+            self.string_concat(text("Cannot convert "), display, node),
+            text(" to a BigInt"),
+            node,
+        );
+        branches.push(Stmt::If {
+            cond: test("symbol"),
+            then: vec![failure(message)],
+            else_: None,
+            loc: helper.loc(),
+        });
+        branches.push(failure(text(
+            "scriptc: BigInt object coercion hooks are not ported",
+        )));
+        helper.function.body.extend(branches);
+        let callee = self.install_helper(helper.function);
+        Ok(Expr::Call {
+            callee,
+            args: vec![value],
+            r#type: Type::Bigint,
+            loc: self.loc(node),
+        })
     }
 }

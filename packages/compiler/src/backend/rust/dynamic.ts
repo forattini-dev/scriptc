@@ -533,6 +533,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()),`);
     this.context.line(`${name}::Promise(handle) => runtime::promise_handle_own_keys(handle).iter().any(|own| own.as_str() == key.to_utf8_lossy()),`);
     this.context.line(`${name}::Array(array) => key.as_ref() == "length" || (key.as_ref() == "raw" && runtime::array_raw(array).is_some()) || runtime::array_property_has(array, key) || sc_dyn_key_index(key).is_some_and(|index| runtime::array_has(array, index as f64)),`);
+    this.context.line(`${name}::String(text) => key.as_ref() == "length" || sc_dyn_key_index(key).is_some_and(|index| index < text.encode_utf16().count()),`);
     this.context.line("_ => false,");
     this.context.popIndent();
     this.context.line("}");

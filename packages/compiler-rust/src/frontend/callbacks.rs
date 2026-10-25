@@ -87,11 +87,10 @@ impl Lowerer<'_> {
         {
             Type::Void
         } else {
-            self.type_id(result)?
+            // Unit-valued source results still need a value when a callback is
+            // invoked through the owning ABI (for example a deleting reviver).
+            self.aggregate_slot_type(result)?
         };
-        if matches!(ret, Type::Null | Type::Undefined) {
-            return None;
-        }
         Some(Type::Func {
             rest: array_rest,
             params,

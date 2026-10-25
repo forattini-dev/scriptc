@@ -240,6 +240,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-json-functions/identity.ts",
         "rust-native-json-functions/values.ts",
         "rust-native-json-functions/parse.ts",
+        "rust-native-json-reviver/source.ts",
+        "rust-native-json-reviver/delete.ts",
+        "rust-native-json-reviver/mutations.ts",
+        "rust-native-json-reviver/effects.ts",
+        "rust-native-json-reviver/presence.ts",
+        "rust-native-json-reviver/feature.ts",
+        "rust-native-json-reviver/bigint.ts",
         "rust-native-json-functions/replacer.ts",
         "rust-native-json-functions/hooks.ts",
         "rust-native-json-functions/shadows.ts",
@@ -1158,7 +1165,6 @@ fn json_function_boundaries_preserve_previous_native_artifacts() {
     for source in [
         "const save = JSON; save.stringify(1);",
         "JSON.stringify = (value: any): string => 'changed'; JSON.stringify(1);",
-        "const read = JSON.parse; read('{}', (key: string, value: any) => value);",
     ] {
         fs::write(&input, source).unwrap();
         for path in [

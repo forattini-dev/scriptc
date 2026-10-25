@@ -55,11 +55,10 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line(`${name}::Object(object) => for (key, field) in runtime::map_string_entries_js_order(object) { let field = if mode != 0 && runtime::map_is_module_namespace(object) { sc_dyn_object_key_get(object, &key, value) } else { field }; sc_dyn_obj_walk_push(&output, mode, key, field); },`);
   context.line(`${name}::Array(array) => {`);
   context.pushIndent();
-  context.line("let mut index = 0usize;");
-  context.line("while index < runtime::array_len(array) as usize {");
+  context.line("for key in runtime::array_own_index_keys(array) {");
   context.pushIndent();
-  context.line("sc_dyn_obj_walk_push(&output, mode, runtime::string(&index.to_string()), runtime::array_get(array, index as f64));");
-  context.line("index += 1;");
+  context.line(`let field = if mode == 0 { ${name}::Undefined } else { sc_dyn_key_get(value, &key, false) };`);
+  context.line("sc_dyn_obj_walk_push(&output, mode, key, field);");
   context.popIndent();
   context.line("}");
   context.popIndent();

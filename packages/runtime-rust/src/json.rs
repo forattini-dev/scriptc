@@ -599,6 +599,8 @@ pub fn json_parse_node(text: &JsString) -> Result<JsonNode, String> {
 struct JsonParser<'a> {
     bytes: &'a [u8],
     position: usize,
+    source_locations: Option<JsonSourceLocations>,
+    last_source: Option<JsonSourceTree>,
 }
 
 impl<'a> JsonParser<'a> {
@@ -606,10 +608,16 @@ impl<'a> JsonParser<'a> {
         Self {
             bytes: text.as_bytes(),
             position: 0,
+            source_locations: None,
+            last_source: None,
         }
     }
 
     fn parse(mut self) -> Result<JsonNode, String> {
+        self.parse_value()
+    }
+
+    fn parse_value(&mut self) -> Result<JsonNode, String> {
         self.whitespace();
         let value = self.value()?;
         self.whitespace();
@@ -621,6 +629,17 @@ impl<'a> JsonParser<'a> {
 
     fn value(&mut self) -> Result<JsonNode, String> {
         self.whitespace();
+        let start = self.position;
+        let value = self.value_inner()?;
+        if !matches!(&value, JsonNode::Array(_) | JsonNode::Object(_))
+            && let Some(source) = &self.source_locations
+        {
+            self.last_source = Some(JsonSourceTree::Primitive(source.extract(start, self.position)));
+        }
+        Ok(value)
+    }
+
+    fn value_inner(&mut self) -> Result<JsonNode, String> {
         match self.peek() {
             Some(b'n') => {
                 self.keyword(b"null")?;
@@ -646,13 +665,17 @@ impl<'a> JsonParser<'a> {
         self.position += 1;
         self.whitespace();
         let mut elements = Vec::new();
+        let mut sources = Vec::new();
         if self.take(b']') {
+            if self.source_locations.is_some() { self.last_source = Some(JsonSourceTree::Array(sources)); }
             return Ok(JsonNode::Array(elements));
         }
         loop {
             elements.push(self.value()?);
+            if self.source_locations.is_some() { sources.push(self.last_source.take().expect("JSON child source")); }
             self.whitespace();
             if self.take(b']') {
+                if self.source_locations.is_some() { self.last_source = Some(JsonSourceTree::Array(sources)); }
                 return Ok(JsonNode::Array(elements));
             }
             if !self.take(b',') {
@@ -665,7 +688,9 @@ impl<'a> JsonParser<'a> {
         self.position += 1;
         self.whitespace();
         let mut fields = Vec::new();
+        let mut sources = Vec::new();
         if self.take(b'}') {
+            if self.source_locations.is_some() { self.last_source = Some(JsonSourceTree::Object(sources)); }
             return Ok(JsonNode::Object(fields));
         }
         loop {
@@ -678,9 +703,12 @@ impl<'a> JsonParser<'a> {
             if !self.take(b':') {
                 return self.syntax("expected ':'");
             }
-            fields.push((name, self.value()?));
+            let value = self.value()?;
+            if self.source_locations.is_some() { sources.push((name.clone(), self.last_source.take().expect("JSON child source"))); }
+            fields.push((name, value));
             self.whitespace();
             if self.take(b'}') {
+                if self.source_locations.is_some() { self.last_source = Some(JsonSourceTree::Object(sources)); }
                 return Ok(JsonNode::Object(fields));
             }
             if !self.take(b',') {

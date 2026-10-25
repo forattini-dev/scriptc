@@ -931,28 +931,12 @@ impl Lowerer<'_> {
         }
         let obj = self.expression(member.expression())?;
         if obj.ty() == Type::Dyn {
-            let key = member.name().text();
-            if key == "__proto__" {
-                return Err(self.refuse(node, "dynamic prototype writes are not ported"));
-            }
-            let value = self.expected_expression(node.right(), Type::Dyn)?;
-            return Ok(Stmt::Expression {
-                expr: Expr::LibCall {
-                    r#fn: "dyn.keySet".into(),
-                    args: vec![
-                        obj,
-                        Expr::StrLit {
-                            value: key.into(),
-                            r#type: Type::String,
-                            loc: self.loc(member),
-                        },
-                        value,
-                    ],
-                    r#type: Type::Void,
-                    loc: self.loc(node),
-                },
-                loc: self.loc(node),
-            });
+            let key = Expr::StrLit {
+                value: member.name().text().into(),
+                r#type: Type::String,
+                loc: self.loc(member),
+            };
+            return self.dynamic_property_set(node, obj, key);
         }
         let Type::Record { shape_id } = obj.ty() else {
             return Err(self.refuse(node, "property assignment requires a closed record"));
@@ -972,6 +956,27 @@ impl Lowerer<'_> {
             shape_id: format!("r{shape_id}"),
             field: field.name,
             value,
+            loc: self.loc(node),
+        })
+    }
+
+    pub(super) fn dynamic_property_set(
+        &mut self,
+        node: Node,
+        obj: Expr,
+        key: Expr,
+    ) -> Result<Stmt, String> {
+        if matches!(&key, Expr::StrLit { value, .. } if value == "__proto__") {
+            return Err(self.refuse(node, "dynamic prototype writes are not ported"));
+        }
+        let value = self.expected_expression(node.right(), Type::Dyn)?;
+        Ok(Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "dyn.keySet".into(),
+                args: vec![obj, key, value],
+                r#type: Type::Void,
+                loc: self.loc(node),
+            },
             loc: self.loc(node),
         })
     }

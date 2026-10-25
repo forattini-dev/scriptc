@@ -21,6 +21,20 @@ impl runtime::NativeJsonValue for NativeValue {
     }
     fn json_root(value: Self) -> Self { Self::Object(runtime::Gc::new(NativeMap { entries: vec![(runtime::JsString::default(), value)] })) }
     fn json_get(&self, key: &runtime::JsString) -> Self { native_value_get(self.clone(), key.clone()) }
+    fn json_define(&self, key: &runtime::JsString, value: Self) {
+        match self {
+            Self::Object(object) | Self::Record(_, object) => object.with_mut(|data| js_data_set(&mut data.entries, key.clone(), value)),
+            Self::Array(array) => runtime::array_set(array, key.parse::<f64>().expect("JSON array index"), value),
+            _ => runtime::throw_type_error("scriptc: JSON reviver property creation requires a native data object".into()),
+        }
+    }
+    fn json_delete(&self, key: &runtime::JsString) {
+        match self {
+            Self::Object(object) | Self::Record(_, object) => object.with_mut(|data| data.entries.retain(|(name, _)| name != key)),
+            Self::Array(array) => { runtime::array_delete(array, key.parse::<f64>().expect("JSON array index")); },
+            _ => runtime::throw_type_error("scriptc: JSON reviver property deletion requires a native data object".into()),
+        }
+    }
     fn json_keys(&self) -> Vec<runtime::JsString> {
         let keys = match self { Self::Record(..) | Self::Object(..) => native_value_own_keys(self), _ => native_json_typed_keys(self) };
         let mut keys = keys;

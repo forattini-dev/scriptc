@@ -154,6 +154,7 @@ include!("effect_sql.rs");
 include!("effect_http.rs");
 include!("windows_paths.rs");
 include!("json.rs");
+include!("json_parse_source.rs");
 include!("native_json.rs");
 include!("raw_json.rs");
 include!("number_format.rs");
@@ -241,6 +242,7 @@ mod tests {
     include!("web_stream.test.rs");
     include!("web_stream_from.test.rs");
     include!("native_module.test.rs");
+    include!("json_parse_source.test.rs");
     include!("collections.test.rs");
     include!("map_views.test.rs");
     include!("error_stacks.test.rs");

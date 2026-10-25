@@ -186,6 +186,24 @@ pub fn array_includes_missing_by<T: ArrayElement>(
     array_includes_by(array, needle, equal)
 }
 
+/// Enumerable indexed properties, excluding holes and the array's length.
+/// Sparse length growth must not allocate or scan the missing index range.
+pub fn array_own_index_keys<T: ArrayElement>(array: &JsArray<T>) -> Vec<JsString> {
+    array.with(|data| {
+        let mut indices = if let Some(view) = &data.view {
+            (0..view.len() as usize).collect::<Vec<_>>()
+        } else {
+            (0..data.elements.len()).filter(|index| data.slot_state(*index) != ARRAY_HOLE).collect()
+        };
+        if data.view.is_none() && let Some(sparse) = &data.sparse {
+            indices.extend(sparse.tail_undefined.iter().copied());
+            indices.extend(sparse.tail_values.keys().copied());
+        }
+        indices.sort_unstable();
+        indices.into_iter().map(|index| index.to_string().into()).collect()
+    })
+}
+
 /// Concat preserves holes, unlike iterator-based push/spread.
 pub fn array_concat_from<T: ArrayElement>(array: &JsArray<T>, source: &JsArray<T>) -> f64 {
     let (length, slots) = source.with(|data| {

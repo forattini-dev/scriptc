@@ -80,3 +80,16 @@ fn concat_keeps_holes_and_explicit_undefined_even_when_source_aliases_destinatio
     finish();
     assert_eq!(live_heap_objects(), 0);
 }
+
+#[test]
+fn json_reviver_sparse_array_keys_preserve_absence_and_undefined() {
+    let array = array_new(vec![1.0, 2.0, 3.0]);
+    array_delete(&array, 1.0);
+    array_set_undefined(&array, 4.0);
+    array_set(&array, 4_000_000_000.0, 7.0);
+    assert_eq!(
+        array_own_index_keys(&array),
+        vec![string("0"), string("2"), string("4"), string("4000000000")]
+    );
+    assert_eq!(array_len(&array), 4_000_000_001.0);
+}

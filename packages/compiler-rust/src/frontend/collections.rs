@@ -250,6 +250,10 @@ impl Lowerer<'_> {
 
     pub(super) fn dictionary_set_value(&mut self, node: Node, obj: Expr) -> Result<Stmt, String> {
         let member = node.left();
+        if obj.ty() == Type::Dyn {
+            let key = self.property_key_expression(member.argument_expression())?;
+            return self.dynamic_property_set(node, obj, key);
+        }
         let Type::Record { shape_id } = obj.ty() else {
             return Err(self.refuse(member, "indexed writes need a native dictionary"));
         };

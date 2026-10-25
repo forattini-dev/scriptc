@@ -36,6 +36,32 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn primitive_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let name = node.name().text();
+        if node.expression().kind() == SyntaxKind::Identifier {
+            let receiver = self.symbol(node.expression());
+            let member = self.symbol(node.name());
+            if self.primitive_symbol(receiver, "Number", None)
+                && self.primitive_symbol(member, name, Some("NumberConstructor"))
+            {
+                let value = match name {
+                    "MAX_SAFE_INTEGER" => 9_007_199_254_740_991.0,
+                    "MIN_SAFE_INTEGER" => -9_007_199_254_740_991.0,
+                    "MAX_VALUE" => f64::MAX,
+                    "MIN_VALUE" => f64::from_bits(1),
+                    "EPSILON" => f64::EPSILON,
+                    "POSITIVE_INFINITY" => f64::INFINITY,
+                    "NEGATIVE_INFINITY" => f64::NEG_INFINITY,
+                    "NaN" => f64::NAN,
+                    _ => return Ok(None),
+                };
+                return Ok(Some(Expr::NumLit {
+                    value,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: self.loc(node),
+                }));
+            }
+        }
         if node.name().text() != "length" {
             return Ok(None);
         }

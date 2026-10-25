@@ -22,6 +22,20 @@ export function emitNativeJsonDefinitions(context: RustDynamicContext): void {
     fn json_from_node(node: runtime::JsonNode) -> Self { <Self as runtime::JsonDecode>::decode_json(&node, "$").unwrap_or_else(|message| runtime::throw_type_error(message)) }
     fn json_root(value: Self) -> Self { let root = runtime::map_new(); runtime::map_set_by(&root, runtime::empty_string(), value, |a,b| a == b); Self::Object(root) }
     fn json_get(&self, key: &runtime::JsString) -> Self { sc_dyn_key_get(self, key, false) }
+    fn json_define(&self, key: &runtime::JsString, value: Self) {
+      match self {
+        Self::Object(object) => { runtime::map_set_by(object, key.clone(), value, |a,b| a == b); },
+        Self::Array(array) => runtime::array_set(array, key.parse::<f64>().expect("JSON array index"), value),
+        _ => runtime::throw_type_error("scriptc: JSON reviver property creation requires a native data object".into()),
+      }
+    }
+    fn json_delete(&self, key: &runtime::JsString) {
+      match self {
+        Self::Object(object) => { runtime::map_delete_by(object, key, |a,b| a == b); },
+        Self::Array(array) => { runtime::array_delete(array, key.parse::<f64>().expect("JSON array index")); },
+        _ => runtime::throw_type_error("scriptc: JSON reviver property deletion requires a native data object".into()),
+      }
+    }
     fn json_keys(&self) -> Vec<runtime::JsString> {
       match self {
         Self::Object(value) => { let keys = runtime::map_string_keys_js_order(value); (0..runtime::array_len(&keys) as usize).map(|index| runtime::array_get(&keys, index as f64)).collect() },

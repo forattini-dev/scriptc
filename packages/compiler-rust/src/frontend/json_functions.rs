@@ -222,19 +222,6 @@ impl Lowerer<'_> {
     }
     pub(super) fn json_function_call(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let origin = self.json_function_origin(node.expression(), &mut HashSet::new());
-        if origin == Some("parse") && node.arguments().len() > 1 {
-            let reviver = self.checker.get_type_at_location(node.arguments().get(1));
-            if !self
-                .checker
-                .get_signatures_of_type(reviver, source_frontend::prelude::SignatureKind::CALL)
-                .is_empty()
-            {
-                return Err(self.refuse(
-                    node,
-                    "JSON.parse reviver requires a source-preserving parse context; not ported",
-                ));
-            }
-        }
         if origin.is_some() {
             self.call_value(node).map(Some)
         } else {

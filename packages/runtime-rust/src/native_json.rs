@@ -22,6 +22,12 @@ pub trait NativeJsonValue: Clone {
     fn json_keys(&self) -> Vec<JsString>;
     fn json_call(&self, holder: &Self, args: &[Self]) -> Self;
     fn json_primitive_string(&self) -> JsString;
+    fn json_define(&self, _key: &JsString, _value: Self) {
+        throw_type_error("scriptc: JSON reviver property creation is not ported by this adapter".into())
+    }
+    fn json_delete(&self, _key: &JsString) {
+        throw_type_error("scriptc: JSON reviver property deletion is not ported by this adapter".into())
+    }
     fn json_raw_json(&self) -> Option<JsRawJson> { None }
     fn json_from_raw_json(_value: JsRawJson) -> Self {
         throw_type_error("scriptc: raw JSON values are not ported by this adapter".into())
@@ -220,19 +226,84 @@ pub fn native_json_stringify<V: NativeJsonValue>(args: Vec<V>) -> V {
 }
 
 pub fn native_json_parse<V: NativeJsonValue>(args: Vec<V>) -> V {
-    if args
-        .get(1)
-        .is_some_and(|value| matches!(value.json_kind(), NativeJsonKind::Function))
-    {
-        throw_type_error("scriptc: JSON.parse reviver and source context are not ported".into());
-    }
     let text = args
         .first()
         .cloned()
         .unwrap_or_else(V::json_undefined)
         .json_primitive_string();
+    if let Some(reviver) = args.get(1).filter(|value| matches!(value.json_kind(), NativeJsonKind::Function)) {
+        let (node, source) = json_parse_with_source(&text).unwrap_or_else(|message| throw_syntax_error(message));
+        let value = V::json_from_node(node);
+        let snapshot = native_json_snapshot(&value, &source);
+        return native_json_internalize(&V::json_root(value), &JsString::default(), reviver, Some(&snapshot));
+    }
     match json_parse_node(&text) {
         Ok(node) => V::json_from_node(node),
         Err(message) => throw_syntax_error(message),
     }
+}
+
+struct NativeJsonParseRecord<V> {
+    value: V,
+    source: Option<JsString>,
+    elements: Vec<NativeJsonParseRecord<V>>,
+    entries: Vec<(JsString, NativeJsonParseRecord<V>)>,
+}
+
+fn native_json_snapshot<V: NativeJsonValue>(value: &V, source: &JsonSourceTree) -> NativeJsonParseRecord<V> {
+    let mut record = NativeJsonParseRecord { value: value.clone(), source: None, elements: Vec::new(), entries: Vec::new() };
+    match source {
+        JsonSourceTree::Primitive(text) => record.source = Some(text.clone()),
+        JsonSourceTree::Array(children) => {
+            for (index, child) in children.iter().enumerate() {
+                record.elements.push(native_json_snapshot(&value.json_get(&index.to_string().into()), child));
+            }
+        }
+        JsonSourceTree::Object(children) => {
+            for key in value.json_keys() {
+                let child = &children.iter().rev().find(|(name, _)| *name == key).expect("JSON object source").1;
+                record.entries.push((key.clone(), native_json_snapshot(&value.json_get(&key), child)));
+            }
+        }
+    }
+    record
+}
+
+fn native_json_same_value<V: NativeJsonValue>(left: &V, right: &V) -> bool {
+    use NativeJsonKind as K;
+    match (left.json_kind(), right.json_kind()) {
+        (K::Undefined, K::Undefined) | (K::Null, K::Null) => true,
+        (K::Number(a), K::Number(b)) => a.to_bits() == b.to_bits() || (a.is_nan() && b.is_nan()),
+        (K::Boolean(a), K::Boolean(b)) => a == b,
+        (K::String(a), K::String(b)) => a == b,
+        (K::Array { identity: a, .. }, K::Array { identity: b, .. }) | (K::Object { identity: a }, K::Object { identity: b }) => a == b,
+        _ => false,
+    }
+}
+
+fn native_json_internalize<V: NativeJsonValue>(holder: &V, key: &JsString, reviver: &V, snapshot: Option<&NativeJsonParseRecord<V>>) -> V {
+    let value = holder.json_get(key);
+    let snapshot = snapshot.filter(|record| native_json_same_value(&record.value, &value));
+    let context = V::json_from_node(JsonNode::Object(snapshot.and_then(|record| record.source.as_ref()).map(|source| vec![("source".into(), JsonNode::String(source.clone()))]).unwrap_or_default()));
+    let replace = |key: JsString, record| {
+        let next = native_json_internalize(&value, &key, reviver, record);
+        if matches!(next.json_kind(), NativeJsonKind::Undefined) { value.json_delete(&key); }
+        else { value.json_define(&key, next); }
+    };
+    match value.json_kind() {
+        NativeJsonKind::Array { length, .. } => {
+            for index in 0..length {
+                replace(index.to_string().into(), snapshot.and_then(|record| record.elements.get(index)));
+            }
+        }
+        NativeJsonKind::Object { .. } => {
+            for name in value.json_keys() {
+                let record = snapshot.and_then(|record| record.entries.iter().find(|(key, _)| *key == name).map(|(_, value)| value));
+                replace(name, record);
+            }
+        }
+        NativeJsonKind::Unsupported => throw_type_error("scriptc: JSON reviver object protocol is not ported".into()),
+        _ => {}
+    }
+    reviver.json_call(holder, &[V::json_from_node(JsonNode::String(key.clone())), value, context])
 }
