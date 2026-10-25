@@ -37,6 +37,11 @@ impl Lowerer<'_> {
                             self.module_vars.insert(symbol, value_type.clone());
                             self.var_types.insert(symbol, value_type);
                             ty = storage;
+                        } else if self.optional_storage(&ty) {
+                            // Initialized optional module cells can also be
+                            // cleared by a call after checker flow narrows them.
+                            self.module_vars.insert(symbol, ty.clone());
+                            self.var_types.insert(symbol, ty.clone());
                         }
                         self.module_binding(name, ty, !list.flags().intersects(NodeFlags::CONST));
                     }

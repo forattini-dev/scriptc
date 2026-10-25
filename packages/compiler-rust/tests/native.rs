@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-relational/contracts.ts",
+        "rust-native-relational/effects.ts",
+        "rust-native-relational/unions.ts",
         "rust-native-updates/contracts.ts",
         "rust-native-updates/references.ts",
         "rust-native-updates/conversions.ts",
@@ -4674,6 +4677,82 @@ fn process_write_boundaries_preserve_existing_artifacts() {
         "import p from 'node:process'; p.stderr.write = (text: string) => true;",
         "import p from 'node:process'; p.stderr?.write('x');",
         "import p from 'node:process'; p.stderrWrite('x');",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn relational_erased_object_coercion_fails_explicitly() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    fs::write(&input, r#"// @ts-nocheck
+const value: unknown = { n: 1 };
+try { console.log(value < 2); }
+catch (error) { if (error instanceof Error) console.log('boundary', error.message); else throw error; }
+"#).unwrap();
+    let target = binary(temp.path(), "relational-object-boundary");
+    let built = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    success(&built);
+    let actual = Command::new(&target)
+        .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+        .output()
+        .unwrap();
+    success(&actual);
+    assert_eq!(
+        String::from_utf8(actual.stdout).unwrap().trim(),
+        "boundary scriptc: relational object coercion requires native ToPrimitive support"
+    );
+    assert!(actual.stderr.is_empty());
+}
+
+#[test]
+fn relational_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "relational-boundary");
+    for source in [
+        "console.log({ valueOf: () => 1 } < 2);",
+        "console.log(2 < { toString: () => '3' });",
+        "console.log([1] < 2);",
+        "console.log(1n < 2n);",
+        "console.log(({ valueOf: () => 1 } as number) < 2);",
+        "console.log(2 < ({} as unknown as number));",
+        "console.log(Symbol('x') + 1);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
         let artifacts = [

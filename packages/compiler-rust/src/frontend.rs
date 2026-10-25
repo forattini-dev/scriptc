@@ -24,6 +24,7 @@ mod classes;
 mod codecs;
 mod collections;
 mod commonjs;
+mod comparisons;
 mod console;
 mod data_tables;
 mod declarations;
@@ -863,6 +864,12 @@ impl<'a> Lowerer<'a> {
                     };
                     if ty != init.ty() {
                         return Err(self.refuse(declaration, "coercion is not ported"));
+                    }
+                    if self.optional_storage(&ty) {
+                        self.var_types.entry(symbol).or_insert_with(|| ty.clone());
+                    }
+                    if self.var_types.contains_key(&symbol) {
+                        self.var_assignment_fact(symbol, &init);
                     }
                     if node.parent().kind() == SyntaxKind::SourceFile {
                         let binding =

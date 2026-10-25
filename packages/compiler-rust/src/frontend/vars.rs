@@ -25,6 +25,10 @@ fn declarations(node: Node, out: &mut Vec<Node>) {
 }
 
 impl Lowerer<'_> {
+    pub(super) fn optional_storage(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Union { union_id } if self.unions[*union_id].arms.contains(&Type::Undefined))
+    }
+
     fn var_value_type(&mut self, declaration: Node) -> Result<Type, String> {
         let name = declaration.name();
         if name.kind() != SyntaxKind::Identifier {
@@ -314,7 +318,15 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             });
         }
-        self.expression(node)
+        let value = self.expression(node)?;
+        if let Expr::UnionNarrow { value: source, .. } = &value
+            && matches!(source.ty(), Type::Union { union_id } if self.unions[union_id].arms.iter().any(|arm| matches!(arm, Type::Null | Type::Undefined)))
+        {
+            // A presence/comparison observation reads the owning property
+            // slot, including tags changed through an alias or callback.
+            return Ok(source.as_ref().clone());
+        }
+        Ok(value)
     }
 
     // Box once into the owning value ABI; testing presence never invokes a callback.

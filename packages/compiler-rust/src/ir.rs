@@ -2455,6 +2455,19 @@ fn validate_function(
                         Err("invalid native record own-key construction".into())
                     };
                 }
+                if r#fn == "dyn.compare" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 2
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::F64
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native relational comparison".into())
+                    };
+                }
                 if matches!(r#fn.as_str(), "dyn.hasOwn" | "dyn.objKeys") {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
@@ -3138,6 +3151,46 @@ mod tests {
                 loc: loc.clone(),
             }];
             assert_eq!(validate(&module).is_ok(), valid, "{name}");
+        }
+    }
+
+    #[test]
+    fn relational_comparison_validates_arity_payloads_and_result() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let number = Expr::NumLit {
+            value: 1.0,
+            spelling: None,
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        let boxed = Expr::DynFrom {
+            value: Box::new(number.clone()),
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        for (args, result, valid) in [
+            (vec![boxed.clone(), boxed.clone()], Type::F64, true),
+            (vec![], Type::F64, false),
+            (vec![boxed.clone()], Type::F64, false),
+            (
+                vec![boxed.clone(), boxed.clone(), boxed.clone()],
+                Type::F64,
+                false,
+            ),
+            (vec![number, boxed.clone()], Type::F64, false),
+            (vec![boxed.clone(), boxed], Type::Bool, false),
+        ] {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: "dyn.compare".into(),
+                    args,
+                    r#type: result,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid);
         }
     }
 

@@ -135,6 +135,7 @@ fn checked(ty: &Type, value: &str, module: &Module) -> String {
 
 pub(super) fn definitions(module: &Module, out: &mut String) {
     record_construction::definitions(module, out);
+    out.push_str(include_str!("../compare_values_support.rs"));
     out.push_str("fn native_value_string(value: NativeValue) -> runtime::JsString { match value { NativeValue::Undefined => \"undefined\".into(), NativeValue::Null => \"null\".into(), NativeValue::Number(v) => runtime::JsString::from(js_string_number(v)), NativeValue::Boolean(v) => runtime::JsString::from(v.to_string()), NativeValue::String(v) => v, NativeValue::Symbol(_) => runtime::throw_type_error(\"Cannot convert a Symbol value to a string\".into()), NativeValue::RawJson(_) => runtime::throw_type_error(\"Cannot convert object to primitive value\".into()), _ => runtime::throw_type_error(\"scriptc: object string conversion requires native ToPrimitive support\".into()) } }\n");
     out.push_str(include_str!("../map_values_support.rs"));
     out.push_str(include_str!("../promise_values_support.rs"));
@@ -540,6 +541,11 @@ fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
 
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     Some(match value {
+        Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.compare" => format!(
+            "{{ let left = {}; let right = {}; native_value_compare(left, right) }}",
+            expr(&args[0], function, module),
+            expr(&args[1], function, module)
+        ),
         Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.stringConstructor" => format!(
             "{{ let value = {}; match value {{ NativeValue::Symbol(symbol) => runtime::symbol_to_string(&symbol), other => native_value_string(other), }} }}",
             expr(&args[0], function, module)
