@@ -792,6 +792,7 @@ impl<'a> Lowerer<'a> {
             SyntaxKind::ImportDeclaration | SyntaxKind::ExportDeclaration => return Ok(vec![]),
             SyntaxKind::TryStatement => return self.try_statement(node),
             SyntaxKind::WhileStatement => return self.while_statement(node),
+            SyntaxKind::ForStatement => return self.for_statement(node),
             SyntaxKind::BreakStatement | SyntaxKind::ContinueStatement => self.loop_jump(node)?,
             SyntaxKind::ThrowStatement => {
                 let value = self.expression(node.expression())?;
@@ -828,8 +829,12 @@ impl<'a> Lowerer<'a> {
                 body: self.statements(node.statements())?,
                 loc,
             },
-            SyntaxKind::VariableStatement => {
-                let list = node.declaration_list();
+            SyntaxKind::VariableStatement | SyntaxKind::VariableDeclarationList => {
+                let list = if node.kind() == SyntaxKind::VariableDeclarationList {
+                    node
+                } else {
+                    node.declaration_list()
+                };
                 let flags = list.flags();
                 if !flags.intersects(NodeFlags::LET | NodeFlags::CONST) {
                     return self.var_statement(node);
@@ -951,75 +956,80 @@ impl<'a> Lowerer<'a> {
                 }
                 return Ok(out);
             }
-            SyntaxKind::ExpressionStatement => {
-                let expression = node.expression();
-                if expression.kind() == SyntaxKind::BinaryExpression
-                    && expression.operator_token().kind() == SyntaxKind::EqualsToken
-                {
-                    if expression.left().kind() == SyntaxKind::ElementAccessExpression {
-                        return Ok(vec![self.dictionary_set(expression)?]);
-                    }
-                    if expression.left().kind() == SyntaxKind::PropertyAccessExpression {
-                        if let Some(value) = self.regex_set(expression)? {
-                            return Ok(vec![value]);
-                        }
-                        if let Some(stmt) = self.class_set(expression)? {
-                            return Ok(vec![stmt]);
-                        }
-                        return Ok(vec![self.record_set(expression)?]);
-                    }
-                    if expression.left().kind() != SyntaxKind::Identifier {
-                        return Err(self.refuse(expression, "only local assignment is ported"));
-                    }
-                    if self.enum_type(expression.left()).is_some() {
-                        return Err(
-                            self.refuse(expression, "enum namespace reassignment is not ported")
-                        );
-                    }
-                    let symbol = self.symbol(expression.left());
-                    if self.native_namespaces.contains_key(&symbol) {
-                        return Err(self.refuse(
-                            expression,
-                            "native namespace alias reassignment is not ported",
-                        ));
-                    }
-                    let local = self.binding(expression.left())?;
-                    if local.r#type == Type::Caught || self.caught_aliases.contains_key(&symbol) {
-                        return Err(
-                            self.refuse(expression, "catch binding reassignment is not ported")
-                        );
-                    }
-                    let symbol = self.symbol(expression.left());
-                    let target = self
-                        .var_types
-                        .get(&symbol)
-                        .cloned()
-                        .unwrap_or_else(|| local.r#type.clone());
-                    let value = self.expected_expression(expression.right(), target)?;
-                    let value = self.coerce(value, local.r#type.clone(), expression)?;
-                    if self.var_types.contains_key(&symbol) {
-                        self.var_assignment_fact(symbol, &value);
-                    }
-                    Stmt::Assign {
-                        local_id: local.id,
-                        initializes_global: false,
-                        value,
-                        loc,
-                    }
-                } else {
-                    let expr = self.expression(expression)?;
-                    if matches!(expr.ty(), Type::Null | Type::Undefined) {
-                        return Err(
-                            self.refuse(expression, "standalone unit expressions are not ported")
-                        );
-                    }
-                    Stmt::Expression { expr, loc }
-                }
-            }
+            SyntaxKind::ExpressionStatement => self.effect_statement(node.expression(), node)?,
             SyntaxKind::IfStatement => self.var_if(node)?,
             _ => return Err(self.refuse(node, "statement is not ported")),
         };
         Ok(vec![stmt])
+    }
+    pub(super) fn effect_statement(
+        &mut self,
+        expression: Node,
+        node: Node,
+    ) -> Result<Stmt, String> {
+        let loc = self.loc(node);
+        Ok(
+            if expression.kind() == SyntaxKind::BinaryExpression
+                && expression.operator_token().kind() == SyntaxKind::EqualsToken
+            {
+                if expression.left().kind() == SyntaxKind::ElementAccessExpression {
+                    return self.dictionary_set(expression);
+                }
+                if expression.left().kind() == SyntaxKind::PropertyAccessExpression {
+                    if let Some(value) = self.regex_set(expression)? {
+                        return Ok(value);
+                    }
+                    if let Some(stmt) = self.class_set(expression)? {
+                        return Ok(stmt);
+                    }
+                    return self.record_set(expression);
+                }
+                if expression.left().kind() != SyntaxKind::Identifier {
+                    return Err(self.refuse(expression, "only local assignment is ported"));
+                }
+                if self.enum_type(expression.left()).is_some() {
+                    return Err(
+                        self.refuse(expression, "enum namespace reassignment is not ported")
+                    );
+                }
+                let symbol = self.symbol(expression.left());
+                if self.native_namespaces.contains_key(&symbol) {
+                    return Err(self.refuse(
+                        expression,
+                        "native namespace alias reassignment is not ported",
+                    ));
+                }
+                let local = self.binding(expression.left())?;
+                if local.r#type == Type::Caught || self.caught_aliases.contains_key(&symbol) {
+                    return Err(self.refuse(expression, "catch binding reassignment is not ported"));
+                }
+                let symbol = self.symbol(expression.left());
+                let target = self
+                    .var_types
+                    .get(&symbol)
+                    .cloned()
+                    .unwrap_or_else(|| local.r#type.clone());
+                let value = self.expected_expression(expression.right(), target)?;
+                let value = self.coerce(value, local.r#type.clone(), expression)?;
+                if self.var_types.contains_key(&symbol) {
+                    self.var_assignment_fact(symbol, &value);
+                }
+                Stmt::Assign {
+                    local_id: local.id,
+                    initializes_global: false,
+                    value,
+                    loc,
+                }
+            } else {
+                let expr = self.expression(expression)?;
+                if matches!(expr.ty(), Type::Null | Type::Undefined) {
+                    return Err(
+                        self.refuse(expression, "standalone unit expressions are not ported")
+                    );
+                }
+                Stmt::Expression { expr, loc }
+            },
+        )
     }
     fn expression(&mut self, node: Node) -> Result<Expr, String> {
         let value = self.expression_inner(node).and_then(|value| {

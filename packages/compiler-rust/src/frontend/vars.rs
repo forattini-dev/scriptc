@@ -183,7 +183,12 @@ impl Lowerer<'_> {
 
     pub(super) fn var_statement(&mut self, node: Node) -> Result<Vec<Stmt>, String> {
         let mut body = Vec::new();
-        for declaration in node.declaration_list().declarations().nodes() {
+        let list = if node.kind() == SyntaxKind::VariableDeclarationList {
+            node
+        } else {
+            node.declaration_list()
+        };
+        for declaration in list.declarations().nodes() {
             let symbol = self.symbol(declaration.name());
             if self.native_namespaces.contains_key(&symbol) {
                 if !self

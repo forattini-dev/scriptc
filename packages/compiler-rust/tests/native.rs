@@ -240,6 +240,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-json-functions/identity.ts",
         "rust-native-json-functions/values.ts",
         "rust-native-json-functions/parse.ts",
+        "rust-native-for-loops/counting.ts",
+        "rust-native-for-loops/order.ts",
+        "rust-native-for-loops/finally.ts",
+        "rust-native-for-loops/var.ts",
         "rust-native-computed-records/read.ts",
         "rust-native-computed-records/order.ts",
         "rust-native-computed-records/optional.ts",
@@ -1234,6 +1238,50 @@ fn computed_record_boundaries_preserve_artifacts() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn for_loop_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "for-loop-boundary");
+    for source in [
+        "for (let i = 0; i < 2; i++) { const fn = () => i; fn(); }",
+        "for (let i = 0; (() => i < 2)(); i++) {}",
+        "for (let i = 0; i < 2; i++) { const fn = () => ({i}); fn(); }",
+    ] {
+        fs::write(&input, source).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains("per-iteration native cells")
+                && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );
         for path in [
@@ -5386,7 +5434,6 @@ fn loop_boundaries_preserve_existing_artifacts() {
         "while (true) { const f = () => { break; }; f(); break; }",
         "while (true) { const f = () => { continue; }; f(); break; }",
         "do { break; } while (false);",
-        "for (let i = 0; i < 1; i = i + 1) { break; }",
         "while (true) { switch (1) { case 1: break; } break; }",
         "function f(): number { while (true) { try { return 1; } finally { break; } } } f();",
         "while (true) { const f = () => value; let value = 1; f(); break; }",
