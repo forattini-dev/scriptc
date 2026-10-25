@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-updates/contracts.ts",
+        "rust-native-updates/references.ts",
+        "rust-native-updates/conversions.ts",
         "rust-native-loops/contracts.ts",
         "rust-native-loops/captures.ts",
         "rust-native-loops/finally.ts",
@@ -4671,6 +4674,60 @@ fn process_write_boundaries_preserve_existing_artifacts() {
         "import p from 'node:process'; p.stderr.write = (text: string) => true;",
         "import p from 'node:process'; p.stderr?.write('x');",
         "import p from 'node:process'; p.stderrWrite('x');",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn update_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "update-boundary");
+    for source in [
+        "const n = 1; n++;",
+        "let n: unknown = 1; n++;",
+        "let n = { valueOf: () => 1 }; n++;",
+        "let n = 1n; n++;",
+        "const a = [1]; a[0]++;",
+        "const d: Record<string, number> = { a: 1 }; d.a++;",
+        "const r = { a: 1 }; const k = () => 'a'; r[k()]++;",
+        "const r: { a: number } | undefined = { a: 1 }; r?.a++;",
+        "class C { n = 1; } const c = new C(); c.n++;",
+        "class C { get n(): number { return 1; } set n(x: number) {} } const c = new C(); c.n++;",
+        "class C { #n = 1; f(): number { return this.#n++; } } new C().f();",
+        "const r = { a: 1 }; r.__proto__++;",
+        "enum E { A = 1 } E.A++;",
+        "let n = '1'; n++;",
+        "let n: string | number = '1'; n++;",
+        "let n: boolean | number = false; n++;",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
         let artifacts = [

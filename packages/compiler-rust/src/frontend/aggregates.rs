@@ -504,6 +504,13 @@ impl Lowerer<'_> {
         if !matches!(value.ty(), Type::Union { .. }) {
             return Ok(value);
         }
+        // An unreachable checker view has no runtime payload to project.
+        // Source updates may make the cell observable again; retain its
+        // owning tags rather than demanding a representation for never.
+        let checked = self.checker.get_type_at_location(node);
+        if self.checker.ty(checked).flags.intersects(TypeFlags::NEVER) {
+            return Ok(value);
+        }
         let target = self.ty(node)?;
         if value.ty() == target {
             return Ok(value);
@@ -979,8 +986,18 @@ impl Lowerer<'_> {
                 }
             }
         }
-        let mut left = self.expression(node.left())?;
-        let mut right = self.expression(node.right())?;
+        // Equality observes the live cell, including tags changed by a call
+        // or a previous loop iteration. A checker projection can be stale.
+        let mut left = if matches!(op, "===" | "!==") {
+            self.condition_value(node.left())?
+        } else {
+            self.expression(node.left())?
+        };
+        let mut right = if matches!(op, "===" | "!==") {
+            self.condition_value(node.right())?
+        } else {
+            self.expression(node.right())?
+        };
         if op == "+" && (left.ty() == Type::String || right.ty() == Type::String) {
             return self.string_addition(left, right, node);
         }

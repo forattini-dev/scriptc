@@ -68,6 +68,7 @@ mod type_graph;
 mod types;
 mod union_literals;
 mod union_spreads;
+mod updates;
 mod values;
 mod vars;
 mod weak_maps;
@@ -1286,6 +1287,15 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 self.narrowed(value, node)
+            }
+            SyntaxKind::PostfixUnaryExpression => self.update_expression(node),
+            SyntaxKind::PrefixUnaryExpression
+                if matches!(
+                    node.operator(),
+                    SyntaxKind::PlusPlusToken | SyntaxKind::MinusMinusToken
+                ) =>
+            {
+                self.update_expression(node)
             }
             SyntaxKind::PrefixUnaryExpression => {
                 let op = match node.operator() {
