@@ -182,7 +182,12 @@ impl Lowerer<'_> {
             let declaration = node.parent();
             let initial = receivers::reference_node(declaration.initializer());
             if declaration.type_().is_nil()
-                && initial.kind() == SyntaxKind::Identifier
+                && matches!(
+                    initial.kind(),
+                    SyntaxKind::Identifier
+                        | SyntaxKind::PropertyAccessExpression
+                        | SyntaxKind::ElementAccessExpression
+                )
                 && parameter_abi::is_javascript(declaration)
                 && self.argument_may_be_absent(initial, &mut HashSet::new())
             {

@@ -205,7 +205,11 @@ impl Lowerer<'_> {
                     r#type: field.r#type,
                     loc: self.loc(node),
                 };
-                return self.narrowed(value, node);
+                return if self.planned_field_read(node) {
+                    Ok(value)
+                } else {
+                    self.narrowed(value, node)
+                };
             }
             return Err(self.refuse(
                 node,

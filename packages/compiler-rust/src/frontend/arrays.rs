@@ -345,6 +345,9 @@ impl Lowerer<'_> {
         if member.name().text() == "join" {
             return self.array_join(node);
         }
+        if member.name().text() == "pop" {
+            return self.array_pop(node);
+        }
         if member.name().text() != "push" {
             return Err(self.refuse(node, "array method is not ported"));
         }
@@ -362,6 +365,51 @@ impl Lowerer<'_> {
             receiver: Box::new(receiver),
             args,
             r#type: Type::F64,
+            loc: self.loc(node),
+        })
+    }
+
+    fn array_pop(&mut self, node: Node) -> Result<Expr, String> {
+        let source = node.expression().expression();
+        let receiver = self.expression(source)?;
+        let receiver = self.live_array_receiver(source, receiver);
+        let Type::Array { elem } = receiver.ty() else {
+            return Err(self.refuse(node, "pop needs a non-null native array"));
+        };
+        if *elem == Type::Dyn
+            || (matches!(*elem, Type::Union { .. }) && !self.optional_storage(&elem))
+        {
+            return Err(self.refuse(
+                node,
+                "pop element needs an existing native undefined union contract",
+            ));
+        }
+        let result_type = self.undefined_storage_type(*elem, node)?;
+        let local = self.construction_local(receiver.ty(), false);
+        let mut stmts = vec![Stmt::VarDecl {
+            local_id: local.id.clone(),
+            init: receiver,
+            loc: self.loc(source),
+        }];
+        for argument in node.arguments() {
+            if argument.kind() == SyntaxKind::SpreadElement {
+                return Err(self.refuse(argument, "pop argument spreads are not ported"));
+            }
+            stmts.push(Stmt::Expression {
+                expr: self.expression(argument)?,
+                loc: self.loc(argument),
+            });
+        }
+        Ok(Expr::Sequence {
+            stmts,
+            result: Box::new(Expr::ArrayIntrinsic {
+                method: "pop".into(),
+                receiver: Box::new(self.construction_read(&local, source)),
+                args: vec![],
+                r#type: result_type.clone(),
+                loc: self.loc(node),
+            }),
+            r#type: result_type,
             loc: self.loc(node),
         })
     }

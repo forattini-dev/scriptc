@@ -142,6 +142,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             receiver,
             method,
             args,
+            r#type,
             ..
         } => {
             if method == "length" {
@@ -149,7 +150,21 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                     "runtime::array_len(&({}))",
                     expr(receiver, function, module)
                 )
-            } else {
+            } else if method == "pop" {
+                let Type::Array { elem } = receiver.ty() else {
+                    unreachable!("IR validated")
+                };
+                let operation = lookup(
+                    "if runtime::array_len(&array) == 0.0 { None } else { Some(runtime::array_pop(&array)) }",
+                    &elem,
+                    r#type,
+                    module,
+                );
+                format!(
+                    "{{ let array = {}; {operation} }}",
+                    expr(receiver, function, module)
+                )
+            } else if method == "push" {
                 let arguments = args
                     .iter()
                     .enumerate()
@@ -173,6 +188,8 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                     "{{ let array = {}; {arguments} {writes} runtime::array_len(&array) }}",
                     expr(receiver, function, module)
                 )
+            } else {
+                unreachable!("unsupported native array intrinsic")
             }
         }
         _ => return None,

@@ -200,6 +200,8 @@ impl Lowerer<'_> {
                 .sym(property)
                 .flags
                 .intersects(SymbolFlags::OPTIONAL)
+                || (self.js_absent_fields.contains(&(id, name.clone()))
+                    && matches!(ty, Type::String | Type::F64 | Type::Bool))
             {
                 let mut arms = match ty {
                     Type::Union { union_id } => self.unions[union_id].arms.clone(),
@@ -889,7 +891,11 @@ impl Lowerer<'_> {
             r#type: field.r#type.clone(),
             loc: self.loc(node),
         };
-        self.narrowed(value, node)
+        if self.planned_field_read(node) {
+            Ok(value)
+        } else {
+            self.narrowed(value, node)
+        }
     }
 
     pub(super) fn record_set(&mut self, node: Node) -> Result<Stmt, String> {

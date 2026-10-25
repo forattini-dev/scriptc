@@ -2077,13 +2077,28 @@ fn validate_function(
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
                 }
-                if *r#type != Type::F64
-                    || match method.as_str() {
-                        "length" => !args.is_empty(),
-                        "push" => args.iter().any(|arg| arg.ty() != *elem),
-                        _ => true,
+                let valid = match method.as_str() {
+                    "length" => *r#type == Type::F64 && args.is_empty(),
+                    "push" => *r#type == Type::F64 && args.iter().all(|arg| arg.ty() == *elem),
+                    "pop" => {
+                        args.is_empty()
+                            && match r#type {
+                                Type::Union { union_id } => {
+                                    module.unions.get(*union_id).is_some_and(|union| {
+                                        union.arms.contains(&Type::Undefined)
+                                            && if matches!(*elem, Type::Union { .. }) {
+                                                *r#type == *elem
+                                            } else {
+                                                union.arms.len() == 2 && union.arms.contains(&elem)
+                                            }
+                                    })
+                                }
+                                _ => false,
+                            }
                     }
-                {
+                    _ => false,
+                };
+                if !valid {
                     return Err("invalid array operation".into());
                 }
                 Ok(())
@@ -4713,6 +4728,72 @@ mod tests {
         } = &mut m.functions[0].body[0]
         {
             args.clear();
+        }
+        validate(&m).unwrap();
+    }
+
+    #[test]
+    fn array_pop_requires_an_undefined_capable_result_and_no_ir_arguments() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        let union_id = m.unions.len();
+        m.unions.push(Union {
+            id: union_id,
+            arms: vec![Type::F64, Type::Undefined],
+        });
+        let result = Type::Union { union_id };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::ArrayIntrinsic {
+                method: "pop".into(),
+                receiver: Box::new(Expr::ArrayLit {
+                    elems: vec![],
+                    r#type: Type::Array {
+                        elem: Box::new(Type::F64),
+                    },
+                    loc: loc.clone(),
+                }),
+                args: vec![],
+                r#type: result.clone(),
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        validate(&m).unwrap();
+        if let Stmt::Expression {
+            expr: Expr::ArrayIntrinsic { r#type, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = Type::F64;
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid array operation");
+        if let Stmt::Expression {
+            expr: Expr::ArrayIntrinsic { r#type, args, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = result.clone();
+            args.push(Expr::NumLit {
+                value: 0.0,
+                spelling: None,
+                r#type: Type::F64,
+                loc: loc.clone(),
+            });
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid array operation");
+        if let Stmt::Expression {
+            expr: Expr::ArrayIntrinsic { receiver, args, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            args.clear();
+            **receiver = Expr::ArrayLit {
+                elems: vec![],
+                r#type: Type::Array {
+                    elem: Box::new(result),
+                },
+                loc,
+            };
         }
         validate(&m).unwrap();
     }

@@ -134,6 +134,9 @@ impl Lowerer<'_> {
             return true;
         }
         let node = receivers::reference_node(node);
+        if self.planned_field_read(node) {
+            return true;
+        }
         let ty = self.checker.get_type_at_location(node);
         if self.source_has_undefined(ty) {
             return true;

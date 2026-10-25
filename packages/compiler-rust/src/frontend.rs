@@ -26,6 +26,7 @@ mod collections;
 mod commonjs;
 mod comparisons;
 mod console;
+mod container_abi;
 mod data_tables;
 mod declarations;
 mod directories;
@@ -177,6 +178,7 @@ struct Lowerer<'a> {
     var_types: HashMap<u32, Type>,
     var_defined: HashSet<u32>,
     js_absence_parameters: HashSet<u32>,
+    js_absent_fields: HashSet<(TypeId, String)>,
     enums: enums::EnumGraph,
     callables: HashMap<usize, Type>,
     polymorphic_callables: HashMap<u32, usize>,
@@ -223,6 +225,7 @@ impl<'a> Lowerer<'a> {
             var_types: HashMap::new(),
             var_defined: HashSet::new(),
             js_absence_parameters: HashSet::new(),
+            js_absent_fields: HashSet::new(),
             enums: enums::EnumGraph::default(),
             callables: HashMap::new(),
             polymorphic_callables: HashMap::new(),
