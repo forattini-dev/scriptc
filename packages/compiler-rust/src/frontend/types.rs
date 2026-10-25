@@ -2,6 +2,21 @@
 use super::*;
 
 impl Lowerer<'_> {
+    /// Aggregate slots need owning values even when the semantic source type
+    /// has no payload. Keep type_id's unit/never meaning separate from storage.
+    pub(super) fn aggregate_slot_type(&mut self, id: TypeId) -> Option<Type> {
+        if self
+            .checker
+            .ty(id)
+            .flags
+            .intersects(TypeFlags::NULL | TypeFlags::UNDEFINED | TypeFlags::NEVER | TypeFlags::VOID)
+        {
+            Some(Type::Dyn)
+        } else {
+            self.type_id(id)
+        }
+    }
+
     fn opaque_object_type(&self, id: TypeId) -> bool {
         if self
             .checker

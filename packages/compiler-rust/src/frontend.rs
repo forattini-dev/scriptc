@@ -1155,6 +1155,11 @@ impl<'a> Lowerer<'a> {
                     return Ok(self.dynamic_get(node, obj, key));
                 }
                 if let Type::Array { elem } = obj.ty() {
+                    if *elem == Type::Dyn {
+                        let key = self.property_key_expression(node.argument_expression())?;
+                        let obj = self.coerce(obj, Type::Dyn, node.expression())?;
+                        return Ok(self.dynamic_get(node, obj, key));
+                    }
                     let index = self.expected_expression(node.argument_expression(), Type::F64)?;
                     return Ok(Expr::ArrayGet {
                         arr: Box::new(obj),

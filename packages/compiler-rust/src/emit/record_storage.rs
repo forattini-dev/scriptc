@@ -8,15 +8,9 @@ pub(super) fn shared(record: &crate::ir::Record) -> bool {
 pub(super) fn definitions(out: &mut String) {
     out.push_str(
         r#"
-struct NativeRecordData { entries: Vec<(runtime::JsString, NativeValue)> }
-impl runtime::Trace for NativeRecordData {
-    fn trace(&self, tracer: &mut runtime::Tracer<'_>) {
-        for (_, value) in &self.entries { value.trace_native(tracer); }
-    }
-}
-impl runtime::ClearEdges for NativeRecordData {
-    fn clear_edges(&mut self) { self.entries.clear(); }
-}
+// Typed record views and erased plain objects own the same property store.
+// Refining an object to a record must never copy or change its identity.
+type NativeRecordData = NativeMap<runtime::JsString, NativeValue>;
 fn native_record_get<K: runtime::JsStringSource + ?Sized>(object: &runtime::Gc<NativeRecordData>, key: &K) -> NativeValue {
     let key = runtime::string(key);
     object.with(|data| data.entries.iter().find(|(name,_)| name == &key)

@@ -70,7 +70,7 @@ impl Lowerer<'_> {
         }
         if self.checker.is_array_type(id) {
             let element = self.checker.get_element_type_of_array_type(id);
-            let elem = self.type_id(element)?;
+            let elem = self.aggregate_slot_type(element)?;
             if matches!(
                 elem,
                 Type::Void | Type::Null | Type::Undefined | Type::Func { .. } | Type::Stats
@@ -194,7 +194,7 @@ impl Lowerer<'_> {
                 return None;
             }
             let source = self.checker.get_type_of_symbol(property);
-            let mut ty = self.type_id(source)?;
+            let mut ty = self.aggregate_slot_type(source)?;
             if self
                 .checker
                 .sym(property)
@@ -209,9 +209,6 @@ impl Lowerer<'_> {
                 };
                 arms.push(Type::Undefined);
                 ty = self.intern_union(arms)?;
-            }
-            if matches!(ty, Type::Null | Type::Undefined) {
-                return None;
             }
             fields.push(ir::Field { name, r#type: ty });
         }

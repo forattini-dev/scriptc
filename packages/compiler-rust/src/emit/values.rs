@@ -285,7 +285,16 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
                 ),
             ),
         };
-        writeln!(out, "fn native_box_{i}(value: {rt}) -> NativeValue {{ {box_code} }}\nfn native_try_{i}(value: &NativeValue) -> Option<{rt}> {{ {try_code} }}\nfn native_check_{i}(value: &NativeValue) -> {rt} {{ native_try_{i}(value).unwrap_or_else(|| runtime::throw_type_error(\"scriptc: native value does not match the required type\".into())) }}").unwrap();
+        // A direct checked record conversion is an owning property view.
+        // Union tag tests still use native_try and require a known record tag;
+        // an untagged object must not arbitrarily select a union's first arm.
+        let object_view = if matches!(ty, Type::Record { shape_id } if record_storage::shared(&module.records[*shape_id]))
+        {
+            "if let NativeValue::Object(object) = value { return object.clone(); }"
+        } else {
+            ""
+        };
+        writeln!(out, "fn native_box_{i}(value: {rt}) -> NativeValue {{ {box_code} }}\nfn native_try_{i}(value: &NativeValue) -> Option<{rt}> {{ {try_code} }}\nfn native_check_{i}(value: &NativeValue) -> {rt} {{ {object_view} native_try_{i}(value).unwrap_or_else(|| runtime::throw_type_error(\"scriptc: native value does not match the required type\".into())) }}").unwrap();
     }
     out.push_str(r#"fn native_value_missing<K: runtime::JsStringSource + ?Sized>(key: &K) -> NativeValue { native_value_missing_kind(key, "object") }
 fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind: &str) -> NativeValue {
@@ -309,7 +318,7 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
 
 
 "#);
-    out.push_str("fn native_value_eq(left: &NativeValue, right: &NativeValue) -> bool { match (left, right) { (NativeValue::RawJson(a), NativeValue::RawJson(b)) => a.ptr_eq(b), (NativeValue::Record(_,a), NativeValue::Record(_,b)) => a.ptr_eq(b), (NativeValue::Undefined, NativeValue::Undefined) | (NativeValue::Null, NativeValue::Null) => true, (NativeValue::Number(a), NativeValue::Number(b)) => a == b, (NativeValue::BigInt(a), NativeValue::BigInt(b)) => a == b, (NativeValue::Boolean(a), NativeValue::Boolean(b)) => a == b, (NativeValue::String(a), NativeValue::String(b)) => a == b, (NativeValue::Symbol(a), NativeValue::Symbol(b)) => runtime::symbol_ptr_eq(a,b), (NativeValue::Regex(a), NativeValue::Regex(b)) => std::rc::Rc::ptr_eq(a,b), (NativeValue::Object(a), NativeValue::Object(b)) => a.ptr_eq(b), (NativeValue::Map(a), NativeValue::Map(b)) => a.ptr_eq(b), (NativeValue::Promise(a), NativeValue::Promise(b)) => runtime::promise_view_identity(a) == runtime::promise_view_identity(b), (NativeValue::Array(a), NativeValue::Array(b)) => a.ptr_eq(b),\n");
+    out.push_str("fn native_value_eq(left: &NativeValue, right: &NativeValue) -> bool { match (left, right) { (NativeValue::RawJson(a), NativeValue::RawJson(b)) => a.ptr_eq(b), (NativeValue::Record(_,a), NativeValue::Record(_,b)) => a.ptr_eq(b), (NativeValue::Record(_,a), NativeValue::Object(b)) | (NativeValue::Object(a), NativeValue::Record(_,b)) => a.ptr_eq(b), (NativeValue::Undefined, NativeValue::Undefined) | (NativeValue::Null, NativeValue::Null) => true, (NativeValue::Number(a), NativeValue::Number(b)) => a == b, (NativeValue::BigInt(a), NativeValue::BigInt(b)) => a == b, (NativeValue::Boolean(a), NativeValue::Boolean(b)) => a == b, (NativeValue::String(a), NativeValue::String(b)) => a == b, (NativeValue::Symbol(a), NativeValue::Symbol(b)) => runtime::symbol_ptr_eq(a,b), (NativeValue::Regex(a), NativeValue::Regex(b)) => std::rc::Rc::ptr_eq(a,b), (NativeValue::Object(a), NativeValue::Object(b)) => a.ptr_eq(b), (NativeValue::Map(a), NativeValue::Map(b)) => a.ptr_eq(b), (NativeValue::Promise(a), NativeValue::Promise(b)) => runtime::promise_view_identity(a) == runtime::promise_view_identity(b), (NativeValue::Array(a), NativeValue::Array(b)) => a.ptr_eq(b),\n");
     if !module.classes.is_empty() {
         out.push_str("(NativeValue::Instance(a), NativeValue::Instance(b)) => a.ptr_eq(b),\n");
     }

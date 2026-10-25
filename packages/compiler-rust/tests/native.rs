@@ -108,6 +108,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-aggregate-slots/contracts.ts",
+        "rust-native-aggregate-slots/aliases.js",
+        "rust-native-aggregate-slots/callbacks.ts",
+        "rust-native-aggregate-slots/order.ts",
+        "rust-native-aggregate-slots/identity.ts",
         "rust-native-function-source/contracts.ts",
         "rust-native-function-source/effects.ts",
         "rust-native-function-source/aliases.js",
@@ -5579,6 +5584,42 @@ fn function_source_boundaries_preserve_existing_artifacts() {
         );
         for artifact in artifacts {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn aggregate_slots_use_owning_ir_storage() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = temp.path().join("slots.ir.json");
+    fs::write(&input, "const factory = () => ({ children: [], key: undefined, nil: null }); const value = factory(); console.log('slots', value.children.length, value.key === undefined, value.nil === null);").unwrap();
+    let output = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--emit", "ir", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    success(&output);
+    let module: serde_json::Value = serde_json::from_slice(&fs::read(target).unwrap()).unwrap();
+    assert_eq!(module["irVersion"], 13);
+    let record = module["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| {
+            let fields = record["fields"].as_array().unwrap();
+            fields.len() == 3 && fields.iter().any(|field| field["name"] == "children")
+        })
+        .unwrap();
+    for field in record["fields"].as_array().unwrap() {
+        if field["name"] == "children" {
+            assert_eq!(field["type"]["kind"], "array");
+            assert_eq!(field["type"]["elem"]["kind"], "dyn");
+        } else {
+            assert_eq!(field["type"]["kind"], "dyn");
         }
     }
 }
