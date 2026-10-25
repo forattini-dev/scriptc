@@ -74,6 +74,33 @@ fn weak_map_collects_a_value_pointing_back_to_its_key() {
 }
 
 #[test]
+fn weak_membership_table_does_not_retain_a_cyclic_key_or_dead_owner() {
+    collect_cycles();
+    let before = live_heap_objects();
+    let owner = node();
+    let table = node();
+    owner.with_mut(|value| value.edges.push(table.clone()));
+    let key = node();
+    key.with_mut(|value| value.edges.push(key.clone()));
+    let dead_key = key.downgrade();
+    let dead_table = table.downgrade();
+    let table_id = WeakKey::new(&table);
+    let key_id = WeakKey::new(&key);
+    weak_map_set(&table_id, &key_id, true);
+    drop(table);
+    drop(key);
+    collect_cycles();
+    assert!(dead_key.upgrade().is_none());
+    assert!(!weak_map_has::<bool>(&table_id, &key_id));
+    assert!(dead_table.upgrade().is_some());
+    assert_eq!(live_heap_objects(), before + 2);
+    drop(owner);
+    collect_cycles();
+    assert!(dead_table.upgrade().is_none());
+    assert_eq!(live_heap_objects(), before);
+}
+
+#[test]
 fn weak_map_fixed_point_keeps_a_chain_until_the_first_key_dies() {
     collect_cycles();
     let before = live_heap_objects();

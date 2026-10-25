@@ -296,6 +296,9 @@ impl Lowerer<'_> {
         if self.native_type_contains(ty, weak_maps::instance) {
             return Some("erasing WeakMap requires a native property descriptor contract");
         }
+        if self.native_type_contains(ty, classes::weak_sets::instance) {
+            return Some("erasing WeakSet requires a native property descriptor contract");
+        }
         if self.native_type_contains(ty, async_context::instance) {
             return Some(
                 "erasing AsyncLocalStorage requires a native property descriptor contract",

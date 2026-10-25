@@ -163,6 +163,11 @@ impl Lowerer<'_> {
         }
         let info = self.checker.sym(SymbolId(symbol));
         let name = info.name.to_string();
+        if self.standard_weak_set(symbol) {
+            let index = self.weak_set_class(info.value_declaration);
+            self.classes.symbols.insert(symbol, index);
+            return Some(index);
+        }
         if matches!(name.as_str(), "Number" | "String" | "Boolean")
             && self.primitive_symbol(symbol, &name, None)
         {
@@ -411,6 +416,9 @@ impl Lowerer<'_> {
             }
             if self.classes.definitions[base].name == weak_maps::CLASS {
                 return Err(self.refuse(node, "WeakMap subclassing is not ported"));
+            }
+            if self.classes.definitions[base].name == weak_sets::CLASS {
+                return Err(self.refuse(node, "WeakSet subclassing is not ported"));
             }
             if self.classes.definitions[base].name == async_context::CLASS {
                 return Err(self.refuse(node, "AsyncLocalStorage subclassing is not ported"));
@@ -811,3 +819,4 @@ mod methods;
 mod private_slots;
 mod symbol_methods;
 mod values;
+pub(super) mod weak_sets;

@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-weak-sets/contracts.ts",
+        "rust-native-weak-sets/order.ts",
+        "rust-native-weak-sets/shadows.ts",
         "rust-native-object-keys/contracts.ts",
         "rust-native-object-keys/order.ts",
         "rust-native-object-keys/shadows.ts",
@@ -4664,6 +4667,63 @@ fn process_write_boundaries_preserve_existing_artifacts() {
         "import p from 'node:process'; p.stderr.write = (text: string) => true;",
         "import p from 'node:process'; p.stderr?.write('x');",
         "import p from 'node:process'; p.stderrWrite('x');",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn weak_set_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "weak-set-boundary");
+    for source in [
+        "const C = WeakSet; new C([{ x: 1 }]);",
+        "class Child extends WeakSet<object> {} new Child();",
+        "const s = new WeakSet<object>(); const add = s.add;",
+        "const s: unknown = new WeakSet<object>();",
+        "const s: unknown = { nested: new WeakSet<object>() };",
+        "const s = new WeakSet<object>(); s.add(...[{ x: 1 }]);",
+        "new WeakSet<object>(...[[{ x: 1 }]]);",
+        "new WeakSet<object>(new Set<object>());",
+        "new WeakSet<object>('keys');",
+        "const s = new WeakSet<object>(); s.add([]);",
+        "const s = new WeakSet<object>(); s.add(() => 1);",
+        "const s = new WeakSet<object>(); s.add(Symbol('key'));",
+        "new WeakSet([Symbol('key')]);",
+        "class Key { x = 1; } new WeakSet<object>().add(new Key());",
+        "const s = new WeakSet<object>(); s.add(s);",
+        "const s = new WeakSet<object>(); console.log(s.size);",
+        "const s = new WeakSet<object>(); s.add = () => s;",
+        "const s = new WeakSet<object>(); console.log(s['[[WeakSetData]]']);",
+        "Object.keys(new WeakSet<object>());",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
         let artifacts = [

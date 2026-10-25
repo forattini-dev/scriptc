@@ -1352,7 +1352,10 @@ impl<'a> Lowerer<'a> {
             }
             SyntaxKind::TypeOfExpression => {
                 let value = self.condition_value(node.expression())?;
-                if async_context::instance(&value.ty()) || weak_maps::instance(&value.ty()) {
+                if async_context::instance(&value.ty())
+                    || weak_maps::instance(&value.ty())
+                    || classes::weak_sets::instance(&value.ty())
+                {
                     return Ok(Expr::Sequence {
                         stmts: vec![Stmt::Expression {
                             expr: value,
@@ -1404,6 +1407,9 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 if let Some(value) = self.weak_map_call(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.weak_set_call(node)? {
                     return Ok(value);
                 }
                 if let Some(value) = self.async_context_call(node)? {

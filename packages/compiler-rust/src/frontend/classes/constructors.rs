@@ -28,6 +28,7 @@ impl Lowerer<'_> {
         if definition.name.starts_with("native_builtin_Text")
             || definition.name == async_context::CLASS
             || definition.name == weak_maps::CLASS
+            || definition.name == weak_sets::CLASS
         {
             let params = vec![Param {
                 local_id: "p0".into(),
@@ -190,6 +191,9 @@ impl Lowerer<'_> {
         let definition = self.classes.definitions[index].clone();
         if let Some(name) = boxed::kind(&definition.name) {
             return self.boxed_constructor(index, name);
+        }
+        if definition.name == weak_sets::CLASS {
+            return Ok(self.weak_set_constructor(index));
         }
         if definition.name.starts_with("native_builtin_Text")
             || definition.name == async_context::CLASS

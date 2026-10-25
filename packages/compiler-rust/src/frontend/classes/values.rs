@@ -150,6 +150,9 @@ impl Lowerer<'_> {
         if let Some(name) = boxed::kind(&self.classes.definitions[index].name) {
             return self.boxed_new(node, index, name).map(Some);
         }
+        if self.classes.definitions[index].name == weak_sets::CLASS {
+            return self.weak_set_new(node, index).map(Some);
+        }
         if self.classes.definitions[index].name == weak_maps::CLASS {
             if !node.arguments().is_empty() {
                 return Err(self.refuse(node, "WeakMap constructor iterables are not ported"));
@@ -344,7 +347,10 @@ impl Lowerer<'_> {
         let Type::Object { class_name } = obj.ty() else {
             unreachable!()
         };
-        if class_name == weak_maps::CLASS || class_name == async_context::CLASS {
+        if class_name == weak_maps::CLASS
+            || class_name == weak_sets::CLASS
+            || class_name == async_context::CLASS
+        {
             return Err(self.refuse(node, "builtin class indexed properties are not ported"));
         }
         let key = node.argument_expression();
@@ -396,10 +402,10 @@ impl Lowerer<'_> {
             return Err(self.refuse(node, "class receiver has no object representation"));
         };
         let field = node.name().text().to_string();
-        if class_name == weak_maps::CLASS {
+        if class_name == weak_maps::CLASS || class_name == weak_sets::CLASS {
             return Err(self.refuse(
                 node,
-                "WeakMap property access and extracted methods are not ported",
+                "weak collection property access and extracted methods are not ported",
             ));
         }
         if class_name == async_context::CLASS {
@@ -491,10 +497,10 @@ impl Lowerer<'_> {
             return Err(self.refuse(node, "class write needs an object"));
         };
         let field = member.name().text().to_string();
-        if class_name == weak_maps::CLASS {
+        if class_name == weak_maps::CLASS || class_name == weak_sets::CLASS {
             return Err(self.refuse(
                 node,
-                "WeakMap property access and extracted methods are not ported",
+                "weak collection property access and extracted methods are not ported",
             ));
         }
         if class_name == async_context::CLASS {
@@ -532,7 +538,15 @@ impl Lowerer<'_> {
         self.layout_class(index)?;
         let class_name = self.classes.definitions[index].name.clone();
         let direct = matches!(value.ty(), Type::Object { class_name: left } if self.classes.hierarchy(&left) && self.classes.hierarchy(&class_name));
-        let value = if value.ty() == Type::Caught || direct {
+        let value = if weak_sets::instance(&value.ty()) {
+            // Brand observation does not expose the collection's descriptors.
+            // Keep the shared dyn.classInstanceof contract for nominal roots.
+            Expr::DynFrom {
+                value: Box::new(value),
+                r#type: Type::Dyn,
+                loc: self.loc(node.left()),
+            }
+        } else if value.ty() == Type::Caught || direct {
             value
         } else {
             self.coerce(value, Type::Dyn, node.left())?
