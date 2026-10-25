@@ -1987,6 +1987,7 @@ export type IrLibFn =
    * (sloppy mode would silently ignore — suite tests are 'use strict';
    * SEMANTICS.md notes the sloppy divergence: loud, never silent). Void
    * result; in the may-throw seed set. */
+  | "dyn.keyDelete"
   | "dyn.keySet"
   /** Computed-reference PutValue: receiver, unconverted key, and value are
    * dyn values. ToObject precedes key conversion, after RHS evaluation.
@@ -8014,6 +8015,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // new RegExp compiles the pattern eagerly: an invalid pattern or flag
   // throws Node's catchable SyntaxError at construction.
   "regex.new",
+  "dyn.keyDelete",
   "dyn.keySet",
   "dyn.keySetComputed",
   // the destructuring pack throws V8's TypeError on non-iterable dyn kinds

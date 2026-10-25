@@ -30,6 +30,7 @@ import { emitRustDynamicKeyWrite } from "./dynamic-key-write.js";
 import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
+import { emitNativeDeleteDefinitions } from "./property-delete.js";
 import { caughtArrayValues } from "./caught-array-values.js";
 import type { RustClosureShape } from "./model.js";
 import { isSharedRecord, recordCheckName, recordNewName } from "./shared-records.js";
@@ -57,6 +58,7 @@ export class RustDynamicEmitter {
     });
 
     emitRustNativeMethodDefinition(this.context);
+    emitNativeDeleteDefinitions(this.context);
     this.context.line("#[derive(Clone)]");
     this.context.line(`enum ${name} {`);
     this.context.pushIndent();

@@ -139,6 +139,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "json.parse": { argTypes: [STRING], result: DYN },
   "json.stringifyNative": { argTypes: [arrayOf(DYN)], result: DYN },
   "json.parseNative": { argTypes: [arrayOf(DYN)], result: DYN },
+  "dyn.keyDelete": { argTypes: [DYN, STRING, BOOL], result: BOOL },
   "dyn.keySet": { argTypes: [DYN, STRING, DYN], result: VOID },
   "dyn.keySetComputed": { argTypes: [DYN, DYN, DYN], result: VOID },
   "dyn.iterPack": { argTypes: [DYN, STRING], result: DYN },

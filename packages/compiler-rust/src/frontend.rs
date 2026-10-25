@@ -31,6 +31,7 @@ mod console;
 mod container_abi;
 mod data_tables;
 mod declarations;
+mod deletion;
 mod directories;
 mod enums;
 mod exceptions;
@@ -1081,6 +1082,9 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expression_inner(&mut self, node: Node) -> Result<Expr, String> {
+        if node.kind() == SyntaxKind::DeleteExpression {
+            return self.delete_expression(node);
+        }
         if optional_access::is_access(node) {
             return self.optional_access(node);
         }

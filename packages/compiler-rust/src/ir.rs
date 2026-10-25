@@ -2548,6 +2548,20 @@ fn validate_function(
                         Err("invalid native text codec operation".into())
                     };
                 }
+                if r#fn == "dyn.keyDelete" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    if args.len() != 3
+                        || args[0].ty() != Type::Dyn
+                        || args[1].ty() != Type::String
+                        || args[2].ty() != Type::Bool
+                        || *r#type != Type::Bool
+                    {
+                        return Err("invalid native dynamic property deletion".into());
+                    }
+                    return Ok(());
+                }
                 if r#fn == "dyn.keySet" {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
@@ -5019,6 +5033,63 @@ mod tests {
         validate(&m).unwrap();
         m.globals.push(m.globals[0].clone());
         assert!(validate(&m).unwrap_err().contains("global storage"));
+    }
+
+    #[test]
+    fn dynamic_property_deletion_validates_key_mode_and_boolean_result() {
+        let mut m = callable_module();
+        m.functions.truncate(1);
+        let loc = m.functions[0].loc.clone();
+        let operation = Expr::LibCall {
+            r#fn: "dyn.keyDelete".into(),
+            args: vec![
+                Expr::DynObjLit {
+                    fields: vec![],
+                    r#type: Type::Dyn,
+                    loc: loc.clone(),
+                },
+                Expr::StrLit {
+                    value: "key".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                },
+                Expr::BoolLit {
+                    value: true,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                },
+            ],
+            r#type: Type::Bool,
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: operation,
+            loc,
+        }];
+        validate(&m).unwrap();
+        for kind in 0..3 {
+            let mut invalid = callable_module();
+            invalid.functions.truncate(1);
+            invalid.functions[0].body = m.functions[0].body.clone();
+            let Stmt::Expression {
+                expr: Expr::LibCall { args, r#type, .. },
+                ..
+            } = &mut invalid.functions[0].body[0]
+            else {
+                unreachable!()
+            };
+            if kind == 0 {
+                *r#type = Type::Void;
+            } else if kind == 1 {
+                args[2] = args[1].clone();
+            } else {
+                args.pop();
+            }
+            assert_eq!(
+                validate(&invalid).unwrap_err(),
+                "invalid native dynamic property deletion"
+            );
+        }
     }
 
     #[test]

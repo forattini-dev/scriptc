@@ -135,6 +135,7 @@ fn checked(ty: &Type, value: &str, module: &Module) -> String {
 }
 
 pub(super) fn definitions(module: &Module, out: &mut String) {
+    property_delete::definitions(module, out);
     record_construction::definitions(module, out);
     out.push_str(include_str!("../compare_values_support.rs"));
     out.push_str("fn native_value_string(value: NativeValue) -> runtime::JsString { match value { NativeValue::Undefined => \"undefined\".into(), NativeValue::Null => \"null\".into(), NativeValue::Number(v) => runtime::JsString::from(js_string_number(v)), NativeValue::Boolean(v) => runtime::JsString::from(v.to_string()), NativeValue::String(v) => v, NativeValue::BigInt(v) => runtime::bigint_to_string(&v), NativeValue::Symbol(_) => runtime::throw_type_error(\"Cannot convert a Symbol value to a string\".into()), NativeValue::RawJson(_) => runtime::throw_type_error(\"Cannot convert object to primitive value\".into()), _ => runtime::throw_type_error(\"scriptc: object string conversion requires native ToPrimitive support\".into()) } }\n");
@@ -605,6 +606,12 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             expr(&args[2], function, module)
         ),
 
+        Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.keyDelete" => format!(
+            "{{ let object = {}; let key = {}; let strict = {}; runtime::native_delete_property(&object, &key, strict) }}",
+            expr(&args[0], function, module),
+            expr(&args[1], function, module),
+            expr(&args[2], function, module)
+        ),
         Expr::DynFrom { value, .. } => boxed(&value.ty(), &expr(value, function, module), module),
         Expr::DynCheck { value, r#type, .. } => {
             checked(r#type, &expr(value, function, module), module)

@@ -156,6 +156,7 @@ include!("windows_paths.rs");
 include!("json.rs");
 include!("json_parse_source.rs");
 include!("native_json.rs");
+include!("native_delete.rs");
 include!("raw_json.rs");
 include!("number_format.rs");
 include!("numeric_ops.rs");

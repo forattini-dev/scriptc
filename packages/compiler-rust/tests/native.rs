@@ -240,6 +240,14 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-json-functions/identity.ts",
         "rust-native-json-functions/values.ts",
         "rust-native-json-functions/parse.ts",
+        "rust-native-delete/records.ts",
+        "rust-native-delete/order.ts",
+        "rust-native-delete/arrays.ts",
+        "rust-native-delete/keys.ts",
+        "rust-native-delete/errors.ts",
+        "rust-native-delete/sloppy.cjs",
+        "rust-native-delete/dictionary.ts",
+        "rust-native-delete/raw.ts",
         "rust-native-object-bindings/holder.ts",
         "rust-native-object-bindings/contracts.ts",
         "rust-native-object-bindings/identity.ts",
@@ -1289,6 +1297,53 @@ fn for_loop_boundaries_preserve_artifacts() {
                 && stderr.contains("SCN1001")
                 && stderr.contains("per-iteration native cells")
                 && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn deletion_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "deletion-boundary");
+    for source in [
+        "const data = {value: 1}; delete data.value;",
+        "const data = {value: 1}; let key: string = 'value'; delete data[key];",
+        "const data = [1]; delete data[0];",
+        "const data = JSON.parse('{}'); let key: any = 'x'; delete data[key];",
+        "const data = JSON.parse('{}'); const key = {toString: () => 'x'}; delete data[key as any];",
+        "const data = JSON.parse('{}'); delete data[Symbol('key')];",
+        "const data = JSON.parse('{}'); delete data?.x;",
+        "const data = new Set([1]); delete data.size;",
+        "delete (console.log('effect'), 1);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );
         for path in [

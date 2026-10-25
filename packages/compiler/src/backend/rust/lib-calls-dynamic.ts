@@ -153,6 +153,10 @@ export function emitRustDynamicLibCall(
     const value = context.nextTemporary();
     return `{ let ${value} = ${context.emitExpr(arg)}; sc_dyn_get_prototype_of(&${value}) }`;
   }
+  if (expr.fn === "dyn.keyDelete" && expr.args.length === 3 && arg?.type.kind === "dyn" && secondArg?.type.kind === "string" && expr.args[2]?.type.kind === "bool" && expr.type.kind === "bool") {
+    const receiver = context.nextTemporary(), key = context.nextTemporary(), strict = context.nextTemporary();
+    return `{ let ${receiver} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; let ${strict} = ${context.emitExpr(expr.args[2])}; runtime::native_delete_property(&${receiver}, &${key}, ${strict}) }`;
+  }
   if (expr.fn === "dyn.keySetComputed" && expr.args.length === 3 && arg?.type.kind === "dyn" &&
     secondArg?.type.kind === "dyn" && expr.args[2]?.type.kind === "dyn" && expr.type.kind === "void") {
     const receiver = context.nextTemporary(), key = context.nextTemporary(), value = context.nextTemporary();

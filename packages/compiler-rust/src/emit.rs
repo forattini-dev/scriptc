@@ -10,6 +10,7 @@ mod functions;
 mod json_functions;
 mod layouts;
 mod process;
+mod property_delete;
 mod receivers;
 mod record_construction;
 mod record_storage;

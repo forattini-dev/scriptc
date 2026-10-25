@@ -98,6 +98,11 @@ export function nativeModuleBackendDiagnostics(
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
       return;
     }
+    if (node.kind === "libCall" && node.fn === "dyn.keyDelete") {
+      feature = "native property deletion (libCall:dyn.keyDelete)";
+      loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+      return;
+    }
     if (node.kind === "libCall" && (node.fn === "dns.promises.lookup" || node.fn === "dns.lookupAsync" || node.fn === "dns.lookupFamily")) {
       feature = `native ${node.fn}`;
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
