@@ -8,6 +8,23 @@ impl Lowerer<'_> {
             return Ok(params.clone());
         }
         let definition = self.classes.definitions[index].clone();
+        if let Some(name) = boxed::kind(&definition.name) {
+            let params = vec![
+                Param {
+                    local_id: "p0".into(),
+                    name: "this".into(),
+                    r#type: self.classes.object(index),
+                },
+                Param {
+                    local_id: "p1".into(),
+                    name: "value".into(),
+                    r#type: boxed::payload(name),
+                },
+            ];
+            self.classes.definitions[index].signature = Some(params.clone());
+            self.classes.pending.push_back(index);
+            return Ok(params);
+        }
         if definition.name.starts_with("native_builtin_Text")
             || definition.name == async_context::CLASS
             || definition.name == weak_maps::CLASS
@@ -171,6 +188,9 @@ impl Lowerer<'_> {
         index: usize,
     ) -> Result<Function, String> {
         let definition = self.classes.definitions[index].clone();
+        if let Some(name) = boxed::kind(&definition.name) {
+            return self.boxed_constructor(index, name);
+        }
         if definition.name.starts_with("native_builtin_Text")
             || definition.name == async_context::CLASS
             || definition.name == weak_maps::CLASS

@@ -29,6 +29,7 @@ pub(super) struct ClassGraph {
     private_slots: HashMap<u32, private_slots::Slot>,
     private_method_signatures: HashMap<String, Signature>,
     method_queue: VecDeque<Signature>,
+    boxed_slots: Vec<(String, ir::Global)>,
 }
 
 impl ClassGraph {
@@ -162,6 +163,16 @@ impl Lowerer<'_> {
         }
         let info = self.checker.sym(SymbolId(symbol));
         let name = info.name.to_string();
+        if matches!(name.as_str(), "Number" | "String" | "Boolean")
+            && self.primitive_symbol(symbol, &name, None)
+        {
+            let site = self.checker.sym(SymbolId(symbol)).value_declaration;
+            let index = self.boxed_class(&name);
+            self.private_table_constructor(site)
+                .expect("internal boxed storage constructor");
+            self.classes.symbols.insert(symbol, index);
+            return Some(index);
+        }
         if self.standard_async_context(symbol) || self.standard_weak_map(symbol) {
             let weak = self.standard_weak_map(symbol);
             let class_name = if weak {
@@ -395,6 +406,9 @@ impl Lowerer<'_> {
                 })?);
         }
         if let Some(base) = base {
+            if boxed::kind(&self.classes.definitions[base].name).is_some() {
+                return Err(self.refuse(node, "boxed primitive subclassing is not ported"));
+            }
             if self.classes.definitions[base].name == weak_maps::CLASS {
                 return Err(self.refuse(node, "WeakMap subclassing is not ported"));
             }
@@ -791,6 +805,7 @@ impl Lowerer<'_> {
 }
 
 mod accessors;
+mod boxed;
 mod constructors;
 mod methods;
 mod private_slots;

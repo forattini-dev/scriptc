@@ -404,7 +404,7 @@ impl Lowerer<'_> {
 
     // Type-only wrappers do not perform JavaScript numeric/string conversion.
     // Preserve the operand before applying the actual standard operation.
-    fn primitive_operand(&mut self, node: Node) -> Result<Expr, String> {
+    pub(super) fn primitive_operand(&mut self, node: Node) -> Result<Expr, String> {
         self.expression(primitive_source(node))
     }
 

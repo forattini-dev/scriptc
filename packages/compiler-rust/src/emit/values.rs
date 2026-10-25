@@ -441,7 +441,11 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
             for method in methods {
                 writeln!(out, "{:?} => runtime::throw_type_error(\"scriptc: erased instance method values require a receiver ABI\".into()),", method).unwrap();
             }
-            out.push_str("_ => native_value_missing(&key), },\n");
+            if c.name.starts_with("native_boxed_") {
+                out.push_str("_ => runtime::throw_type_error(\"scriptc: boxed primitive properties require a native adapter\".into()), },\n");
+            } else {
+                out.push_str("_ => native_value_missing(&key), },\n");
+            }
         }
         out.push_str("_ => unreachable!(\"validated native instance kind\") } },\n");
     }

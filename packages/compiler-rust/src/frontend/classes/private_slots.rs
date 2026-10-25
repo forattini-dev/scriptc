@@ -105,7 +105,10 @@ impl Lowerer<'_> {
     }
 
     // This intrinsic identity is independent of source bindings and lib choices.
-    fn private_table_constructor(&mut self, site: Node) -> Result<(), String> {
+    pub(in crate::frontend::classes) fn private_table_constructor(
+        &mut self,
+        site: Node,
+    ) -> Result<(), String> {
         let index = if let Some(index) = self
             .classes
             .definitions

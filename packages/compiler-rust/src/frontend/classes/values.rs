@@ -147,6 +147,9 @@ impl Lowerer<'_> {
         let Some(index) = self.class_symbol(node.expression()) else {
             return Ok(None);
         };
+        if let Some(name) = boxed::kind(&self.classes.definitions[index].name) {
+            return self.boxed_new(node, index, name).map(Some);
+        }
         if self.classes.definitions[index].name == weak_maps::CLASS {
             if !node.arguments().is_empty() {
                 return Err(self.refuse(node, "WeakMap constructor iterables are not ported"));

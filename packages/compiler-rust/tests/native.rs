@@ -108,6 +108,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-boxed/contracts.ts",
+        "rust-native-boxed/identity.ts",
+        "rust-native-boxed/methods.ts",
+        "rust-native-boxed/shadows.ts",
         "rust-native-process-writes/contracts.ts",
         "rust-native-process-writes/callbacks.ts",
         "rust-native-process-writes/order.ts",
@@ -4677,6 +4681,58 @@ fn process_write_boundaries_preserve_existing_artifacts() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn boxed_primitive_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "boxed-boundary");
+    for source in [
+        "const C = Number; new C(1);",
+        "new Number({ valueOf() { return 1; } });",
+        "new String({ toString() { return 'one'; } });",
+        "new Number(Symbol('one'));",
+        "new String(Symbol('one'));",
+        "new Number(...[1]);",
+        "class Child extends Number {} new Child(1);",
+        "const value = new String('one'); console.log(value.length);",
+        "const value = new String('one'); console.log(value['0']);",
+        "const value = new Number(1); value.toString();",
+        "new Number(1n);",
+        "Number.prototype.valueOf.call(1);",
+        "const value = new Number(1); value?.valueOf();",
+        "const value = new Number(1); console.log(value['unknown']);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success()
                 && stderr.contains("SCN1001")
                 && !stderr.contains("SCN9001")
                 && !stderr.contains("panicked"),

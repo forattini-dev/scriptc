@@ -1017,6 +1017,9 @@ impl<'a> Lowerer<'a> {
                 "optional calls require a native receiver-call contract",
             ));
         }
+        if let Some(value) = self.boxed_get(node)? {
+            return Ok(value);
+        }
         if let Some(value) = self.standard_function_value(node)? {
             return Ok(value);
         }
@@ -1373,6 +1376,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.boxed_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.process_write(node)? {
                     return Ok(value);
                 }

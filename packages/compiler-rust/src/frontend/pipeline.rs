@@ -132,6 +132,8 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             functions.push(function);
         }
         functions[0].body.splice(0..0, lowerer.namespace_prelude());
+        let boxed_prelude = lowerer.boxed_prelude();
+        functions[0].body.splice(0..0, boxed_prelude);
         functions.extend(std::mem::take(&mut lowerer.lifted));
         lowerer.validate_call_receivers(&functions)?;
         Ok(Module {

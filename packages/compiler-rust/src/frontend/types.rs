@@ -71,6 +71,13 @@ impl Lowerer<'_> {
             return Some(ty);
         }
         let symbol = self.checker.ty(id).symbol().0;
+        // Wrapper interfaces also accept primitives: preserve the actual tag.
+        if ["Number", "String", "Boolean"]
+            .iter()
+            .any(|name| self.primitive_symbol(symbol, name, None))
+        {
+            return Some(Type::Dyn);
+        }
         if self.standard_stats_type(id) {
             return Some(Type::Stats);
         }
