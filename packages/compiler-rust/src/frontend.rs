@@ -36,6 +36,7 @@ mod exceptions;
 mod filesystem;
 mod filesystem_reads;
 mod filesystem_writes;
+mod function_reflection;
 mod functions;
 mod helpers;
 pub mod inspect;
@@ -1457,6 +1458,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::CallExpression => {
+                if let Some(value) = self.function_source_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.boxed_call(node)? {
                     return Ok(value);
                 }

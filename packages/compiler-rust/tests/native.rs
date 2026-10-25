@@ -108,6 +108,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-function-source/contracts.ts",
+        "rust-native-function-source/effects.ts",
+        "rust-native-function-source/aliases.js",
+        "rust-native-function-source/shadows.ts",
+        "rust-native-function-source/raw.ts",
         "rust-native-regex-replace/contracts.ts",
         "rust-native-regex-replace/state.ts",
         "rust-native-regex-replace/effects.ts",
@@ -5501,6 +5506,52 @@ fn regex_replacement_boundaries_preserve_existing_artifacts() {
         "function f(re: RegExp | undefined): string { return 'x'.replace(re, 'y'); } f(undefined);",
         "'x'.replace(...[/x/, 'y']);",
         "const method = 'x'.replace; method(/x/, 'y');",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn function_source_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "function-source-boundary");
+    for source in [
+        "function f(): number { return 1; } f.toString();",
+        "let parse = JSON.parse; parse.toString();",
+        "const parse: typeof JSON.parse = () => null; parse.toString();",
+        "const bound = JSON.parse.bind(null); bound.toString();",
+        "JSON.parse.toString(...[1]);",
+        "const source = JSON.parse.toString; source();",
+        "JSON.parse.toString.call(JSON.stringify);",
+        "export {}; declare global { interface Function { toString(): string; } } JSON.parse.toString();",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
         let artifacts = [

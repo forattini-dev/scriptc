@@ -126,16 +126,14 @@ impl Lowerer<'_> {
         }
         Some(member)
     }
-    fn json_function_origin(
+    pub(super) fn json_function_origin(
         &mut self,
         node: Node,
         active: &mut HashSet<u32>,
     ) -> Option<&'static str> {
+        let node = receivers::reference_node(node);
         if let Some(member) = self.standard_json_member(node) {
             return Some(member);
-        }
-        if node.kind() == SyntaxKind::ParenthesizedExpression {
-            return self.json_function_origin(node.expression(), active);
         }
         if node.kind() != SyntaxKind::Identifier {
             return None;
