@@ -13,6 +13,10 @@ pub fn view_pairs(
             _ => Some(vec![ty.clone()]),
         }
     }
+    fn optional(ty: &Type, unions: &[Union]) -> bool {
+        *ty == Type::Undefined
+            || matches!(ty, Type::Union { union_id } if unions.get(*union_id).is_some_and(|u| u.arms.contains(&Type::Undefined)))
+    }
     let targets = arms(target, unions)?;
     let sources = arms(source, unions)?;
     if !sources.iter().any(|t| matches!(t, Type::Record { .. })) {
@@ -51,16 +55,20 @@ pub fn view_pairs(
                     let target = records.get(*shape_id)?;
                     (!target.tuple
                         && target.index_value.is_none()
+                        && !target.fields.iter().any(|f| f.name == "\0scriptc.call")
+                        && !contains_set(ty, records, unions)
                         && target.fields.iter().all(|f| {
-                            source.fields.iter().any(|old| {
-                                old.name == f.name
-                                    && super::record_equivalence::equivalent(
-                                        &old.r#type,
-                                        &f.r#type,
-                                        records,
-                                        unions,
-                                    )
-                            })
+                            match source.fields.iter().find(|old| old.name == f.name) {
+                                Some(old) => super::record_equivalence::equivalent(
+                                    &old.r#type,
+                                    &f.r#type,
+                                    records,
+                                    unions,
+                                ),
+                                // A view exposes an absent optional key without
+                                // defining it or copying the shared property store.
+                                None => optional(&f.r#type, unions),
+                            }
                         }))
                     .then_some(to)
                 })
@@ -150,6 +158,110 @@ mod tests {
             view_pairs(
                 &Type::Record { shape_id: 0 },
                 &Type::Record { shape_id: 2 },
+                &records,
+                &unions
+            )
+            .is_none()
+        );
+    }
+    #[test]
+    fn absent_optional_fields_preserve_nullable_view_mapping() {
+        let optional = Type::Union { union_id: 0 };
+        let records = vec![
+            record(0, &[("width", optional.clone())]),
+            record(1, &[("width", optional.clone()), ("height", optional)]),
+        ];
+        let unions = vec![
+            Union {
+                id: 0,
+                arms: vec![Type::F64, Type::Undefined],
+            },
+            Union {
+                id: 1,
+                arms: vec![Type::Record { shape_id: 0 }, Type::Undefined],
+            },
+            Union {
+                id: 2,
+                arms: vec![Type::Undefined, Type::Record { shape_id: 1 }],
+            },
+        ];
+        assert_eq!(
+            view_pairs(
+                &Type::Record { shape_id: 0 },
+                &Type::Record { shape_id: 1 },
+                &records,
+                &unions
+            ),
+            Some(vec![(0, 0)])
+        );
+        assert_eq!(
+            view_pairs(
+                &Type::Union { union_id: 1 },
+                &Type::Union { union_id: 2 },
+                &records,
+                &unions
+            ),
+            Some(vec![(0, 1), (1, 0)])
+        );
+    }
+    #[test]
+    fn optional_views_refuse_mutable_changes_required_fields_and_nominal_targets() {
+        let optional = Type::Union { union_id: 0 };
+        let mut records = vec![
+            record(0, &[("width", Type::F64)]),
+            record(1, &[("width", optional.clone())]),
+            record(2, &[("width", Type::F64), ("height", Type::F64)]),
+            record(3, &[("width", Type::F64), ("height", optional.clone())]),
+            record(4, &[("width", Type::F64), ("depth", optional.clone())]),
+            record(5, &[("width", Type::F64), ("\0scriptc.call", optional)]),
+        ];
+        let unions = vec![
+            Union {
+                id: 0,
+                arms: vec![Type::F64, Type::Undefined],
+            },
+            Union {
+                id: 1,
+                arms: vec![Type::Record { shape_id: 3 }, Type::Record { shape_id: 4 }],
+            },
+            Union {
+                id: 2,
+                arms: vec![
+                    Type::Set {
+                        elem: Box::new(Type::String),
+                    },
+                    Type::Undefined,
+                ],
+            },
+        ];
+        for shape_id in [1, 2, 5] {
+            assert!(
+                view_pairs(
+                    &Type::Record { shape_id: 0 },
+                    &Type::Record { shape_id },
+                    &records,
+                    &unions
+                )
+                .is_none()
+            );
+        }
+        assert!(
+            view_pairs(
+                &Type::Record { shape_id: 0 },
+                &Type::Union { union_id: 1 },
+                &records,
+                &unions
+            )
+            .is_none()
+        );
+        records.push(record(
+            6,
+            &[("width", Type::F64), ("set", Type::Union { union_id: 2 })],
+        ));
+        assert!(
+            view_pairs(
+                &Type::Record { shape_id: 0 },
+                &Type::Record { shape_id: 6 },
                 &records,
                 &unions
             )

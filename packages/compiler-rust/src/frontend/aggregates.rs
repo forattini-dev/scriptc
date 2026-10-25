@@ -734,6 +734,34 @@ impl Lowerer<'_> {
 
     pub(super) fn record_literal(&mut self, node: Node, target: Type) -> Result<Expr, String> {
         let properties = node.properties().into_iter().collect::<Vec<_>>();
+        let Type::Record { shape_id } = target else {
+            return Err(self.refuse(node, "record literal needs a closed shape"));
+        };
+        let record = &self.records[shape_id];
+        let has_extra = record.index_value.is_none()
+            && properties.iter().any(|property| {
+                matches!(
+                    property.kind(),
+                    SyntaxKind::PropertyAssignment
+                        | SyntaxKind::ShorthandPropertyAssignment
+                        | SyntaxKind::MethodDeclaration
+                ) && self
+                    .data_property_name(property.name())
+                    .is_some_and(|name| !record.fields.iter().any(|field| field.name == name))
+            });
+        if has_extra {
+            let source = self.ty(node)?;
+            if source != target
+                && matches!(source, Type::Record { .. })
+                && ir::record_views::view_pairs(&source, &target, &self.records, &self.unions)
+                    .is_some()
+            {
+                // Keep every source property in its complete owning
+                // layout, then project a view without dropping keys.
+                let value = self.record_literal(node, source)?;
+                return self.coerce(value, target, node);
+            }
+        }
         if properties
             .iter()
             .any(|p| p.kind() == SyntaxKind::SpreadAssignment)

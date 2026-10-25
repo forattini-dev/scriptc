@@ -298,6 +298,14 @@ impl Lowerer<'_> {
     }
 
     fn join_value(&mut self, receiver: Expr, separator: Expr, node: Node) -> Result<Expr, String> {
+        if !matches!(receiver.ty(), Type::Array { .. })
+            && !matches!(receiver.ty(), Type::Record { shape_id } if self.records[shape_id].tuple)
+        {
+            return Err(self.refuse(
+                node,
+                "array.join requires a represented array or fixed tuple receiver",
+            ));
+        }
         if let Type::Record { shape_id } = receiver.ty() {
             let mut helper = Helper::new(
                 "tuple_join",

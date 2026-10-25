@@ -108,6 +108,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-optional-views/contracts.ts",
+        "rust-native-optional-views/identity.ts",
+        "rust-native-optional-views/callbacks.ts",
+        "rust-native-optional-views/order.ts",
+        "rust-native-optional-views/nullable.ts",
         "rust-native-record-overrides/contracts.ts",
         "rust-native-record-overrides/order.ts",
         "rust-native-record-overrides/identity.ts",
@@ -5626,6 +5631,56 @@ fn aggregate_slots_use_owning_ir_storage() {
             assert_eq!(field["type"]["elem"]["kind"], "dyn");
         } else {
             assert_eq!(field["type"]["kind"], "dyn");
+        }
+    }
+}
+
+#[test]
+fn optional_record_view_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "optional-view-boundary");
+    let join =
+        fs::read_to_string(root().join("tests/fixtures/native-unrefined-array-join.ts")).unwrap();
+    for source in [
+        "function bad(value: {}): { width: number } { return value as unknown as { width: number }; } console.log(bad({}).width);",
+        "function bad(value: { width: number }): { width?: number } { return value; } console.log(bad({width: 1}).width === 1);",
+        "function bad(value: { width: number }): { width: number; height?: number } | { width: number; depth?: number } { return value; } console.log(Object.keys(bad({width: 1})).join('|'));",
+        join.as_str(),
+    ] {
+        fs::write(&input, source).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("rs"),
+            target.with_extension("ir.json"),
+        ];
+        for path in &artifacts {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        if source == join {
+            assert!(
+                stderr.contains("array.join requires a represented array or fixed tuple receiver"),
+                "{stderr}"
+            );
+        }
+        for path in artifacts {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
         }
     }
 }

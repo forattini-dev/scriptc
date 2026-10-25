@@ -6,6 +6,8 @@ import { nativeRecordShapeSupported } from "./native-record.js";
 export function recordViewPairs(source: IrType, target: IrType, records: ReadonlyMap<string, IrRecordShape>, unions: Pick<ReadonlyMap<string, IrUnionDef>, "get">): [number, number][] | null {
   const arms = (type: IrType): readonly IrType[] => type.kind === "union" ? unions.get(type.unionId)?.arms ?? [] : [type];
   const targets = arms(target);
+  const optional = (type: IrType): boolean => type.kind === "undefinedT" ||
+    (type.kind === "union" && (unions.get(type.unionId)?.arms.some(arm => arm.kind === "undefinedT") ?? false));
   if (!arms(source).some(type => type.kind === "record")) return null;
   const result: [number, number][] = [];
   for (const [from, type] of arms(source).entries()) {
@@ -19,7 +21,10 @@ export function recordViewPairs(source: IrType, target: IrType, records: Readonl
     if (!shape || shape.tuple || shape.indexValue || shape.fields.some(f => f.name === "\0scriptc.call") || !nativeRecordShapeSupported(shape, unions, id => records.get(id))) return null;
     const choices = targets.flatMap((type, to) => {
       const next = type.kind === "record" ? records.get(type.shapeId) : undefined;
-      return next && !next.tuple && !next.indexValue && next.fields.every(field => shape.fields.some(old => old.name === field.name && equivalentRecordType(old.type, field.type, records, unions))) ? [to] : [];
+      return next && !next.tuple && !next.indexValue && !next.fields.some(field => field.name === "\0scriptc.call") && nativeRecordShapeSupported(next, unions, id => records.get(id)) && next.fields.every(field => {
+        const old = shape.fields.find(old => old.name === field.name);
+        return old ? equivalentRecordType(old.type, field.type, records, unions) : optional(field.type);
+      }) ? [to] : [];
     });
     if (choices.length !== 1) return null;
     result.push([from, choices[0]!]);
