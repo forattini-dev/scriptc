@@ -24,6 +24,7 @@ impl Lowerer<'_> {
                 !matches!(
                     ty,
                     Type::String
+                        | Type::Bigint
                         | Type::F64
                         | Type::Bool
                         | Type::Null
@@ -131,6 +132,7 @@ impl Lowerer<'_> {
         let ty = value.ty();
         match ty {
             Type::String => Ok(value),
+            Type::Bigint => Ok(self.bigint_operation("bigint.toString", vec![value], node)),
             Type::F64 | Type::Bool => Ok(Expr::ToString {
                 operand: Box::new(value),
                 r#type: Type::String,

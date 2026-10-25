@@ -10,6 +10,7 @@ fn native_map_key(key: NativeValue) -> NativeValue {
     }
 }
 fn native_value_method(recv: NativeValue, method: &str) -> NativeValue {
+    if matches!(&recv, NativeValue::BigInt(_)) && matches!(method, "toString" | "valueOf") { return recv; }
     if native_value_is_function(&recv) && matches!(method, "call" | "apply") { return recv; }
     if matches!(&recv, NativeValue::Promise(_)) && method == "then" {
         return recv;
@@ -29,6 +30,19 @@ fn native_value_invoke(
     args: Vec<NativeValue>,
     name: &str,
 ) -> NativeValue {
+    if let NativeValue::BigInt(value) = &recv {
+        return match method {
+            "valueOf" => recv,
+            "toString" => {
+                let radix = match args.first() {
+                    None | Some(NativeValue::Undefined) => 10.0,
+                    Some(value) => native_compare_number(value),
+                };
+                NativeValue::String(runtime::bigint_to_string_radix(value, radix))
+            }
+            _ => runtime::throw_type_error(format!("{} is not a function", name)),
+        };
+    }
     if native_value_is_function(&holder) && matches!(method, "call" | "apply") {
         let receiver = args.first().cloned().unwrap_or(NativeValue::Undefined);
         let args = if method == "call" {

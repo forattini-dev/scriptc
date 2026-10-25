@@ -970,7 +970,8 @@ impl Lowerer<'_> {
                     if value.ty() == Type::Dyn
                         && matches!(
                             kind.text(),
-                            "number"
+                            "bigint"
+                                | "number"
                                 | "string"
                                 | "boolean"
                                 | "symbol"
@@ -1163,6 +1164,32 @@ impl Lowerer<'_> {
                     loc: self.loc(node),
                 });
             }
+        }
+        if left.ty() == Type::Bigint && right.ty() == Type::Bigint {
+            if matches!(op, "===" | "!==") {
+                return Ok(Expr::DynScalarEq {
+                    left: Box::new(self.coerce(left, Type::Dyn, node.left())?),
+                    right: Box::new(self.coerce(right, Type::Dyn, node.right())?),
+                    negated: op == "!==",
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                });
+            }
+            let operation = match op {
+                "+" => "add",
+                "-" => "sub",
+                "*" => "mul",
+                "/" => "div",
+                "%" => "rem",
+                "**" => "pow",
+                _ => return Err(self.refuse(node, "BigInt operator is not ported")),
+            };
+            self.ensure_exception_classes(node)?;
+            return Ok(self.bigint_operation(
+                &format!("bigint.{operation}"),
+                vec![left, right],
+                node,
+            ));
         }
         let supported = if matches!(op, "===" | "!==") {
             left.ty() == right.ty()

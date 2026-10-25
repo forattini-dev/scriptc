@@ -108,6 +108,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-bigint/values.ts",
+        "rust-native-bigint/storage.ts",
+        "rust-native-bigint/errors.ts",
+        "rust-native-bigint/json.ts",
+        "rust-native-bigint/raw-json.ts",
         "rust-native-rest-entry/contracts.ts",
         "rust-native-rest-entry/effects.ts",
         "rust-native-rest-entry/captures.ts",
@@ -1947,7 +1952,7 @@ fn module_slots_check_tdz_on_reads_writes_defaults_and_cycles() {
 #[test]
 fn emit_modes_and_paths_with_spaces_preserve_sources_and_failed_outputs() {
     let temp = tempfile::tempdir().unwrap();
-    let input = temp.path().join("ação entry.ts");
+    let input = temp.path().join("aÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o entry.ts");
     fs::write(&input, "console.log('ok', 42);").unwrap();
     for (kind, extension) in [("ir", "json"), ("rust", "rs")] {
         let target = temp.path().join(format!("result.{extension}"));
@@ -4297,7 +4302,7 @@ fn unsupported_recursive_layouts_preserve_previous_artifacts() {
 fn module_metadata_keeps_source_paths_after_changing_working_directory() {
     let temp = tempfile::tempdir().unwrap();
     metadata_project(temp.path());
-    let input = temp.path().join("source # % café.mts");
+    let input = temp.path().join("source # % cafÃƒÆ’Ã‚Â©.mts");
     fs::write(&input, "import { fileURLToPath } from 'node:url'; console.log(import.meta.url); console.log(import.meta.filename); console.log(import.meta.dirname); console.log(fileURLToPath(import.meta.url));").unwrap();
     let target = binary(temp.path(), "different-output-name");
     success(
@@ -4642,7 +4647,7 @@ fn utf16_instance_keys_do_not_alias_empty_fields() {
         r#"
 class EmptyField { "": string = "present"; }
 function read(value: unknown, key: string): unknown { return (value as any)[key]; }
-const high = "😀".slice(0, 1);
+const high = "ÃƒÂ°Ã…Â¸Ã‹Å“Ã¢â€šÂ¬".slice(0, 1);
 const object = new EmptyField();
 console.log("keys", read(object, "") === "present", read(object, high) === undefined);
 "#,
@@ -4966,6 +4971,60 @@ fn erased_rest_entry_boundaries_preserve_existing_artifacts() {
 }
 
 #[test]
+fn bigint_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let config_path = temp.path().join("tsconfig.json");
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["compilerOptions"]["allowJs"] = serde_json::json!(true);
+    fs::write(config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+    let target = binary(temp.path(), "bigint-boundary");
+    for (extension, source) in [
+        (
+            "mts",
+            "function f(value: any): bigint { return BigInt(value); } f('1');",
+        ),
+        ("mts", "BigInt({ valueOf: () => 1 });"),
+        ("mts", "const ctor = BigInt; ctor('1');"),
+        ("mts", "BigInt(...['1']);"),
+        ("mts", "console.log(1n + 1);"),
+        ("mts", "new BigInt(1);"),
+        ("mts", "console.log(1n >>> 1n);"),
+    ] {
+        let input = temp.path().join(format!("main.{extension}"));
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("ir.json"),
+            target.with_extension("rs"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+        fs::remove_file(input).unwrap();
+    }
+}
+
+#[test]
 fn javascript_parameter_abi_boundaries_preserve_existing_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     metadata_project(temp.path());
@@ -5081,7 +5140,7 @@ fn relational_boundaries_preserve_existing_artifacts() {
         "console.log({ valueOf: () => 1 } < 2);",
         "console.log(2 < { toString: () => '3' });",
         "console.log([1] < 2);",
-        "console.log(1n < 2n);",
+        "console.log(Object(1n) < 2n);",
         "console.log(({ valueOf: () => 1 } as number) < 2);",
         "console.log(2 < ({} as unknown as number));",
         "console.log(Symbol('x') + 1);",

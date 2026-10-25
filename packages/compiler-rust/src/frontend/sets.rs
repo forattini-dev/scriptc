@@ -26,7 +26,7 @@ impl Lowerer<'_> {
         let elem = self.type_id(args[0])?;
         // Portable Sets keep heterogeneous union values in the owning tagged
         // slot. Membership consumes values; no unchecked element is projected.
-        let elem = if matches!(elem, Type::Union { .. }) {
+        let elem = if matches!(elem, Type::Bigint | Type::Union { .. }) {
             Type::Dyn
         } else {
             elem

@@ -19,7 +19,8 @@ impl Lowerer<'_> {
             if self.native_type_contains(&ty, |ty| {
                 !matches!(
                     ty,
-                    Type::F64
+                    Type::Bigint
+                        | Type::F64
                         | Type::String
                         | Type::Bool
                         | Type::Null
@@ -30,10 +31,7 @@ impl Lowerer<'_> {
                         | Type::Union { .. }
                 )
             }) {
-                return Err(self.refuse(
-                    node,
-                    "relational object ToPrimitive and BigInt are not ported",
-                ));
+                return Err(self.refuse(node, "relational object ToPrimitive is not ported"));
             }
         }
         self.ensure_exception_classes(node)?;

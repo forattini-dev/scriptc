@@ -26,6 +26,9 @@ impl Lowerer<'_> {
             return None;
         }
         let key = self.type_id(args[0])?;
+        // IR v13 stores BigInt keys through its owning scalar value ABI.
+        // Numeric-value equality remains exact; no f64 key projection occurs.
+        let key = if key == Type::Bigint { Type::Dyn } else { key };
         let mut value = self.type_id(args[1])?;
         // The portable Map ABI accepts owning union values, but not a bare
         // bytes slot. Keep u8 payloads typed and traced in the same optional

@@ -1,5 +1,6 @@
 use crate::ir::{Expr, Function, Module, Stmt, Type};
 mod async_context;
+mod bigint;
 mod bytes;
 mod child_process;
 mod classes;
@@ -29,6 +30,7 @@ fn rust_type(ty: Type, module: &Module) -> String {
             return format!("runtime::Gc<{}>", functions::type_name(&ty, module));
         }
         Type::F64 => "f64",
+        Type::Bigint => "runtime::JsBigInt",
         Type::Bool => "bool",
         Type::Regex => "runtime::JsRegex",
         Type::Symbol => "runtime::JsSymbol",
@@ -315,6 +317,9 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
         return code;
     }
     if let Some(code) = values::promise_expression(value, function, module) {
+        return code;
+    }
+    if let Some(code) = bigint::expression(value, function, module) {
         return code;
     }
     if let Some(code) = symbols::expression(value, function, module) {
@@ -648,6 +653,7 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
                     | Type::Object { .. }
                     | Type::Regex
                     | Type::Bytes { .. }
+                    | Type::Bigint
                     | Type::Symbol
                     | Type::Promise { .. }
                     | Type::Child

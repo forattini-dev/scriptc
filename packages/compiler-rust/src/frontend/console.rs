@@ -183,6 +183,9 @@ impl Lowerer<'_> {
         if matches!(value.ty(), Type::F64 | Type::String | Type::Bool) {
             return Ok(value);
         }
+        if value.ty() == Type::Bigint {
+            return Ok(self.bigint_operation("bigint.inspect", vec![value], node));
+        }
         let arms = match value.ty() {
             Type::Union { union_id } => self.unions[union_id].arms.clone(),
             Type::Null => {
@@ -208,7 +211,7 @@ impl Lowerer<'_> {
         if arms.iter().any(|ty| {
             !matches!(
                 ty,
-                Type::F64 | Type::String | Type::Bool | Type::Null | Type::Undefined
+                Type::F64 | Type::Bigint | Type::String | Type::Bool | Type::Null | Type::Undefined
             )
         }) {
             return Err(self.refuse(node, "non-primitive console argument values are not ported"));
@@ -243,6 +246,7 @@ impl Lowerer<'_> {
                     loc: helper.loc(),
                 },
                 Type::String => read,
+                Type::Bigint => self.bigint_operation("bigint.inspect", vec![read], node),
                 Type::F64 => {
                     // Console displays -0; String(-0) deliberately does not.
                     let zero = Expr::Bin {

@@ -33,6 +33,7 @@ pub(super) fn types(module: &Module) -> Vec<Type> {
         Type::String,
         Type::Regex,
         Type::Symbol,
+        Type::Bigint,
         Type::Map {
             key: Box::new(Type::Dyn),
             value: Box::new(Type::Dyn),
@@ -136,7 +137,7 @@ fn checked(ty: &Type, value: &str, module: &Module) -> String {
 pub(super) fn definitions(module: &Module, out: &mut String) {
     record_construction::definitions(module, out);
     out.push_str(include_str!("../compare_values_support.rs"));
-    out.push_str("fn native_value_string(value: NativeValue) -> runtime::JsString { match value { NativeValue::Undefined => \"undefined\".into(), NativeValue::Null => \"null\".into(), NativeValue::Number(v) => runtime::JsString::from(js_string_number(v)), NativeValue::Boolean(v) => runtime::JsString::from(v.to_string()), NativeValue::String(v) => v, NativeValue::Symbol(_) => runtime::throw_type_error(\"Cannot convert a Symbol value to a string\".into()), NativeValue::RawJson(_) => runtime::throw_type_error(\"Cannot convert object to primitive value\".into()), _ => runtime::throw_type_error(\"scriptc: object string conversion requires native ToPrimitive support\".into()) } }\n");
+    out.push_str("fn native_value_string(value: NativeValue) -> runtime::JsString { match value { NativeValue::Undefined => \"undefined\".into(), NativeValue::Null => \"null\".into(), NativeValue::Number(v) => runtime::JsString::from(js_string_number(v)), NativeValue::Boolean(v) => runtime::JsString::from(v.to_string()), NativeValue::String(v) => v, NativeValue::BigInt(v) => runtime::bigint_to_string(&v), NativeValue::Symbol(_) => runtime::throw_type_error(\"Cannot convert a Symbol value to a string\".into()), NativeValue::RawJson(_) => runtime::throw_type_error(\"Cannot convert object to primitive value\".into()), _ => runtime::throw_type_error(\"scriptc: object string conversion requires native ToPrimitive support\".into()) } }\n");
     out.push_str(include_str!("../map_values_support.rs"));
     out.push_str(include_str!("../promise_values_support.rs"));
     let types = types(module);
@@ -177,7 +178,7 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
         }
     }
     out.push_str("_ => runtime::throw_type_error(\"scriptc: apply requires a native array argument list\".into()) } }\n");
-    out.push_str("#[derive(Clone)]\nenum NativeValue { Record(usize, runtime::Gc<NativeRecordData>), Undefined, Null, Number(f64), Boolean(bool), String(runtime::JsString), RawJson(runtime::JsRawJson), Regex(runtime::JsRegex), Symbol(runtime::JsSymbol), Promise(runtime::JsPromise<NativeValue>), Object(runtime::Gc<NativeMap<runtime::JsString, NativeValue>>), Map(runtime::Gc<NativeMap<NativeValue, NativeValue>>), Array(runtime::JsArray<NativeValue>),\n");
+    out.push_str("#[derive(Clone)]\nenum NativeValue { Record(usize, runtime::Gc<NativeRecordData>), Undefined, Null, Number(f64), BigInt(runtime::JsBigInt), Boolean(bool), String(runtime::JsString), RawJson(runtime::JsRawJson), Regex(runtime::JsRegex), Symbol(runtime::JsSymbol), Promise(runtime::JsPromise<NativeValue>), Object(runtime::Gc<NativeMap<runtime::JsString, NativeValue>>), Map(runtime::Gc<NativeMap<NativeValue, NativeValue>>), Array(runtime::JsArray<NativeValue>),\n");
     if !module.classes.is_empty() {
         out.push_str("Instance(runtime::Gc<NativeInstance>),\n");
     }
@@ -230,9 +231,10 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
                 "{ let _ = value; NativeValue::Null }".into(),
                 "if matches!(value, NativeValue::Null) { Some(()) } else { None }".into(),
             ),
-            Type::F64 | Type::Bool | Type::String | Type::Regex | Type::Symbol => {
+            Type::F64 | Type::Bigint | Type::Bool | Type::String | Type::Regex | Type::Symbol => {
                 let variant = match ty {
                     Type::F64 => "Number",
+                    Type::Bigint => "BigInt",
                     Type::Bool => "Boolean",
                     Type::String => "String",
                     Type::Regex => "Regex",
@@ -307,7 +309,7 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
 
 
 "#);
-    out.push_str("fn native_value_eq(left: &NativeValue, right: &NativeValue) -> bool { match (left, right) { (NativeValue::RawJson(a), NativeValue::RawJson(b)) => a.ptr_eq(b), (NativeValue::Record(_,a), NativeValue::Record(_,b)) => a.ptr_eq(b), (NativeValue::Undefined, NativeValue::Undefined) | (NativeValue::Null, NativeValue::Null) => true, (NativeValue::Number(a), NativeValue::Number(b)) => a == b, (NativeValue::Boolean(a), NativeValue::Boolean(b)) => a == b, (NativeValue::String(a), NativeValue::String(b)) => a == b, (NativeValue::Symbol(a), NativeValue::Symbol(b)) => runtime::symbol_ptr_eq(a,b), (NativeValue::Regex(a), NativeValue::Regex(b)) => std::rc::Rc::ptr_eq(a,b), (NativeValue::Object(a), NativeValue::Object(b)) => a.ptr_eq(b), (NativeValue::Map(a), NativeValue::Map(b)) => a.ptr_eq(b), (NativeValue::Promise(a), NativeValue::Promise(b)) => runtime::promise_view_identity(a) == runtime::promise_view_identity(b), (NativeValue::Array(a), NativeValue::Array(b)) => a.ptr_eq(b),\n");
+    out.push_str("fn native_value_eq(left: &NativeValue, right: &NativeValue) -> bool { match (left, right) { (NativeValue::RawJson(a), NativeValue::RawJson(b)) => a.ptr_eq(b), (NativeValue::Record(_,a), NativeValue::Record(_,b)) => a.ptr_eq(b), (NativeValue::Undefined, NativeValue::Undefined) | (NativeValue::Null, NativeValue::Null) => true, (NativeValue::Number(a), NativeValue::Number(b)) => a == b, (NativeValue::BigInt(a), NativeValue::BigInt(b)) => a == b, (NativeValue::Boolean(a), NativeValue::Boolean(b)) => a == b, (NativeValue::String(a), NativeValue::String(b)) => a == b, (NativeValue::Symbol(a), NativeValue::Symbol(b)) => runtime::symbol_ptr_eq(a,b), (NativeValue::Regex(a), NativeValue::Regex(b)) => std::rc::Rc::ptr_eq(a,b), (NativeValue::Object(a), NativeValue::Object(b)) => a.ptr_eq(b), (NativeValue::Map(a), NativeValue::Map(b)) => a.ptr_eq(b), (NativeValue::Promise(a), NativeValue::Promise(b)) => runtime::promise_view_identity(a) == runtime::promise_view_identity(b), (NativeValue::Array(a), NativeValue::Array(b)) => a.ptr_eq(b),\n");
     if !module.classes.is_empty() {
         out.push_str("(NativeValue::Instance(a), NativeValue::Instance(b)) => a.ptr_eq(b),\n");
     }
@@ -323,13 +325,13 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
         };
         writeln!(out, "(NativeValue::V{i}(a), NativeValue::V{i}(b)) => {eq},").unwrap();
     }
-    out.push_str("_ => false } }\nfn native_value_test(value: &NativeValue, test: &str) -> bool { match test { \"number\" => matches!(value, NativeValue::Number(_)), \"boolean\" => matches!(value, NativeValue::Boolean(_)), \"string\" => matches!(value, NativeValue::String(_)), \"symbol\" => matches!(value, NativeValue::Symbol(_)), \"undefined\" => matches!(value, NativeValue::Undefined), \"null\" => matches!(value, NativeValue::Null), \"nullish\" => matches!(value, NativeValue::Undefined | NativeValue::Null), \"array\" => native_value_is_array(value), \"truthy\" => match value { NativeValue::Undefined | NativeValue::Null => false, NativeValue::Number(v) => *v != 0.0 && !v.is_nan(), NativeValue::Boolean(v) => *v, NativeValue::String(v) => !v.is_empty(), _ => true }, \"function\" => match value {\n");
+    out.push_str("_ => false } }\nfn native_value_test(value: &NativeValue, test: &str) -> bool { match test { \"bigint\" => matches!(value, NativeValue::BigInt(_)), \"number\" => matches!(value, NativeValue::Number(_)), \"boolean\" => matches!(value, NativeValue::Boolean(_)), \"string\" => matches!(value, NativeValue::String(_)), \"symbol\" => matches!(value, NativeValue::Symbol(_)), \"undefined\" => matches!(value, NativeValue::Undefined), \"null\" => matches!(value, NativeValue::Null), \"nullish\" => matches!(value, NativeValue::Undefined | NativeValue::Null), \"array\" => native_value_is_array(value), \"truthy\" => match value { NativeValue::Undefined | NativeValue::Null => false, NativeValue::BigInt(v) => runtime::bigint_truthy(v), NativeValue::Number(v) => *v != 0.0 && !v.is_nan(), NativeValue::Boolean(v) => *v, NativeValue::String(v) => !v.is_empty(), _ => true }, \"function\" => match value {\n");
     for (i, t) in types.iter().enumerate() {
         if matches!(t, Type::Func { .. } | Type::Classval { .. }) {
             writeln!(out, "NativeValue::V{i}(_) => true,").unwrap();
         }
     }
-    out.push_str("_ => false }, \"object\" => !matches!(value, NativeValue::Undefined | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::String(_) | NativeValue::Symbol(_)) && !native_value_test(value, \"function\"), _ => false } }\n");
+    out.push_str("_ => false }, \"object\" => !matches!(value, NativeValue::Undefined | NativeValue::BigInt(_) | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::String(_) | NativeValue::Symbol(_)) && !native_value_test(value, \"function\"), _ => false } }\n");
     out.push_str("fn native_value_set(value: NativeValue, key: runtime::JsString, field: NativeValue) { match value { NativeValue::RawJson(raw) => raw.refuse_write(&key), NativeValue::Object(object) => object.with_mut(|o| { if let Some((_, current)) = o.entries.iter_mut().find(|(k,_)| *k == key) { *current = field; } else { o.entries.push((key, field)); } }),\n");
     out.push_str("NativeValue::Record(_,object) => { if key == \"__proto__\" { runtime::throw_type_error(\"scriptc: ordinary prototype writes are not ported\".into()); } native_record_set(&object, key, field); }, _ => runtime::throw_type_error(\"scriptc: property writes require a native plain object\".into()) } }\n");
     out.push_str("fn native_record_plan_set(plan: NativeValue, key: runtime::JsString, value: NativeValue) { match plan { NativeValue::Object(object) => object.with_mut(|data| native_record_define(&mut data.entries, key, value)), NativeValue::Record(_,object) => native_record_set(&object, key, value), _ => runtime::throw_type_error(\"scriptc: own-value plan must be a native object\".into()) } }\n");
@@ -523,7 +525,7 @@ fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
     // and noncanonical numeric spellings are ordinary string keys.
     // ToObject/enumerability belongs to Object.keys, not the internal own-key
     // reader shared with hasOwn, JSON and process environment validation.
-    out.push_str("fn native_index_keys(length: usize) -> Vec<runtime::JsString> { (0..length).map(|index| index.to_string().into()).collect() }\nfn native_value_keys(value: NativeValue) -> NativeValue { let mut keys = match &value { NativeValue::Undefined | NativeValue::Null => runtime::throw_type_error(\"Cannot convert undefined or null to object\".into()), NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::Symbol(_) => Vec::new(), NativeValue::String(text) => native_index_keys(text.encode_utf16().count()), NativeValue::Array(array) => native_index_keys(runtime::array_len(array) as usize),\n");
+    out.push_str("fn native_index_keys(length: usize) -> Vec<runtime::JsString> { (0..length).map(|index| index.to_string().into()).collect() }\nfn native_value_keys(value: NativeValue) -> NativeValue { let mut keys = match &value { NativeValue::Undefined | NativeValue::Null => runtime::throw_type_error(\"Cannot convert undefined or null to object\".into()), NativeValue::BigInt(_) | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::Symbol(_) => Vec::new(), NativeValue::String(text) => native_index_keys(text.encode_utf16().count()), NativeValue::Array(array) => native_index_keys(runtime::array_len(array) as usize),\n");
     for (index, ty) in types.iter().enumerate() {
         let length = match ty {
             Type::Array { elem } if **elem != Type::Dyn => "runtime::array_len(value)",

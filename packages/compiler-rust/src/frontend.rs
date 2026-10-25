@@ -16,6 +16,7 @@ use std::{
 mod aggregates;
 mod arrays;
 mod async_context;
+mod bigint;
 mod buffers;
 mod callables;
 mod callbacks;
@@ -1272,6 +1273,7 @@ impl<'a> Lowerer<'a> {
                 }
                 self.record_get(node)
             }
+            SyntaxKind::BigIntLiteral => Ok(self.bigint_literal(node)),
             SyntaxKind::NumericLiteral => {
                 let text = node.text().replace('_', "");
                 let value = source_frontend::jsnum::from_string(&text).value();
@@ -1375,6 +1377,9 @@ impl<'a> Lowerer<'a> {
                 }
                 let raw = self.expression(node.operand())?;
                 let operand = Box::new(raw);
+                if op == "-" && operand.ty() == Type::Bigint {
+                    return Ok(self.bigint_operation("bigint.neg", vec![*operand], node));
+                }
                 if !matches!((op, operand.ty()), ("-", Type::F64) | ("!", Type::Bool)) {
                     return Err(self.refuse(node, "unary coercions are not ported"));
                 }
@@ -1465,6 +1470,9 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 if let Some(value) = self.standard_function_call(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.bigint_call(node)? {
                     return Ok(value);
                 }
                 if let Some(value) = self.primitive_call(node)? {

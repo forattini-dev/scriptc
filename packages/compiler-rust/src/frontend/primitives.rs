@@ -307,7 +307,7 @@ impl Lowerer<'_> {
         }
     }
 
-    fn primitive_string_argument(
+    pub(super) fn primitive_string_argument(
         &mut self,
         value: Option<Expr>,
         argument: crate::string_builtins::Argument,

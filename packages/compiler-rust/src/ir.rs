@@ -1,5 +1,6 @@
 //! The first native subset of the existing scriptc IR v13 wire contract.
 use serde::Serialize;
+pub(crate) mod bigint;
 mod child_process;
 mod control_flow;
 pub mod record_equivalence;
@@ -91,6 +92,7 @@ pub enum Type {
         ret: Box<Type>,
     },
     F64,
+    Bigint,
     String,
     Bool,
     Regex,
@@ -1447,7 +1449,8 @@ fn validate_function(
                     && *r#type == Type::Bool
                     && matches!(
                         test.as_str(),
-                        "string"
+                        "bigint"
+                            | "string"
                             | "symbol"
                             | "number"
                             | "boolean"
@@ -1515,6 +1518,21 @@ fn validate_function(
                 }
             }
 
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if r#fn.starts_with("bigint.") => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let Some((types, result, _)) = bigint::signature(r#fn) else {
+                    return Err("unknown BigInt operation".into());
+                };
+                if args.iter().map(Expr::ty).collect::<Vec<_>>() == types && *r#type == result {
+                    Ok(())
+                } else {
+                    Err("invalid BigInt ABI".into())
+                }
+            }
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } if r#fn.starts_with("sym.")
@@ -2056,8 +2074,10 @@ fn validate_function(
                 operand, r#type, ..
             } => {
                 expr(operand, locals, initialized, functions, module)?;
-                if !matches!(operand.ty(), Type::F64 | Type::Bool | Type::Dyn)
-                    || *r#type != Type::String
+                if !matches!(
+                    operand.ty(),
+                    Type::F64 | Type::Bigint | Type::Bool | Type::Dyn
+                ) || *r#type != Type::String
                 {
                     return Err("invalid native string conversion".into());
                 }
@@ -3069,7 +3089,7 @@ mod tests {
         module.functions.truncate(1);
         let loc = module.functions[0].loc.clone();
         let string = Expr::StrLit {
-            value: "ðŸ˜€".into(),
+            value: "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¹Ã…â€œÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬".into(),
             r#type: Type::String,
             loc: loc.clone(),
         };
@@ -3668,6 +3688,59 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn bigint_abi_checks_argument_and_result_layouts_before_emission() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let literal = Expr::LibCall {
+            r#fn: "bigint.parse".into(),
+            args: vec![Expr::StrLit {
+                value: "9007199254740993".into(),
+                r#type: Type::String,
+                loc: loc.clone(),
+            }],
+            r#type: Type::Bigint,
+            loc: loc.clone(),
+        };
+        for defect in ["none", "argument", "arity", "result", "unknown"] {
+            let mut args = vec![literal.clone()];
+            if defect == "argument" {
+                args[0] = Expr::NumLit {
+                    value: 1.0,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                };
+            }
+            if defect == "arity" {
+                args.clear();
+            }
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: if defect == "unknown" {
+                        "bigint.unsupported"
+                    } else {
+                        "bigint.toString"
+                    }
+                    .into(),
+                    args,
+                    r#type: if defect == "result" {
+                        Type::Bigint
+                    } else {
+                        Type::String
+                    },
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), defect == "none", "{defect}");
+        }
+        assert_eq!(
+            serde_json::to_value(Type::Bigint).unwrap()["kind"],
+            "bigint"
+        );
     }
 
     #[test]

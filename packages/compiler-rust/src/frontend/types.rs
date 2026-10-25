@@ -26,7 +26,9 @@ impl Lowerer<'_> {
             })
     }
     pub(super) fn primitive_type(&self, flags: TypeFlags) -> Option<Type> {
-        if flags.intersects(TypeFlags::NUMBER_LIKE) {
+        if flags.intersects(TypeFlags::BIG_INT_LIKE) {
+            Some(Type::Bigint)
+        } else if flags.intersects(TypeFlags::NUMBER_LIKE) {
             Some(Type::F64)
         } else if flags.intersects(TypeFlags::STRING_LIKE) {
             Some(Type::String)

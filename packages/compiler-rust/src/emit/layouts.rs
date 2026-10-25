@@ -84,7 +84,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                     | Type::Func { .. }
                     | Type::Bytes { .. } => "left.ptr_eq(&right)",
                     Type::Null | Type::Undefined => "true",
-                    Type::F64 | Type::String | Type::Bool | Type::Classval { .. } => {
+                    Type::F64 | Type::Bigint | Type::String | Type::Bool | Type::Classval { .. } => {
                         "left == right"
                     }
                     Type::Dyn => "native_value_eq(&left, &right)",

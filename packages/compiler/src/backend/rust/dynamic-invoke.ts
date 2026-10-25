@@ -401,6 +401,10 @@ class RustDynamicInvokeEmitter {
     this.emitObjectArm();
     this.emitFunctionArm();
     this.emitNumberArm();
+    this.context.line(`${this.dyn}::BigInt(value) => match method {`);
+    this.context.line(`"toString" => { let radix = match args.first() { None | Some(${this.dyn}::Undefined) => 10.0, Some(value) => sc_dyn_to_number(value), }; ${this.dyn}::String(runtime::bigint_to_string_radix(value, radix)) },`);
+    this.context.line(`"valueOf" => ${this.dyn}::BigInt(value.clone()),`);
+    this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")), },`);
     this.emitBooleanArm();
     this.emitStringArm();
     this.emitRegexArm();

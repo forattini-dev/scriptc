@@ -42,7 +42,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             )
         }
         "dyn.typeof" => format!(
-            "{{ let value = {}; runtime::JsString::from(if native_value_test(&value, \"undefined\") {{ \"undefined\" }} else if native_value_test(&value, \"boolean\") {{ \"boolean\" }} else if native_value_test(&value, \"number\") {{ \"number\" }} else if native_value_test(&value, \"string\") {{ \"string\" }} else if native_value_test(&value, \"symbol\") {{ \"symbol\" }} else if native_value_test(&value, \"function\") {{ \"function\" }} else {{ \"object\" }}) }}",
+            "{{ let value = {}; runtime::JsString::from(if native_value_test(&value, \"undefined\") {{ \"undefined\" }} else if native_value_test(&value, \"boolean\") {{ \"boolean\" }} else if native_value_test(&value, \"number\") {{ \"number\" }} else if native_value_test(&value, \"string\") {{ \"string\" }} else if native_value_test(&value, \"bigint\") {{ \"bigint\" }} else if native_value_test(&value, \"symbol\") {{ \"symbol\" }} else if native_value_test(&value, \"function\") {{ \"function\" }} else {{ \"object\" }}) }}",
             arg()
         ),
         _ => return None,
