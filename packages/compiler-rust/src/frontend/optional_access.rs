@@ -246,12 +246,7 @@ impl Lowerer<'_> {
             self.literal_property_key(node.argument_expression())
         };
         let field = name.and_then(|name| record.fields.iter().find(|field| field.name == name));
-        field.map(|field| field.r#type.clone()).ok_or_else(|| {
-            self.refuse(
-                node,
-                "optional record access requires a known literal data field",
-            )
-        })
+        Ok(field.map_or(Type::Dyn, |field| field.r#type.clone()))
     }
 
     fn optional_member(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
@@ -263,7 +258,7 @@ impl Lowerer<'_> {
         let Type::Record { shape_id } = receiver.ty() else {
             unreachable!()
         };
-        if self.records[shape_id].index_value.is_some() {
+        if self.records[shape_id].index_value.is_some() || result_type == Type::Dyn {
             return self.dictionary_get(node, receiver, key);
         }
         let Expr::StrLit { value: name, .. } = key else {

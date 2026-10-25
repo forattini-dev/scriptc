@@ -1,4 +1,4 @@
-//! Typed maps and string-indexed records. No untyped property bags.
+//! Typed maps, string-indexed records and owning data-property lookups.
 use super::*;
 use source_frontend::prelude::get_source_file_of_node;
 
@@ -194,13 +194,22 @@ impl Lowerer<'_> {
             return Err(self.refuse(node, "indexed access needs a native dictionary"));
         };
         if self.records[shape_id].index_value.is_none() {
-            if let Expr::StrLit { value: name, .. } = &key {
-                let field = self.records[shape_id]
+            if self.records[shape_id].tuple
+                || self.callables.contains_key(&shape_id)
+                || self.enum_shape(shape_id)
+            {
+                return Err(self.refuse(
+                    node,
+                    "computed tuple, callable and enum reads require their native member contracts",
+                ));
+            }
+            if let Expr::StrLit { value: name, .. } = &key
+                && let Some(field) = self.records[shape_id]
                     .fields
                     .iter()
                     .find(|f| f.name == *name)
                     .cloned()
-                    .ok_or_else(|| self.refuse(node, "unknown native record field"))?;
+            {
                 let value = Expr::RecordGet {
                     obj: Box::new(obj),
                     shape_id: format!("r{shape_id}"),
@@ -214,10 +223,12 @@ impl Lowerer<'_> {
                     self.narrowed(value, node)
                 };
             }
-            return Err(self.refuse(
-                node,
-                "closed record indexed access requires a literal property key",
-            ));
+            // A shape describes typed views of known fields, not a whitelist
+            // for JavaScript property reads. Keep the original owning store so
+            // computed keys observe aliases, extra properties and absence.
+            let obj = self.coerce(obj, Type::Dyn, node)?;
+            let value = self.dynamic_get(node, obj, key);
+            return self.narrowed(value, node);
         }
         let value = self.records[shape_id]
             .index_value
@@ -264,14 +275,25 @@ impl Lowerer<'_> {
             ));
         }
         if self.records[shape_id].index_value.is_none() {
-            let name = self
-                .literal_property_key(member.argument_expression())
-                .ok_or_else(|| {
-                    self.refuse(
-                        member,
-                        "closed record indexed writes require a literal property key",
-                    )
-                })?;
+            let name = self.literal_property_key(member.argument_expression());
+            if name.is_none()
+                && !self.records[shape_id].tuple
+                && !self.callables.contains_key(&shape_id)
+                && self.records[shape_id]
+                    .fields
+                    .iter()
+                    .all(|field| field.r#type == Type::Dyn)
+            {
+                let key = self.property_key_expression(member.argument_expression())?;
+                let obj = self.coerce(obj, Type::Dyn, member)?;
+                return self.dynamic_property_set(node, obj, key);
+            }
+            let name = name.ok_or_else(|| {
+                self.refuse(
+                    member,
+                    "computed record writes require owning dynamic field slots",
+                )
+            })?;
             if name == "__proto__" {
                 return Err(self.refuse(member, "ordinary prototype writes are not ported"));
             }

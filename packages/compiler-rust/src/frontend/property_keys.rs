@@ -46,7 +46,9 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             })
         } else {
-            let value = self.expression(node)?;
+            // Type-only assertions do not perform ToPropertyKey or erase
+            // observable object conversion hooks.
+            let value = self.primitive_operand(node)?;
             if value.ty() == Type::F64 {
                 // Object keys use NumberToString, not Map's numeric identity.
                 Ok(Expr::ToString {
