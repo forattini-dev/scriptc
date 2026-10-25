@@ -1,10 +1,12 @@
 //! A private construction plan snapshots values before publishing a typed record.
 use super::*;
+use source_frontend::flags::ContextFlags;
 
 struct Slot {
     name: String,
     ty: Type,
     value: Local,
+    inputs: Vec<Expr>,
 }
 struct Plan {
     slots: Vec<Slot>,
@@ -94,17 +96,18 @@ impl Lowerer<'_> {
                 name: field.name,
                 ty: field.r#type,
                 value,
+                inputs: vec![self.construction_undefined(node)],
             });
         }
-        let plan = Plan { slots, own };
+        let mut plan = Plan { slots, own };
         let mut definite = HashSet::new();
         if let Some((source, value)) = source {
-            let (body, written) = self.construction_copy_value(source, &plan, value)?;
+            let (body, written) = self.construction_copy_value(source, &mut plan, value)?;
             stmts.extend(body);
             definite.extend(written);
         }
         for property in properties {
-            let (body, written) = self.construction_property(property, &plan)?;
+            let (body, written) = self.construction_property(property, &mut plan)?;
             stmts.extend(body);
             definite.extend(written);
         }
@@ -114,6 +117,17 @@ impl Lowerer<'_> {
                     node,
                     "record construction cannot prove a required own field on every path",
                 ));
+            }
+            // Only values that can survive as the last write must fit the
+            // published layout. This is a static proof; these expressions
+            // are never emitted or evaluated again.
+            for input in &slot.inputs {
+                let input = if input.ty() == Type::Void {
+                    self.construction_undefined(node)
+                } else {
+                    input.clone()
+                };
+                self.coerce(input, slot.ty.clone(), node)?;
             }
         }
         let fields = plan
@@ -154,14 +168,30 @@ impl Lowerer<'_> {
     fn construction_write(
         &self,
         node: Node,
-        plan: &Plan,
-        slot: &Slot,
+        plan: &mut Plan,
+        slot_index: usize,
         value: Expr,
     ) -> Result<Vec<Stmt>, String> {
-        let value = self.coerce(value, slot.ty.clone(), node)?;
+        let slot = &plan.slots[slot_index];
+        // Intermediate writes can have a different representation from the
+        // published field. Retain their actual value until all overrides run;
+        // only the final materialization checks the target layout.
+        // A proven invariant record view changes no value or property and
+        // retains the tag needed when that view is boxed into the final slot.
+        let value =
+            if ir::record_views::view_pairs(&value.ty(), &slot.ty, &self.records, &self.unions)
+                .is_some()
+            {
+                self.coerce(value, slot.ty.clone(), node)?
+            } else {
+                value
+            };
+        let local = slot.value.clone();
+        let name = slot.name.clone();
+        plan.slots[slot_index].inputs = vec![value.clone()];
         Ok(vec![
             Stmt::Assign {
-                local_id: slot.value.id.clone(),
+                local_id: local.id.clone(),
                 value: self.coerce(value, Type::Dyn, node)?,
                 initializes_global: false,
                 loc: self.loc(node),
@@ -170,11 +200,11 @@ impl Lowerer<'_> {
                 node,
                 plan,
                 Expr::StrLit {
-                    value: slot.name.clone(),
+                    value: name,
                     r#type: Type::String,
                     loc: self.loc(node),
                 },
-                self.construction_read(&slot.value, node),
+                self.construction_read(&local, node),
             ),
         ])
     }
@@ -192,7 +222,7 @@ impl Lowerer<'_> {
     fn construction_property(
         &mut self,
         property: Node,
-        plan: &Plan,
+        plan: &mut Plan,
     ) -> Result<(Vec<Stmt>, HashSet<String>), String> {
         if property.kind() == SyntaxKind::SpreadAssignment {
             return self.construction_source(property.expression(), plan);
@@ -214,22 +244,49 @@ impl Lowerer<'_> {
         if name == "__proto__" && property.kind() == SyntaxKind::PropertyAssignment {
             return Err(self.refuse(property, "object prototype setters are not ported"));
         }
-        let slot = plan.slots.iter().find(|s| s.name == name).ok_or_else(|| {
-            self.refuse(
-                property,
-                "record construction width projection is not ported",
-            )
-        })?;
-        let value = self.object_property_value(property, slot.ty.clone())?;
+        let slot_index = plan
+            .slots
+            .iter()
+            .position(|s| s.name == name)
+            .ok_or_else(|| {
+                self.refuse(
+                    property,
+                    "record construction width projection is not ported",
+                )
+            })?;
+        let source = match property.kind() {
+            SyntaxKind::MethodDeclaration => property,
+            SyntaxKind::ShorthandPropertyAssignment => property.name(),
+            _ => property.initializer(),
+        };
+        // Context still supplies callable ABIs and aggregate element layouts
+        // when the source is assignable to it. An overwritten incompatible
+        // value must instead keep its own representation.
+        let context = self.checker.get_contextual_type(source, ContextFlags::NONE);
+        let source_type = self.checker.get_type_at_location(source);
+        let context = if context.0 != 0 && self.checker.is_type_assignable_to(source_type, context)
+        {
+            self.type_id(context)
+        } else {
+            None
+        };
+        let value = if let Some(context) = context {
+            self.object_property_value(property, context)?
+        } else if property.kind() == SyntaxKind::MethodDeclaration {
+            let ty = self.ty(source)?;
+            self.object_property_value(property, ty)?
+        } else {
+            self.expression(source)?
+        };
         Ok((
-            self.construction_write(property, plan, slot, value)?,
+            self.construction_write(property, plan, slot_index, value)?,
             HashSet::from([name]),
         ))
     }
     fn construction_source(
         &mut self,
         source: Node,
-        plan: &Plan,
+        plan: &mut Plan,
     ) -> Result<(Vec<Stmt>, HashSet<String>), String> {
         match source.kind() {
             SyntaxKind::ParenthesizedExpression => {
@@ -252,13 +309,33 @@ impl Lowerer<'_> {
                 if let Some(symbol) = self.guarded_var(source.condition(), true) {
                     self.var_defined.insert(symbol);
                 }
+                let before_inputs = plan
+                    .slots
+                    .iter()
+                    .map(|s| s.inputs.clone())
+                    .collect::<Vec<_>>();
                 let (then, yes) = self.construction_source(source.when_true(), plan)?;
+                let then_inputs = plan
+                    .slots
+                    .iter()
+                    .map(|s| s.inputs.clone())
+                    .collect::<Vec<_>>();
+                for (slot, inputs) in plan.slots.iter_mut().zip(before_inputs) {
+                    slot.inputs = inputs;
+                }
                 let then_defined = self.var_defined.clone();
                 self.var_defined = before;
                 if let Some(symbol) = self.guarded_var(source.condition(), false) {
                     self.var_defined.insert(symbol);
                 }
                 let (other, no) = self.construction_source(source.when_false(), plan)?;
+                for (slot, inputs) in plan.slots.iter_mut().zip(then_inputs) {
+                    for input in inputs {
+                        if !slot.inputs.iter().any(|old| old.ty() == input.ty()) {
+                            slot.inputs.push(input);
+                        }
+                    }
+                }
                 self.var_defined = then_defined
                     .intersection(&self.var_defined)
                     .copied()
@@ -279,7 +356,7 @@ impl Lowerer<'_> {
     fn construction_copy(
         &mut self,
         source: Node,
-        plan: &Plan,
+        plan: &mut Plan,
     ) -> Result<(Vec<Stmt>, HashSet<String>), String> {
         let value = self.expression(source)?;
         self.construction_copy_value(source, plan, value)
@@ -287,7 +364,7 @@ impl Lowerer<'_> {
     fn construction_copy_value(
         &mut self,
         source: Node,
-        plan: &Plan,
+        plan: &mut Plan,
         value: Expr,
     ) -> Result<(Vec<Stmt>, HashSet<String>), String> {
         let Type::Record { shape_id } = value.ty() else {
@@ -379,7 +456,7 @@ impl Lowerer<'_> {
         ));
         let mut definite = HashSet::new();
         for field in record.fields {
-            let Some(slot) = plan.slots.iter().find(|s| s.name == field.name) else {
+            let Some(slot_index) = plan.slots.iter().position(|s| s.name == field.name) else {
                 continue;
             };
             let value = Expr::RecordGet {
@@ -389,7 +466,19 @@ impl Lowerer<'_> {
                 r#type: field.r#type.clone(),
                 loc: self.loc(source),
             };
-            let writes = self.construction_write(source, plan, slot, value)?;
+            let previous = plan.slots[slot_index].inputs.clone();
+            let writes = self.construction_write(source, plan, slot_index, value)?;
+            if self.construction_optional(&field.r#type) {
+                for input in previous {
+                    if !plan.slots[slot_index]
+                        .inputs
+                        .iter()
+                        .any(|old| old.ty() == input.ty())
+                    {
+                        plan.slots[slot_index].inputs.push(input);
+                    }
+                }
+            }
             let cond = Expr::StrEq {
                 left: Box::new(self.construction_read(&key, source)),
                 right: Box::new(Expr::StrLit {

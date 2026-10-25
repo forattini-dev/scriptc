@@ -738,7 +738,7 @@ impl Lowerer<'_> {
             .iter()
             .any(|p| p.kind() == SyntaxKind::SpreadAssignment)
         {
-            return self.record_spread_literal(node, target, properties);
+            return self.construct_record(node, target, properties);
         }
         self.record_literal_fields(node, target, properties)
     }

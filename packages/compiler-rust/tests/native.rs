@@ -108,6 +108,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-record-overrides/contracts.ts",
+        "rust-native-record-overrides/order.ts",
+        "rust-native-record-overrides/identity.ts",
+        "rust-native-record-overrides/aliases.js",
+        "rust-native-record-overrides/context.ts",
         "rust-native-aggregate-slots/contracts.ts",
         "rust-native-aggregate-slots/aliases.js",
         "rust-native-aggregate-slots/callbacks.ts",
@@ -3008,6 +3013,8 @@ fn object_spread_boundaries_preserve_artifacts() {
         "type S = { kind: 'a'; value: string } | { kind: 'b'; count: number }; type O = { kind: 'a'; value: number } | { kind: 'b'; count: number; value: number }; function f(s: S): O { return { ...s, value: 2 }; } console.log(f({kind:'a',value:'x'}).kind);",
         "const flag = false; const result: { a: string } = { ...(flag ? { a: 'a' } : ({} as { a: string })) }; console.log(result.a);",
         "function copy(source: { a: number; extra: string }): { a: string } { return { ...source } as unknown as { a: string }; } console.log(copy({ a: 1, extra: 'x' }).a);",
+        "function copy(flag: boolean): { a: string } { return { ...(flag ? { a: 'x' } : { a: 1 }) } as unknown as { a: string }; } console.log(copy(true).a);",
+        "function copy(source: { a?: number }): { a: string } { return { a: 'x', ...source } as unknown as { a: string }; } console.log(copy({}).a);",
         "function copy(source: Record<string, string>) { return { a: 'a', ...source }; } console.log(copy({ b: 'b' }).a);",
         "const result: { a: string; b?: string } = { a: 'a', ...{ get b() { return 'b'; } } }; console.log(result.a);",
         "class C { a: string = 'a'; } const source = new C(); const result = { ...source }; console.log(result.a);",
@@ -3015,7 +3022,6 @@ fn object_spread_boundaries_preserve_artifacts() {
         "const result: { a: string } = { a: 'a', ...{ __proto__: null } }; console.log(result.a);",
         "function key(): string { return 'b'; } const result: { a: string; b?: string } = { a: 'a', ...{ [key()]: 'b' } }; console.log(result.a);",
         "const key = Symbol('b'); const result = { a: 'a', ...{ [key]: 'b' } }; console.log(result.a);",
-        "console.log(Object.keys(['a']).length);",
         "console.log(Object.hasOwn({ a: 'a' }, Symbol('a')));",
         "const value: { a: string; __proto__?: string } = { a: 'a' }; value.__proto__ = 'ignored'; console.log(Object.hasOwn(value, '__proto__'));",
         "const value: { a: string; __proto__?: string } = { a: 'a' }; value['__proto__'] = 'ignored'; console.log(Object.keys(value).length);",

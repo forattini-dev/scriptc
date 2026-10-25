@@ -61,7 +61,6 @@ mod record_construction;
 mod reflection;
 mod regex;
 mod sets;
-mod spreads;
 mod standard_functions;
 mod standard_objects;
 mod stats;
