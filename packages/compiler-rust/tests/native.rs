@@ -240,6 +240,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-json-functions/identity.ts",
         "rust-native-json-functions/values.ts",
         "rust-native-json-functions/parse.ts",
+        "rust-native-object-bindings/holder.ts",
+        "rust-native-object-bindings/contracts.ts",
+        "rust-native-object-bindings/identity.ts",
+        "rust-native-object-bindings/order.ts",
+        "rust-native-object-bindings/module.ts",
+        "rust-native-object-bindings/presence.ts",
         "rust-native-for-loops/counting.ts",
         "rust-native-for-loops/order.ts",
         "rust-native-for-loops/finally.ts",
@@ -1259,6 +1265,7 @@ fn for_loop_boundaries_preserve_artifacts() {
         "for (let i = 0; i < 2; i++) { const fn = () => i; fn(); }",
         "for (let i = 0; (() => i < 2)(); i++) {}",
         "for (let i = 0; i < 2; i++) { const fn = () => ({i}); fn(); }",
+        "for (let {i} = {i: 0}; i < 2; i++) { const fn = () => i; fn(); }",
     ] {
         fs::write(&input, source).unwrap();
         for path in [
@@ -1282,6 +1289,52 @@ fn for_loop_boundaries_preserve_artifacts() {
                 && stderr.contains("SCN1001")
                 && stderr.contains("per-iteration native cells")
                 && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn object_binding_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "object-binding-boundary");
+    for source in [
+        "const {x = 1} = {x: undefined};",
+        "const {...rest} = {x: 1};",
+        "const {x: {y}} = {x: {y: 1}};",
+        "const {['x']: x} = {x: 1};",
+        "const {x} = JSON.parse('{\"x\":1}');",
+        "const {length} = 'hello';",
+        "const {x}: {x: number} = {x: 1};",
+        "var {x} = {x: 1};",
+    ] {
+        fs::write(&input, source).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );
         for path in [

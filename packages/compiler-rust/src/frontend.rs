@@ -17,6 +17,7 @@ mod aggregates;
 mod arrays;
 mod async_context;
 mod bigint;
+mod bindings;
 mod buffers;
 mod callables;
 mod callbacks;
@@ -849,6 +850,14 @@ impl<'a> Lowerer<'a> {
                     let name = declaration.name();
                     let symbol = self.symbol(name);
                     if self.native_namespaces.contains_key(&symbol) {
+                        continue;
+                    }
+                    if name.kind() == SyntaxKind::ObjectBindingPattern {
+                        out.extend(self.object_binding_declaration(
+                            declaration,
+                            !flags.intersects(NodeFlags::CONST),
+                            node.parent().kind() == SyntaxKind::SourceFile,
+                        )?);
                         continue;
                     }
                     if name.kind() != SyntaxKind::Identifier {

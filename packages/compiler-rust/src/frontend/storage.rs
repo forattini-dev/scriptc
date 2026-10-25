@@ -14,36 +14,43 @@ impl Lowerer<'_> {
                     continue;
                 }
                 for declaration in list.declarations().nodes() {
-                    let name = declaration.name();
-                    let symbol = self.symbol(name);
-                    if self.native_namespaces.contains_key(&symbol) {
-                        continue;
-                    }
-                    if name.kind() != SyntaxKind::Identifier {
-                        continue;
-                    }
-                    // An untyped JavaScript initializer can provide a more
-                    // precise native contract when lowered at its source site.
-                    if let Ok(mut ty) = self.storage_type(name) {
-                        if declaration.initializer().is_nil() {
-                            let value_type = ty;
-                            let Ok(storage) =
-                                self.undefined_storage_type(value_type.clone(), declaration)
-                            else {
-                                continue;
-                            };
-                            // Functions must observe this module cell's actual
-                            // layout even before its declaration executes.
-                            self.module_vars.insert(symbol, value_type.clone());
-                            self.var_types.insert(symbol, value_type);
-                            ty = storage;
-                        } else if self.optional_storage(&ty) {
-                            // Initialized optional module cells can also be
-                            // cleared by a call after checker flow narrows them.
-                            self.module_vars.insert(symbol, ty.clone());
-                            self.var_types.insert(symbol, ty.clone());
+                    let mut names = Vec::new();
+                    bindings::names(declaration.name(), &mut names);
+                    for name in names {
+                        let symbol = self.symbol(name);
+                        if self.native_namespaces.contains_key(&symbol) {
+                            continue;
                         }
-                        self.module_binding(name, ty, !list.flags().intersects(NodeFlags::CONST));
+                        if name.kind() != SyntaxKind::Identifier {
+                            continue;
+                        }
+                        // An untyped JavaScript initializer can provide a more
+                        // precise native contract when lowered at its source site.
+                        if let Ok(mut ty) = self.storage_type(name) {
+                            if declaration.initializer().is_nil() {
+                                let value_type = ty;
+                                let Ok(storage) =
+                                    self.undefined_storage_type(value_type.clone(), declaration)
+                                else {
+                                    continue;
+                                };
+                                // Functions must observe this module cell's actual
+                                // layout even before its declaration executes.
+                                self.module_vars.insert(symbol, value_type.clone());
+                                self.var_types.insert(symbol, value_type);
+                                ty = storage;
+                            } else if self.optional_storage(&ty) {
+                                // Initialized optional module cells can also be
+                                // cleared by a call after checker flow narrows them.
+                                self.module_vars.insert(symbol, ty.clone());
+                                self.var_types.insert(symbol, ty.clone());
+                            }
+                            self.module_binding(
+                                name,
+                                ty,
+                                !list.flags().intersects(NodeFlags::CONST),
+                            );
+                        }
                     }
                 }
             }

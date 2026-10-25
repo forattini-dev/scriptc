@@ -8,12 +8,11 @@ impl Lowerer<'_> {
             && initializer.kind() == SyntaxKind::VariableDeclarationList
             && initializer.flags().intersects(NodeFlags::LET)
         {
-            let symbols = initializer
-                .declarations()
-                .nodes()
-                .iter()
-                .map(|declaration| self.symbol(declaration.name()))
-                .collect::<HashSet<_>>();
+            let mut names = Vec::new();
+            for declaration in initializer.declarations().nodes() {
+                bindings::names(declaration.name(), &mut names);
+            }
+            let symbols = names.into_iter().map(|name| self.symbol(name)).collect();
             if self.captures_for_binding(node, &symbols, false) {
                 return Err(self.refuse(
                     node,
