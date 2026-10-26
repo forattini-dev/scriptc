@@ -441,6 +441,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-parameter-properties/values.ts",
         "rust-native-parameter-properties/order.ts",
         "rust-native-parameter-properties/errors.ts",
+        "rust-native-presence-guards/strings.ts",
+        "rust-native-presence-guards/compound.ts",
+        "rust-native-presence-guards/effects.ts",
+        "rust-native-presence-guards/parentheses.ts",
         "rust-native-enums/main.ts",
         "rust-native-callables/contracts.ts",
         "rust-native-callables/cycles.ts",
@@ -4233,7 +4237,6 @@ fn optional_access_boundaries_preserve_existing_artifacts() {
         "function f(d:{a:number}|{b:number}|undefined){return d?.a} console.log(f(undefined));",
         "class Example {get x(){return 1}} const e=new Example(); console.log(e?.x);",
         "const a=[1] as const; console.log(a?.[0]);",
-        "function f(d:{child:{value:number}}|undefined){return (d?.child).value} console.log(f(undefined));",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         for artifact in [

@@ -6,22 +6,10 @@ impl Lowerer<'_> {
         let left = self.condition_value(node.left())?;
         let before = self.var_defined.clone();
         let guard = (op != "??")
-            .then(|| self.guarded_var(node.left(), op == "&&"))
-            .flatten()
-            .or_else(|| {
-                let mut source = node.left();
-                while source.kind() == SyntaxKind::ParenthesizedExpression {
-                    source = source.expression();
-                }
-                if op == "&&" && source.kind() == SyntaxKind::Identifier {
-                    let symbol = self.symbol(source);
-                    self.var_types.contains_key(&symbol).then_some(symbol)
-                } else {
-                    None
-                }
-            });
-        if let Some(symbol) = guard {
-            self.var_defined.insert(symbol);
+            .then(|| self.guarded_vars(node.left(), op == "&&"))
+            .flatten();
+        if let Some(symbols) = guard {
+            self.var_defined.extend(symbols);
         }
         // An empty fallback is never[] on its own. The checked expression
         // supplies its array element contract without evaluating the fallback.

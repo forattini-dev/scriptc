@@ -75,10 +75,19 @@ impl Lowerer<'_> {
 
     pub(super) fn var_call_effects(&mut self) {
         self.var_defined.retain(|symbol| {
-            !matches!(
-                self.var_types.get(symbol),
-                Some(Type::Union { .. } | Type::Dyn)
-            )
+            let immutable = self
+                .bindings
+                .get(symbol)
+                .or_else(|| self.module_bindings.get(symbol))
+                .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(symbol)))
+                .is_some_and(|local| !local.mutable);
+            // A call can change a captured mutable cell, but cannot retag an
+            // immutable value snapshot. Its object's properties remain live.
+            immutable
+                || !matches!(
+                    self.var_types.get(symbol),
+                    Some(Type::Union { .. } | Type::Dyn)
+                )
         });
     }
 
@@ -268,6 +277,23 @@ impl Lowerer<'_> {
     pub(super) fn guarded_vars(&mut self, node: Node, truth: bool) -> Option<HashSet<u32>> {
         if node.kind() == SyntaxKind::ParenthesizedExpression {
             return self.guarded_vars(node.expression(), truth);
+        }
+        if node.kind() == SyntaxKind::PrefixUnaryExpression
+            && node.operator() == SyntaxKind::ExclamationToken
+        {
+            return self.guarded_vars(node.operand(), !truth);
+        }
+        if node.kind() == SyntaxKind::Identifier {
+            let symbol = self.symbol(node);
+            // Truthiness proves presence, but a falsy value can still be a
+            // defined empty string, zero or false. Both observations are pure.
+            return self.var_types.contains_key(&symbol).then(|| {
+                if truth {
+                    HashSet::from([symbol])
+                } else {
+                    HashSet::new()
+                }
+            });
         }
         if node.kind() != SyntaxKind::BinaryExpression {
             return None;
