@@ -98,6 +98,9 @@ impl Lowerer<'_> {
 
     pub(super) fn parameter_type(&mut self, node: Node, ty: Type) -> Result<Type, String> {
         let symbol = self.parameter_symbol(node);
+        if self.data_bindings.contains(&symbol) {
+            return Ok(Type::Dyn);
+        }
         if node.question_token().is_nil()
             && node.initializer().is_nil()
             && !(self.js_absence_parameters.contains(&symbol)

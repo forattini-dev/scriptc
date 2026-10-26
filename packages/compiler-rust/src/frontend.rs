@@ -41,6 +41,7 @@ mod filesystem;
 mod filesystem_reads;
 mod filesystem_writes;
 mod for_of;
+mod function_completion;
 mod function_properties;
 mod function_reflection;
 mod functions;
@@ -48,6 +49,7 @@ mod helpers;
 pub mod inspect;
 mod json_functions;
 mod json_modules;
+mod local_storage;
 mod logical;
 mod loops;
 mod module_metadata;
@@ -73,6 +75,7 @@ mod record_construction;
 mod reflection;
 mod regex;
 mod regex_captures;
+mod runtime_types;
 mod sets;
 mod standard_functions;
 mod standard_objects;
@@ -706,12 +709,12 @@ impl<'a> Lowerer<'a> {
         }
         body.extend(self.hoist_local_vars(signature.node.body())?);
         body.extend(self.statements(signature.node.body().statements())?);
-        if body_return != Type::Void && !ir::always_returns(&body) {
-            return Err(self.refuse(
-                signature.node,
-                "non-void function fallthrough is not ported",
-            ));
-        }
+        self.complete_function_body(
+            &mut body,
+            &body_return,
+            signature.node,
+            "non-void function fallthrough is not ported",
+        )?;
         self.instance_this = None;
         Ok(Function {
             is_async: signature.is_async,
@@ -789,7 +792,14 @@ impl<'a> Lowerer<'a> {
                     .clone()
                     .ok_or_else(|| self.refuse(node, "return outside a function"))?;
                 let value = if node.expression().is_nil() {
-                    None
+                    if ret == Type::Void {
+                        None
+                    } else {
+                        Some(
+                            self.undefined_return(ret.clone(), node)
+                                .map_err(|_| self.refuse(node, "return coercion is not ported"))?,
+                        )
+                    }
                 } else {
                     Some(self.expected_expression(node.expression(), ret.clone())?)
                 };
@@ -867,6 +877,16 @@ impl<'a> Lowerer<'a> {
                             );
                         }
                         (init.ty(), init)
+                    } else if self.inferred_call_local(declaration, node, flags) {
+                        let inferred = storage?;
+                        let init = self.expression(declaration.initializer())?;
+                        let ty = if self.call_record_storage(&init.ty(), &inferred) {
+                            init.ty()
+                        } else {
+                            inferred
+                        };
+                        let init = self.coerce(init, ty.clone(), declaration.initializer())?;
+                        (ty, init)
                     } else if self.declared(declaration).is_none()
                         && declaration.type_().is_nil()
                         && matches!(

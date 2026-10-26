@@ -15,6 +15,7 @@ fn collect(node: Node, functions: &mut Vec<Node>, calls: &mut Vec<Node>) {
         SyntaxKind::FunctionDeclaration
             | SyntaxKind::FunctionExpression
             | SyntaxKind::ArrowFunction
+            | SyntaxKind::MethodDeclaration
     ) {
         functions.push(node);
     }
@@ -28,6 +29,80 @@ fn collect(node: Node, functions: &mut Vec<Node>, calls: &mut Vec<Node>) {
 }
 
 impl Lowerer<'_> {
+    fn plan_default_object_parameter(&mut self, node: Node) {
+        if node.initializer().is_nil() {
+            return;
+        }
+        let initial = receivers::reference_node(node.initializer());
+        if !node.type_().is_nil()
+            || !node.dot_dot_dot_token().is_nil()
+            || node.name().kind() != SyntaxKind::Identifier
+            || initial.is_nil()
+            || initial.kind() != SyntaxKind::ObjectLiteralExpression
+            || !initial.properties().is_empty()
+        {
+            return;
+        }
+        let function = node.parent();
+        let file = get_source_file_of_node(function);
+        let text = source_frontend::prelude::source_file_text(file);
+        // Documentation alone is fine; explicit JSDoc input types retain the
+        // checked ABI instead of being silently erased.
+        let mut owners = vec![node, function];
+        let mut parent = function.parent();
+        while matches!(
+            parent.kind(),
+            SyntaxKind::VariableDeclaration
+                | SyntaxKind::VariableDeclarationList
+                | SyntaxKind::VariableStatement
+        ) {
+            owners.push(parent);
+            parent = parent.parent();
+        }
+        for owner in owners {
+            let token = source_frontend::prelude::get_token_pos_of_node(owner, file, false)
+                .max(owner.pos())
+                .max(0) as usize;
+            if !text
+                .get(owner.pos().max(0) as usize..token)
+                .is_some_and(|prefix| !prefix.contains("@param") && !prefix.contains("@type"))
+            {
+                return;
+            }
+        }
+        // Select ownership before callable signatures or record layouts are
+        // cached. Keep reads, aliases and private return values on that same
+        // ABI instead of projecting the live object into the inferred {}.
+        let source = self.checker.get_type_at_location(node.name());
+        let arms = if self.checker.ty(source).flags.intersects(TypeFlags::UNION) {
+            self.checker.ty(source).types().to_vec()
+        } else {
+            vec![source]
+        };
+        if arms.iter().any(|id| {
+            let flags = self.checker.ty(*id).flags;
+            !flags.intersects(TypeFlags::UNDEFINED)
+                && (!flags.intersects(TypeFlags::OBJECT)
+                    || !self.checker.get_properties_of_type(*id).is_empty()
+                    || !self.checker.get_index_infos_of_type(*id).is_empty())
+        }) {
+            return;
+        }
+        let symbol = self.symbol(node.name());
+        if symbol == 0 {
+            return;
+        }
+        self.data_bindings.insert(symbol);
+        self.data_types.insert(source);
+        for id in arms {
+            if self.checker.ty(id).flags.intersects(TypeFlags::OBJECT) {
+                self.data_types.insert(id);
+            }
+        }
+        self.data_types
+            .insert(self.checker.get_type_at_location(initial));
+    }
+
     pub(super) fn plan_parameter_abi(&mut self, files: &[Node]) {
         let mut functions = Vec::new();
         let mut calls = Vec::new();
@@ -38,6 +113,19 @@ impl Lowerer<'_> {
         for function in functions {
             if !is_javascript(function) || self.declared(function).is_some() {
                 continue;
+            }
+            if function.kind() == SyntaxKind::MethodDeclaration
+                && function.parent().kind() != SyntaxKind::ObjectLiteralExpression
+            {
+                continue;
+            }
+            if function.parent().kind() == SyntaxKind::VariableDeclaration
+                && self.declared(function.parent()).is_some()
+            {
+                continue;
+            }
+            for param in receivers::parameters(function) {
+                self.plan_default_object_parameter(param);
             }
             let binding = if function.kind() == SyntaxKind::FunctionDeclaration {
                 function.name()

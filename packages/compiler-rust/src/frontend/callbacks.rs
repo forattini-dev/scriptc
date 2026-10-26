@@ -302,9 +302,7 @@ impl Lowerer<'_> {
                 loc: self.loc(node.body()),
             }]
         });
-        if body_return != Type::Void && !ir::always_returns(&body) {
-            return Err(self.refuse(node, "callback can fall through"));
-        }
+        self.complete_function_body(&mut body, &body_return, node, "callback can fall through")?;
         let captures = std::mem::replace(&mut self.captures, saved_captures);
         let function = Function {
             is_async,

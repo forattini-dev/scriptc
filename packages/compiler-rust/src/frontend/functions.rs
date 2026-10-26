@@ -41,6 +41,10 @@ pub(super) struct FunctionGraph {
 }
 
 impl FunctionGraph {
+    pub(super) fn source_node(&self, symbol: u32) -> Option<Node> {
+        let nodes = &self.definitions.get(&symbol)?.nodes;
+        (nodes.len() == 1).then(|| nodes[0])
+    }
     pub(super) fn declare(&mut self, symbol: u32, node: Node, file: String, name: String) {
         let ordinal = self.definitions.len();
         self.definitions

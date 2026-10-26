@@ -458,6 +458,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-for-of/captures.ts",
         "rust-native-for-of/strings.ts",
         "rust-native-for-of/control.ts",
+        "rust-native-local-call-abi/values.mjs",
+        "rust-native-local-call-abi/effects.mjs",
+        "rust-native-local-call-abi/completion.mjs",
+        "rust-native-local-call-abi/callbacks.ts",
+        "rust-native-local-call-abi/default-options.mjs",
+        "rust-native-local-call-abi/catalog-errors.ts",
         "rust-native-presence-guards/strings.ts",
         "rust-native-presence-guards/compound.ts",
         "rust-native-presence-guards/effects.ts",
@@ -6821,5 +6827,80 @@ fn for_of_boundaries_preserve_existing_artifacts() {
         for artifact in artifacts {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
+    }
+}
+
+#[test]
+fn local_inferred_call_and_completion_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mjs");
+    let target = binary(temp.path(), "call-abi-boundary");
+    fs::write(temp.path().join("tsconfig.json"), serde_json::to_vec(&serde_json::json!({"compilerOptions":{"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","allowJs":true,"checkJs":false,"strict":true,"types":["node"],"typeRoots":[root().join("node_modules/@types")],"skipLibCheck":true}})).unwrap()).unwrap();
+    fs::write(temp.path().join("package.json"), "{\"type\":\"module\"}").unwrap();
+    fs::create_dir(temp.path().join("lib")).unwrap();
+    for name in ["index.js", "index.d.ts"] {
+        fs::copy(
+            root()
+                .join("tests/corpus/rust-native-local-call-abi/lib")
+                .join(name),
+            temp.path().join("lib").join(name),
+        )
+        .unwrap();
+    }
+    let import = "import {makePlan} from \"./lib/index.js\";\n";
+    for source in [
+        "function run(value) { let plan = makePlan({value}); console.log(plan.width); } run(1);",
+        "const plan = makePlan({value:1}); console.log(plan.width);",
+        "function run(value) { /** @type {{width: string, fit: string, active: boolean, nested: {value: number}}} */ const plan = makePlan({value}); console.log(plan.width); } run(1);",
+        "/** @param {{}} options */ function run(options = {}) { return options.width; } console.log(run());",
+        "/** @type {(options?: {}) => unknown} */ const run = (options = {}) => options.width; console.log(run());",
+    ] {
+        fs::write(&input, format!("{import}{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+    let typed = temp.path().join("main.ts");
+    for source in [
+        "function run(value: boolean): number { if(value)return 1; } run(true);",
+        "const run: (value:boolean)=>number = value => {if(value)return 1;}; run(true);",
+        "function run(): number { return; } run();",
+        "function run(options: {} = {}) { return options.width; } console.log(run());",
+    ] {
+        fs::write(&typed, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&typed)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        assert_eq!(fs::read_to_string(&target).unwrap(), "preserve");
     }
 }

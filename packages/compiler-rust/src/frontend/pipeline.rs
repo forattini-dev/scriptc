@@ -137,6 +137,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         functions[0].body.splice(0..0, boxed_prelude);
         functions.extend(std::mem::take(&mut lowerer.lifted));
         lowerer.validate_call_receivers(&functions)?;
+        lowerer.link_runtime_types(&functions, file)?;
         Ok(Module {
             ir_version: ir::VERSION,
             source_file: source.clone(),
