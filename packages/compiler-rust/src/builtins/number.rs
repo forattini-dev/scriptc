@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn apis() -> Vec<Api> {
-    vec![Api::native(
+    let mut apis = vec![Api::native(
         "Number.prototype",
         "toString",
         Lowering::Primitive,
@@ -17,5 +17,48 @@ pub(super) fn apis() -> Vec<Api> {
             "tests/corpus/rust-native-number-string/order.ts",
             "tests/corpus/rust-native-number-string/errors.ts",
         ],
-    )]
+    )];
+    for (name, operation) in [
+        (
+            "isFinite",
+            Builtin {
+                ir: "number.isFinite",
+                args: vec![Type::F64],
+                result: Type::Bool,
+                implementation: Implementation::FloatMethod("is_finite"),
+            },
+        ),
+        (
+            "isNaN",
+            Builtin {
+                ir: "number.isNaN",
+                args: vec![Type::F64],
+                result: Type::Bool,
+                implementation: Implementation::FloatMethod("is_nan"),
+            },
+        ),
+        (
+            "isInteger",
+            call!(
+                "number.isInteger",
+                [Type::F64],
+                Type::Bool,
+                "number_is_integer"
+            ),
+        ),
+        (
+            "isSafeInteger",
+            call!(
+                "number.isSafeInteger",
+                [Type::F64],
+                Type::Bool,
+                "number_is_safe_integer"
+            ),
+        ),
+    ] {
+        apis.push(Api::native("Number", name, Lowering::Primitive, vec![operation],
+            "Declaration-proven Number predicate; original tag inspected without coercion; missing input is undefined, extra ordinary arguments evaluate; callable aliases keep native identity",
+            &["tests/corpus/rust-native-number-predicates/values.ts", "tests/corpus/rust-native-number-predicates/order.ts", "tests/corpus/rust-native-number-predicates/aliases.ts"]));
+    }
+    apis
 }

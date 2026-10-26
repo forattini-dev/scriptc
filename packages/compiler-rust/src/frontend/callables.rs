@@ -418,9 +418,11 @@ impl Lowerer<'_> {
         }
         let arguments = node.arguments().into_iter().collect::<Vec<_>>();
         let source_type = self.checker.get_type_at_location(member.expression());
-        let value = if self.regex_callable_type(source_type).is_some() {
-            // A standard method's owning ABI includes JavaScript argument
-            // conversion; a contextual string signature must not replace it.
+        let value = if self.regex_callable_type(source_type).is_some()
+            || self.number_predicate_type(source_type).is_some()
+        {
+            // Keep the standard method's owning argument and receiver ABI
+            // instead of replacing it with the checker's contextual signature.
             self.expression(member.expression())?
         } else if let Some(Type::Func { params, ret, rest }) = expected {
             let prefix = arguments.len().saturating_sub(1);

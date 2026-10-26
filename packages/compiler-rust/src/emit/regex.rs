@@ -1,4 +1,20 @@
 use super::*;
+use std::fmt::Write;
+
+pub(super) fn metadata_definitions(types: &[Type], out: &mut String) {
+    out.push_str(include_str!("regex_metadata_support.rs"));
+    out.push_str("fn native_regex_property(value: &NativeValue, key: &runtime::JsString) -> Option<NativeValue> { match value { NativeValue::Array(row) => native_regex_metadata(row, key),\n");
+    for (index, ty) in types.iter().enumerate() {
+        if matches!(ty, Type::Array { elem } if **elem != Type::Dyn) {
+            writeln!(
+                out,
+                "NativeValue::V{index}(row) => native_regex_metadata(row, key),"
+            )
+            .unwrap();
+        }
+    }
+    out.push_str("_ => None, } }\n");
+}
 
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     Some(match value {
@@ -26,6 +42,22 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             let receiver = expr(receiver, function, module);
             let arg = args.first().map(|arg| expr(arg, function, module));
             match method.as_str() {
+                "exec" => {
+                    let layout = crate::ir::regex_captures::exec_layout(module, &value.ty())
+                        .expect("validated captures");
+                    let crate::ir::regex_captures::ExecLayout {
+                        result,
+                        array_tag,
+                        null_tag,
+                        capture,
+                        string_tag,
+                        undefined_tag,
+                    } = layout;
+                    format!(
+                        "{{ let regex = {receiver}; let text = {}; match runtime::regex_exec(&regex, &text, |value| match value {{ Some(text) => U{capture}::V{string_tag}(text), None => U{capture}::V{undefined_tag}(()), }}) {{ Some(row) => U{result}::V{array_tag}(row), None => U{result}::V{null_tag}(()), }} }}",
+                        arg.unwrap()
+                    )
+                }
                 "test" => format!(
                     "{{ let regex = {receiver}; let text = {}; runtime::regex_test(&regex, &runtime::JsString::from(text)) }}",
                     arg.unwrap()

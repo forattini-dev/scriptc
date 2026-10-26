@@ -1,3 +1,3 @@
 const pattern = /a/;
-pattern.exec("a");
+pattern.compile("a");
 export {};

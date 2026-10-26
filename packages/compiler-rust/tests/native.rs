@@ -252,6 +252,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-regex-functions/errors.ts",
         "rust-native-regex-functions/order.ts",
         "rust-native-regex-functions/shadows.ts",
+        "rust-native-number-predicates/values.ts",
+        "rust-native-number-predicates/order.ts",
+        "rust-native-number-predicates/aliases.ts",
+        "rust-native-regex-exec/captures.ts",
+        "rust-native-regex-exec/state.ts",
+        "rust-native-regex-exec/unicode.ts",
+        "rust-native-regex-exec/optional.ts",
         "rust-native-function-properties/aliases.ts",
         "rust-native-function-properties/closures.ts",
         "rust-native-function-properties/keys.ts",
@@ -1682,7 +1689,10 @@ fn regex_and_var_boundaries_refuse_without_replacing_artifacts() {
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "boundary");
     for (name, source) in [
-        ("regex-exec", "const pattern = /x/; pattern.exec('x');"),
+        (
+            "regex-compile",
+            "const pattern = /x/; pattern.compile('x');",
+        ),
         ("regex-flags", "const pattern = /x/d;"),
         ("regex-copy", "const pattern = new RegExp(/x/);"),
         ("var-map", "var map = new Map<string, number>();"),
@@ -6218,9 +6228,14 @@ fn regexp_method_boundaries_preserve_artifacts() {
         "const regex = /a/; regex.test = () => false; console.log(regex.test('a'));",
         "const regex = /a/; regex.exec = () => null; console.log(regex.test('a'));",
         "const regex = /a/; const exec = regex.exec; console.log(exec('a'));",
+        "const row = /(?<value>a)/.exec('a'); if (row !== null) console.log(row.groups);",
+        "const row = /a/.exec('a'); if (row !== null) console.log(row.indices);",
+        "const regex = /a/; regex.exec();",
+        "const regex = /a/; regex.exec('a', 'extra');",
+        "const row = /a/.exec('a'); const key: string = 'index'; if (row !== null) console.log(row[key]);",
     ] {
         let input = temp.path().join("main.ts");
-        fs::write(&input, source).unwrap();
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let target = binary(temp.path(), "regexp-method-boundary");
         let artifacts = [
             target.clone(),

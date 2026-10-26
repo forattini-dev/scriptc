@@ -76,6 +76,9 @@ impl Lowerer<'_> {
         if let Some(ty) = self.regex_callable_type(id) {
             return Some(ty);
         }
+        if let Some(ty) = self.number_predicate_type(id) {
+            return Some(ty);
+        }
         if self.data_types.contains(&id) {
             return Some(Type::Dyn);
         }
@@ -130,6 +133,9 @@ impl Lowerer<'_> {
         if self.is_regex_type(id) {
             return Some(Type::Regex);
         }
+        if self.is_regex_capture_type(id) {
+            return Some(self.regex_capture_array());
+        }
         self.aggregate_type(id)
     }
     fn owning_rest_call(&mut self, node: Node) -> bool {
@@ -174,6 +180,25 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn ty(&mut self, node: Node) -> Result<Type, String> {
+        if node.kind() == SyntaxKind::ElementAccessExpression {
+            let source = self.checker.get_type_at_location(node.expression());
+            if self.is_regex_capture_type(source) {
+                let key = self
+                    .checker
+                    .get_type_at_location(node.argument_expression());
+                if self
+                    .checker
+                    .ty(key)
+                    .flags
+                    .intersects(TypeFlags::NUMBER_LIKE)
+                    || self
+                        .literal_property_key(node.argument_expression())
+                        .is_some_and(|key| key.parse::<f64>().is_ok())
+                {
+                    return Ok(self.regex_capture_slot());
+                }
+            }
+        }
         if self.owning_rest_call(node) {
             return Ok(Type::Dyn);
         }
@@ -370,8 +395,12 @@ impl Lowerer<'_> {
                             None
                         };
                     let element = declared.or_else(|| {
-                        self.type_id(source)
-                            .and_then(|ty| self.nullable_array_element(&ty))
+                        let receiver = self.type_id(source)?;
+                        self.nullable_array_element(&receiver)
+                            .or_else(|| match receiver {
+                                Type::Array { elem } if self.optional_storage(&elem) => Some(*elem),
+                                _ => None,
+                            })
                     });
                     if let Some(element) = element {
                         // Reserve the owning lookup's undefined arm before

@@ -5,6 +5,7 @@ mod child_process;
 mod control_flow;
 pub mod record_equivalence;
 pub mod record_views;
+pub(crate) mod regex_captures;
 mod symbol_methods;
 mod symbols;
 mod walk;
@@ -1679,6 +1680,11 @@ fn validate_function(
                                 args.len() == 1
                                     && args[0].ty() == Type::String
                                     && *r#type == Type::Bool
+                            }
+                            "exec" => {
+                                args.len() == 1
+                                    && args[0].ty() == Type::String
+                                    && regex_captures::exec_layout(module, r#type).is_some()
                             }
                             "source" | "flags" => args.is_empty() && *r#type == Type::String,
                             "lastIndex" => args.is_empty() && *r#type == Type::F64,

@@ -1,3 +1,3 @@
 export function unused(): void {
-  /a/.exec("a");
+  /a/.compile("a");
 }

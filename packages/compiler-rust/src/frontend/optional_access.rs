@@ -243,6 +243,34 @@ impl Lowerer<'_> {
     }
 
     fn optional_member_type(&mut self, node: Node, receiver: &Type) -> Result<Type, String> {
+        if let Type::Array { elem } = receiver {
+            let name = if node.kind() == SyntaxKind::PropertyAccessExpression {
+                Some(node.name().text().to_owned())
+            } else {
+                self.literal_property_key(node.argument_expression())
+            };
+            if name.as_deref() == Some("length") {
+                return Ok(Type::F64);
+            }
+            if node.kind() == SyntaxKind::ElementAccessExpression {
+                let key = self
+                    .checker
+                    .get_type_at_location(node.argument_expression());
+                if self
+                    .checker
+                    .ty(key)
+                    .flags
+                    .intersects(TypeFlags::NUMBER_LIKE)
+                    || name.is_some_and(|name| name.parse::<f64>().is_ok())
+                {
+                    return self.undefined_storage_type(elem.as_ref().clone(), node);
+                }
+            }
+            return Err(self.refuse(
+                node,
+                "optional array access requires a numeric index or length",
+            ));
+        }
         if *receiver == Type::String {
             return self.string_index_type(node);
         }
@@ -280,6 +308,11 @@ impl Lowerer<'_> {
         }
         let result_type = self.optional_member_type(node, &receiver.ty())?;
         let key = self.optional_key(node)?;
+        if matches!(receiver.ty(), Type::Array { .. }) {
+            let receiver = self.coerce(receiver, Type::Dyn, node)?;
+            let value = self.dynamic_get(node, receiver, key);
+            return self.coerce(value, result_type, node);
+        }
         if receiver.ty() == Type::Dyn {
             return Ok(self.dynamic_get(node, receiver, key));
         }

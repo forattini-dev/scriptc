@@ -161,8 +161,11 @@ impl Lowerer<'_> {
         {
             return Ok(None);
         }
-        if member.name().text() != "test" || node.arguments().len() != 1 {
-            return Err(self.refuse(node, "only RegExp.test(string) is ported"));
+        if !matches!(member.name().text(), "test" | "exec") || node.arguments().len() != 1 {
+            return Err(self.refuse(
+                node,
+                "RegExp.test/exec require one represented string argument",
+            ));
         }
         let receiver = self.expression(member.expression())?;
         if receiver.ty() != Type::Regex {
@@ -173,11 +176,18 @@ impl Lowerer<'_> {
         }
         let arg =
             self.expected_expression(node.arguments().into_iter().next().unwrap(), Type::String)?;
+        let result = if member.name().text() == "exec" {
+            let array = self.regex_capture_array();
+            self.intern_union(vec![array, Type::Null])
+                .expect("regex result")
+        } else {
+            Type::Bool
+        };
         Ok(Some(Expr::RegexIntrinsic {
-            method: "test".into(),
+            method: member.name().text().into(),
             receiver: Box::new(receiver),
             args: vec![arg],
-            r#type: Type::Bool,
+            r#type: result,
             loc: self.loc(node),
         }))
     }

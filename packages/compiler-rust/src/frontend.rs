@@ -51,6 +51,7 @@ mod loops;
 mod module_metadata;
 mod modules;
 mod namespace_values;
+mod number_predicates;
 mod object_methods;
 mod optional_access;
 mod parameter_abi;
@@ -65,6 +66,7 @@ mod receivers;
 mod record_construction;
 mod reflection;
 mod regex;
+mod regex_captures;
 mod sets;
 mod standard_functions;
 mod standard_objects;
@@ -1116,7 +1118,13 @@ impl<'a> Lowerer<'a> {
         if let Some(value) = self.boxed_get(node)? {
             return Ok(value);
         }
+        if let Some(value) = self.regex_capture_get(node)? {
+            return Ok(value);
+        }
         if let Some(value) = self.standard_function_value(node)? {
+            return Ok(value);
+        }
+        if let Some(value) = self.number_predicate_value(node)? {
             return Ok(value);
         }
         if let Some(value) = self.json_function_value(node)? {
@@ -1207,10 +1215,11 @@ impl<'a> Lowerer<'a> {
                     return Ok(self.dynamic_get(node, obj, key));
                 }
                 if let Type::Array { elem } = obj.ty() {
-                    if *elem == Type::Dyn {
+                    if *elem == Type::Dyn || self.optional_storage(&elem) {
                         let key = self.property_key_expression(node.argument_expression())?;
                         let obj = self.coerce(obj, Type::Dyn, node.expression())?;
-                        return Ok(self.dynamic_get(node, obj, key));
+                        let value = self.dynamic_get(node, obj, key);
+                        return self.coerce(value, *elem, node);
                     }
                     let index = self.expected_expression(node.argument_expression(), Type::F64)?;
                     return Ok(Expr::ArrayGet {
@@ -1254,14 +1263,7 @@ impl<'a> Lowerer<'a> {
                         };
                         let object = self.coerce(obj, Type::Dyn, node.expression())?;
                         let value = self.dynamic_get(node, object, key);
-                        let result = self
-                            .intern_union(vec![arrays[0].clone(), Type::Undefined])
-                            .ok_or_else(|| {
-                                self.refuse(
-                                    node,
-                                    "array lookup result has no undefined representation",
-                                )
-                            })?;
+                        let result = self.undefined_storage_type(arrays[0].clone(), node)?;
                         return self.coerce(value, result, node);
                     }
                 }
@@ -1531,6 +1533,9 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 if let Some(value) = self.standard_function_call(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.number_predicate_call(node)? {
                     return Ok(value);
                 }
                 if let Some(value) = self.bigint_call(node)? {
