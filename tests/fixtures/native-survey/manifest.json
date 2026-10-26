@@ -1,0 +1,8 @@
+{
+  "entries": [
+    { "name": "supported", "input": "supported.ts", "project": "tsconfig.json" },
+    { "name": "regex", "input": "regex.ts", "project": "tsconfig.json" },
+    { "name": "write", "input": "write.ts", "project": "tsconfig.json" },
+    { "name": "regex-alias", "input": "regex.ts", "project": "tsconfig.json" }
+  ]
+}

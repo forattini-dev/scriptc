@@ -6,6 +6,7 @@ mod frontend;
 mod ir;
 mod project;
 mod string_builtins;
+mod survey;
 
 use std::{
     fs,
@@ -28,7 +29,10 @@ fn execute() -> Result<(), String> {
     let mut args = std::env::args_os().skip(1);
     let command = args
         .next()
-        .ok_or("usage: scriptc build|inspect <file.ts|file.js> [--project <tsconfig>] [--emit bin|ir|rust] --out <path>; scriptc builtins")?;
+        .ok_or("usage: scriptc build|inspect <file.ts|file.js> [--project <tsconfig>] [--emit bin|ir|rust] --out <path>; scriptc survey <manifest.json> --out <report.json>; scriptc builtins")?;
+    if command == "survey" {
+        return survey::run(args);
+    }
     if command == "builtins" {
         if args.next().is_some() {
             return Err("SCN0001: builtins takes no arguments".into());
@@ -48,7 +52,7 @@ fn execute() -> Result<(), String> {
         return Ok(());
     }
     if command != "build" && command != "inspect" {
-        return Err("SCN0001: expected build, inspect or builtins".into());
+        return Err("SCN0001: expected build, inspect, survey or builtins".into());
     }
     let input = fs::canonicalize(PathBuf::from(
         args.next().ok_or("SCN0001: missing input file")?,

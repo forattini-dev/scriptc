@@ -2652,7 +2652,7 @@ fn inspection_includes_uncalled_bodies_and_keeps_outputs_atomic() {
     );
     assert_eq!(
         report["builtinCalls"]["fs.readFileSync"]["signatureAvailable"],
-        false
+        true
     );
     assert_eq!(
         report["builtinCalls"]["fs.existsSync"]["signatureAvailable"],
@@ -6249,4 +6249,194 @@ fn regexp_method_boundaries_preserve_artifacts() {
             assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn survey_collects_independent_failures_without_external_tools() {
+    let temp = tempfile::tempdir().unwrap();
+    let fixtures = root().join("tests/fixtures/native-survey");
+    let paths = [
+        "manifest.json",
+        "tsconfig.json",
+        "supported.ts",
+        "regex.ts",
+        "write.ts",
+    ];
+    let originals = paths.map(|path| fs::read(fixtures.join(path)).unwrap());
+    let traps = temp.path().join("traps");
+    fs::create_dir(&traps).unwrap();
+    let source = temp.path().join("trap.rs");
+    fs::write(&source, "fn main() { std::fs::write(std::env::var(\"SCRIPTC_FORBIDDEN_MARKER\").unwrap(), b\"called\").unwrap(); std::process::exit(99); }").unwrap();
+    let trap = binary(temp.path(), "trap");
+    success(
+        &Command::new("rustc")
+            .arg(&source)
+            .arg("-o")
+            .arg(&trap)
+            .output()
+            .unwrap(),
+    );
+    for name in ["node", "go", "tsgo", "tsc", "bun", "cargo", "rustc"] {
+        fs::copy(&trap, binary(&traps, name)).unwrap();
+    }
+    let path = std::env::join_paths(
+        std::iter::once(traps).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let marker = temp.path().join("forbidden-called");
+    let target = temp.path().join("survey results.json");
+    let run = |manifest: &Path| {
+        Command::new(compiler())
+            .arg("survey")
+            .arg(manifest)
+            .arg("--out")
+            .arg(&target)
+            .env("PATH", &path)
+            .env("SCRIPTC_FORBIDDEN_MARKER", &marker)
+            .output()
+            .unwrap()
+    };
+    let output = run(&fixtures.join("manifest.json"));
+    assert!(
+        !output.status.success(),
+        "blocked probes must not report success"
+    );
+    let report: serde_json::Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+    assert_eq!(report["kind"], "native-survey");
+    assert_eq!(report["jobs"], 1);
+    assert_eq!(report["engine"], "none");
+    assert_eq!(report["fallback"], false);
+    assert_eq!(report["irAccepted"], 1);
+    assert_eq!(report["blocked"], 3);
+    assert_eq!(report["toolFailures"], 0);
+    assert_eq!(report["timedOut"], 0);
+    assert_eq!(
+        report["probes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["supported", "regex", "write", "regex-alias"]
+    );
+    let families = report["families"].as_array().unwrap();
+    assert_eq!(families.len(), 2);
+    assert_eq!(
+        families[0]["occurrences"][0]["roots"],
+        serde_json::json!(["regex", "regex-alias"])
+    );
+    assert_eq!(families[0]["occurrences"].as_array().unwrap().len(), 1);
+    assert!(!marker.exists());
+    assert!(!target.with_extension("rs").exists());
+    assert!(!target.with_extension("ir.json").exists());
+    // A reversed queue produces the same stable diagnostic families.
+    let reversed = temp.path().join("reversed.json");
+    fs::write(&reversed, serde_json::to_vec(&serde_json::json!({"entries": [
+        {"name":"regex-alias","input":fixtures.join("regex.ts"),"project":fixtures.join("tsconfig.json")},
+        {"name":"write","input":fixtures.join("write.ts"),"project":fixtures.join("tsconfig.json")},
+        {"name":"regex","input":fixtures.join("regex.ts"),"project":fixtures.join("tsconfig.json")},
+        {"name":"supported","input":fixtures.join("supported.ts"),"project":fixtures.join("tsconfig.json")}
+    ]})).unwrap()).unwrap();
+    assert!(!run(&reversed).status.success());
+    let repeated: serde_json::Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+    assert_eq!(repeated["families"], report["families"]);
+    assert!(!marker.exists());
+    for (index, path) in paths.iter().enumerate() {
+        assert_eq!(fs::read(fixtures.join(path)).unwrap(), originals[index]);
+    }
+}
+
+#[test]
+fn survey_distinguishes_unused_exports_from_explicit_demands() {
+    let temp = tempfile::tempdir().unwrap();
+    let fixtures = root().join("tests/fixtures/native-survey");
+    let manifest = temp.path().join("manifest.json");
+    fs::write(&manifest, serde_json::to_vec(&serde_json::json!({"entries": [
+        {"name":"dormant","input":fixtures.join("dormant.ts"),"project":fixtures.join("tsconfig.json")},
+        {"name":"demanded","input":fixtures.join("demand.ts"),"project":fixtures.join("tsconfig.json"),"scope":"demand-adapter"}
+    ]})).unwrap()).unwrap();
+    let target = temp.path().join("report.json");
+    let output = Command::new(compiler())
+        .arg("survey")
+        .arg(&manifest)
+        .arg("--out")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+    assert_eq!(report["probes"][0]["status"], "ir-accepted");
+    assert_eq!(report["probes"][1]["status"], "blocked");
+    assert_eq!(report["probes"][1]["scope"], "demand-adapter");
+    assert!(
+        report["scope"]
+            .as_str()
+            .unwrap()
+            .contains("Unused exported bodies")
+    );
+}
+
+#[test]
+fn survey_invalid_requests_preserve_existing_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let fixtures = root().join("tests/fixtures/native-survey");
+    let manifest = fixtures.join("manifest.json");
+    let target = temp.path().join("report.json");
+    fs::write(&target, "preserve").unwrap();
+    for option in [["--jobs", "0"], ["--jobs", "4"], ["--timeout-seconds", "0"]] {
+        let output = Command::new(compiler())
+            .arg("survey")
+            .arg(&manifest)
+            .args(option)
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("SCN0001"));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "preserve");
+    }
+    for protected in [
+        fixtures.join("dormant.ts"),
+        fixtures.join("tsconfig.json"),
+        manifest.clone(),
+        target,
+    ] {
+        let original = fs::read(&protected).unwrap();
+        let output = Command::new(compiler())
+            .arg("survey")
+            .arg(&manifest)
+            .arg("--out")
+            .arg(&protected)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("SCN0001"));
+        assert_eq!(fs::read(&protected).unwrap(), original);
+    }
+}
+
+#[test]
+fn survey_keeps_other_entries_when_one_source_is_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let fixtures = root().join("tests/fixtures/native-survey");
+    let manifest = temp.path().join("manifest.json");
+    fs::write(&manifest, serde_json::to_vec(&serde_json::json!({"entries": [
+        {"name":"missing","input":"missing.ts"},
+        {"name":"supported","input":fixtures.join("supported.ts"),"project":fixtures.join("tsconfig.json")}
+    ]})).unwrap()).unwrap();
+    let target = temp.path().join("report.json");
+    let output = Command::new(compiler())
+        .arg("survey")
+        .arg(&manifest)
+        .arg("--out")
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+    assert_eq!(report["toolFailures"], 1);
+    assert_eq!(report["irAccepted"], 1);
+    assert_eq!(report["probes"][0]["status"], "tool-failure");
+    assert_eq!(report["probes"][1]["status"], "ir-accepted");
 }
