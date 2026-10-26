@@ -441,6 +441,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-parameter-properties/values.ts",
         "rust-native-parameter-properties/order.ts",
         "rust-native-parameter-properties/errors.ts",
+        "rust-native-number-parsers/values.ts",
+        "rust-native-number-parsers/grammar.ts",
+        "rust-native-number-parsers/aliases.ts",
+        "rust-native-number-parsers/order.ts",
+        "rust-native-number-parsers/errors.ts",
         "rust-native-presence-guards/strings.ts",
         "rust-native-presence-guards/compound.ts",
         "rust-native-presence-guards/effects.ts",
@@ -4935,10 +4940,6 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
             "iterable call spreads are not ported",
         ),
         (
-            "Number.parseInt('12');",
-            "call target has no native representation",
-        ),
-        (
             "const C = Number; C.isFinite(1);",
             "standard constructor properties require their native member adapter",
         ),
@@ -6628,5 +6629,48 @@ fn object_storage_preserves_contextual_and_published_contracts() {
         );
         assert!(String::from_utf8_lossy(&output.stderr).contains("SCN1001"));
         assert_eq!(fs::read(&target).unwrap(), previous);
+    }
+}
+
+#[test]
+fn numeric_parser_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "numeric-parser-boundary");
+    for source in [
+        "Number.parseInt({toString(){return '7'}} as any, 10);",
+        "parseFloat({toString(){return '7.5'}} as unknown as string);",
+        "Number.parseInt('11', {valueOf(){return 2}} as any);",
+        "parseInt(['7'] as any, 10);",
+        "parseInt(...['7'] as [string]);",
+        "Number.parseFloat('7', ...[]);",
+        "Number.parseInt = () => 1; console.log(Number.parseInt('3'));",
+        "parseInt = () => 1; console.log(parseInt('3'));",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
     }
 }

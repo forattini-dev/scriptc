@@ -455,6 +455,7 @@ impl Lowerer<'_> {
         let value = if owning_rest
             || self.regex_callable_type(source_type).is_some()
             || self.number_predicate_type(source_type).is_some()
+            || self.number_parser_type(source_type).is_some()
         {
             // Keep the standard method's owning argument and receiver ABI
             // instead of replacing it with the checker's contextual signature.

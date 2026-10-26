@@ -20,6 +20,32 @@ pub(super) fn apis() -> Vec<Api> {
     )];
     for (name, operation) in [
         (
+            "parseInt",
+            call!(
+                "num.parseInt",
+                [Type::String, Type::F64],
+                Type::F64,
+                "number_parse_int"
+            ),
+        ),
+        (
+            "parseFloat",
+            call!(
+                "num.parseFloat",
+                [Type::String],
+                Type::F64,
+                "number_parse_float"
+            ),
+        ),
+    ] {
+        for module in ["Number", "global"] {
+            apis.push(Api::native(module, name, Lowering::Primitive, vec![operation.clone()],
+                "Declaration-proven parser values; global and Number members share identity; eager ordinary arguments followed by primitive ToString and ToNumber(radix); missing input is undefined; object coercion hooks and iterable spreads refused",
+                &["tests/corpus/rust-native-number-parsers/values.ts", "tests/corpus/rust-native-number-parsers/aliases.ts", "tests/corpus/rust-native-number-parsers/order.ts", "tests/corpus/rust-native-number-parsers/grammar.ts", "tests/corpus/rust-native-number-parsers/errors.ts"]));
+        }
+    }
+    for (name, operation) in [
+        (
             "isFinite",
             Builtin {
                 ir: "number.isFinite",

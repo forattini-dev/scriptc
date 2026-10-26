@@ -53,6 +53,7 @@ mod module_metadata;
 mod modules;
 mod namespace_values;
 mod number_constructor;
+mod number_parsers;
 mod number_predicates;
 mod object_methods;
 mod optional_access;
@@ -1080,6 +1081,9 @@ impl<'a> Lowerer<'a> {
         if let Some(value) = self.number_predicate_value(node)? {
             return Ok(value);
         }
+        if let Some(value) = self.number_parser_value(node)? {
+            return Ok(value);
+        }
         if let Some(value) = self.json_function_value(node)? {
             return Ok(value);
         }
@@ -1486,6 +1490,9 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 if let Some(value) = self.number_predicate_call(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.number_parser_call(node)? {
                     return Ok(value);
                 }
                 if let Some(value) = self.bigint_call(node)? {

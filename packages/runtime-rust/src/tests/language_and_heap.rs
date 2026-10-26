@@ -160,6 +160,32 @@
     }
 
     #[test]
+    fn parse_int_power_of_two_rounding_retains_guard_and_sticky_bits() {
+        for radix in [2_u32, 4, 8, 16, 32] {
+            for integer in [
+                (1_u64 << 54) + 1,
+                (1_u64 << 54) + 2,
+                (1_u64 << 54) + 3,
+                (1_u64 << 54) + 6,
+                u64::MAX,
+            ] {
+                let mut digits = String::new();
+                let mut remaining = integer;
+                while remaining > 0 {
+                    digits.push(char::from_digit((remaining % u64::from(radix)) as u32, radix).unwrap());
+                    remaining /= u64::from(radix);
+                }
+                let text: String = digits.chars().rev().collect();
+                assert_eq!(number_parse_int(&string(&format!("000{text}!")), f64::from(radix)), integer as f64);
+                assert_eq!(number_parse_int(&string(&format!("-000{text}!")), f64::from(radix)), -(integer as f64));
+            }
+            assert!(number_parse_int(&string("-000"), f64::from(radix)).is_sign_negative());
+            assert_eq!(number_parse_int(&string(&"1".repeat(1100)), f64::from(radix)), f64::INFINITY);
+        }
+        assert_eq!(number_parse_int(&string("0XFFFFFFFFFFFFFFFFtail"), 16.0), u64::MAX as f64);
+    }
+
+    #[test]
     fn parse_float_uses_the_longest_javascript_decimal_prefix() {
         assert_eq!(number_parse_float(&string("  -2.5e-2tail")), -0.025);
         assert_eq!(number_parse_float(&string(".5")), 0.5);

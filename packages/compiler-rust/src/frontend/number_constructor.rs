@@ -70,10 +70,31 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn number_primitive(&mut self, argument: Expr, node: Node) -> Result<Expr, String> {
+        self.number_conversion(argument, node, true)
+    }
+
+    pub(super) fn strict_number_primitive(
+        &mut self,
+        argument: Expr,
+        node: Node,
+    ) -> Result<Expr, String> {
+        self.number_conversion(argument, node, false)
+    }
+
+    fn number_conversion(
+        &mut self,
+        argument: Expr,
+        node: Node,
+        allow_bigint: bool,
+    ) -> Result<Expr, String> {
         self.ensure_exception_classes(node)?;
         let argument = self.coerce(argument, Type::Dyn, node)?;
         let mut helper = Helper::new(
-            "number_primitive",
+            if allow_bigint {
+                "number_primitive"
+            } else {
+                "to_number_primitive"
+            },
             vec![Type::Dyn],
             Type::F64,
             self.loc(node),
@@ -109,7 +130,10 @@ impl Lowerer<'_> {
                     r#type: Type::F64,
                     loc: helper.loc(),
                 },
-                Type::Bigint => self.bigint_operation("bigint.toNumber", vec![payload], node),
+                Type::Bigint if allow_bigint => {
+                    self.bigint_operation("bigint.toNumber", vec![payload], node)
+                }
+                Type::Bigint => self.primitive_number(payload, node)?,
                 _ => unreachable!(),
             };
             body.push(Stmt::If {
@@ -154,9 +178,11 @@ impl Lowerer<'_> {
             else_: None,
             loc: helper.loc(),
         });
-        body.push(failure(
-            "scriptc: Number object coercion hooks are not ported",
-        ));
+        body.push(failure(if allow_bigint {
+            "scriptc: Number object coercion hooks are not ported"
+        } else {
+            "scriptc: numeric object coercion hooks are not ported"
+        }));
         helper.function.body.extend(body);
         Ok(Expr::Call {
             callee: self.install_helper(helper.function),

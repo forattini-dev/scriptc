@@ -9,6 +9,7 @@ impl Lowerer<'_> {
             .or_else(|| self.json_callable_type(id))
             .or_else(|| self.regex_callable_type(id))
             .or_else(|| self.number_predicate_type(id))
+            .or_else(|| self.number_parser_type(id))
         {
             return Some(ty);
         }

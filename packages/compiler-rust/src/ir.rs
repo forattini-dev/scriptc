@@ -3264,8 +3264,29 @@ mod tests {
             ("math.floor", vec![string.clone()], Type::F64, false),
             ("math.floor", vec![], Type::F64, false),
             ("math.floor", vec![number.clone()], Type::String, false),
-            ("math.minArr", vec![number], Type::F64, false),
-            ("num.fromString", vec![string], Type::F64, true),
+            ("math.minArr", vec![number.clone()], Type::F64, false),
+            ("num.fromString", vec![string.clone()], Type::F64, true),
+            (
+                "num.parseInt",
+                vec![string.clone(), number.clone()],
+                Type::F64,
+                true,
+            ),
+            (
+                "num.parseInt",
+                vec![number.clone(), number.clone()],
+                Type::F64,
+                false,
+            ),
+            ("num.parseInt", vec![string.clone()], Type::F64, false),
+            (
+                "num.parseInt",
+                vec![string.clone(), number.clone()],
+                Type::Bool,
+                false,
+            ),
+            ("num.parseFloat", vec![string], Type::F64, true),
+            ("num.parseFloat", vec![number], Type::F64, false),
         ] {
             module.functions[0].body = vec![Stmt::Expression {
                 expr: Expr::LibCall {

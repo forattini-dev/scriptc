@@ -82,6 +82,9 @@ impl Lowerer<'_> {
         if let Some(ty) = self.number_predicate_type(id) {
             return Some(ty);
         }
+        if let Some(ty) = self.number_parser_type(id) {
+            return Some(ty);
+        }
         if self.data_types.contains(&id) {
             return Some(Type::Dyn);
         }

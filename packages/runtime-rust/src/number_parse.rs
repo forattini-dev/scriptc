@@ -47,6 +47,13 @@ pub fn number_parse_int(value: &JsString, radix: f64) -> f64 {
         result = digits[..consumed_bytes]
             .parse::<f64>()
             .unwrap_or(f64::INFINITY);
+    } else if matches!(base, 2 | 4 | 8 | 16 | 32) {
+        let significant = digits[..consumed_bytes].trim_start_matches('0').as_bytes();
+        result = if significant.is_empty() {
+            0.0
+        } else {
+            power_of_two_integer_to_f64(significant, base as u32)
+        };
     }
     if negative {
         -result
