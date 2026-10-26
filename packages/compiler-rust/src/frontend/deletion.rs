@@ -42,6 +42,7 @@ impl Lowerer<'_> {
         } else if !matches!(
             receiver.ty(),
             Type::Dyn
+                | Type::Func { .. }
                 | Type::String
                 | Type::F64
                 | Type::Bool
@@ -51,6 +52,9 @@ impl Lowerer<'_> {
                 | Type::Undefined
         ) {
             return Err(self.refuse(node, "native deletion receiver layout is not ported"));
+        }
+        if matches!(receiver.ty(), Type::Func { .. }) {
+            self.function_member_key(member)?;
         }
         let receiver = self.coerce(receiver, Type::Dyn, node)?;
         let key = if member.kind() == SyntaxKind::PropertyAccessExpression {

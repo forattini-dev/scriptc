@@ -7,6 +7,11 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
 impl runtime::NativeDeleteValue for NativeValue {
     fn delete_own_property(&self, key: &runtime::JsString) -> runtime::NativeDeleteResult {
         use runtime::NativeDeleteResult as D;
+        if let Some(properties) = native_function_properties(self) {
+            native_function_data_key(key);
+            properties.with_mut(|data| data.entries.retain(|(name, _)| name != key));
+            return D::Deleted;
+        }
         match self {
             Self::Undefined | Self::Null => D::Nullish,
             Self::Object(object) | Self::Record(_, object) => {

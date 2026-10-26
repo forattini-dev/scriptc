@@ -533,6 +533,7 @@ export class RustDynamicEmitter {
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, true),`);
     this.context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()),`);
+    for (const shape of boxedShapes) this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, _, properties) => runtime::map_has_by(properties, key, |left, right| left == right),`);
     this.context.line(`${name}::Promise(handle) => runtime::promise_handle_own_keys(handle).iter().any(|own| own.as_str() == key.to_utf8_lossy()),`);
     this.context.line(`${name}::Array(array) => key.as_ref() == "length" || (key.as_ref() == "raw" && runtime::array_raw(array).is_some()) || runtime::array_property_has(array, key) || sc_dyn_key_index(key).is_some_and(|index| runtime::array_has(array, index as f64)),`);
     this.context.line(`${name}::String(text) => key.as_ref() == "length" || sc_dyn_key_index(key).is_some_and(|index| index < text.encode_utf16().count()),`);

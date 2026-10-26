@@ -849,7 +849,11 @@ impl Lowerer<'_> {
     pub(super) fn record_get(&mut self, node: Node) -> Result<Expr, String> {
         let obj = self.expression(node.expression())?;
         let obj = self.live_member_receiver(node.expression(), obj);
-        if obj.ty() == Type::Dyn {
+        if obj.ty() == Type::Dyn || matches!(obj.ty(), Type::Func { .. }) {
+            if matches!(obj.ty(), Type::Func { .. }) {
+                self.function_data_key(node, node.name().text())?;
+            }
+            let obj = self.coerce(obj, Type::Dyn, node)?;
             let key = Expr::StrLit {
                 value: node.name().text().into(),
                 r#type: Type::String,
@@ -930,7 +934,11 @@ impl Lowerer<'_> {
             return Err(self.refuse(member, "ordinary prototype writes are not ported"));
         }
         let obj = self.expression(member.expression())?;
-        if obj.ty() == Type::Dyn {
+        if obj.ty() == Type::Dyn || matches!(obj.ty(), Type::Func { .. }) {
+            if matches!(obj.ty(), Type::Func { .. }) {
+                self.function_data_key(member, member.name().text())?;
+            }
+            let obj = self.coerce(obj, Type::Dyn, node)?;
             let key = Expr::StrLit {
                 value: member.name().text().into(),
                 r#type: Type::String,

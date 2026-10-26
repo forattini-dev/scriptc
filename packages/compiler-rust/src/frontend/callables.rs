@@ -19,7 +19,14 @@ impl Lowerer<'_> {
                 self.polymorphic_callable_type(id)
             };
         }
-        if properties.is_empty() {
+        // A source function declaration owns its properties independently of
+        // its callable ABI. Structural callable interfaces retain their record
+        // contract; expando declarations must keep the original function identity.
+        let symbol = self.checker.ty(id).symbol();
+        let source_function = symbol.0 != 0
+            && !self.checker.sym(symbol).value_declaration.is_nil()
+            && self.checker.sym(symbol).value_declaration.kind() == SyntaxKind::FunctionDeclaration;
+        if properties.is_empty() || source_function {
             return self.function_type(id);
         }
         let shape_id = self.records.len();

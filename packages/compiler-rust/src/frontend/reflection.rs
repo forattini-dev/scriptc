@@ -164,7 +164,8 @@ impl Lowerer<'_> {
             | Type::Undefined
             | Type::Array { .. }
             | Type::Bytes { .. }
-            | Type::Promise { .. } => true,
+            | Type::Promise { .. }
+            | Type::Func { .. } => true,
             Type::Record { shape_id } => {
                 !self.enum_shape(*shape_id) && !self.callables.contains_key(shape_id)
             }
@@ -178,7 +179,7 @@ impl Lowerer<'_> {
 
     fn reflected_record(&self, ty: &Type) -> bool {
         match ty {
-            Type::Dyn | Type::Promise { .. } => true,
+            Type::Dyn | Type::Promise { .. } | Type::Func { .. } => true,
             Type::Record { shape_id } => {
                 let shape = &self.records[*shape_id];
                 !shape.tuple

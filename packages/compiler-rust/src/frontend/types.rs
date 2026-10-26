@@ -328,6 +328,18 @@ impl Lowerer<'_> {
                 SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression
             ) {
                 let source = self.checker.get_type_at_location(initial.expression());
+                if declaration.type_().is_nil()
+                    && matches!(self.type_id(source), Some(Type::Func { .. }))
+                {
+                    // An expando property can disappear or change through an
+                    // alias. Inferred locals keep its owning snapshot tag.
+                    self.function_member_key(initial)?;
+                    self.var_types.entry(symbol).or_insert(Type::Dyn);
+                    if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                        self.module_vars.entry(symbol).or_insert(Type::Dyn);
+                    }
+                    return Ok(Type::Dyn);
+                }
                 if initial.kind() == SyntaxKind::ElementAccessExpression
                     && self
                         .literal_property_key(initial.argument_expression())

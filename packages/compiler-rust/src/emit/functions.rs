@@ -91,7 +91,11 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             output.push_str("Unreachable,\n");
         }
         for (index, function) in &targets {
-            writeln!(output, "F{index} {{").unwrap();
+            writeln!(
+                output,
+                "F{index} {{ properties: Option<runtime::Gc<NativeRecordData>>,"
+            )
+            .unwrap();
             for (i, capture) in function.captures.iter().flatten().enumerate() {
                 writeln!(
                     output,
@@ -109,6 +113,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
         for (index, function) in &targets {
             let fields = (0..function.captures.as_ref().map_or(0, Vec::len))
                 .map(|i| format!("c{i}"))
+                .chain(std::iter::once("properties".into()))
                 .collect::<Vec<_>>();
             writeln!(output, "Self::F{index} {{ {} }} => {{", fields.join(", ")).unwrap();
             for field in fields {
@@ -127,6 +132,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
         for (index, function) in &targets {
             let fields = (0..function.captures.as_ref().map_or(0, Vec::len))
                 .map(|i| format!("c{i}"))
+                .chain(std::iter::once("properties".into()))
                 .collect::<Vec<_>>();
             writeln!(output, "Self::F{index} {{ {} }} => {{", fields.join(", ")).unwrap();
             for field in fields {
@@ -135,6 +141,18 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
             output.push_str("},\n");
         }
         output.push_str("} } }\n");
+        writeln!(output, "fn properties_{name}(function: &runtime::Gc<{name}>) -> runtime::Gc<NativeRecordData> {{ function.with(|target| match target {{").unwrap();
+        if targets.is_empty() {
+            writeln!(
+                output,
+                "{name}::Unreachable => unreachable!(\"scriptc: unallocated function properties\"),"
+            )
+            .unwrap();
+        }
+        for (index, _) in &targets {
+            writeln!(output, "{name}::F{index} {{ properties, .. }} => properties.as_ref().expect(\"scriptc: cleared function properties\").clone(),").unwrap();
+        }
+        output.push_str("}) }\n");
         let arguments = params
             .iter()
             .enumerate()
@@ -167,8 +185,11 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
                 .join(", ");
             writeln!(
                 output,
-                "{name}::F{index} {{ {} }} => {}({args}),",
-                captures.join(", "),
+                "{name}::F{index} {{ {}.. }} => {}({args}),",
+                captures
+                    .iter()
+                    .map(|c| format!("{c}, "))
+                    .collect::<String>(),
                 function_name(&function.name)
             )
             .unwrap();
@@ -208,7 +229,7 @@ pub(super) fn closure(fn_name: &str, captures: &[String], ty: &Type, module: &Mo
     let name = type_name(ty, module);
     if module.functions[index].captures.is_none() {
         return format!(
-            "FN_{index}.with(|slot| slot.borrow_mut().get_or_insert_with(|| runtime::Gc::new({name}::F{index} {{}})).clone())"
+            "FN_{index}.with(|slot| slot.borrow_mut().get_or_insert_with(|| runtime::Gc::new({name}::F{index} {{ properties: Some(runtime::Gc::new(NativeMap {{ entries: Vec::new() }})) }})).clone())"
         );
     }
     let fields = captures
@@ -217,5 +238,7 @@ pub(super) fn closure(fn_name: &str, captures: &[String], ty: &Type, module: &Mo
         .map(|(i, id)| format!("c{i}: Some({id}.clone())"))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("runtime::Gc::new({name}::F{index} {{ {fields} }})")
+    format!(
+        "runtime::Gc::new({name}::F{index} {{ properties: Some(runtime::Gc::new(NativeMap {{ entries: Vec::new() }})), {fields} }})"
+    )
 }

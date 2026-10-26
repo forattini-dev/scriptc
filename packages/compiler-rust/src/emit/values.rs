@@ -380,7 +380,10 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
         if matches!(t, Type::Bytes { .. }) {
             writeln!(out, "NativeValue::V{i}(bytes) => {{ if !key.is_well_formed() {{ return NativeValue::Undefined; }} match key.well_formed_utf8().unwrap_or_else(|| unreachable!(\"ill-formed keys were checked before fixed-field dispatch\")) {{ \"length\" | \"byteLength\" => NativeValue::Number(runtime::bytes_len(&bytes)), \"byteOffset\" => NativeValue::Number(runtime::bytes_byte_offset(&bytes)), _ => runtime::throw_type_error(\"scriptc: erased Uint8Array member requires a typed receiver\".into()), }} }},").unwrap();
         }
-        if matches!(t, Type::Func { .. } | Type::Classval { .. }) {
+        if matches!(t, Type::Func { .. }) {
+            let name = functions::type_name(t, module);
+            writeln!(out, "NativeValue::V{i}(function) => {{ native_function_data_key(&key); properties_{name}(&function).with(|data| data.entries.iter().find(|(k,_)| *k == key).map(|(_,v)| v.clone()).unwrap_or(NativeValue::Undefined)) }},").unwrap();
+        } else if matches!(t, Type::Classval { .. }) {
             writeln!(
                 out,
                 "NativeValue::V{i}(_) => native_value_missing_kind(&key, \"function\"),"
@@ -514,8 +517,24 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
 }
 
 fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
+    out.push_str("fn native_function_properties(value: &NativeValue) -> Option<runtime::Gc<NativeRecordData>> { match value {\n");
+    for (i, ty) in types.iter().enumerate() {
+        if matches!(ty, Type::Func { .. }) {
+            let name = functions::type_name(ty, module);
+            writeln!(
+                out,
+                "NativeValue::V{i}(function) => Some(properties_{name}(function)),"
+            )
+            .unwrap();
+        }
+    }
+    out.push_str("_ => None, } }\n");
     out.push_str("fn native_value_own_keys(value: &NativeValue) -> Vec<runtime::JsString> { match value { NativeValue::RawJson(_) => vec![runtime::string(\"rawJSON\")], NativeValue::Promise(promise) => runtime::promise_own_keys(promise).into_iter().map(runtime::JsString::from).collect(), NativeValue::Record(_,object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()), NativeValue::Object(object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()), NativeValue::Array(array) => native_array_index_keys(array),\n");
     for (i, ty) in types.iter().enumerate() {
+        if matches!(ty, Type::Func { .. }) {
+            let name = functions::type_name(ty, module);
+            writeln!(out, "NativeValue::V{i}(function) => properties_{name}(function).with(|data| data.entries.iter().map(|(key,_)| key.clone()).collect()),").unwrap();
+        }
         if let Type::Record { shape_id } = ty {
             let record = &module.records[*shape_id];
             if record_storage::shared(record) {

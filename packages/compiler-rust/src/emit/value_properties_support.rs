@@ -1,7 +1,18 @@
+// Ordinary function data slots deliberately exclude intrinsic descriptors and prototypes.
+fn native_function_data_key(key: &runtime::JsString) {
+    if matches!(key.well_formed_utf8(), Some("name" | "length" | "bind" | "call" | "apply" | "prototype" | "caller" | "arguments" | "constructor" | "__proto__" | "toString" | "valueOf" | "hasOwnProperty" | "isPrototypeOf" | "propertyIsEnumerable" | "toLocaleString")) {
+        runtime::throw_type_error("scriptc: intrinsic function properties require their native member contract".into());
+    }
+}
 // Owning property operations shared by dot and computed writes.
 fn native_value_set(value: NativeValue, key: runtime::JsString, field: NativeValue) {
     if key == "__proto__" && !matches!(&value, NativeValue::RawJson(_)) {
         runtime::throw_type_error("scriptc: ordinary prototype writes are not ported".into());
+    }
+    if let Some(properties) = native_function_properties(&value) {
+        native_function_data_key(&key);
+        native_record_set(&properties, key, field);
+        return;
     }
     match value {
         NativeValue::RawJson(raw) => raw.refuse_write(&key),
@@ -49,6 +60,10 @@ fn native_value_set(value: NativeValue, key: runtime::JsString, field: NativeVal
     }
 }
 fn native_value_has_own(value: NativeValue, key: runtime::JsString) -> bool {
+    if let Some(properties) = native_function_properties(&value) {
+        native_function_data_key(&key);
+        return properties.with(|data| data.entries.iter().any(|(name, _)| *name == key));
+    }
     match &value {
         NativeValue::Undefined | NativeValue::Null => {
             runtime::throw_type_error("Cannot convert undefined or null to object".into())

@@ -38,6 +38,7 @@ mod exceptions;
 mod filesystem;
 mod filesystem_reads;
 mod filesystem_writes;
+mod function_properties;
 mod function_reflection;
 mod functions;
 mod helpers;
@@ -1056,6 +1057,7 @@ impl<'a> Lowerer<'a> {
     fn expression(&mut self, node: Node) -> Result<Expr, String> {
         let value = self.expression_inner(node).and_then(|value| {
             if value.ty() == Type::Dyn
+                && !function_properties::owning_read(&value)
                 && matches!(
                     node.kind(),
                     SyntaxKind::CallExpression
@@ -1193,7 +1195,11 @@ impl<'a> Lowerer<'a> {
                 if obj.ty() == Type::bytes() {
                     return self.bytes_index(node, obj);
                 }
-                if obj.ty() == Type::Dyn {
+                if obj.ty() == Type::Dyn || matches!(obj.ty(), Type::Func { .. }) {
+                    if matches!(obj.ty(), Type::Func { .. }) {
+                        self.function_member_key(node)?;
+                    }
+                    let obj = self.coerce(obj, Type::Dyn, node)?;
                     let key = self.property_key_expression(node.argument_expression())?;
                     return Ok(self.dynamic_get(node, obj, key));
                 }
