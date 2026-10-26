@@ -848,7 +848,7 @@ impl Lowerer<'_> {
 
     pub(super) fn record_get(&mut self, node: Node) -> Result<Expr, String> {
         let obj = self.expression(node.expression())?;
-        let obj = self.live_array_receiver(node.expression(), obj);
+        let obj = self.live_member_receiver(node.expression(), obj);
         if obj.ty() == Type::Dyn {
             let key = Expr::StrLit {
                 value: node.name().text().into(),

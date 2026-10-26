@@ -242,6 +242,26 @@ impl Lowerer<'_> {
         {
             let declaration = node.parent();
             let initial = receivers::reference_node(declaration.initializer());
+            if declaration.type_().is_nil() && initial.kind() == SyntaxKind::Identifier {
+                let source = self.symbol(initial);
+                let storage = self
+                    .bindings
+                    .get(&source)
+                    .or_else(|| self.module_bindings.get(&source))
+                    .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&source)))
+                    .map(|local| local.r#type.clone());
+                if let Some(storage) = storage
+                    && self.optional_storage(&storage)
+                {
+                    // Inferred aliases snapshot the represented value, including
+                    // lookup absence omitted by the checker's declared type.
+                    self.var_types.entry(symbol).or_insert(storage.clone());
+                    if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                        self.module_vars.entry(symbol).or_insert(storage.clone());
+                    }
+                    return Ok(storage);
+                }
+            }
             if declaration.type_().is_nil()
                 && initial.kind() == SyntaxKind::CallExpression
                 && self.owning_rest_call(initial)
@@ -286,6 +306,22 @@ impl Lowerer<'_> {
                     self.module_vars.entry(symbol).or_insert(storage.clone());
                 }
                 return Ok(storage);
+            }
+            if declaration.type_().is_nil() && initial.kind() == SyntaxKind::ElementAccessExpression
+            {
+                let source = self.checker.get_type_at_location(initial.expression());
+                if let Some(receiver) = self.type_id(source)
+                    && self.string_view(&receiver)
+                {
+                    let storage = self.string_index_type(initial)?;
+                    if self.optional_storage(&storage) {
+                        self.var_types.entry(symbol).or_insert(storage.clone());
+                        if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                            self.module_vars.entry(symbol).or_insert(storage.clone());
+                        }
+                    }
+                    return Ok(storage);
+                }
             }
             if matches!(
                 initial.kind(),

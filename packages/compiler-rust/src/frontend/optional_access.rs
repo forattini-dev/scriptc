@@ -10,6 +10,28 @@ pub(super) fn is_access(node: Node) -> bool {
 }
 
 impl Lowerer<'_> {
+    pub(super) fn live_member_receiver(&mut self, node: Node, value: Expr) -> Expr {
+        let source_node = receivers::reference_node(node);
+        let tracked_symbol = if source_node.kind() == SyntaxKind::Identifier {
+            self.symbol(source_node)
+        } else {
+            0
+        };
+        if self.var_defined.contains(&tracked_symbol) {
+            // Retain a live presence proof for a tracked local. Calls and
+            // writes invalidate these facts before the next receiver read.
+            return value;
+        }
+        if let Expr::UnionNarrow { value: source, .. } = &value
+            && (self.array_view(&source.ty()) || self.string_view(&source.ty()))
+        {
+            // A checker refinement can outlive an alias/callback mutation.
+            // Keep the actual nullable receiver for the property read.
+            return source.as_ref().clone();
+        }
+        value
+    }
+
     pub(super) fn optional_result_type(&mut self, value: Type, node: Node) -> Result<Type, String> {
         if matches!(value, Type::Null | Type::Undefined) {
             // Unit tags never occupy standalone ABI slots.
@@ -221,6 +243,9 @@ impl Lowerer<'_> {
     }
 
     fn optional_member_type(&mut self, node: Node, receiver: &Type) -> Result<Type, String> {
+        if *receiver == Type::String {
+            return self.string_index_type(node);
+        }
         if *receiver == Type::Dyn {
             return Ok(Type::Dyn);
         }
@@ -250,6 +275,9 @@ impl Lowerer<'_> {
     }
 
     fn optional_member(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
+        if receiver.ty() == Type::String {
+            return self.string_index(node, receiver);
+        }
         let result_type = self.optional_member_type(node, &receiver.ty())?;
         let key = self.optional_key(node)?;
         if receiver.ty() == Type::Dyn {

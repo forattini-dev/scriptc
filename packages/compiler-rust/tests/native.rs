@@ -240,6 +240,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-json-functions/identity.ts",
         "rust-native-json-functions/values.ts",
         "rust-native-json-functions/parse.ts",
+        "rust-native-string-index/units.ts",
+        "rust-native-string-index/keys.ts",
+        "rust-native-string-index/storage.ts",
+        "rust-native-string-index/order.ts",
+        "rust-native-string-index/optional.ts",
         "rust-native-delete/records.ts",
         "rust-native-delete/order.ts",
         "rust-native-delete/arrays.ts",
@@ -1297,6 +1302,50 @@ fn for_loop_boundaries_preserve_artifacts() {
                 && stderr.contains("SCN1001")
                 && stderr.contains("per-iteration native cells")
                 && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn string_index_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "string-index-boundary");
+    for source in [
+        "const text = 'abc'; const key = {toString: () => '0'}; text[key as unknown as number];",
+        "function read(text: string, key: string) { return text[key]; } read('abc', '0');",
+        "const text = 'abc'; let key: any = 0; text[key];",
+        "const text = 'abc'; text[Symbol.iterator];",
+        "const text = 'abc'; const method = text['trim']; method();",
+        "function read(text: string, index: number): string { return text[index]; } read('', 0);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );
         for path in [

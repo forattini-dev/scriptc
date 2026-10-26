@@ -34,28 +34,6 @@ impl Lowerer<'_> {
         }
     }
 
-    pub(super) fn live_array_receiver(&mut self, node: Node, value: Expr) -> Expr {
-        let source_node = receivers::reference_node(node);
-        let tracked_symbol = if source_node.kind() == SyntaxKind::Identifier {
-            self.symbol(source_node)
-        } else {
-            0
-        };
-        if self.var_defined.contains(&tracked_symbol) {
-            // Retain a live presence proof for a tracked local. Calls and
-            // writes invalidate these facts before the next receiver read.
-            return value;
-        }
-        if let Expr::UnionNarrow { value: source, .. } = &value
-            && self.array_view(&source.ty())
-        {
-            // A checker refinement can outlive an alias/callback mutation.
-            // Keep the actual nullable receiver for the property read.
-            return source.as_ref().clone();
-        }
-        value
-    }
-
     pub(super) fn array_length(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
         if matches!(receiver.ty(), Type::Array { .. }) {
             return Ok(Expr::ArrayIntrinsic {
@@ -372,7 +350,7 @@ impl Lowerer<'_> {
     fn array_pop(&mut self, node: Node) -> Result<Expr, String> {
         let source = node.expression().expression();
         let receiver = self.expression(source)?;
-        let receiver = self.live_array_receiver(source, receiver);
+        let receiver = self.live_member_receiver(source, receiver);
         let Type::Array { elem } = receiver.ty() else {
             return Err(self.refuse(node, "pop needs a non-null native array"));
         };

@@ -67,6 +67,7 @@ mod standard_functions;
 mod standard_objects;
 mod stats;
 mod storage;
+mod string_index;
 mod strings;
 mod symbols;
 mod tuples;
@@ -1156,8 +1157,17 @@ impl<'a> Lowerer<'a> {
                 if let Some(value) = self.enum_get(node)? {
                     return Ok(value);
                 }
-                let obj = self.expression(node.expression())?;
-                let obj = self.live_array_receiver(node.expression(), obj);
+                let source = primitives::primitive_source(node.expression());
+                let string_source = self.ty(source).is_ok_and(|ty| self.string_view(&ty));
+                let obj = if string_source {
+                    self.primitive_operand(node.expression())?
+                } else {
+                    self.expression(node.expression())?
+                };
+                let obj = self.live_member_receiver(node.expression(), obj);
+                if self.string_view(&obj.ty()) {
+                    return self.string_index(node, obj);
+                }
                 if self.array_view(&obj.ty())
                     && self
                         .literal_property_key(node.argument_expression())
@@ -1265,9 +1275,9 @@ impl<'a> Lowerer<'a> {
                 let target = self.ty(node)?;
                 self.expected_expression(node.expression(), target)
             }
-            SyntaxKind::ParenthesizedExpression | SyntaxKind::SatisfiesExpression => {
-                self.expression(node.expression())
-            }
+            SyntaxKind::ParenthesizedExpression
+            | SyntaxKind::SatisfiesExpression
+            | SyntaxKind::NonNullExpression => self.expression(node.expression()),
             SyntaxKind::PropertyAccessExpression if self.module_namespace(node.expression()) => {
                 self.expression(node.name())
             }
