@@ -30,6 +30,7 @@ mod comparisons;
 mod console;
 mod container_abi;
 mod data_tables;
+mod declaration_abi;
 mod declarations;
 mod deletion;
 mod directories;
@@ -175,6 +176,7 @@ struct Lowerer<'a> {
     next_closure: usize,
     helpers: HashMap<(String, Vec<Type>, Type), String>,
     declarations: HashMap<declarations::Key, declarations::Hint>,
+    declaration_abi: bool,
     projections: HashMap<declarations::Key, Type>,
     literal_choices: HashMap<declarations::Key, Type>,
     classes: classes::ClassGraph,
@@ -223,6 +225,7 @@ impl<'a> Lowerer<'a> {
             next_closure: 0,
             helpers: HashMap::new(),
             declarations: HashMap::new(),
+            declaration_abi: false,
             projections: HashMap::new(),
             literal_choices: HashMap::new(),
             classes: classes::ClassGraph::default(),

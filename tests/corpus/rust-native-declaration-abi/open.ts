@@ -1,0 +1,11 @@
+import { put, lookup, type Options } from "native-declaration-abi";
+const child = { value: 3 };
+const callback = (n: number): number => n + 4;
+const options: Options = { label: "first", child, callback, missing: undefined };
+const alias = put(options, "label", "second");
+console.log("open", alias === options, lookup(options, "label") === "second", lookup(options, "absent") === undefined);
+put(alias, "child", child);
+console.log("references", lookup(options, "child") === child, lookup(options, "callback") === callback, Object.hasOwn(alias, "missing"));
+put(alias, "02", 2);
+put(alias, "2", 20);
+console.log("keys", Object.keys(alias).join("|"));

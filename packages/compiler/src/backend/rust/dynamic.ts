@@ -1,4 +1,5 @@
 import { emitNativeJsonDefinitions } from "./json-functions.js";
+import { emitRustClassPropertyReads } from "./class-properties.js";
 import { emitExecFileDefinitions } from "./exec-file.js";
 import { recursiveNativeReference } from "../../ir/recursive-native.js";
 import { RecursiveNativeChecks } from "./recursive-checks.js";
@@ -548,6 +549,7 @@ export class RustDynamicEmitter {
     emitRustDynamicObjectPrototype(this.context);
     this.context.line(`fn sc_dyn_object_key_get(object: &runtime::JsMap<runtime::JsString, ${name}>, key: &runtime::JsString, receiver: &${name}) -> ${name} {`);
     this.context.pushIndent();
+    this.context.line("if let Some(field) = sc_dyn_class_key_get(object, key) { return field; }");
     this.context.line(`match runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()) { Some(${name}::Getter(getter)) => ${getterRead}, Some(field) => field, None => match runtime::map_prototype(object) { Some(prototype @ (${name}::Object(..) | ${name}::Proxy(..))) => sc_dyn_get(&prototype, key, receiver), None => sc_dyn_object_prototype_fallback(object, key), _ => ${name}::Undefined, }, }`);
     this.context.popIndent();
     this.context.line("}");
@@ -1018,6 +1020,7 @@ export class RustDynamicEmitter {
   }
 
   emitDynFromDefinitions(): void {
+    emitRustClassPropertyReads(this.context, (type, value) => this.emitDynFromValue(type, value));
     do {
       this.dynFrom.emitDefinitions();
       this.recursiveChecks.emitDefinitions((type, value, loc, path) => this.emitDynCheckInline(type, value, loc, path));

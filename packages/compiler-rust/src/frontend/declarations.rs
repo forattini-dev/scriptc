@@ -148,6 +148,7 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
             }
         }
         let mut lowerer = Lowerer::new(checker, source, console_prelude);
+        lowerer.declaration_abi = true;
         let mut exports = Vec::new();
         for file in &files {
             let file = *file;
@@ -321,7 +322,8 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
             }
         }
         fn project(lowerer: &mut Lowerer<'_>, node: Node, out: &mut HashMap<Key, Type>) {
-            if node.kind() == SyntaxKind::ObjectLiteralExpression
+            if !lowerer.declaration_abi
+                && node.kind() == SyntaxKind::ObjectLiteralExpression
                 && let Some(choice) = lowerer.contextual_union_literal(node)
                 && portable(
                     &choice,
@@ -340,7 +342,8 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
                     | SyntaxKind::CallExpression
             ) {
                 let id = lowerer.checker.get_type_at_location(node);
-                if let Some(ty) = lowerer.type_id(id)
+                if lowerer.declaration_projection(id) == lowerer.declaration_abi
+                    && let Some(ty) = lowerer.type_id(id)
                     && portable(&ty, &lowerer.records, &lowerer.unions, &mut HashSet::new())
                 {
                     out.insert(Key::of(node), ty);
@@ -351,11 +354,20 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
                 false
             });
         }
+        // Public data/callback views retain the implementation ABI. Resolve
+        // concrete consumer views separately so that transport-mode cache
+        // entries never erase local class or container storage.
         let mut projections = HashMap::new();
-        for file in files {
-            let path = source_file_info(file).file_name.to_string();
-            if !is_declaration(&path) && !is_javascript(&path) {
-                project(&mut lowerer, file, &mut projections);
+        for transport in [true, false] {
+            lowerer.declaration_abi = transport;
+            if !transport {
+                lowerer.types = type_graph::TypeCache::default();
+            }
+            for file in &files {
+                let path = source_file_info(*file).file_name.to_string();
+                if !is_declaration(&path) && !is_javascript(&path) {
+                    project(&mut lowerer, *file, &mut projections);
+                }
             }
         }
         Catalog {

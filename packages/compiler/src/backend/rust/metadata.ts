@@ -3,6 +3,13 @@ import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/
 import { mangleClassStruct, mangleField, mangleFunction } from "../mangle.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 
+export function rustClassFieldName(meta: RustClassMeta, fieldName: string): string {
+  const index = meta.def.fields.findIndex(field => field.name === fieldName);
+  let owner = meta;
+  while (owner.base !== null && index < owner.base.def.fields.length) owner = owner.base;
+  return owner.hierarchy ? `sc_hf_${owner.pre}_${mangleField(fieldName)}` : mangleField(fieldName);
+}
+
 export interface RustMetadataContext {
   readonly classMeta: ReadonlyMap<string, RustClassMeta>;
   readonly classes: ReadonlyMap<string, IrClassDef>;
@@ -175,11 +182,10 @@ export class RustMetadata {
   }
 
   classFieldName(className: string, fieldName: string, loc?: SrcLoc): string {
-    let owner = this.classMetaOf(className, loc);
+    const owner = this.classMetaOf(className, loc);
     const index = owner.def.fields.findIndex((field) => field.name === fieldName);
     if (index < 0) this.context.unsupported(`unknown class field '${className}.${fieldName}'`, loc);
-    while (owner.base !== null && index < owner.base.def.fields.length) owner = owner.base;
-    return this.classFieldStorageName(owner, fieldName);
+    return rustClassFieldName(owner, fieldName);
   }
 
   classFieldStorageName(owner: RustClassMeta, fieldName: string): string {

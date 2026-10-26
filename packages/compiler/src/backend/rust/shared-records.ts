@@ -30,10 +30,15 @@ export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordSh
   const visited = new Set<string>();
   const wrappersByRecord = new Map<string, Set<string>>();
   const mark = (type: IrType): void => {
-    if (type.kind === "union" || type.kind === "record") {
-      const key = type.kind === "union" ? `union:${type.unionId}` : `record:${type.shapeId}`;
+    if (type.kind === "union" || type.kind === "record" || type.kind === "object") {
+      const key = type.kind === "union" ? `union:${type.unionId}` : type.kind === "record" ? `record:${type.shapeId}` : `class:${type.className}`;
       if (visited.has(key)) return;
       visited.add(key);
+    }
+    if (type.kind === "object") {
+      const cls = mod.classes?.find(cls => cls.name === type.className);
+      for (const field of cls?.fields ?? []) if (!field.name.startsWith("%")) mark(field.type);
+      for (const child of mod.classes ?? []) if (child.base === type.className) mark({ kind: "object", className: child.name });
     }
     if (type.kind === "union") { for (const arm of unions.get(type.unionId)?.arms ?? []) mark(arm); }
     if (type.kind === "promise") mark(type.inner);

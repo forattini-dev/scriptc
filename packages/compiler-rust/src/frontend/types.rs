@@ -121,6 +121,9 @@ impl Lowerer<'_> {
         if let Some(ty) = self.class_type(id) {
             return Some(ty);
         }
+        if self.declaration_owning_type(id) {
+            return Some(Type::Dyn);
+        }
         if self.is_regex_type(id) {
             return Some(Type::Regex);
         }

@@ -240,6 +240,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-json-functions/identity.ts",
         "rust-native-json-functions/values.ts",
         "rust-native-json-functions/parse.ts",
+        "rust-native-declaration-abi/nominal.ts",
+        "rust-native-declaration-abi/open.ts",
+        "rust-native-declaration-abi/plugin.ts",
+        "rust-native-declaration-abi/containers.ts",
+        "rust-native-declaration-abi/generic.ts",
+        "rust-native-declaration-abi/errors.ts",
+        "rust-native-declaration-abi/hierarchy.ts",
         "rust-native-function-properties/aliases.ts",
         "rust-native-function-properties/closures.ts",
         "rust-native-function-properties/keys.ts",
@@ -6104,5 +6111,96 @@ fn function_property_boundaries_preserve_artifacts() {
         for path in artifacts {
             assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
         }
+    }
+}
+
+#[test]
+fn public_declaration_abi_preserves_execution_storage() {
+    let temp = tempfile::tempdir().unwrap();
+    for fixture in ["nominal", "containers"] {
+        let input = root().join(format!(
+            "tests/corpus/rust-native-declaration-abi/{fixture}.ts"
+        ));
+        let target = temp.path().join(format!("{fixture}.json"));
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        success(&output);
+        let module: serde_json::Value = serde_json::from_slice(&fs::read(target).unwrap()).unwrap();
+        let globals = module["globals"].as_array().unwrap();
+        let global = |name: &str| {
+            globals
+                .iter()
+                .find(|global| global["name"] == name)
+                .unwrap()
+        };
+        if fixture == "nominal" {
+            assert_eq!(global("client")["type"]["kind"], "object");
+            assert_eq!(global("alias")["type"]["kind"], "dyn");
+            assert_eq!(global("clients")["type"]["kind"], "array");
+            assert_eq!(global("clients")["type"]["elem"]["kind"], "object");
+            assert_eq!(global("call")["type"]["kind"], "func");
+            assert_eq!(global("call")["type"]["params"][0]["kind"], "object");
+        } else {
+            assert_eq!(global("values")["type"]["kind"], "array");
+            assert_eq!(global("values")["type"]["elem"]["kind"], "f64");
+            assert_eq!(global("pair")["type"]["kind"], "record");
+            assert!(
+                module["functions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|function| {
+                        function["params"][0]["name"] == "values"
+                            && function["params"][0]["type"]["kind"] == "array"
+                            && function["params"][0]["type"]["elem"]["kind"] == "f64"
+                    })
+            );
+        }
+    }
+}
+
+#[test]
+fn public_declaration_constructor_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    fs::write(temp.path().join("api.d.ts"), "export declare class Client { value: number; constructor(); } export declare function construct(value: typeof Client): Client;").unwrap();
+    fs::write(temp.path().join("api.js"), "export class Client { constructor() { this.value = 1; } } export function construct(value) { return new value(); }").unwrap();
+    let input = temp.path().join("main.ts");
+    fs::write(
+        &input,
+        "import { Client, construct } from './api.js'; console.log(construct(Client).value);",
+    )
+    .unwrap();
+    let target = binary(temp.path(), "constructor-abi-boundary");
+    let artifacts = [
+        target.clone(),
+        target.with_extension("rs"),
+        target.with_extension("ir.json"),
+    ];
+    for path in &artifacts {
+        fs::write(path, "preserve").unwrap();
+    }
+    let output = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success()
+            && stderr.contains("SCN1001")
+            && !stderr.contains("SCN9001")
+            && !stderr.contains("panicked"),
+        "{stderr}"
+    );
+    for path in artifacts {
+        assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
     }
 }
