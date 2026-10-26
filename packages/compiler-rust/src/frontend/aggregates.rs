@@ -1016,7 +1016,7 @@ impl Lowerer<'_> {
             return self.relational(node, op);
         }
         if op == "in" {
-            return self.standard_object_presence(node);
+            return self.object_presence(node);
         }
         if matches!(op, "&&" | "||" | "??") {
             return self.logical(node, op);

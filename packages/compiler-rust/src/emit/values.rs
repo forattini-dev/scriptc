@@ -551,6 +551,19 @@ fn own_key_definitions(types: &[Type], module: &Emission<'_>, out: &mut String) 
     }
     out.push_str("_ => runtime::throw_type_error(\"scriptc: own-key reflection requires a native data record\".into()) } }\n");
     out.push_str(include_str!("value_properties_support.rs"));
+    out.push_str(include_str!("value_presence_support.rs"));
+    // Indexed records retain their own storage layout. Membership reads its
+    // live overflow keys without narrowing or reading a possibly absent value.
+    out.push_str("fn native_value_has_key(value: NativeValue, key: runtime::JsString) -> bool { match &value { NativeValue::Object(object) | NativeValue::Record(_, object) => native_value_has_own(value.clone(), key.clone()) || (!object.with(|data| data.null_prototype) && native_object_prototype_has_key(&key)), NativeValue::RawJson(_) => key == \"rawJSON\",\n");
+    for (i, ty) in types.iter().enumerate() {
+        if let Type::Record { shape_id } = ty
+            && !module.records[*shape_id].tuple
+            && !record_storage::shared(&module.records[*shape_id])
+        {
+            writeln!(out, "NativeValue::V{i}(..) => native_value_has_own(value.clone(), key.clone()) || native_object_prototype_has_key(&key),").unwrap();
+        }
+    }
+    out.push_str("_ => runtime::throw_type_error(\"scriptc: in operator requires a native data record; exotic prototype presence is not ported\".into()) } }\n");
     // Stable sorting leaves non-index string keys in insertion order. 2^32-1
     // and noncanonical numeric spellings are ordinary string keys.
     // ToObject/enumerability belongs to Object.keys, not the internal own-key
@@ -624,6 +637,11 @@ pub(super) fn expression(
             expr(&args[0], function, module),
             expr(&args[1], function, module)
         ),
+        Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.hasKey" => format!(
+            "native_value_has_key({}, {})",
+            expr(&args[0], function, module),
+            expr(&args[1], function, module)
+        ),
         Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.objKeys" => {
             format!("native_value_keys({})", expr(&args[0], function, module))
         }
@@ -647,7 +665,7 @@ pub(super) fn expression(
         Expr::DynObjLit { fields, .. } => {
             let fields = fields.iter().map(|f| format!("{{ let key = {}; let value = {}; js_data_set(&mut entries, key, value); }}",expr(&f.key,function,module),expr(&f.value,function,module))).collect::<String>();
             format!(
-                "{{ let mut entries = Vec::new(); {fields} NativeValue::Object(runtime::Gc::new(NativeMap {{ entries }})) }}"
+                "{{ let mut entries = Vec::new(); {fields} NativeValue::Object(runtime::Gc::new(NativeMap {{ null_prototype: false, entries }})) }}"
             )
         }
         Expr::DynArrLit { elems, .. } => format!(

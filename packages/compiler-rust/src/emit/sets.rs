@@ -42,7 +42,7 @@ pub(super) fn expression(
             );
             let seed = seed.as_ref().map(|seed| format!("let seed = {}; let length = runtime::array_len(&seed) as usize; for index in 0..length {{ let value = {} ; {insert} }}", expr(seed, function, module), "runtime::array_get(&seed, index as f64)")).unwrap_or_default();
             format!(
-                "{{ let mut entries: Vec<({ty}, bool)> = Vec::new(); {seed} runtime::Gc::new(NativeMap {{ entries }}) }}"
+                "{{ let mut entries: Vec<({ty}, bool)> = Vec::new(); {seed} runtime::Gc::new(NativeMap {{ null_prototype: false, entries }}) }}"
             )
         }
         Expr::SetIntrinsic {

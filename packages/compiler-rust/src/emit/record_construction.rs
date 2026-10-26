@@ -17,7 +17,7 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     });
     for record in module.records.iter().filter(|r| demanded.contains(&r.id)) {
         let id = record.id;
-        writeln!(out, "fn record_from_own_{id}(template: runtime::Gc<R{id}>, own: NativeValue) -> runtime::Gc<R{id}> {{ let _ = template; let NativeValue::Object(own) = own else {{ runtime::throw_type_error(\"scriptc: own-value plan must be a native object\".into()) }}; let data = runtime::Gc::new(NativeRecordData {{ entries: own.with(|object| object.entries.clone()) }});").unwrap();
+        writeln!(out, "fn record_from_own_{id}(template: runtime::Gc<R{id}>, own: NativeValue) -> runtime::Gc<R{id}> {{ let _ = template; let NativeValue::Object(own) = own else {{ runtime::throw_type_error(\"scriptc: own-value plan must be a native object\".into()) }}; let data = runtime::Gc::new(NativeRecordData {{ null_prototype: false, entries: own.with(|object| object.entries.clone()) }});").unwrap();
         for field in &record.fields {
             let optional = field.r#type == Type::Undefined
                 || matches!(&field.r#type, Type::Union{union_id} if module.unions[*union_id].arms.contains(&Type::Undefined));
@@ -46,6 +46,6 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
                 writeln!(out, "if !keys.iter().any(|key| key == {:?}) {{ runtime::throw_type_error(\"scriptc: missing required record own key\".into()); }}", field.name).unwrap();
             }
         }
-        writeln!(out, "let entries = keys.into_iter().map(|key| {{ let value = native_record_get(&source, &key); (key, value) }}).collect(); runtime::Gc::new(NativeRecordData {{ entries }}) }}").unwrap();
+        writeln!(out, "let entries = keys.into_iter().map(|key| {{ let value = native_record_get(&source, &key); (key, value) }}).collect(); runtime::Gc::new(NativeRecordData {{ null_prototype: false, entries }}) }}").unwrap();
     }
 }

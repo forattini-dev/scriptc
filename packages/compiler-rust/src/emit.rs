@@ -475,7 +475,7 @@ fn expr(value: &Expr, function: &Function, module: &Emission<'_>) -> String {
                     }
                 }).collect::<String>();
                 return format!(
-                    "{{ let mut entries = Vec::new(); {entries} runtime::Gc::new(NativeRecordData {{ entries }}) }}"
+                    "{{ let mut entries = Vec::new(); {entries} runtime::Gc::new(NativeRecordData {{ null_prototype: false, entries }}) }}"
                 );
             }
             let keys = fields

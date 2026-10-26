@@ -34,6 +34,7 @@ impl<T: runtime::Trace + runtime::ClearEdges + 'static> NativeTrace for runtime:
     }
 }
 struct NativeMap<K: NativeTrace + 'static, V: NativeTrace + 'static> {
+    null_prototype: bool,
     entries: Vec<(K, V)>,
 }
 impl<K: NativeTrace + 'static, V: NativeTrace + 'static> runtime::Trace for NativeMap<K, V> {

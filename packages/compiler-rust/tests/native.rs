@@ -446,6 +446,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-number-parsers/aliases.ts",
         "rust-native-number-parsers/order.ts",
         "rust-native-number-parsers/errors.ts",
+        "rust-native-object-presence/records.ts",
+        "rust-native-object-presence/keys.ts",
+        "rust-native-object-presence/effects.ts",
+        "rust-native-object-presence/json.ts",
+        "rust-native-object-presence/groups.ts",
+        "rust-native-object-presence/caught.ts",
+        "rust-native-object-presence/raw.ts",
         "rust-native-presence-guards/strings.ts",
         "rust-native-presence-guards/compound.ts",
         "rust-native-presence-guards/effects.ts",
@@ -4968,14 +4975,6 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
             "object ToPropertyKey for standard object presence is not ported",
         ),
         (
-            "export {}; const JSON = { rawJSON: false }; console.log('stringify' in JSON);",
-            "in operator requires a proven standard JSON object",
-        ),
-        (
-            "const data = {}; console.log('rawJSON' in data);",
-            "in operator requires a proven standard JSON object",
-        ),
-        (
             "// @ts-nocheck\nconst value = JSON.rawJSON('1'); const alias = value; alias.rawJSON = '2';",
             "sloppy raw JSON writes require a native integrity contract",
         ),
@@ -6673,4 +6672,99 @@ fn numeric_parser_boundaries_preserve_existing_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn property_presence_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "property-presence-boundary");
+    for source in [
+        "({toString(){return 'field'}} as any) in {field: 1};",
+        "({toString(){return 'field'}} as unknown as string) in {field: 1};",
+        "const key = Symbol('field'); console.log(key in {[key]: 1});",
+        "console.log('constructor' in {__proto__: null});",
+        "const data = {}; Object.setPrototypeOf(data, {inherited: 1}); console.log('inherited' in data);",
+        "console.log('field' in new Proxy({}, {has(){return true}}));",
+        "console.log('length' in []);",
+        "console.log('size' in new Set());",
+        "console.log('length' in (() => 1));",
+        "class Packet {field = 1} console.log('field' in new Packet());",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn erased_property_presence_refuses_exotic_layouts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "erased-presence-boundary");
+    fs::write(&input, r#"// @ts-nocheck
+function check(value: unknown, key: unknown): void {
+  try { console.log(key in value); }
+  catch (error) {
+    if (!(error instanceof TypeError) || !error.message.includes("exotic prototype presence is not ported")) throw error;
+    console.log("refused");
+  }
+}
+check([], "length"); check([], Symbol.iterator);
+check(() => 1, "length"); check(() => 1, Symbol.iterator);
+check(new Map(), "size"); check(/x/, "source");
+class Packet { value = 1; }
+check(new Packet(), "value");
+"#).unwrap();
+    let output = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new(&target)
+        .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        "refused\n".repeat(7)
+    );
+    assert!(output.stderr.is_empty());
 }

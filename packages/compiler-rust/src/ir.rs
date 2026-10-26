@@ -2567,11 +2567,11 @@ fn validate_function(
                         Err("invalid native object binding source check".into())
                     };
                 }
-                if matches!(r#fn.as_str(), "dyn.hasOwn" | "dyn.objKeys") {
+                if matches!(r#fn.as_str(), "dyn.hasOwn" | "dyn.hasKey" | "dyn.objKeys") {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
                     }
-                    let valid = if r#fn == "dyn.hasOwn" {
+                    let valid = if r#fn != "dyn.objKeys" {
                         args.len() == 2
                             && args[0].ty() == Type::Dyn
                             && args[1].ty() == Type::String
@@ -3859,6 +3859,9 @@ mod tests {
     fn own_key_reflection_validates_the_portable_abi() {
         for (name, valid_args, valid_result) in [
             ("dyn.hasOwn", true, true),
+            ("dyn.hasKey", true, true),
+            ("dyn.hasKey", false, true),
+            ("dyn.hasKey", true, false),
             ("dyn.objKeys", true, true),
             ("dyn.hasOwn", false, true),
             ("dyn.objKeys", true, false),
@@ -3870,7 +3873,7 @@ mod tests {
                 r#type: Type::Dyn,
                 loc: loc.clone(),
             }];
-            if name == "dyn.hasOwn" && valid_args {
+            if name != "dyn.objKeys" && valid_args {
                 args.push(Expr::StrLit {
                     value: "key".into(),
                     r#type: Type::String,
@@ -3883,7 +3886,7 @@ mod tests {
                     args,
                     r#type: if !valid_result {
                         Type::String
-                    } else if name == "dyn.hasOwn" {
+                    } else if name != "dyn.objKeys" {
                         Type::Bool
                     } else {
                         Type::Dyn

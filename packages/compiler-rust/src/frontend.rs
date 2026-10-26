@@ -56,6 +56,7 @@ mod number_constructor;
 mod number_parsers;
 mod number_predicates;
 mod object_methods;
+mod object_presence;
 mod optional_access;
 mod parameter_abi;
 mod parameter_patterns;

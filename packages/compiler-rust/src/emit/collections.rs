@@ -75,7 +75,7 @@ pub(super) fn expression(
                     expr(&pair.key, function, module), expr(&pair.value, function, module), key_equality(key))
             }).collect::<String>();
             format!(
-                "{{ let map: {} = runtime::Gc::new(NativeMap {{ entries: Vec::new() }}); {entries} map }}",
+                "{{ let map: {} = runtime::Gc::new(NativeMap {{ null_prototype: false, entries: Vec::new() }}); {entries} map }}",
                 rust_type(value.ty(), module)
             )
         }

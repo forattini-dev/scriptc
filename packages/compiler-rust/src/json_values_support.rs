@@ -15,11 +15,11 @@ impl runtime::NativeJsonValue for NativeValue {
             runtime::JsonNode::Object(values) => {
                 let mut entries = Vec::new();
                 for (key,value) in values { js_data_set(&mut entries, key, Self::json_from_node(value)); }
-                Self::Object(runtime::Gc::new(NativeMap { entries }))
+                Self::Object(runtime::Gc::new(NativeMap { null_prototype: false, entries }))
             }
         }
     }
-    fn json_root(value: Self) -> Self { Self::Object(runtime::Gc::new(NativeMap { entries: vec![(runtime::JsString::default(), value)] })) }
+    fn json_root(value: Self) -> Self { Self::Object(runtime::Gc::new(NativeMap { null_prototype: false, entries: vec![(runtime::JsString::default(), value)] })) }
     fn json_get(&self, key: &runtime::JsString) -> Self { native_value_get(self.clone(), key.clone()) }
     fn json_define(&self, key: &runtime::JsString, value: Self) {
         match self {

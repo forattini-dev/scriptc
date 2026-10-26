@@ -234,7 +234,7 @@ pub(super) fn closure(
     let name = type_name(ty, module);
     if module.functions[index].captures.is_none() {
         return format!(
-            "FN_{index}.with(|slot| slot.borrow_mut().get_or_insert_with(|| runtime::Gc::new({name}::F{index} {{ properties: Some(runtime::Gc::new(NativeMap {{ entries: Vec::new() }})) }})).clone())"
+            "FN_{index}.with(|slot| slot.borrow_mut().get_or_insert_with(|| runtime::Gc::new({name}::F{index} {{ properties: Some(runtime::Gc::new(NativeMap {{ null_prototype: false, entries: Vec::new() }})) }})).clone())"
         );
     }
     let fields = captures
@@ -244,6 +244,6 @@ pub(super) fn closure(
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "runtime::Gc::new({name}::F{index} {{ properties: Some(runtime::Gc::new(NativeMap {{ entries: Vec::new() }})), {fields} }})"
+        "runtime::Gc::new({name}::F{index} {{ properties: Some(runtime::Gc::new(NativeMap {{ null_prototype: false, entries: Vec::new() }})), {fields} }})"
     )
 }

@@ -32,7 +32,7 @@ import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
 import { emitNativeDeleteDefinitions } from "./property-delete.js";
-import { caughtArrayValues } from "./caught-array-values.js";
+import { caughtReferenceValues } from "./caught-reference-values.js";
 import type { RustClosureShape } from "./model.js";
 import { isSharedRecord, recordCheckName, recordNewName } from "./shared-records.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
@@ -483,11 +483,11 @@ export class RustDynamicEmitter {
     this.context.line(`else if runtime::caught_is::<bool>(&caught) { ${name}::Boolean(runtime::caught_narrow::<bool>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsString>(&caught) { ${name}::String(runtime::caught_narrow::<runtime::JsString>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsSymbol>(&caught) { ${name}::Symbol(runtime::caught_narrow::<runtime::JsSymbol>(&caught)) }`);
-    const caughtArrayAbis = new Set<string>();
-    for (const payload of caughtArrayValues(this.context.module())) {
+    const caughtReferenceAbis = new Set<string>();
+    for (const payload of caughtReferenceValues(this.context.module())) {
       const abi = this.context.rustType(payload.type, payload.loc);
-      if (caughtArrayAbis.has(abi)) continue;
-      caughtArrayAbis.add(abi);
+      if (caughtReferenceAbis.has(abi)) continue;
+      caughtReferenceAbis.add(abi);
       const value = this.dynFrom.emit(payload.type, `runtime::caught_narrow::<${abi}>(&caught)`, payload.loc, "", true);
       this.context.line(`else if runtime::caught_is::<${abi}>(&caught) { ${value} }`);
     }
@@ -518,7 +518,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("property membership"),`);
     this.context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("property membership"),`);
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, false),`);
-    this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()) || runtime::map_prototype(object).is_some_and(|prototype| sc_dyn_has_key(&prototype, key)),`);
+    this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()) || match runtime::map_prototype(object) { Some(prototype) => sc_dyn_has_key(&prototype, key), None => !sc_dyn_is_null_proto(object) && matches!(runtime::JsStringSource::well_formed_utf8(key), Some("constructor" | "__defineGetter__" | "__defineSetter__" | "hasOwnProperty" | "__lookupGetter__" | "__lookupSetter__" | "isPrototypeOf" | "propertyIsEnumerable" | "toString" | "valueOf" | "__proto__" | "toLocaleString")), },`);
     this.context.line(`${name}::Array(array) => key.as_ref() == "length" || runtime::array_property_has(array, key) || sc_dyn_key_index(key).is_some_and(|index| runtime::array_has(array, index as f64)),`);
     this.context.line("_ => false,");
     this.context.popIndent();

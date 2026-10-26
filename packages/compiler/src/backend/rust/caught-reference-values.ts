@@ -1,18 +1,16 @@
 import type { IrModule, IrStmt, IrType, SrcLoc } from "../../ir/ir.js";
 import { typeKey } from "../../ir/ir.js";
 
-/** Inventory compiled array payloads, including throws inside expression
- * sequences and protected regions. Caught values retain their original ABI;
- * conversion uses the same owning array views as ordinary dynamic boxing. */
-export function caughtArrayValues(module: IrModule): { type: IrType; loc: SrcLoc }[] {
-  const records = new Map(module.records?.map(record => [record.id, record]));
+/** Inventory compiled reference payloads at actual throw sites, including
+ * expression sequences and protected regions. Preserve the full payload ABI;
+ * conversion reuses owning array/record views and class identity mirrors. */
+export function caughtReferenceValues(module: IrModule): { type: IrType; loc: SrcLoc }[] {
   const unions = new Map(module.unions?.map(union => [union.id, union]));
-  const hasArrayArm = (type: IrType, seen = new Set<string>()): boolean => {
-    if (type.kind === "array") return true;
-    if (type.kind === "record") return records.get(type.shapeId)?.tuple === true;
+  const hasReferenceArm = (type: IrType, seen = new Set<string>()): boolean => {
+    if (type.kind === "array" || type.kind === "record" || type.kind === "object") return true;
     if (type.kind !== "union" || seen.has(type.unionId)) return false;
     seen.add(type.unionId);
-    return unions.get(type.unionId)?.arms.some(arm => hasArrayArm(arm, seen)) === true;
+    return unions.get(type.unionId)?.arms.some(arm => hasReferenceArm(arm, seen)) === true;
   };
   const values = new Map<string, { type: IrType; loc: SrcLoc }>();
   const visit = (value: unknown): void => {
@@ -22,7 +20,7 @@ export function caughtArrayValues(module: IrModule): { type: IrType; loc: SrcLoc
     if (node.kind === "throw") {
       const statement = value as Extract<IrStmt, { kind: "throw" }>;
       const type = statement.value.type;
-      if (hasArrayArm(type)) {
+      if (hasReferenceArm(type)) {
         values.set(typeKey(type), { type, loc: statement.loc });
       }
     }
