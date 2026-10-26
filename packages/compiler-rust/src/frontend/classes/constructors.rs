@@ -62,16 +62,16 @@ impl Lowerer<'_> {
                     node.name().kind(),
                     SyntaxKind::Identifier | SyntaxKind::ObjectBindingPattern
                 ) || !node.dot_dot_dot_token().is_nil()
-                    || node.modifier_flags().intersects(
-                        ModifierFlags::PUBLIC
-                            | ModifierFlags::PRIVATE
-                            | ModifierFlags::PROTECTED
-                            | ModifierFlags::READONLY,
-                    )
+                    || (parameter_property(node) && node.name().kind() != SyntaxKind::Identifier)
+                    || node
+                        .modifiers()
+                        .nodes()
+                        .into_iter()
+                        .any(|modifier| modifier.kind() == SyntaxKind::Decorator)
                 {
                     return Err(self.refuse(
                         node,
-                        "constructor rest and parameter properties are not ported",
+                        "constructor rest, decorated and binding-pattern properties are not ported",
                     ));
                 }
                 if node.name().kind() == SyntaxKind::ObjectBindingPattern {
@@ -176,7 +176,28 @@ impl Lowerer<'_> {
                     field,
                 )?
             } else {
-                self.expected_expression(field.initializer(), ty)?
+                let initializer = receivers::reference_node(field.initializer());
+                if matches!(
+                    initializer.kind(),
+                    SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression
+                ) && initializer.expression().kind() == SyntaxKind::ThisKeyword
+                {
+                    let value = self.expression(initializer)?;
+                    // A field can observe a later field or a parameter property
+                    // before its assignment. When the destination admits the
+                    // actual owning slot, do not invent a presence proof from
+                    // the checker's declared scalar type.
+                    if let Expr::UnionNarrow { value: source, .. } = &value
+                        && matches!(source.as_ref(), Expr::FieldGet { .. })
+                        && let Ok(value) = self.coerce(source.as_ref().clone(), ty.clone(), field)
+                    {
+                        value
+                    } else {
+                        self.coerce(value, ty, field)?
+                    }
+                } else {
+                    self.expected_expression(field.initializer(), ty)?
+                }
             };
             body.push(Stmt::FieldSet {
                 obj: self.this_expression(field)?,
@@ -187,6 +208,40 @@ impl Lowerer<'_> {
             });
         }
         Ok(body)
+    }
+
+    fn initialize_parameter_properties(
+        &mut self,
+        index: usize,
+        ctor: Node,
+    ) -> Result<Vec<Stmt>, String> {
+        let class_name = self.classes.definitions[index].name.clone();
+        ctor.parameters()
+            .into_iter()
+            .filter(|param| parameter_property(*param))
+            .map(|param| {
+                let field = param.name().text().to_string();
+                let ty = self.field_type(&class_name, &field).unwrap();
+                // Defaults and pre-super assignments belong to the live local,
+                // not the immutable incoming ABI slot. TS access modifiers do
+                // not turn these ordinary own properties into private slots.
+                let symbol = self.parameter_symbol(param);
+                let local = self.resolve_binding(symbol, param.name())?;
+                let value = Expr::VarRef {
+                    local_id: local.id,
+                    r#type: local.r#type,
+                    loc: self.loc(param),
+                };
+                let value = self.coerce(value, ty, param)?;
+                Ok(Stmt::FieldSet {
+                    obj: self.this_expression(param)?,
+                    class_name: class_name.clone(),
+                    field,
+                    value,
+                    loc: self.loc(param),
+                })
+            })
+            .collect()
     }
 
     pub(in crate::frontend) fn lower_constructor(
@@ -288,6 +343,9 @@ impl Lowerer<'_> {
             for (node, param) in ctor.parameters().into_iter().zip(params.iter().skip(1)) {
                 body.extend(self.bind_parameter(Some(node), param)?);
             }
+            if base.is_none() {
+                body.extend(self.initialize_parameter_properties(index, ctor)?);
+            }
             body.extend(self.hoist_local_vars(ctor.body())?);
             let mut super_seen = false;
             for statement in ctor.body().statements() {
@@ -322,6 +380,7 @@ impl Lowerer<'_> {
                     body.push(self.super_call(index, args, call)?);
                     self.instance_this = Some(this.clone());
                     body.extend(self.initialize_fields(index)?);
+                    body.extend(self.initialize_parameter_properties(index, ctor)?);
                     super_seen = true;
                 } else {
                     if statement.kind() == SyntaxKind::ReturnStatement {

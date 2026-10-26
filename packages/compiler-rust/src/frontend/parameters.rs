@@ -7,6 +7,19 @@ pub(super) fn erased_rest(ty: &Type) -> bool {
 }
 
 impl Lowerer<'_> {
+    pub(super) fn parameter_symbol(&mut self, node: Node) -> u32 {
+        if node.parent().kind() == SyntaxKind::Constructor && classes::parameter_property(node) {
+            // The declaration-name symbol denotes the instance property; bare
+            // references in defaults and the constructor body denote a local.
+            self.checker
+                .get_symbols_of_parameter_property_declaration(node, node.name().text())
+                .0
+                .0
+        } else {
+            self.symbol(node.name())
+        }
+    }
+
     /// Unpack a public (...args: any[]) contract without changing callable
     /// identity or exposing its transport vector as a source parameter.
     pub(super) fn bind_erased_rest_formals(
@@ -84,7 +97,7 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn parameter_type(&mut self, node: Node, ty: Type) -> Result<Type, String> {
-        let symbol = self.symbol(node.name());
+        let symbol = self.parameter_symbol(node);
         if node.question_token().is_nil()
             && node.initializer().is_nil()
             && !(self.js_absence_parameters.contains(&symbol)
@@ -231,7 +244,7 @@ impl Lowerer<'_> {
         };
         self.locals.push(local.clone());
         let Some(node) = node else { return Ok(vec![]) };
-        let symbol = self.symbol(node.name());
+        let symbol = self.parameter_symbol(node);
         if param.r#type == Type::Dyn && !node.initializer().is_nil() {
             let value = self.expected_expression(node.initializer(), Type::Dyn)?;
             self.bindings.insert(symbol, local.clone());

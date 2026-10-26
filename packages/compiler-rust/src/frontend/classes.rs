@@ -3,6 +3,15 @@ use super::*;
 use source_frontend::prelude::{SignatureKind, SymbolId, get_source_file_of_node};
 use std::collections::VecDeque;
 
+pub(super) fn parameter_property(node: Node) -> bool {
+    node.modifier_flags().intersects(
+        ModifierFlags::PUBLIC
+            | ModifierFlags::PRIVATE
+            | ModifierFlags::PROTECTED
+            | ModifierFlags::READONLY,
+    )
+}
+
 #[derive(Clone)]
 struct Definition {
     node: Node,
@@ -678,6 +687,27 @@ impl Lowerer<'_> {
             .into_iter()
             .filter(|n| n.kind() == SyntaxKind::Constructor)
         {
+            for param in ctor
+                .parameters()
+                .into_iter()
+                .filter(|param| parameter_property(*param))
+            {
+                if param.name().kind() != SyntaxKind::Identifier {
+                    return Err(self.refuse(
+                        param,
+                        "constructor binding-pattern properties are not ported",
+                    ));
+                }
+                let name = param.name().text().to_string();
+                if self.classes.accessor(index, &name).is_some() {
+                    return Err(
+                        self.refuse(param, "parameter property/accessor shadowing is not ported")
+                    );
+                }
+                if !sources.iter().any(|(field, _)| *field == name) {
+                    sources.push((name, param));
+                }
+            }
             assigned(ctor.body(), &mut sources);
         }
         let contract = self.class_contract(definition.node).cloned();

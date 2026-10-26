@@ -438,6 +438,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-vars/contracts.ts",
         "rust-native-class-values/main.ts",
         "rust-native-class-values/contracts.ts",
+        "rust-native-parameter-properties/values.ts",
+        "rust-native-parameter-properties/order.ts",
+        "rust-native-parameter-properties/errors.ts",
         "rust-native-enums/main.ts",
         "rust-native-callables/contracts.ts",
         "rust-native-callables/cycles.ts",
@@ -632,6 +635,14 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         let normal_cwd = std::env::current_dir().unwrap();
         let expected = Command::new(oracle())
             .env("SCRIPTC_EXEC_FILE_HELPER", &helper)
+            .args(
+                name.starts_with("rust-native-parameter-properties/")
+                    .then_some("--experimental-transform-types"),
+            )
+            .args(
+                name.starts_with("rust-native-parameter-properties/")
+                    .then_some("--disable-warning=ExperimentalWarning"),
+            )
             .arg(&input)
             .envs(process_environment(name, false))
             .env_remove("SCRIPTC_NATIVE_PROCESS_MISSING")
@@ -2824,7 +2835,7 @@ fn ordinary_class_boundaries_preserve_previous_artifacts() {
         "class Box { method() { return 1; } } const unbound = new Box().method; unbound();",
         "class Box { get #value() { return 1; } } new Box();",
         "class Box { ['value'] = 1; } new Box();",
-        "class Box { constructor(public value: number) {} } new Box(1);",
+        "class Box { constructor(...values: number[]) {} } new Box(1);",
         "class Box { constructor() { return {}; } } new Box();",
         "class Box { '__proto__' = 1; } new Box();",
         "class Box { constructor() { if (false) return; } } new Box();",
