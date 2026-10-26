@@ -98,6 +98,11 @@ export function nativeModuleBackendDiagnostics(
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
       return;
     }
+    if (node.kind === "libCall" && node.fn === "regex.replaceCaptures") {
+      feature = "native regex replacement callback (libCall:regex.replaceCaptures)";
+      loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+      return;
+    }
     if (node.kind === "libCall" && node.fn === "dyn.keyDelete") {
       feature = "native property deletion (libCall:dyn.keyDelete)";
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };

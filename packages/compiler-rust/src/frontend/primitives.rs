@@ -180,7 +180,11 @@ impl Lowerer<'_> {
                 .as_ref()
                 .map_or(1, |operation| operation.args.len())
         };
-        for index in 0..count {
+        let callback_replace = regex_replace
+            && values
+                .get(2)
+                .is_some_and(|value| matches!(value.ty(), Type::Func { .. }));
+        for index in 0..if callback_replace { 0 } else { count } {
             let value = if regex_replace && index == 0 {
                 helper.read(&helper.param(1))
             } else if let Some(operation) = string {
@@ -200,6 +204,23 @@ impl Lowerer<'_> {
         // helper call: eliminating it would discard unused argument effects.
         let value = if string_identity {
             helper.read(&helper.param(0))
+        } else if callback_replace {
+            let callback = self.coerce(helper.read(&helper.param(2)), Type::Dyn, node)?;
+            Expr::LibCall {
+                r#fn: "regex.replaceCaptures".into(),
+                args: vec![
+                    helper.read(&helper.param(0)),
+                    helper.read(&helper.param(1)),
+                    callback,
+                    Expr::BoolLit {
+                        value: name == "replaceAll",
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    },
+                ],
+                r#type: Type::String,
+                loc: helper.loc(),
+            }
         } else if regex_replace {
             Expr::RegexIntrinsic {
                 method: name.into(),

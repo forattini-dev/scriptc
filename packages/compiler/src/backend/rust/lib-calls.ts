@@ -1,4 +1,5 @@
 import { emitNativeJsonCall } from "./json-functions.js";
+import { emitRegexReplacement } from "./regex-replacement.js";
 import { emitExecFileCall } from "./exec-file.js";
 import { wellKnownSymbolVariant } from "../../ir/well-known-symbols.js";
 import { emitRustWeakMapCall } from "./weak-maps.js";
@@ -120,6 +121,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   const dynamicCall = emitRustDynamicLibCall(expr, context);
   if (dynamicCall !== null) return dynamicCall;
   const jsonCall = emitNativeJsonCall(expr, context);
+  const regexReplacement = emitRegexReplacement(expr, context);
+  if (regexReplacement !== null) return regexReplacement;
   if (jsonCall !== null) return jsonCall;
   const execFileCall = emitExecFileCall(expr, context);
   if (execFileCall !== null) return execFileCall;

@@ -3924,6 +3924,7 @@ export type IrLibFn =
    * engine exactly like a literal. */
   | "regex.new"
   /** Rust-native RegExp replacement callback, currently the common one-argument `(match) => string` shape. */
+  | "regex.replaceCaptures"
   | "regex.replaceCallback"
   /** structuredClone with a NON-EMPTY transfer array of static values:
    * nothing static is transferable, so the call always throws Node's
@@ -8014,6 +8015,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "error.domClone",
   // new RegExp compiles the pattern eagerly: an invalid pattern or flag
   // throws Node's catchable SyntaxError at construction.
+  "regex.replaceCaptures",
   "regex.new",
   "dyn.keyDelete",
   "dyn.keySet",

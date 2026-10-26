@@ -2548,6 +2548,19 @@ fn validate_function(
                         Err("invalid native text codec operation".into())
                     };
                 }
+                if r#fn == "regex.replaceCaptures" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.iter().map(Expr::ty).collect::<Vec<_>>()
+                        == [Type::String, Type::Regex, Type::Dyn, Type::Bool]
+                        && *r#type == Type::String
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native regex replacement callback".into())
+                    };
+                }
                 if r#fn == "dyn.keyDelete" {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
@@ -5088,6 +5101,71 @@ mod tests {
             assert_eq!(
                 validate(&invalid).unwrap_err(),
                 "invalid native dynamic property deletion"
+            );
+        }
+    }
+
+    #[test]
+    fn regex_replacement_callback_validates_its_owning_abi() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        let operation = Expr::LibCall {
+            r#fn: "regex.replaceCaptures".into(),
+            args: vec![
+                Expr::StrLit {
+                    value: "a".into(),
+                    r#type: Type::String,
+                    loc: loc.clone(),
+                },
+                Expr::RegexLit {
+                    pattern: "(a)".into(),
+                    flags: "g".into(),
+                    r#type: Type::Regex,
+                    loc: loc.clone(),
+                },
+                Expr::DynObjLit {
+                    fields: vec![],
+                    r#type: Type::Dyn,
+                    loc: loc.clone(),
+                },
+                Expr::BoolLit {
+                    value: false,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                },
+            ],
+            r#type: Type::String,
+            loc: loc.clone(),
+        };
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: operation,
+            loc,
+        }];
+        validate(&module).unwrap();
+        for index in 0..5 {
+            let mut invalid = callable_module();
+            invalid.functions.truncate(1);
+            invalid.functions[0].body = module.functions[0].body.clone();
+            let Stmt::Expression {
+                expr: Expr::LibCall { args, r#type, .. },
+                ..
+            } = &mut invalid.functions[0].body[0]
+            else {
+                unreachable!()
+            };
+            match index {
+                0 => {
+                    args.pop();
+                }
+                1 => *r#type = Type::Void,
+                2 => args[1] = args[0].clone(),
+                3 => args[2] = args[0].clone(),
+                _ => args[3] = args[0].clone(),
+            }
+            assert_eq!(
+                validate(&invalid).unwrap_err(),
+                "invalid native regex replacement callback"
             );
         }
     }

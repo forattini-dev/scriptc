@@ -459,32 +459,10 @@ pub fn regex_replace_callback(
     regex: &JsRegex,
     replacement: Rc<dyn Fn(JsString) -> JsString>,
 ) -> JsString {
-    let units: Vec<u16> = subject.encode_utf16().collect();
-    let mut output = Vec::new();
-    let mut next = 0usize;
-    let mut position = if regex.sticky && !regex.global { regex_start_index(regex) } else { 0 };
-    if regex.global { regex.last_index.set(0.0); }
-    while position <= units.len() {
-        let Some(matched) = regex_find(regex, &units, position, regex.sticky) else {
-            if regex.global || regex.sticky { regex.last_index.set(0.0); }
-            break;
-        };
-        let range = matched.range();
-        if regex.global || regex.sticky { regex.last_index.set(range.end as f64); }
-        output.extend_from_slice(&units[next..range.start]);
-        output.extend((replacement(string_from_utf16(&units[range.clone()]))).encode_utf16());
-        next = range.end;
-        if !regex.global { break; }
-        position = if range.start == range.end {
-            advance_string_index(&units, range.end, regex.unicode)
-        } else {
-            range.end
-        };
-    }
-    if regex.global { regex.last_index.set(0.0); }
-    output.extend_from_slice(&units[next..]);
-    string_from_utf16(&output)
+    regex_replace_captures(subject, regex, false, |matched| replacement(matched.matched))
 }
+
+include!("regex_replace.rs");
 
 pub fn regex_split(subject: &JsString, regex: &JsRegex, limit: f64) -> JsArray<JsString> {
     let limit = to_uint32(limit) as usize;

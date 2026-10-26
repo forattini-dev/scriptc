@@ -10,6 +10,13 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
             expr(&args[0], function, module),
             expr(&args[1], function, module)
         ),
+        Expr::LibCall { r#fn, args, .. } if r#fn == "regex.replaceCaptures" => format!(
+            "{{ let subject = {}; let regex = {}; let callback = {}; let require_global = {}; runtime::regex_replace_captures(&subject, &regex, require_global, |matched| {{ let mut args = vec![NativeValue::String(matched.matched)]; args.extend(matched.captures.into_iter().map(|value| value.map(NativeValue::String).unwrap_or(NativeValue::Undefined))); args.push(NativeValue::Number(matched.offset as f64)); args.push(NativeValue::String(matched.input)); if let Some(groups) = matched.groups {{ args.push(NativeValue::Object(runtime::Gc::new(NativeMap {{ entries: groups.into_iter().map(|(key, value)| (key, value.map(NativeValue::String).unwrap_or(NativeValue::Undefined))).collect() }}))); }} native_value_string(native_value_call(callback.clone(), args, \"replacement\")) }}) }}",
+            expr(&args[0], function, module),
+            expr(&args[1], function, module),
+            expr(&args[2], function, module),
+            expr(&args[3], function, module)
+        ),
         Expr::RegexIntrinsic {
             method,
             receiver,

@@ -1128,6 +1128,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.cloneMissing": { argTypes: [], result: DYN },
   "dyn.cloneTransferFail": { argTypes: [], result: DYN },
   "regex.new": { argTypes: [STRING, STRING], result: REGEX },
+  "regex.replaceCaptures": { argTypes: [STRING, REGEX, DYN, BOOL], result: STRING },
   "regex.replaceCallback": { argTypes: [STRING, REGEX, null], result: STRING },
   // node:events EventEmitter: receivers are emitter-hierarchy objects and
   // the chaining forms (on/off/removeAll/setMax) return the receiver's

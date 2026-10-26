@@ -240,6 +240,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-json-functions/identity.ts",
         "rust-native-json-functions/values.ts",
         "rust-native-json-functions/parse.ts",
+        "rust-native-replace-callback/captures.ts",
+        "rust-native-replace-callback/state.ts",
+        "rust-native-replace-callback/order.ts",
+        "rust-native-replace-callback/values.ts",
+        "rust-native-replace-callback/unicode.ts",
+        "rust-native-replace-callback/named.ts",
+        "rust-native-replace-callback/aliases.ts",
         "rust-native-string-index/units.ts",
         "rust-native-string-index/keys.ts",
         "rust-native-string-index/storage.ts",
@@ -5950,6 +5957,48 @@ fn optional_record_view_boundaries_preserve_artifacts() {
                 "{stderr}"
             );
         }
+        for path in artifacts {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn replacement_callback_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "replacement-boundary");
+    for source in [
+        "'a'.replace(/a/, { toString() { return 'x'; } });",
+        "const callback: any = () => 'x'; 'a'.replace(/a/, callback);",
+        "'a'.replace('a', () => 'x');",
+        "'a'.replace(/a/, ...[() => 'x']);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("rs"),
+            target.with_extension("ir.json"),
+        ];
+        for path in &artifacts {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
         for path in artifacts {
             assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
         }

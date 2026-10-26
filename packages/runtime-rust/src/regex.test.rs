@@ -3,6 +3,70 @@ struct RegexCapture(Option<JsString>);
 impl ArrayElement for RegexCapture {}
 
 #[test]
+fn regex_callback_receives_absent_captures_and_utf16_positions() {
+    let regex = regex_new("(?<first>a)|(?<second>b)", "g");
+    let mut offsets = Vec::new();
+    let result = regex_replace_captures(&string("😀a b"), &regex, false, |matched| {
+        offsets.push(matched.offset);
+        assert_eq!(matched.input, string("😀a b"));
+        assert_eq!(matched.captures.len(), 2);
+        let groups = matched.groups.unwrap();
+        assert_eq!(groups.len(), 2);
+        if matched.matched == string("a") {
+            assert_eq!(matched.captures, vec![Some(string("a")), None]);
+        } else {
+            assert_eq!(matched.captures, vec![None, Some(string("b"))]);
+        }
+        string("X")
+    });
+    assert_eq!(result, string("😀X X"));
+    assert_eq!(offsets, [2, 4]);
+}
+
+#[test]
+fn regex_callback_collects_matches_before_user_code_and_keeps_its_last_index() {
+    let regex = regex_new("a", "g");
+    let mut count = 0;
+    let result = regex_replace_captures(&string("aaa"), &regex, false, |matched| {
+        assert_eq!(regex_last_index(&regex), if count == 0 { 0.0 } else { 40.0 + (count - 1) as f64 });
+        count += 1;
+        regex_set_last_index(&regex, 40.0 + matched.offset as f64);
+        string("X")
+    });
+    assert_eq!(result, string("XXX"));
+    assert_eq!(count, 3);
+    assert_eq!(regex_last_index(&regex), 42.0);
+    let thrown = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        regex_replace_captures(&string("aa"), &regex, false, |_| {
+            assert_eq!(regex_last_index(&regex), 0.0);
+            regex_set_last_index(&regex, 99.0);
+            throw_type_error("stop".into())
+        })
+    }));
+    assert!(thrown.is_err());
+    assert_eq!(regex_last_index(&regex), 99.0);
+}
+
+#[test]
+fn regex_callback_empty_matches_advance_and_sticky_out_of_bounds_resets() {
+    for (flags, expected) in [("g", vec![0, 1, 2, 3]), ("gu", vec![0, 2, 3])] {
+        let mut offsets = Vec::new();
+        regex_replace_captures(&string("😀x"), &regex_new("(?:)", flags), false, |matched| {
+            offsets.push(matched.offset); string("|")
+        });
+        assert_eq!(offsets, expected);
+    }
+    let sticky = regex_new("a", "y");
+    regex_set_last_index(&sticky, 99.0);
+    assert_eq!(regex_replace_captures(&string("a"), &sticky, false, |_| panic!("no match")), string("a"));
+    assert_eq!(regex_last_index(&sticky), 0.0);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        regex_replace_captures(&string("a"), &sticky, true, |_| panic!("non-global guard"))
+    }));
+    assert!(result.is_err());
+}
+
+#[test]
 fn regex_source_serializes_literal_syntax_without_changing_matching() {
     for (pattern, expected) in [
         ("/", r"\/"),
