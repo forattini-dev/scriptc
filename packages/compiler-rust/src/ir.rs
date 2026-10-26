@@ -2513,6 +2513,17 @@ fn validate_function(
                         Err("invalid native relational comparison".into())
                     };
                 }
+                if r#fn == "dyn.objectRestCheck" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::Void
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native object binding source check".into())
+                    };
+                }
                 if matches!(r#fn.as_str(), "dyn.hasOwn" | "dyn.objKeys") {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
@@ -5101,6 +5112,59 @@ mod tests {
             assert_eq!(
                 validate(&invalid).unwrap_err(),
                 "invalid native dynamic property deletion"
+            );
+        }
+    }
+
+    #[test]
+    fn object_binding_source_check_requires_one_owning_value_and_no_result() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        let value = Expr::DynObjLit {
+            fields: vec![],
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "dyn.objectRestCheck".into(),
+                args: vec![value],
+                r#type: Type::Void,
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        validate(&module).unwrap();
+        for kind in 0..3 {
+            let mut invalid = callable_module();
+            invalid.functions.truncate(1);
+            invalid.functions[0].body = module.functions[0].body.clone();
+            let Stmt::Expression {
+                expr: Expr::LibCall {
+                    args, r#type, loc, ..
+                },
+                ..
+            } = &mut invalid.functions[0].body[0]
+            else {
+                unreachable!()
+            };
+            match kind {
+                0 => {
+                    args.clear();
+                }
+                1 => *r#type = Type::Dyn,
+                _ => {
+                    args[0] = Expr::StrLit {
+                        value: "wrong".into(),
+                        r#type: Type::String,
+                        loc: loc.clone(),
+                    }
+                }
+            }
+            assert_eq!(
+                validate(&invalid).unwrap_err(),
+                "invalid native object binding source check"
             );
         }
     }

@@ -74,9 +74,11 @@ impl Lowerer<'_> {
             body.extend(self.bind_parameter(Some(node), &formal)?);
             // JS annotations do not prove that an omitted public argument is
             // present. Keep its live value for tests, defaults and captures.
-            let symbol = self.symbol(node.name());
-            self.var_types.insert(symbol, Type::Dyn);
-            self.var_defined.remove(&symbol);
+            if node.name().kind() == SyntaxKind::Identifier {
+                let symbol = self.symbol(node.name());
+                self.var_types.insert(symbol, Type::Dyn);
+                self.var_defined.remove(&symbol);
+            }
         }
         Ok(body)
     }
@@ -215,6 +217,11 @@ impl Lowerer<'_> {
         node: Option<Node>,
         param: &Param,
     ) -> Result<Vec<Stmt>, String> {
+        if let Some(node) = node
+            && node.name().kind() == SyntaxKind::ObjectBindingPattern
+        {
+            return self.bind_object_parameter(node, param);
+        }
         let local = Local {
             id: param.local_id.clone(),
             name: param.name.clone(),

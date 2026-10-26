@@ -240,6 +240,15 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-json-functions/identity.ts",
         "rust-native-json-functions/values.ts",
         "rust-native-json-functions/parse.ts",
+        "rust-native-parameter-patterns/typed.ts",
+        "rust-native-parameter-patterns/order.ts",
+        "rust-native-parameter-patterns/aliases.ts",
+        "rust-native-parameter-patterns/dynamic.ts",
+        "rust-native-parameter-patterns/width.ts",
+        "rust-native-parameter-patterns/callbacks.ts",
+        "rust-native-parameter-patterns/errors.ts",
+        "rust-native-parameter-patterns/imports.ts",
+        "rust-native-parameter-patterns/public.ts",
         "rust-native-replace-callback/captures.ts",
         "rust-native-replace-callback/state.ts",
         "rust-native-replace-callback/order.ts",
@@ -5974,6 +5983,51 @@ fn replacement_callback_boundaries_preserve_artifacts() {
         "const callback: any = () => 'x'; 'a'.replace(/a/, callback);",
         "'a'.replace('a', () => 'x');",
         "'a'.replace(/a/, ...[() => 'x']);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("rs"),
+            target.with_extension("ir.json"),
+        ];
+        for path in &artifacts {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in artifacts {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn object_parameter_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "object-parameter-boundary");
+    for source in [
+        "function f({a: {b}}: {a: {b: number}}): number { return b; } console.log(f({a: {b: 1}}));",
+        "const key = 'a'; function f({[key]: a}: {a: number}): number { return a; } console.log(f({a: 1}));",
+        "function f([a]: number[]): number { return a; } console.log(f([1]));",
+        "function f({length}: string): number { return length; } console.log(f('a'));",
+        "function f({value}: {value: number} | null): number { return value; } console.log(f({value: 1}));",
+        "const value = 9; function f({value = value}: {value?: number}): number { return value; } console.log(f({}));",
+        "function f({first = later, later = 1}: {first?: number; later?: number}): number { return first; } console.log(f({}));",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
         let artifacts = [

@@ -189,10 +189,15 @@ impl Lowerer<'_> {
             return Err(self.refuse(node, "callback rest ABI differs from its native target"));
         }
         for (index, param) in parameters.iter().copied().enumerate() {
-            if param.name().kind() != SyntaxKind::Identifier
-                || (!param.dot_dot_dot_token().is_nil() && (!*rest || index + 1 != types.len()))
+            if !matches!(
+                param.name().kind(),
+                SyntaxKind::Identifier | SyntaxKind::ObjectBindingPattern
+            ) || (!param.dot_dot_dot_token().is_nil() && (!*rest || index + 1 != types.len()))
             {
                 return Err(self.refuse(param, "callback parameter form is not ported"));
+            }
+            if param.name().kind() == SyntaxKind::ObjectBindingPattern {
+                self.validate_object_parameter(param)?;
             }
         }
         let name = format!("lambda{}", self.next_closure);

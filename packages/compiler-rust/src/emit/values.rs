@@ -553,6 +553,10 @@ fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
 
 pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
     Some(match value {
+        Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.objectRestCheck" => format!(
+            "{{ let value = {}; match value {{ NativeValue::Object(_) | NativeValue::Record(..) => (), _ => runtime::throw_error_code(\"scriptc SC1031: checked-dynamic object rest requires an ordinary object without descriptor-defined properties\".into(), \"SC1031\"), }} }}",
+            expr(&args[0], function, module)
+        ),
         Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.compare" => format!(
             "{{ let left = {}; let right = {}; native_value_compare(left, right) }}",
             expr(&args[0], function, module),

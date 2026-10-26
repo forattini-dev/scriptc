@@ -52,6 +52,7 @@ mod namespace_values;
 mod object_methods;
 mod optional_access;
 mod parameter_abi;
+mod parameter_patterns;
 mod parameters;
 mod pipeline;
 mod primitives;
@@ -577,13 +578,18 @@ impl<'a> Lowerer<'a> {
         }
         let mut params = Vec::new();
         for (index, param) in parameters.iter().copied().enumerate() {
-            if param.name().kind() != SyntaxKind::Identifier
-                || (!param.dot_dot_dot_token().is_nil() && index + 1 != parameters.len())
+            if !matches!(
+                param.name().kind(),
+                SyntaxKind::Identifier | SyntaxKind::ObjectBindingPattern
+            ) || (!param.dot_dot_dot_token().is_nil() && index + 1 != parameters.len())
             {
                 return Err(self.refuse(
                     param,
-                    "only native identifier parameters with a terminal rest slot are ported",
+                    "native parameters require identifiers or flat object patterns with a terminal array-rest slot",
                 ));
+            }
+            if param.name().kind() == SyntaxKind::ObjectBindingPattern {
+                self.validate_object_parameter(param)?;
             }
             if unpack_rest {
                 continue;
@@ -595,6 +601,11 @@ impl<'a> Lowerer<'a> {
                         "public JavaScript parameter type has no native representation",
                     )
                 })?
+            } else if param.name().kind() == SyntaxKind::ObjectBindingPattern
+                && parameter_abi::is_javascript(param)
+                && param.type_().is_nil()
+            {
+                Type::Dyn
             } else {
                 self.storage_type(param.name())?
             };

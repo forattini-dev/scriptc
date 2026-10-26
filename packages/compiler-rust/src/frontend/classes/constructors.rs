@@ -58,8 +58,10 @@ impl Lowerer<'_> {
                 return Err(self.refuse(*ctor, "constructor body is required"));
             }
             for (i, node) in ctor.parameters().into_iter().enumerate() {
-                if node.name().kind() != SyntaxKind::Identifier
-                    || !node.dot_dot_dot_token().is_nil()
+                if !matches!(
+                    node.name().kind(),
+                    SyntaxKind::Identifier | SyntaxKind::ObjectBindingPattern
+                ) || !node.dot_dot_dot_token().is_nil()
                     || node.modifier_flags().intersects(
                         ModifierFlags::PUBLIC
                             | ModifierFlags::PRIVATE
@@ -71,6 +73,9 @@ impl Lowerer<'_> {
                         node,
                         "constructor rest and parameter properties are not ported",
                     ));
+                }
+                if node.name().kind() == SyntaxKind::ObjectBindingPattern {
+                    self.validate_object_parameter(node)?;
                 }
                 let ty = if let Some(hint) = self.class_contract(definition.node) {
                     if hint.params.len() != ctor.parameters().len() {
