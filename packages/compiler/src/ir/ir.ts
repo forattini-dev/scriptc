@@ -6324,7 +6324,7 @@ export function canDynCheckTo(
   if (t.kind === "promise") return t.inner.kind === "void" || t.inner.kind === "dyn" || canDynCheckTo(t.inner, getRecord, getUnion);
   if ((t.kind === "map" && t.key.kind === "dyn" && t.value.kind === "dyn") ||
       (t.kind === "set" && t.elem.kind === "dyn") || t.kind === "searchParams") return true;
-  if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
+  if (t.kind === "effect" || t.kind === "date" || t.kind === "regex" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
   if (t.kind === "object" && t.className === "%Error") return true;
   if (isDynTypedRefType(t)) return true;
   if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);

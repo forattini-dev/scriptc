@@ -247,6 +247,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-declaration-abi/generic.ts",
         "rust-native-declaration-abi/errors.ts",
         "rust-native-declaration-abi/hierarchy.ts",
+        "rust-native-regex-functions/identity.ts",
+        "rust-native-regex-functions/receivers.ts",
+        "rust-native-regex-functions/errors.ts",
+        "rust-native-regex-functions/order.ts",
+        "rust-native-regex-functions/shadows.ts",
         "rust-native-function-properties/aliases.ts",
         "rust-native-function-properties/closures.ts",
         "rust-native-function-properties/keys.ts",
@@ -6202,5 +6207,46 @@ fn public_declaration_constructor_boundaries_preserve_artifacts() {
     );
     for path in artifacts {
         assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+    }
+}
+
+#[test]
+fn regexp_method_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    for source in [
+        "const regex = /a/; regex.test = () => false; console.log(regex.test('a'));",
+        "const regex = /a/; regex.exec = () => null; console.log(regex.test('a'));",
+        "const regex = /a/; const exec = regex.exec; console.log(exec('a'));",
+    ] {
+        let input = temp.path().join("main.ts");
+        fs::write(&input, source).unwrap();
+        let target = binary(temp.path(), "regexp-method-boundary");
+        let artifacts = [
+            target.clone(),
+            target.with_extension("rs"),
+            target.with_extension("ir.json"),
+        ];
+        for path in &artifacts {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in artifacts {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
     }
 }

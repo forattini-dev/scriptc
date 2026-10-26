@@ -3,6 +3,82 @@ use super::*;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
 impl Lowerer<'_> {
+    pub(super) fn regex_callable_type(&self, id: TypeId) -> Option<Type> {
+        self.primitive_symbol(self.checker.ty(id).symbol().0, "test", Some("RegExp"))
+            .then(|| Type::Func {
+                rest: false,
+                params: vec![Type::Dyn],
+                ret: Box::new(Type::Bool),
+            })
+    }
+
+    fn regex_test_value(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
+        let symbol = self.symbol(node.name());
+        if !self.primitive_symbol(symbol, "test", Some("RegExp")) {
+            return Err(self.refuse(node, "RegExp.test extraction requires the standard member"));
+        }
+        self.ensure_exception_classes(node)?;
+        let mut method =
+            helpers::Helper::new("regexp_test", vec![Type::Dyn], Type::Bool, self.loc(node));
+        let this = method.local("RegExp receiver", Type::Regex, false);
+        method.declare(
+            &this,
+            Expr::DynCheck {
+                value: Box::new(Expr::LibCall {
+                    r#fn: "dyn.this".into(),
+                    args: vec![],
+                    r#type: Type::Dyn,
+                    loc: method.loc(),
+                }),
+                r#type: Type::Regex,
+                loc: method.loc(),
+            },
+        );
+        method.function.body.push(Stmt::Return {
+            value: Some(Expr::RegexIntrinsic {
+                method: "test".into(),
+                receiver: Box::new(method.read(&this)),
+                args: vec![Expr::ToString {
+                    operand: Box::new(method.read(&method.param(0))),
+                    r#type: Type::String,
+                    loc: method.loc(),
+                }],
+                r#type: Type::Bool,
+                loc: method.loc(),
+            }),
+            loc: method.loc(),
+        });
+        let ty = Type::Func {
+            rest: false,
+            params: vec![Type::Dyn],
+            ret: Box::new(Type::Bool),
+        };
+        let value = Expr::Closure {
+            fn_name: self.install_helper(method.function),
+            captures: vec![],
+            r#type: ty.clone(),
+            loc: self.loc(node),
+        };
+        // Reading a prototype method evaluates the base, but does not bind it.
+        // The capture-free method has one identity shared by all regex values.
+        let mut read = helpers::Helper::new(
+            "regexp_test_get",
+            vec![Type::Regex],
+            ty.clone(),
+            self.loc(node),
+        );
+        read.function.body.push(Stmt::Return {
+            value: Some(value),
+            loc: read.loc(),
+        });
+        Ok(Expr::Call {
+            callee: self.install_helper(read.function),
+            args: vec![receiver],
+            r#type: ty,
+            loc: self.loc(node),
+        })
+    }
+
     fn regex_symbol(&self, symbol: u32) -> bool {
         symbol != 0 && {
             let symbol = self.checker.sym(SymbolId(symbol));
@@ -110,11 +186,6 @@ impl Lowerer<'_> {
             return Ok(None);
         }
         let method = node.name().text();
-        let result = match method {
-            "source" | "flags" => Type::String,
-            "lastIndex" => Type::F64,
-            _ => return Err(self.refuse(node, "RegExp property is not ported")),
-        };
         let receiver = self.expression(node.expression())?;
         if receiver.ty() != Type::Regex {
             return Err(self.refuse(
@@ -122,6 +193,14 @@ impl Lowerer<'_> {
                 "RegExp receiver may be undefined; guard it before use",
             ));
         }
+        if method == "test" {
+            return self.regex_test_value(node, receiver).map(Some);
+        }
+        let result = match method {
+            "source" | "flags" => Type::String,
+            "lastIndex" => Type::F64,
+            _ => return Err(self.refuse(node, "RegExp property is not ported")),
+        };
         Ok(Some(Expr::RegexIntrinsic {
             method: method.into(),
             receiver: Box::new(receiver),

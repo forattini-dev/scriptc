@@ -417,7 +417,12 @@ impl Lowerer<'_> {
             return Ok(None);
         }
         let arguments = node.arguments().into_iter().collect::<Vec<_>>();
-        let value = if let Some(Type::Func { params, ret, rest }) = expected {
+        let source_type = self.checker.get_type_at_location(member.expression());
+        let value = if self.regex_callable_type(source_type).is_some() {
+            // A standard method's owning ABI includes JavaScript argument
+            // conversion; a contextual string signature must not replace it.
+            self.expression(member.expression())?
+        } else if let Some(Type::Func { params, ret, rest }) = expected {
             let prefix = arguments.len().saturating_sub(1);
             let mut slots = Vec::new();
             for argument in arguments.iter().skip(1).take(prefix) {

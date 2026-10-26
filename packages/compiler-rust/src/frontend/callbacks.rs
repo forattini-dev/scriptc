@@ -7,6 +7,7 @@ impl Lowerer<'_> {
         if let Some(ty) = self
             .standard_callable_type(id)
             .or_else(|| self.json_callable_type(id))
+            .or_else(|| self.regex_callable_type(id))
         {
             return Some(ty);
         }

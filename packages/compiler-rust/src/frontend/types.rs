@@ -73,6 +73,9 @@ impl Lowerer<'_> {
         if let Some(ty) = self.json_callable_type(id) {
             return Some(ty);
         }
+        if let Some(ty) = self.regex_callable_type(id) {
+            return Some(ty);
+        }
         if self.data_types.contains(&id) {
             return Some(Type::Dyn);
         }
