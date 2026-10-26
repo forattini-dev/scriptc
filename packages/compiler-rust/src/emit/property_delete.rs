@@ -2,7 +2,7 @@
 use super::*;
 use std::fmt::Write;
 
-pub(super) fn definitions(module: &Module, out: &mut String) {
+pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     out.push_str(r#"
 impl runtime::NativeDeleteValue for NativeValue {
     fn delete_own_property(&self, key: &runtime::JsString) -> runtime::NativeDeleteResult {

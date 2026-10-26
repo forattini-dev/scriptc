@@ -13,7 +13,10 @@ impl Lowerer<'_> {
         {
             Some(Type::Dyn)
         } else {
-            self.type_id(id)
+            self.type_id(id).map(|ty| match ty {
+                Type::Null | Type::Undefined | Type::Void => Type::Dyn,
+                ty => ty,
+            })
         }
     }
 
@@ -288,7 +291,7 @@ impl Lowerer<'_> {
                     .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&source)))
                     .map(|local| local.r#type.clone());
                 if let Some(storage) = storage
-                    && self.optional_storage(&storage)
+                    && (self.optional_storage(&storage) || parameters::erased_rest(&storage))
                 {
                     // Inferred aliases snapshot the represented value, including
                     // lookup absence omitted by the checker's declared type.
@@ -298,6 +301,15 @@ impl Lowerer<'_> {
                     }
                     return Ok(storage);
                 }
+            }
+            if declaration.type_().is_nil()
+                && let Some(storage) = self.owning_bind_type(initial)
+            {
+                self.var_types.entry(symbol).or_insert(storage.clone());
+                if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                    self.module_vars.entry(symbol).or_insert(storage.clone());
+                }
+                return Ok(storage);
             }
             if declaration.type_().is_nil()
                 && initial.kind() == SyntaxKind::CallExpression
@@ -366,6 +378,7 @@ impl Lowerer<'_> {
             ) {
                 let source = self.checker.get_type_at_location(initial.expression());
                 if declaration.type_().is_nil()
+                    && self.standard_callable_type(source).is_none()
                     && matches!(self.type_id(source), Some(Type::Func { .. }))
                 {
                     // An expando property can disappear or change through an

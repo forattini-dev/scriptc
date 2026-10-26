@@ -2,7 +2,7 @@
 use super::*;
 use std::fmt::Write;
 
-pub(super) fn definitions(module: &Module, output: &mut String) {
+pub(super) fn definitions(module: &Emission<'_>, output: &mut String) {
     output.push_str("fn native_exception_string(caught: &runtime::Caught) -> runtime::JsString { if runtime::caught_is::<NativeValue>(caught) { return match runtime::caught_narrow::<NativeValue>(caught) {\n");
     if !module.classes.is_empty() {
         output.push_str("NativeValue::Instance(object) if object.with(|o| o.error.is_some()) => error_string(object),\n");
@@ -31,7 +31,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
 fn region(
     body: &[Stmt],
     function: &Function,
-    module: &Module,
+    module: &Emission<'_>,
     output: &mut String,
     flow: &FlowContext,
 ) {
@@ -50,7 +50,7 @@ fn region(
 pub(super) fn statement(
     stmt: &Stmt,
     function: &Function,
-    module: &Module,
+    module: &Emission<'_>,
     output: &mut String,
     flow: &FlowContext,
 ) {
@@ -115,7 +115,11 @@ pub(super) fn statement(
     writeln!(output, "{jump}, }} }}").unwrap();
 }
 
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     Some(match value {
         Expr::CaughtToDyn { value, .. } => expr(value, function, module),
         Expr::CaughtNarrow { value, r#type, .. } => {

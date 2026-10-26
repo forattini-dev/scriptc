@@ -407,6 +407,39 @@ impl Lowerer<'_> {
     pub(super) fn function_bind(&mut self, node: Node) -> Result<Option<Expr>, String> {
         self.function_bind_expected(node, None)
     }
+    pub(super) fn owning_bind_type(&mut self, node: Node) -> Option<Type> {
+        if node.kind() != SyntaxKind::CallExpression {
+            return None;
+        }
+        let member = node.expression();
+        if member.kind() != SyntaxKind::PropertyAccessExpression || member.name().text() != "bind" {
+            return None;
+        }
+        let symbol = self.symbol(member.name());
+        if !self.primitive_symbol(symbol, "bind", Some("Function"))
+            && !self.primitive_symbol(symbol, "bind", Some("CallableFunction"))
+            && !self.primitive_symbol(symbol, "bind", Some("NewableFunction"))
+        {
+            return None;
+        }
+        let source = receivers::reference_node(member.expression());
+        let symbol = if source.kind() == SyntaxKind::Identifier {
+            self.symbol(source)
+        } else {
+            0
+        };
+        let ty = self
+            .bindings
+            .get(&symbol)
+            .or_else(|| self.module_bindings.get(&symbol))
+            .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
+            .map(|local| local.r#type.clone())
+            .or_else(|| {
+                let source = self.checker.get_type_at_location(source);
+                self.type_id(source)
+            })?;
+        parameters::erased_rest(&ty).then_some(ty)
+    }
     pub(super) fn function_bind_expected(
         &mut self,
         node: Node,
@@ -418,7 +451,9 @@ impl Lowerer<'_> {
         }
         let arguments = node.arguments().into_iter().collect::<Vec<_>>();
         let source_type = self.checker.get_type_at_location(member.expression());
-        let value = if self.regex_callable_type(source_type).is_some()
+        let owning_rest = self.owning_bind_type(node).is_some();
+        let value = if owning_rest
+            || self.regex_callable_type(source_type).is_some()
             || self.number_predicate_type(source_type).is_some()
         {
             // Keep the standard method's owning argument and receiver ABI
@@ -454,9 +489,11 @@ impl Lowerer<'_> {
         let Type::Func { params, ret, rest } = target.ty() else {
             return Err(self.refuse(member, "bind requires a native function"));
         };
+        let erased_rest = parameters::erased_rest(&target.ty());
 
         if arguments.is_empty()
-            || arguments.len() - 1 > params.len().saturating_sub(usize::from(rest))
+            || (!erased_rest
+                && arguments.len() - 1 > params.len().saturating_sub(usize::from(rest)))
         {
             return Err(self.refuse(
                 node,
@@ -466,10 +503,17 @@ impl Lowerer<'_> {
         let this = self.expected_expression(arguments[0], Type::Dyn)?;
         let mut values = vec![target, this];
         let prefix_start = values.len();
-        for (argument, ty) in arguments.iter().skip(1).zip(&params) {
-            values.push(self.expected_expression(*argument, ty.clone())?);
+        for (index, argument) in arguments.iter().skip(1).enumerate() {
+            let ty = if erased_rest {
+                Type::Dyn
+            } else {
+                params[index].clone()
+            };
+            values.push(self.expected_expression(*argument, ty)?);
         }
-        let prefix = arguments.len() - 1;
+        // An owning rest vector is transport, not one source argument slot.
+        // Bound values prepend to that vector; the result keeps its complete ABI.
+        let prefix = if erased_rest { 0 } else { arguments.len() - 1 };
         let result = Type::Func {
             rest,
             params: params[prefix..].to_vec(),

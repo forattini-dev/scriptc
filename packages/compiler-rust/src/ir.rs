@@ -1029,6 +1029,19 @@ impl Module {
             .find(|f| f.name == name)
     }
     fn valid_type(&self, ty: Type, active: &mut Vec<Type>) -> bool {
+        self.valid_type_cached(ty, active, &mut std::collections::HashSet::new())
+    }
+
+    fn valid_type_cached(
+        &self,
+        ty: Type,
+        active: &mut Vec<Type>,
+        proven: &mut std::collections::HashSet<Type>,
+    ) -> bool {
+        if proven.contains(&ty) {
+            return true;
+        }
+
         if let Some(first) = active.iter().position(|current| *current == ty) {
             // A recursive native layout must cross owning heap storage (or a
             // callable ABI). Union payloads alone would form an infinite Rust
@@ -1044,6 +1057,7 @@ impl Module {
                 )
             });
         }
+        let identity = ty.clone();
         active.push(ty.clone());
         let valid = match ty {
             Type::Object { class_name } => self.class(&class_name).is_some(),
@@ -1053,32 +1067,39 @@ impl Module {
                     || params
                         .last()
                         .is_some_and(|p| matches!(p, Type::Array { .. })))
-                    && params.iter().all(|p| self.valid_type(p.clone(), active))
-                    && (*ret == Type::Void || self.valid_type(*ret, active))
+                    && params
+                        .iter()
+                        .all(|p| self.valid_type_cached(p.clone(), active, proven))
+                    && (*ret == Type::Void || self.valid_type_cached(*ret, active, proven))
             }
             Type::Void | Type::Null | Type::Undefined | Type::Caught => false,
             Type::Array { elem } => {
-                !matches!(*elem, Type::Func { .. } | Type::Stats) && self.valid_type(*elem, active)
+                !matches!(*elem, Type::Func { .. } | Type::Stats)
+                    && self.valid_type_cached(*elem, active, proven)
             }
             Type::Bytes { elem } => elem == "u8",
-            Type::Promise { inner } => *inner == Type::Void || self.valid_type(*inner, active),
-            Type::Set { elem } => elem.set_element() && self.valid_type(*elem, active),
+            Type::Promise { inner } => {
+                *inner == Type::Void || self.valid_type_cached(*inner, active, proven)
+            }
+            Type::Set { elem } => {
+                elem.set_element() && self.valid_type_cached(*elem, active, proven)
+            }
             Type::Map { key, value } => {
                 matches!(*key, Type::F64 | Type::String | Type::Dyn)
                     && !matches!(*value, Type::Func { .. } | Type::Map { .. } | Type::Stats)
                     && !matches!(*value, Type::Bytes { .. })
-                    && self.valid_type(*value, active)
+                    && self.valid_type_cached(*value, active, proven)
             }
             Type::Record { shape_id } => self.records.get(shape_id).is_some_and(|r| {
                 r.id == shape_id
                     && r.index_value.as_ref().is_none_or(|v| {
                         r.fields.is_empty()
                             && !matches!(v, Type::Func { .. } | Type::Map { .. } | Type::Stats)
-                            && self.valid_type(v.clone(), active)
+                            && self.valid_type_cached(v.clone(), active, proven)
                     })
                     && r.fields
                         .iter()
-                        .all(|f| self.valid_type(f.r#type.clone(), active))
+                        .all(|f| self.valid_type_cached(f.r#type.clone(), active, proven))
             }),
             Type::Union { union_id } => self.unions.get(union_id).is_some_and(|u| {
                 u.id == union_id
@@ -1101,12 +1122,15 @@ impl Module {
                     && u.arms.iter().all(|arm| {
                         matches!(arm, Type::Null | Type::Undefined)
                             || (!matches!(arm, Type::Union { .. } | Type::Map { .. } | Type::Stats)
-                                && self.valid_type(arm.clone(), active))
+                                && self.valid_type_cached(arm.clone(), active, proven))
                     })
             }),
             _ => true,
         };
         active.pop();
+        if valid {
+            proven.insert(identity);
+        }
         valid
     }
     /// Runtime Error headers are inherited only along the Error chain.
@@ -1119,6 +1143,7 @@ impl Module {
     }
 
     fn validate_layouts(&self) -> Result<(), String> {
+        let mut proven = std::collections::HashSet::new();
         let mut names = std::collections::HashSet::new();
         for class in &self.classes {
             if !names.insert(&class.name) {
@@ -1160,7 +1185,11 @@ impl Module {
                     && (i < header_len
                         || (!field.name.starts_with('%')
                             && !matches!(field.r#type, Type::Func { .. })
-                            && self.valid_type(field.r#type.clone(), &mut vec![])))
+                            && self.valid_type_cached(
+                                field.r#type.clone(),
+                                &mut vec![],
+                                &mut proven,
+                            )))
             }) {
                 return Err("invalid class field layout".into());
             }
@@ -1169,9 +1198,9 @@ impl Module {
             let mut names = r.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>();
             if r.id != id
                 || !names.windows(2).all(|pair| pair[0] < pair[1])
-                || !self.valid_type(Type::Record { shape_id: id }, &mut vec![])
+                || !self.valid_type_cached(Type::Record { shape_id: id }, &mut vec![], &mut proven)
             {
-                return Err("invalid/recursive record layout".into());
+                return Err(format!("invalid/recursive record layout r{id}: {r:?}"));
             }
             if r.tuple
                 && (r.index_value.is_some()
@@ -1195,7 +1224,7 @@ impl Module {
             let mut seen = std::collections::HashSet::new();
             if u.id != id
                 || !u.arms.iter().all(|a| seen.insert(a.clone()))
-                || !self.valid_type(Type::Union { union_id: id }, &mut vec![])
+                || !self.valid_type_cached(Type::Union { union_id: id }, &mut vec![], &mut proven)
             {
                 return Err("invalid/recursive union layout".into());
             }
@@ -5489,6 +5518,79 @@ mod tests {
     }
 
     #[test]
+    fn shared_layout_dags_validate_without_expanding_every_path() {
+        let mut m = callable_module();
+        m.functions.truncate(1);
+        m.records.clear();
+        m.unions.clear();
+        for id in 0..36 {
+            let child = if id == 35 {
+                Type::F64
+            } else {
+                Type::Record { shape_id: id + 1 }
+            };
+            m.records.push(Record {
+                id,
+                fields: vec![
+                    Field {
+                        name: "a".into(),
+                        r#type: child.clone(),
+                    },
+                    Field {
+                        name: "b".into(),
+                        r#type: child,
+                    },
+                ],
+                declared_order: vec!["a".into(), "b".into()],
+                tuple: false,
+                index_value: None,
+            });
+        }
+        assert!(m.validate_layouts().is_ok());
+        // A later IR edit starts a fresh proof; cached child success must not
+        // hide the newly invalid sibling.
+        m.records[35].fields[1].r#type = Type::Object {
+            class_name: "missing".into(),
+        };
+        assert!(
+            m.validate_layouts()
+                .unwrap_err()
+                .starts_with("invalid/recursive record layout")
+        );
+    }
+
+    #[test]
+    fn layout_proofs_keep_missing_siblings_and_unguarded_cycles_invalid() {
+        let mut m = callable_module();
+        m.functions.truncate(1);
+        m.records = vec![Record {
+            id: 0,
+            fields: vec![
+                Field {
+                    name: "a".into(),
+                    r#type: Type::Union { union_id: 0 },
+                },
+                Field {
+                    name: "b".into(),
+                    r#type: Type::Undefined,
+                },
+            ],
+            declared_order: vec!["a".into(), "b".into()],
+            tuple: false,
+            index_value: None,
+        }];
+        m.unions = vec![Union {
+            id: 0,
+            arms: vec![Type::Record { shape_id: 0 }, Type::Undefined],
+        }];
+        assert!(m.validate_layouts().is_err());
+        m.records[0].fields[1].r#type = Type::Dyn;
+        assert!(m.validate_layouts().is_ok());
+        m.unions[0].arms = vec![Type::Union { union_id: 0 }, Type::F64];
+        assert!(m.validate_layouts().is_err());
+    }
+
+    #[test]
     fn indexed_layouts_accept_guarded_cycles_and_reject_incompatible_overflow() {
         let mut m = callable_module();
         m.functions.truncate(1);
@@ -5528,7 +5630,9 @@ mod tests {
             params: vec![],
             ret: Box::new(Type::F64),
         });
-        assert_eq!(validate(&m).unwrap_err(), "invalid/recursive record layout");
+        let error = validate(&m).unwrap_err();
+        assert!(error.starts_with("invalid/recursive record layout r0:"));
+        assert!(error.contains("index_value: Some(Func"));
     }
 
     #[test]

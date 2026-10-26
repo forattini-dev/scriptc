@@ -11,7 +11,7 @@ fn key_equality(ty: &Type) -> &'static str {
     }
 }
 
-fn lookup(option: &str, stored: &Type, result: &Type, module: &Module) -> String {
+fn lookup(option: &str, stored: &Type, result: &Type, module: &Emission<'_>) -> String {
     if *stored == Type::Dyn && *result == Type::Dyn {
         return format!("({option}).unwrap_or(NativeValue::Undefined)");
     }
@@ -45,7 +45,11 @@ fn lookup(option: &str, stored: &Type, result: &Type, module: &Module) -> String
     format!("match {option} {{ Some(value) => {present}, None => U{union_id}::V{undefined}(()) }}")
 }
 
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     Some(match value {
         Expr::ArrayGet { arr, index, .. } => {
             format!(

@@ -1,7 +1,11 @@
 //! Option-valued runtime reads keep the shared string/undefined union ABI.
 use super::*;
 
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     let Expr::LibCall {
         r#fn,
         args,

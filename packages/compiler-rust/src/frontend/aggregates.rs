@@ -203,12 +203,29 @@ impl Lowerer<'_> {
                 || (self.js_absent_fields.contains(&(id, name.clone()))
                     && matches!(ty, Type::String | Type::F64 | Type::Bool))
             {
-                let mut arms = match ty {
-                    Type::Union { union_id } => self.unions[union_id].arms.clone(),
-                    _ => vec![ty],
-                };
-                arms.push(Type::Undefined);
-                ty = self.intern_union(arms)?;
+                if matches!(ty, Type::Union { union_id } if self.unions[union_id].arms.is_empty()) {
+                    // A recursive union is reserved before its arms exist.
+                    // Copying the empty arm list would collapse this field to
+                    // undefined. Retain the reference when its source union
+                    // already owns absence; otherwise refuse this layout query.
+                    if !self.checker.ty(source).flags.intersects(TypeFlags::UNION)
+                        || !self
+                            .checker
+                            .ty(source)
+                            .types()
+                            .iter()
+                            .any(|arm| self.checker.ty(*arm).flags.intersects(TypeFlags::UNDEFINED))
+                    {
+                        return None;
+                    }
+                } else {
+                    let mut arms = match ty {
+                        Type::Union { union_id } => self.unions[union_id].arms.clone(),
+                        _ => vec![ty],
+                    };
+                    arms.push(Type::Undefined);
+                    ty = self.intern_union(arms)?;
+                }
             }
             fields.push(ir::Field { name, r#type: ty });
         }
@@ -1072,6 +1089,21 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             });
         }
+        if matches!(op, "===" | "!==")
+            && matches!(left.ty(), Type::Func { .. })
+            && matches!(right.ty(), Type::Func { .. })
+            && left.ty() != right.ty()
+        {
+            // Function identity is independent of the native call signature.
+            // Use the owning callable identity when no shared typed ABI exists.
+            return Ok(Expr::DynScalarEq {
+                left: Box::new(self.coerce(left, Type::Dyn, node.left())?),
+                right: Box::new(self.coerce(right, Type::Dyn, node.right())?),
+                negated: op == "!==",
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            });
+        }
         if matches!(op, "===" | "!==") {
             if matches!(left.ty(), Type::Func { .. }) {
                 right = self.callable_body(right, node.right())?;
@@ -1183,6 +1215,22 @@ impl Lowerer<'_> {
                     same_value: false,
                     left: Box::new(self.coerce(left, union.clone(), node.left())?),
                     right: Box::new(self.coerce(right, union, node.right())?),
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                });
+            }
+            if matches!(left.ty(), Type::Union { .. })
+                && matches!(right.ty(), Type::Union { .. })
+                && left.ty() != right.ty()
+                && self.dynamic_erasure_reason(&left.ty()).is_none()
+                && self.dynamic_erasure_reason(&right.ty()).is_none()
+            {
+                // Equality observes both complete domains. Projecting one
+                // operand into the other's union could discard a live tag.
+                return Ok(Expr::DynScalarEq {
+                    left: Box::new(self.coerce(left, Type::Dyn, node.left())?),
+                    right: Box::new(self.coerce(right, Type::Dyn, node.right())?),
+                    negated: op == "!==",
                     r#type: Type::Bool,
                     loc: self.loc(node),
                 });

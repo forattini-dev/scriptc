@@ -9,13 +9,13 @@ fn signature(function: &Function) -> Type {
         ret: Box::new(function.call_result()),
     }
 }
-pub(super) fn reads_receiver(ty: &Type, module: &Module) -> bool {
+pub(super) fn reads_receiver(ty: &Type, module: &Emission<'_>) -> bool {
     module
         .functions
         .iter()
         .any(|function| signature(function) == *ty && function.reads_receiver())
 }
-fn types(module: &Module) -> Vec<Type> {
+fn types(module: &Emission<'_>) -> Vec<Type> {
     fn visit(ty: &Type, found: &mut Vec<Type>) {
         match ty {
             Type::Func { params, ret, .. } => {
@@ -65,7 +65,7 @@ fn types(module: &Module) -> Vec<Type> {
     module.visit_expressions(&mut |e| visit(&e.ty(), &mut found));
     found
 }
-pub(super) fn type_name(ty: &Type, module: &Module) -> String {
+pub(super) fn type_name(ty: &Type, module: &Emission<'_>) -> String {
     format!(
         "NativeFunction{}",
         types(module)
@@ -74,7 +74,7 @@ pub(super) fn type_name(ty: &Type, module: &Module) -> String {
             .expect("inventoried native function signature")
     )
 }
-pub(super) fn definitions(module: &Module, output: &mut String) {
+pub(super) fn definitions(module: &Emission<'_>, output: &mut String) {
     for ty in types(module) {
         let Type::Func { params, ret, .. } = &ty else {
             unreachable!()
@@ -220,7 +220,12 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
     }
     output.push_str("}\n");
 }
-pub(super) fn closure(fn_name: &str, captures: &[String], ty: &Type, module: &Module) -> String {
+pub(super) fn closure(
+    fn_name: &str,
+    captures: &[String],
+    ty: &Type,
+    module: &Emission<'_>,
+) -> String {
     let index = module
         .functions
         .iter()

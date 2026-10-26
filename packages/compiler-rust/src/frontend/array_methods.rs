@@ -34,7 +34,7 @@ impl Lowerer<'_> {
         if name == "slice" {
             self.array_slice_values(node, values)
         } else {
-            self.array_some_values(node, values)
+            self.array_predicate_values(node, values, name)
         }
     }
 
@@ -73,13 +73,22 @@ impl Lowerer<'_> {
         })
     }
 
-    fn array_some_values(&mut self, node: Node, values: Vec<Expr>) -> Result<Expr, String> {
+    fn array_predicate_values(
+        &mut self,
+        node: Node,
+        values: Vec<Expr>,
+        method: &str,
+    ) -> Result<Expr, String> {
         if values.len() < 2 || !matches!(values[1].ty(), Type::Func { .. }) {
-            return Err(self.refuse(node, "array.some requires a represented native callback"));
+            return Err(self.refuse(
+                node,
+                &format!("array.{method} requires a represented native callback"),
+            ));
         }
+        let every = method == "every";
         self.ensure_exception_classes(node)?;
         let mut helper = Helper::new(
-            "array_some",
+            &format!("array_{method}"),
             values.iter().map(Expr::ty).collect(),
             Type::Bool,
             self.loc(node),
@@ -112,7 +121,7 @@ impl Lowerer<'_> {
         let call = Expr::DynInvoke {
             recv: Box::new(self.coerce(helper.read(&helper.param(1)), Type::Dyn, node)?),
             method: "call".into(),
-            callee_name: "Array.some callback".into(),
+            callee_name: format!("Array.{method} callback"),
             args: vec![
                 this,
                 element,
@@ -128,7 +137,7 @@ impl Lowerer<'_> {
             loc: helper.loc(),
         };
         let done = Stmt::Return {
-            value: Some(boolean(false)),
+            value: Some(boolean(every)),
             loc: helper.loc(),
         };
         let body = vec![
@@ -169,9 +178,15 @@ impl Lowerer<'_> {
                 loc: helper.loc(),
             },
             Stmt::If {
-                cond: self.condition(call, node)?,
+                cond: Expr::Bin {
+                    op: "===".into(),
+                    left: Box::new(self.condition(call, node)?),
+                    right: Box::new(boolean(!every)),
+                    r#type: Type::Bool,
+                    loc: helper.loc(),
+                },
                 then: vec![Stmt::Return {
-                    value: Some(boolean(true)),
+                    value: Some(boolean(!every)),
                     loc: helper.loc(),
                 }],
                 else_: None,

@@ -16,7 +16,11 @@ pub(super) fn metadata_definitions(types: &[Type], out: &mut String) {
     out.push_str("_ => None, } }\n");
 }
 
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     Some(match value {
         Expr::RegexLit { pattern, flags, .. } => {
             format!("runtime::regex_new({pattern:?}, {flags:?})")

@@ -2,7 +2,7 @@
 use super::*;
 use std::fmt::Write;
 
-pub(super) fn types(module: &Module) -> Vec<Type> {
+pub(super) fn collect_types(module: &Module) -> Vec<Type> {
     fn visit(ty: &Type, out: &mut Vec<Type>) {
         if out.contains(ty) || *ty == Type::Void {
             return;
@@ -96,13 +96,13 @@ pub(super) fn types(module: &Module) -> Vec<Type> {
     module.visit_expressions(&mut |e| visit(&e.ty(), &mut out));
     out
 }
-fn id(ty: &Type, module: &Module) -> usize {
-    types(module)
-        .iter()
-        .position(|t| t == ty)
-        .expect("inventoried native value ABI")
+pub(super) fn types(module: &Emission<'_>) -> Vec<Type> {
+    module.value_types().to_vec()
 }
-fn specialized(ty: &Type, module: &Module) -> bool {
+fn id(ty: &Type, module: &Emission<'_>) -> usize {
+    module.value_type_id(ty)
+}
+fn specialized(ty: &Type, module: &Emission<'_>) -> bool {
     if let Type::Record { shape_id } = ty
         && record_storage::shared(&module.records[*shape_id])
     {
@@ -127,14 +127,14 @@ fn specialized(ty: &Type, module: &Module) -> bool {
             | Type::Stats
     )
 }
-fn boxed(ty: &Type, value: &str, module: &Module) -> String {
+fn boxed(ty: &Type, value: &str, module: &Emission<'_>) -> String {
     format!("native_box_{}({value})", id(ty, module))
 }
-fn checked(ty: &Type, value: &str, module: &Module) -> String {
+fn checked(ty: &Type, value: &str, module: &Emission<'_>) -> String {
     format!("native_check_{}(&({value}))", id(ty, module))
 }
 
-pub(super) fn definitions(module: &Module, out: &mut String) {
+pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     property_delete::definitions(module, out);
     record_construction::definitions(module, out);
     out.push_str(include_str!("../compare_values_support.rs"));
@@ -517,7 +517,7 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
     out.push_str("_ => runtime::throw_type_error(format!(\"{} is not a function\", name)) } }\n");
 }
 
-fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
+fn own_key_definitions(types: &[Type], module: &Emission<'_>, out: &mut String) {
     out.push_str("fn native_function_properties(value: &NativeValue) -> Option<runtime::Gc<NativeRecordData>> { match value {\n");
     for (i, ty) in types.iter().enumerate() {
         if matches!(ty, Type::Func { .. }) {
@@ -571,7 +571,11 @@ fn own_key_definitions(types: &[Type], module: &Module, out: &mut String) {
     out.push_str("_ => native_value_own_keys(&value) }; keys.sort_by_key(|key| key.parse::<u32>().ok().filter(|i| *i != u32::MAX && *key == i.to_string()).map(|i| (0, i)).unwrap_or((1, 0))); NativeValue::Array(runtime::array_new(keys.into_iter().map(NativeValue::String).collect())) }\n");
 }
 
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     Some(match value {
         Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.objectRestCheck" => format!(
             "{{ let value = {}; match value {{ NativeValue::Object(_) | NativeValue::Record(..) => (), _ => runtime::throw_error_code(\"scriptc SC1031: checked-dynamic object rest requires an ordinary object without descriptor-defined properties\".into(), \"SC1031\"), }} }}",
@@ -707,7 +711,7 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
 pub(super) fn promise_expression(
     value: &Expr,
     function: &Function,
-    module: &Module,
+    module: &Emission<'_>,
 ) -> Option<String> {
     let Expr::Intrinsic { name, args, .. } = value else {
         return None;
@@ -723,10 +727,10 @@ pub(super) fn promise_expression(
     Some(format!("native_promise_resolved({value})"))
 }
 
-pub(super) fn box_value(ty: &Type, value: &str, module: &Module) -> String {
+pub(super) fn box_value(ty: &Type, value: &str, module: &Emission<'_>) -> String {
     boxed(ty, value, module)
 }
 
-pub(super) fn checked_value(ty: &Type, value: &str, module: &Module) -> String {
+pub(super) fn checked_value(ty: &Type, value: &str, module: &Emission<'_>) -> String {
     checked(ty, value, module)
 }

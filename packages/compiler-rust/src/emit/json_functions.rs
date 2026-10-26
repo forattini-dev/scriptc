@@ -1,7 +1,7 @@
 //! JSON uses the portable dynamic-value ABI and shared runtime traversal.
 use super::*;
 use std::fmt::Write;
-pub(super) fn definitions(module: &Module, out: &mut String) {
+pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     let mut used = false;
     module.visit_expressions(&mut |expr| {
         if let Expr::LibCall { r#fn, .. } = expr {
@@ -63,7 +63,11 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
     }
     out.push_str("NativeValue::Promise(promise) => runtime::promise_own_keys(promise).into_iter().map(runtime::JsString::from).collect(), _ => Vec::new() } }\n");
 }
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     let Expr::LibCall { r#fn, args, .. } = value else {
         return None;
     };

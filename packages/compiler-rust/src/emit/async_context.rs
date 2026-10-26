@@ -1,7 +1,11 @@
 //! Existing portable AsyncLocalStorage library operations.
 use super::*;
 
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     let Expr::LibCall { r#fn, args, .. } = value else {
         return None;
     };

@@ -8,7 +8,24 @@ pub(super) fn owning_read(value: &Expr) -> bool {
 }
 
 impl Lowerer<'_> {
-    pub(super) fn function_data_key(&self, node: Node, key: &str) -> Result<(), String> {
+    fn constructor_property_guard(&mut self, node: Node) -> Result<(), String> {
+        if matches!(
+            node.kind(),
+            SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression
+        ) {
+            let source = self.checker.get_type_at_location(node.expression());
+            if self.standard_callable_type(source).is_some() {
+                return Err(self.refuse(
+                    node,
+                    "standard constructor properties require their native member adapter",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn function_data_key(&mut self, node: Node, key: &str) -> Result<(), String> {
+        self.constructor_property_guard(node)?;
         if matches!(
             key,
             "name"
@@ -36,7 +53,7 @@ impl Lowerer<'_> {
         Ok(())
     }
 
-    pub(super) fn function_member_key(&self, member: Node) -> Result<(), String> {
+    pub(super) fn function_member_key(&mut self, member: Node) -> Result<(), String> {
         let key = if member.kind() == SyntaxKind::PropertyAccessExpression {
             Some(member.name().text().to_owned())
         } else {
@@ -44,6 +61,8 @@ impl Lowerer<'_> {
         };
         if let Some(key) = key {
             self.function_data_key(member, &key)?;
+        } else {
+            self.constructor_property_guard(member)?;
         }
         Ok(())
     }

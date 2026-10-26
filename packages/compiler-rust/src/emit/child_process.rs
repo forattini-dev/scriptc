@@ -2,7 +2,7 @@
 use super::*;
 use std::fmt::Write;
 
-pub(super) fn definitions(module: &Module, out: &mut String) {
+pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     let mut result = None;
     let mut used = false;
     module.visit_expressions(&mut |expr| {
@@ -33,7 +33,11 @@ pub(super) fn definitions(module: &Module, out: &mut String) {
     }
 }
 
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     let Expr::LibCall {
         r#fn, args, r#type, ..
     } = value

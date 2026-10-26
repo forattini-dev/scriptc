@@ -5,6 +5,8 @@ mod bytes;
 mod child_process;
 mod classes;
 mod collections;
+mod context;
+use context::Emission;
 mod exceptions;
 mod functions;
 mod json_functions;
@@ -21,7 +23,7 @@ mod symbols;
 mod values;
 mod weak_maps;
 
-fn rust_type(ty: Type, module: &Module) -> String {
+fn rust_type(ty: Type, module: &Emission<'_>) -> String {
     match ty {
         Type::Dyn | Type::Caught => "NativeValue",
         Type::Promise { .. } => "runtime::JsPromise<NativeValue>",
@@ -94,6 +96,8 @@ fn function_name(name: &str) -> String {
 
 pub fn rust(module: &Module) -> Result<String, String> {
     crate::ir::validate(module)?;
+    let emission = Emission::new(module);
+    let module = &emission;
     let mut output = String::from(
         "// scriptc native IR v13; engine: none\n#![forbid(unsafe_code)]\n#![allow(unused_parens, unused_mut, unused_variables)]\n",
     );
@@ -301,7 +305,7 @@ pub fn uses_runtime(module: &Module) -> bool {
         })
 }
 
-fn expr(value: &Expr, function: &Function, module: &Module) -> String {
+fn expr(value: &Expr, function: &Function, module: &Emission<'_>) -> String {
     if let Some(value) = exceptions::expression(value, function, module) {
         return value;
     }
@@ -738,13 +742,13 @@ fn expr(value: &Expr, function: &Function, module: &Module) -> String {
     }
 }
 
-fn statement(stmt: &Stmt, function: &Function, module: &Module, output: &mut String) {
+fn statement(stmt: &Stmt, function: &Function, module: &Emission<'_>, output: &mut String) {
     statement_in(stmt, function, module, output, false);
 }
 fn statement_in(
     stmt: &Stmt,
     function: &Function,
-    module: &Module,
+    module: &Emission<'_>,
     output: &mut String,
     protected: bool,
 ) {
@@ -769,7 +773,7 @@ struct FlowContext {
 fn statement_with_flow(
     stmt: &Stmt,
     function: &Function,
-    module: &Module,
+    module: &Emission<'_>,
     output: &mut String,
     flow: &FlowContext,
 ) {

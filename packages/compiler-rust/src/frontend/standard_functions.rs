@@ -19,8 +19,12 @@ impl Lowerer<'_> {
             return None;
         }
         let symbol = self.checker.sym(id);
-        (symbol.name.as_ref() == "StringConstructor"
-            && !symbol.declarations.is_empty()
+        let callable = match symbol.name.as_ref() {
+            "StringConstructor" => string_callable(),
+            "NumberConstructor" => number_constructor::callable(),
+            _ => return None,
+        };
+        (!symbol.declarations.is_empty()
             && symbol.declarations.iter().all(|decl| {
                 decl.kind() == SyntaxKind::InterfaceDeclaration
                     && source_frontend::frontend::bundled::bundled_lib_name(
@@ -29,7 +33,7 @@ impl Lowerer<'_> {
                     )
                     .is_some()
             }))
-        .then(string_callable)
+        .then_some(callable)
     }
 
     fn standard_string(&mut self, node: Node) -> bool {
@@ -40,7 +44,7 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn standard_function_call(&mut self, node: Node) -> Result<Option<Expr>, String> {
-        if self.standard_string(node.expression()) {
+        if self.standard_string(node.expression()) || self.standard_number(node.expression()) {
             self.call_value(node).map(Some)
         } else {
             Ok(None)
@@ -48,6 +52,9 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn standard_function_value(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        if self.standard_number(node) {
+            return self.number_constructor_value(node).map(Some);
+        }
         if !self.standard_string(node) {
             return Ok(None);
         }

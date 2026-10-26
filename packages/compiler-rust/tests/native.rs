@@ -388,6 +388,15 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-builtins/main.ts",
         "rust-native-package/main.ts",
         "rust-native-json/main.ts",
+        "rust-native-number-constructor/values.ts",
+        "rust-native-number-constructor/bigint.ts",
+        "rust-native-number-constructor/aliases.ts",
+        "rust-native-number-constructor/order.ts",
+        "rust-native-number-constructor/bind.ts",
+        "rust-native-number-constructor/layouts.ts",
+        "rust-native-array-every/values.ts",
+        "rust-native-array-every/sparse.ts",
+        "rust-native-array-every/order.ts",
         "rust-native-json-assets/identity.ts",
         "rust-native-json-assets/mutations.ts",
         "rust-native-json-assets/primitives.ts",
@@ -4901,6 +4910,22 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
             "iterable call spreads are not ported",
         ),
         (
+            "const values = [1]; Number(...values);",
+            "iterable call spreads are not ported",
+        ),
+        (
+            "Number.parseInt('12');",
+            "call target has no native representation",
+        ),
+        (
+            "const C = Number; C.isFinite(1);",
+            "standard constructor properties require their native member adapter",
+        ),
+        (
+            "const C = Number; console.log(C['MAX_VALUE']);",
+            "standard constructor properties require their native member adapter",
+        ),
+        (
             "'x'.repeat({ valueOf: () => 1 } as any);",
             "standard numeric arguments require represented primitives",
         ),
@@ -5277,8 +5302,8 @@ fn erased_rest_entry_boundaries_preserve_existing_artifacts() {
     for (declaration, implementation, caller) in [
         (
             "export const f: (...args: any[]) => any;",
-            "export const f = ({ value }) => value;",
-            "import { f } from 'rest-entry'; f({value: 1});",
+            "export const f = ([value]) => value;",
+            "import { f } from 'rest-entry'; f([1]);",
         ),
         (
             "export const f: (...args: number[]) => number;",
@@ -5810,14 +5835,12 @@ fn boxed_primitive_boundaries_preserve_existing_artifacts() {
         "const C = Number; new C(1);",
         "new Number({ valueOf() { return 1; } });",
         "new String({ toString() { return 'one'; } });",
-        "new Number(Symbol('one'));",
         "new String(Symbol('one'));",
         "new Number(...[1]);",
         "class Child extends Number {} new Child(1);",
         "const value = new String('one'); console.log(value.length);",
         "const value = new String('one'); console.log(value['0']);",
         "const value = new Number(1); value.toString();",
-        "new Number(1n);",
         "Number.prototype.valueOf.call(1);",
         "const value = new Number(1); value?.valueOf();",
         "const value = new Number(1); console.log(value['unknown']);",
@@ -6258,9 +6281,13 @@ fn array_sequence_boundaries_preserve_existing_artifacts() {
         "[1].some();",
         "[1].some(1);",
         "[1].some(...[() => true]);",
+        "[1].every();",
+        "[1].every(1);",
+        "[1].every(...[() => true]);",
         "[1].slice({ valueOf() { return 0; } });",
         "function f(value: number[] | undefined) { return value!.slice(); } f(undefined);",
         "function f(value: number[] | undefined) { return value!.some(() => true); } f(undefined);",
+        "function f(value: number[] | undefined) { return value!.every(() => true); } f(undefined);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let artifacts = [

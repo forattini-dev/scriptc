@@ -207,7 +207,24 @@ impl Lowerer<'_> {
         } else {
             let value = helper.read(&helper.param(0));
             match name {
-                "Number" => self.primitive_number(value, node)?,
+                "Number" => {
+                    if self.native_type_contains(&value.ty(), |ty| {
+                        !matches!(
+                            ty,
+                            Type::F64
+                                | Type::Bigint
+                                | Type::String
+                                | Type::Bool
+                                | Type::Symbol
+                                | Type::Null
+                                | Type::Undefined
+                                | Type::Union { .. }
+                        )
+                    }) {
+                        return Err(self.refuse(node, "Number wrapper construction needs represented primitives; object hooks are not ported"));
+                    }
+                    self.number_primitive(value, node)?
+                }
                 "String" => {
                     if !self.native_type_contains(&value.ty(), |t| {
                         !matches!(

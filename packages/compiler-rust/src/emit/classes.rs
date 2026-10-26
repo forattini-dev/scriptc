@@ -2,7 +2,7 @@
 use super::*;
 use std::fmt::Write;
 
-fn undefined(module: &Module, ty: &Type) -> String {
+fn undefined(module: &Emission<'_>, ty: &Type) -> String {
     if *ty == Type::Dyn {
         return "NativeValue::Undefined".into();
     }
@@ -17,7 +17,7 @@ fn undefined(module: &Module, ty: &Type) -> String {
     format!("U{union_id}::V{tag}(())")
 }
 
-pub(super) fn definitions(module: &Module, output: &mut String) {
+pub(super) fn definitions(module: &Emission<'_>, output: &mut String) {
     if module.classes.is_empty() {
         return;
     }
@@ -152,7 +152,11 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
     }
 }
 
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     let class_index = |name: &str| module.classes.iter().position(|c| c.name == name).unwrap();
     Some(match value {
         Expr::VirtualCall {

@@ -32,7 +32,7 @@ fn native_record_set(object: &runtime::Gc<NativeRecordData>, key: runtime::JsStr
     );
 }
 
-pub(super) fn read(ty: &Type, object: &str, field: &str, module: &Module) -> String {
+pub(super) fn read(ty: &Type, object: &str, field: &str, module: &Emission<'_>) -> String {
     values::checked_value(
         ty,
         &format!("native_record_property(&({object}), {field:?})"),
@@ -40,7 +40,7 @@ pub(super) fn read(ty: &Type, object: &str, field: &str, module: &Module) -> Str
     )
 }
 
-pub(super) fn view(value: &Expr, function: &Function, module: &Module) -> String {
+pub(super) fn view(value: &Expr, function: &Function, module: &Emission<'_>) -> String {
     let Expr::LibCall { args, r#type, .. } = value else {
         unreachable!()
     };

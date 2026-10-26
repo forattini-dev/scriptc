@@ -2,7 +2,7 @@
 use super::*;
 use std::fmt::Write;
 
-pub(super) fn definitions(module: &Module, out: &mut String) {
+pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     let mut demanded = std::collections::HashSet::new();
     module.visit_expressions(&mut |expr| {
         if let Expr::LibCall {

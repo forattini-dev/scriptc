@@ -1,7 +1,7 @@
 //! One live slot per module binding, independent of function capture frames.
 use super::*;
 
-fn name(module: &Module, global: &crate::ir::Global) -> String {
+fn name(module: &Emission<'_>, global: &crate::ir::Global) -> String {
     format!(
         "GLOBAL_{}",
         module
@@ -12,7 +12,7 @@ fn name(module: &Module, global: &crate::ir::Global) -> String {
     )
 }
 
-pub(super) fn definitions(module: &Module, output: &mut String) {
+pub(super) fn definitions(module: &Emission<'_>, output: &mut String) {
     for global in &module.globals {
         output.push_str(&format!("thread_local! {{ static {}: std::cell::RefCell<Option<{}>> = const {{ std::cell::RefCell::new(None) }}; }}\n", name(module, global), rust_type(global.r#type.clone(), module)));
     }
@@ -26,7 +26,7 @@ pub(super) fn definitions(module: &Module, output: &mut String) {
     output.push_str("}\n");
 }
 
-pub(super) fn read(module: &Module, global: &crate::ir::Global) -> String {
+pub(super) fn read(module: &Emission<'_>, global: &crate::ir::Global) -> String {
     let message = format!("Cannot access '{}' before initialization", global.name);
     format!(
         "{}.with(|slot| slot.borrow().as_ref().cloned().unwrap_or_else(|| runtime::throw_reference_error({message:?}.into())))",
@@ -35,7 +35,7 @@ pub(super) fn read(module: &Module, global: &crate::ir::Global) -> String {
 }
 
 pub(super) fn write(
-    module: &Module,
+    module: &Emission<'_>,
     function: &Function,
     stmt: &Stmt,
     global: &crate::ir::Global,

@@ -1,7 +1,7 @@
 //! Runtime representations and tracing are emitted from the same owned layouts.
 use super::*;
 
-pub(super) fn definitions(module: &Module, output: &mut String) {
+pub(super) fn definitions(module: &Emission<'_>, output: &mut String) {
     record_storage::definitions(output);
     for record in &module.records {
         if record_storage::shared(record) {

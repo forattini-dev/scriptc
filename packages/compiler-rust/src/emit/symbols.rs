@@ -1,6 +1,10 @@
 use super::*;
 use crate::ir;
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     let Expr::LibCall {
         r#fn, args, r#type, ..
     } = value

@@ -142,10 +142,18 @@ fn execute() -> Result<(), String> {
         );
         return Ok(());
     }
-    let module = frontend::lower(&input, work.path(), project.as_deref())?;
-    ir::validate(&module).map_err(|e| format!("SCN9001: {e}"))?;
-    let json = serde_json::to_vec_pretty(&module).map_err(|e| e.to_string())?;
-    let rust = emit::rust(&module).map_err(|e| format!("SCN9001: {e}"))?;
+    let module = trace_phase("frontend", || {
+        frontend::lower(&input, work.path(), project.as_deref())
+    })?;
+    trace_phase("IR validation", || {
+        ir::validate(&module).map_err(|e| format!("SCN9001: {e}"))
+    })?;
+    let json = trace_phase("IR serialization", || {
+        serde_json::to_vec_pretty(&module).map_err(|e| e.to_string())
+    })?;
+    let rust = trace_phase("Rust emission", || {
+        emit::rust(&module).map_err(|e| format!("SCN9001: {e}"))
+    })?;
     let (ir_path, rust_path, binary_path) = match kind.as_str() {
         "ir" => {
             atomic_write(&out, &json)?;
@@ -160,7 +168,9 @@ fn execute() -> Result<(), String> {
             let rust_path = out.with_extension("rs");
             // Compile before publishing any artifacts. A failed build leaves
             // previous successful outputs intact.
-            let binary = compile(&rust, work.path(), emit::uses_runtime(&module))?;
+            let binary = trace_phase("Cargo", || {
+                compile(&rust, work.path(), emit::uses_runtime(&module))
+            })?;
             let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
             fs::copy(&binary, staged.path()).map_err(|e| e.to_string())?;
             staged.flush().map_err(|e| e.to_string())?;
@@ -185,6 +195,21 @@ fn execute() -> Result<(), String> {
         "irPath": ir_path, "rustPath": rust_path, "binaryPath": binary_path })
     );
     Ok(())
+}
+
+fn trace_phase<T>(name: &str, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    if !std::env::var("SCRIPTC_TRACE_PHASES").is_ok_and(|value| value == "1") {
+        return work();
+    }
+    eprintln!("scriptc: {name} started");
+    let start = std::time::Instant::now();
+    let result = work();
+    eprintln!(
+        "scriptc: {name} {} ({} ms)",
+        if result.is_ok() { "finished" } else { "failed" },
+        start.elapsed().as_millis()
+    );
+    result
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {

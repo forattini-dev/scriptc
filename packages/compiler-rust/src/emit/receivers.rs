@@ -25,7 +25,7 @@ pub(super) fn call(
     args: &[Expr],
     dynamic_name: Option<&str>,
     function: &Function,
-    module: &Module,
+    module: &Emission<'_>,
 ) -> String {
     // Preserve the typed ABI when none of its targets observes a receiver.
     // In particular, data records containing typed Sets need no dynamic mirror.

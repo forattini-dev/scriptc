@@ -1,7 +1,11 @@
 //! Set operations use the same traced owning storage as native maps.
 use super::*;
 
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     let equality = |elem: &Type| {
         if *elem == Type::F64 {
             "a == b || (a.is_nan() && b.is_nan())"

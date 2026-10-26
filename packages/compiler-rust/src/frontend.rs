@@ -52,6 +52,7 @@ mod loops;
 mod module_metadata;
 mod modules;
 mod namespace_values;
+mod number_constructor;
 mod number_predicates;
 mod object_methods;
 mod optional_access;

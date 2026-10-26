@@ -1,6 +1,10 @@
 //! Owned u8 views reuse the shared portable bytes ABI.
 use super::*;
-pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> Option<String> {
+pub(super) fn expression(
+    value: &Expr,
+    function: &Function,
+    module: &Emission<'_>,
+) -> Option<String> {
     let emit = |v: &Expr| expr(v, function, module);
     Some(match value {
         Expr::BytesNew { source, .. } => match source.as_deref() {
