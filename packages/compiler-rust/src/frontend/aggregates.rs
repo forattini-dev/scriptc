@@ -882,6 +882,9 @@ impl Lowerer<'_> {
             return self.array_length(node, obj);
         }
         if matches!(obj.ty(), Type::Union { .. }) {
+            if self.nullable_record(&obj.ty()).is_some() {
+                return self.nullable_record_get(node, obj);
+            }
             return self.union_record_get(node, obj, node.name().text());
         }
         if matches!(obj.ty(), Type::Map { .. }) && node.name().text() == "size" {
@@ -893,7 +896,10 @@ impl Lowerer<'_> {
         let Type::Record { shape_id } = obj.ty() else {
             return Err(self.refuse(
                 node,
-                "property receiver has no closed record representation",
+                &format!(
+                    "property receiver has no closed record representation: {:?}",
+                    obj.ty()
+                ),
             ));
         };
         if self.records[shape_id].tuple && node.name().text() == "length" {
@@ -951,6 +957,10 @@ impl Lowerer<'_> {
             return Err(self.refuse(member, "ordinary prototype writes are not ported"));
         }
         let obj = self.expression(member.expression())?;
+        let obj = self.live_member_receiver(member.expression(), obj);
+        if self.nullable_record(&obj.ty()).is_some() {
+            return self.nullable_record_set(node, obj);
+        }
         if obj.ty() == Type::Dyn
             || matches!(obj.ty(), Type::Func { .. })
             || matches!(obj.ty(), Type::Array { elem } if *elem == Type::Dyn)
@@ -998,15 +1008,7 @@ impl Lowerer<'_> {
             return Err(self.refuse(node, "dynamic prototype writes are not ported"));
         }
         let value = self.expected_expression(node.right(), Type::Dyn)?;
-        Ok(Stmt::Expression {
-            expr: Expr::LibCall {
-                r#fn: "dyn.keySet".into(),
-                args: vec![obj, key, value],
-                r#type: Type::Void,
-                loc: self.loc(node),
-            },
-            loc: self.loc(node),
-        })
+        self.checked_dynamic_property_set(node, obj, key, value)
     }
 
     pub(super) fn binary(&mut self, node: Node, op: &str) -> Result<Expr, String> {

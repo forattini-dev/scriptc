@@ -63,6 +63,7 @@ mod pipeline;
 mod primitives;
 mod process;
 mod promises;
+mod property_access;
 mod property_keys;
 mod receivers;
 mod record_construction;

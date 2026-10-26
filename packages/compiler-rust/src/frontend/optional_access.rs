@@ -22,8 +22,19 @@ impl Lowerer<'_> {
             // writes invalidate these facts before the next receiver read.
             return value;
         }
+        if let Expr::DynCheck { value: source, .. } = &value
+            && matches!(source.as_ref(), Expr::DynKeyGet { value: receiver, .. } if !matches!(receiver.as_ref(), Expr::DynFrom { .. }))
+        {
+            // A data slot can be retagged through another owning alias. Member
+            // lookup observes its current value, not a scalar checker guess.
+            // A boxed typed container still owns its element contract (for
+            // example a represented regex capture); retain that checked view.
+            return source.as_ref().clone();
+        }
         if let Expr::UnionNarrow { value: source, .. } = &value
-            && (self.array_view(&source.ty()) || self.string_view(&source.ty()))
+            && (self.array_view(&source.ty())
+                || self.string_view(&source.ty())
+                || self.nullable_record(&source.ty()).is_some())
         {
             // A checker refinement can outlive an alias/callback mutation.
             // Keep the actual nullable receiver for the property read.

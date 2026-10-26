@@ -389,6 +389,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-package/main.ts",
         "rust-native-json/main.ts",
         "rust-native-number-constructor/values.ts",
+        "rust-native-object-storage/grow.mjs",
+        "rust-native-object-storage/modules.mjs",
+        "rust-native-object-storage/nullable.ts",
+        "rust-native-object-storage/order.ts",
+        "rust-native-object-storage/dynamic-order.mjs",
+        "rust-native-object-storage/contracts.ts",
+        "rust-native-object-storage/captures.ts",
         "rust-native-number-constructor/bigint.ts",
         "rust-native-number-constructor/aliases.ts",
         "rust-native-number-constructor/order.ts",
@@ -6553,4 +6560,59 @@ fn survey_keeps_other_entries_when_one_source_is_missing() {
     assert_eq!(report["irAccepted"], 1);
     assert_eq!(report["probes"][0]["status"], "tool-failure");
     assert_eq!(report["probes"][1]["status"], "ir-accepted");
+}
+
+#[test]
+fn object_storage_preserves_contextual_and_published_contracts() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("contracts.ir.json");
+    let output = Command::new(compiler())
+        .arg("build")
+        .arg(root().join("tests/corpus/rust-native-object-storage/contracts.ts"))
+        .args(["--no-engine", "--emit", "ir", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let module: serde_json::Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+    let global = |name: &str| {
+        module["globals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["name"] == name)
+            .unwrap()
+    };
+    assert_eq!(global("store")["type"]["kind"], "dyn");
+    for name in ["fixed", "typed"] {
+        assert_eq!(global(name)["type"]["kind"], "record", "{name}");
+    }
+    for (extension, source) in [
+        ("ts", "// @ts-nocheck\nconst value = {}; value.extra = 1;"),
+        (
+            "mjs",
+            "// @ts-nocheck\n/** @type {{known?: number}} */ const value = {}; value.extra = 1;",
+        ),
+    ] {
+        let input = temp.path().join(format!("context.{extension}"));
+        fs::write(&input, source).unwrap();
+        let previous = fs::read(&target).unwrap();
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "contextual contract was erased: {source}"
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("SCN1001"));
+        assert_eq!(fs::read(&target).unwrap(), previous);
+    }
 }
