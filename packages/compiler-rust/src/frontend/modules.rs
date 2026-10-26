@@ -58,22 +58,6 @@ impl ModulePlan {
             requires: HashMap::new(),
         };
         plan.visit(checker, entry, &mut HashSet::new(), &mut HashSet::new())?;
-        // The existing ESM primitive reader does not materialize module identity.
-        // Keep this combination fenced until both loaders share that contract.
-        for binding in &plan.bindings {
-            if let ImportBinding::Json { node, path, file } = binding
-                && plan
-                    .requires
-                    .values()
-                    .any(|target| source_file_info(*target).file_name == *path)
-            {
-                return Err(refusal(
-                    file,
-                    *node,
-                    "mixed ESM/CommonJS JSON loading needs shared materialization",
-                ));
-            }
-        }
         plan.schedule(checker, entry, &mut HashSet::new());
         Ok(plan)
     }
@@ -96,10 +80,7 @@ impl ModulePlan {
                     continue;
                 }
                 let target = checker.sym(symbol).value_declaration;
-                if !target.is_nil()
-                    && target.kind() == SyntaxKind::SourceFile
-                    && !source_file_info(target).file_name.ends_with(".json")
-                {
+                if !target.is_nil() && target.kind() == SyntaxKind::SourceFile {
                     self.schedule(checker, target, visited);
                 }
             }

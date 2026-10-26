@@ -481,6 +481,9 @@ fn is_javascript(path: &str) -> bool {
 
 impl Lowerer<'_> {
     pub(super) fn declared(&self, node: Node) -> Option<&Hint> {
+        if node.is_nil() {
+            return None;
+        }
         self.declarations.get(&Key::of(node))
     }
     pub(super) fn class_contract(&self, node: Node) -> Option<&ClassHint> {

@@ -324,6 +324,13 @@ impl Lowerer<'_> {
             });
         }
         let value = self.expression(node)?;
+        if let Expr::DynCheck { value: source, .. } = &value
+            && matches!(source.as_ref(), Expr::DynKeyGet { .. })
+        {
+            // Equality and presence observe the current property tag. A
+            // checker scalar view may be stale after an alias mutates it.
+            return Ok(source.as_ref().clone());
+        }
         if let Expr::UnionNarrow { value: source, .. } = &value
             && matches!(source.ty(), Type::Union { union_id } if self.unions[union_id].arms.iter().any(|arm| matches!(arm, Type::Null | Type::Undefined)))
         {

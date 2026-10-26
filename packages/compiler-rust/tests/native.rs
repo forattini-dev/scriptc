@@ -388,6 +388,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-builtins/main.ts",
         "rust-native-package/main.ts",
         "rust-native-json/main.ts",
+        "rust-native-json-assets/identity.ts",
+        "rust-native-json-assets/mutations.ts",
+        "rust-native-json-assets/primitives.ts",
+        "rust-native-json-assets/roots.ts",
+        "rust-native-json-assets/order.ts",
         "rust-native-builtins/runtime-types-only.ts",
         "rust-native-builtins/process-import.ts",
         "rust-native-cycles/main.ts",
@@ -1072,35 +1077,43 @@ fn json_require_boundaries_preserve_previous_artifacts() {
         }
     }
     fs::write(&data, r#"{"value":1}"#).unwrap();
-    fs::write(
-        temp.path().join("bridge.cjs"),
-        "const data = require('./data.json'); exports.data = data;",
-    )
-    .unwrap();
     fs::write(temp.path().join("package.json"), r#"{"type":"module"}"#).unwrap();
-    let input = temp.path().join("mixed.js");
-    fs::write(&input, "import data from './data.json' with { type: 'json' }; import bridge from './bridge.cjs'; console.log(data === bridge.data);").unwrap();
-    let result = Command::new(compiler())
-        .arg("build")
-        .arg(&input)
-        .arg("--no-engine")
-        .arg("--out")
-        .arg(&target)
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(
-        !result.status.success()
-            && stderr.contains("SCN1001")
-            && stderr.contains("shared materialization"),
-        "{stderr}"
-    );
-    for path in [
-        &target,
-        &target.with_extension("ir.json"),
-        &target.with_extension("rs"),
+    let input = temp.path().join("unsupported.js");
+    for (source, reason) in [
+        (
+            "import * as data from './data.json' with {type:'json'}; console.log(data);",
+            "only JSON default imports",
+        ),
+        (
+            "import {value} from './data.json' with {type:'json'}; console.log(value);",
+            "only JSON default imports",
+        ),
+        (
+            "export {default} from './data.json' with {type:'json'};",
+            "JSON re-exports",
+        ),
     ] {
-        assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        fs::write(&input, source).unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .arg("--no-engine")
+            .arg("--out")
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001") && stderr.contains(reason),
+            "{stderr}"
+        );
+        for path in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
     }
 }
 
@@ -2292,7 +2305,7 @@ fn module_slots_check_tdz_on_reads_writes_defaults_and_cycles() {
 #[test]
 fn emit_modes_and_paths_with_spaces_preserve_sources_and_failed_outputs() {
     let temp = tempfile::tempdir().unwrap();
-    let input = temp.path().join("aÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o entry.ts");
+    let input = temp.path().join("aÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o entry.ts");
     fs::write(&input, "console.log('ok', 42);").unwrap();
     for (kind, extension) in [("ir", "json"), ("rust", "rs")] {
         let target = temp.path().join(format!("result.{extension}"));
@@ -2476,7 +2489,7 @@ fn concurrent_native_builds_share_dependencies_without_binary_collisions() {
 }
 
 #[test]
-fn json_aggregate_mutations_are_refused_without_publishing_artifacts() {
+fn json_aggregate_mutations_use_shared_owning_values() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(temp.path().join("package.json"), "{\"type\":\"module\"}").unwrap();
     fs::write(temp.path().join("data.json"), "{\"version\":\"1.0.0\"}").unwrap();
@@ -2488,14 +2501,19 @@ fn json_aggregate_mutations_are_refused_without_publishing_artifacts() {
         .arg(input)
         .arg("--project")
         .arg(root().join("tests/corpus/rust-native-json/tsconfig.json"))
+        .arg("--no-engine")
         .arg("--out")
         .arg(&target)
         .output()
         .unwrap();
-    assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("SCN1001"));
-    assert!(!target.exists());
-    assert!(!target.with_extension("ir.json").exists());
+    success(&result);
+    let metadata: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(metadata["compiler"], "rust");
+    assert_eq!(metadata["engine"], "none");
+    let actual = Command::new(&target).output().unwrap();
+    success(&actual);
+    assert_eq!(actual.stdout, b"changed\n");
+    assert!(actual.stderr.is_empty());
 }
 
 #[test]
@@ -4643,7 +4661,9 @@ fn unsupported_recursive_layouts_preserve_previous_artifacts() {
 fn module_metadata_keeps_source_paths_after_changing_working_directory() {
     let temp = tempfile::tempdir().unwrap();
     metadata_project(temp.path());
-    let input = temp.path().join("source # % cafÃƒÆ’Ã‚Â©.mts");
+    let input = temp
+        .path()
+        .join("source # % cafÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©.mts");
     fs::write(&input, "import { fileURLToPath } from 'node:url'; console.log(import.meta.url); console.log(import.meta.filename); console.log(import.meta.dirname); console.log(fileURLToPath(import.meta.url));").unwrap();
     let target = binary(temp.path(), "different-output-name");
     success(
@@ -5000,7 +5020,7 @@ fn utf16_instance_keys_do_not_alias_empty_fields() {
         r#"
 class EmptyField { "": string = "present"; }
 function read(value: unknown, key: string): unknown { return (value as any)[key]; }
-const high = "ÃƒÂ°Ã…Â¸Ã‹Å“Ã¢â€šÂ¬".slice(0, 1);
+const high = "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬".slice(0, 1);
 const object = new EmptyField();
 console.log("keys", read(object, "") === "present", read(object, high) === undefined);
 "#,

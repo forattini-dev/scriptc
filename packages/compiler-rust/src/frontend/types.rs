@@ -221,6 +221,9 @@ impl Lowerer<'_> {
         if let Some(binding) = self.commonjs_binding(node) {
             return Ok(binding.r#type);
         }
+        if let Some(ty) = self.json_import_type(node) {
+            return Ok(ty);
+        }
         if matches!(self.commonjs_import(node), Some((_, None))) {
             return Ok(Type::Dyn);
         }
@@ -248,6 +251,9 @@ impl Lowerer<'_> {
         })
     }
     pub(super) fn storage_type(&mut self, node: Node) -> Result<Type, String> {
+        if let Some(ty) = self.json_import_type(node) {
+            return Ok(ty);
+        }
         let symbol = self.symbol(node);
         if self.data_bindings.contains(&symbol) {
             return Ok(Type::Dyn);

@@ -209,6 +209,19 @@ impl Lowerer<'_> {
             .copied()
             .filter(|f| source_file_info(*f).file_name.ends_with(".json"))
             .collect::<Vec<_>>();
+        // ESM and require edges materialize one owning JSON module instance.
+        for binding in &plan.bindings {
+            if let modules::ImportBinding::Json { node, .. } = binding {
+                let symbol = self
+                    .checker
+                    .get_symbol_at_location(node.module_specifier(), false);
+                let target = self.checker.sym(symbol).value_declaration;
+                if target.is_nil() || target.kind() != SyntaxKind::SourceFile {
+                    return Err(self.refuse(*node, "JSON import has no resolved source asset"));
+                }
+                json_files.push(target);
+            }
+        }
         json_files.sort_by_key(|f| source_file_info(*f).file_name.to_string());
         json_files.dedup();
         files.extend(json_files);
@@ -355,10 +368,60 @@ impl Lowerer<'_> {
         Ok(())
     }
 
+    pub(super) fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
+        if node.kind() != SyntaxKind::ImportDeclaration {
+            return Err(self.refuse(
+                node,
+                "JSON re-exports require an explicit module binding contract",
+            ));
+        }
+        let clause = node.import_clause();
+        if clause.is_nil() {
+            return Ok(());
+        }
+        if clause.name().is_nil() || !clause.named_bindings().is_nil() {
+            return Err(self.refuse(node, "only JSON default imports are ported"));
+        }
+        let index = *self
+            .commonjs
+            .files
+            .get(file)
+            .ok_or_else(|| self.refuse(node, "JSON import has no materialized module cache"))?;
+        let name = clause.name();
+        self.commonjs_alias(name, index, None);
+        let symbol = self.checker.get_symbol_at_location(name, false).0;
+        self.json_imports.insert(symbol);
+        if matches!(
+            self.commonjs.instances[index].json,
+            Some(json_modules::DataValue::Object(_) | json_modules::DataValue::Array(_))
+        ) {
+            self.data_bindings.insert(symbol);
+        }
+        let source = self.checker.get_type_at_location(name);
+        if self.checker.ty(source).flags.intersects(TypeFlags::OBJECT) {
+            self.data_types.insert(source);
+        }
+        Ok(())
+    }
+
     fn commonjs_alias(&mut self, node: Node, index: usize, key: Option<String>) {
         let symbol = self.checker.get_symbol_at_location(node, false).0;
         let local = self.commonjs_global(node.text(), Type::Dyn);
         self.commonjs.imports.insert(symbol, (index, key, local));
+    }
+
+    pub(super) fn json_import_type(&mut self, node: Node) -> Option<Type> {
+        let (index, key) = self.commonjs_import(node)?;
+        let symbol = self.checker.get_symbol_at_location(node, false).0;
+        if key.is_some() || !self.json_imports.contains(&symbol) {
+            return None;
+        }
+        Some(match self.commonjs.instances[index].json.as_ref()? {
+            json_modules::DataValue::Number(_) => Type::F64,
+            json_modules::DataValue::String(_) => Type::String,
+            json_modules::DataValue::Bool(_) => Type::Bool,
+            _ => Type::Dyn,
+        })
     }
 
     pub(super) fn commonjs_import(&mut self, node: Node) -> Option<(usize, Option<String>)> {
@@ -418,7 +481,7 @@ impl Lowerer<'_> {
             let symbol = self.checker.get_symbol_at_location(node, false).0;
             let local = self.commonjs.imports[&symbol].2.clone();
             let value = self.commonjs_read(&local, node);
-            let value = if key.is_some() {
+            let value = if key.is_some() || self.json_imports.contains(&symbol) {
                 let target = self.ty(node)?;
                 if matches!(
                     target,

@@ -167,7 +167,7 @@ struct Lowerer<'a> {
     native_namespaces: HashMap<u32, &'static str>,
     native_local_symbols: HashSet<u32>,
     ambiguous_native_targets: HashSet<u32>,
-    json_imports: HashMap<u32, serde_json::Value>,
+    json_imports: HashSet<u32>,
     records: Vec<ir::Record>,
     unions: Vec<ir::Union>,
     types: type_graph::TypeCache,
@@ -216,7 +216,7 @@ impl<'a> Lowerer<'a> {
             native_namespaces: HashMap::new(),
             native_local_symbols: HashSet::new(),
             ambiguous_native_targets: HashSet::new(),
-            json_imports: HashMap::new(),
+            json_imports: HashSet::new(),
             records: Vec::new(),
             unions: Vec::new(),
             types: type_graph::TypeCache::default(),
@@ -248,56 +248,6 @@ impl<'a> Lowerer<'a> {
             receiver_calls: Vec::new(),
         }
     }
-    fn json_import(&mut self, node: Node, file: &str) -> Result<(), String> {
-        let clause = node.import_clause();
-        if clause.is_nil() {
-            return Ok(());
-        }
-        let mut default_only = true;
-        clause.for_each_child(&mut |child: Node| {
-            if child.kind() != SyntaxKind::Identifier {
-                default_only = false;
-            }
-            false
-        });
-        if !default_only || clause.name().is_nil() {
-            return Err(self.refuse(node, "only JSON default imports are ported"));
-        }
-        let bytes = std::fs::read(file).map_err(|e| format!("SCN0001: JSON import {file}: {e}"))?;
-        let value = serde_json::from_slice(&bytes)
-            .map_err(|e| self.refuse(node, &format!("JSON value is not representable: {e}")))?;
-        let symbol = self.symbol(clause.name());
-        if symbol == 0 {
-            return Err(self.refuse(node, "JSON import has no resolved default symbol"));
-        }
-        self.json_imports.insert(symbol, value);
-        Ok(())
-    }
-
-    fn json_value(&mut self, node: Node) -> Option<serde_json::Value> {
-        match node.kind() {
-            SyntaxKind::Identifier => {
-                let symbol = self.symbol(node);
-                self.json_imports.get(&symbol).cloned()
-            }
-            SyntaxKind::PropertyAccessExpression => self
-                .json_value(node.expression())?
-                .get(node.name().text())
-                .cloned(),
-            _ => None,
-        }
-    }
-
-    fn json_expression(&self, node: Node, value: serde_json::Value) -> Result<Expr, String> {
-        let loc = self.loc(node);
-        match value {
-            serde_json::Value::String(value) => Ok(Expr::StrLit { value, r#type: Type::String, loc }),
-            serde_json::Value::Bool(value) => Ok(Expr::BoolLit { value, r#type: Type::Bool, loc }),
-            serde_json::Value::Number(value) => Ok(Expr::NumLit { value: value.as_f64().ok_or_else(|| self.refuse(node, "JSON number is not representable"))?, spelling: None, r#type: Type::F64, loc }),
-            _ => Err(self.refuse(node, "JSON objects/arrays/null need native aggregate lowering; only primitive field reads are ported")),
-        }
-    }
-
     fn bind_native_namespace(&mut self, node: Node, module: &'static str) {
         let local = self.checker.get_symbol_at_location(node, false).0;
         let target = self.symbol(node);
@@ -1148,9 +1098,6 @@ impl<'a> Lowerer<'a> {
         }
         if let Some(value) = self.namespace_property(node)? {
             return Ok(value);
-        }
-        if let Some(value) = self.json_value(node) {
-            return self.json_expression(node, value);
         }
         let loc = self.loc(node);
         match node.kind() {
