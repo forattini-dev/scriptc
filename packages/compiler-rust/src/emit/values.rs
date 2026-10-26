@@ -415,7 +415,7 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
             && **elem != Type::Dyn
         {
             let value = boxed(elem, "runtime::array_get(&array, index as f64)", module);
-            writeln!(out, "NativeValue::V{i}(array) => {{ if key == \"length\" {{ NativeValue::Number(runtime::array_len(&array)) }} else if let Ok(index) = key.parse::<usize>() {{ if key == index.to_string() && (index as f64) < runtime::array_len(&array) {{ {value} }} else {{ NativeValue::Undefined }} }} else {{ native_value_missing_kind(&key, \"array\") }} }},").unwrap();
+            writeln!(out, "NativeValue::V{i}(array) => {{ if key == \"length\" {{ NativeValue::Number(runtime::array_len(&array)) }} else if let Ok(index) = key.parse::<usize>() {{ if key == index.to_string() && runtime::array_state(&array, index as f64) == 1.0 {{ {value} }} else {{ NativeValue::Undefined }} }} else {{ native_value_missing_kind(&key, \"array\") }} }},").unwrap();
         }
     }
     if !module.classes.is_empty() {

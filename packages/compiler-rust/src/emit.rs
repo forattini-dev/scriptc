@@ -250,7 +250,10 @@ pub fn uses_runtime(module: &Module) -> bool {
     fn body(stmts: &[Stmt]) -> bool {
         stmts.iter().any(|stmt| match stmt {
             Stmt::Break { .. } | Stmt::Continue { .. } => false,
-            Stmt::FieldSet { .. } | Stmt::Throw { .. } | Stmt::TryCatch { .. } => true,
+            Stmt::FieldSet { .. }
+            | Stmt::Throw { .. }
+            | Stmt::TryCatch { .. }
+            | Stmt::ArraySetLength { .. } => true,
             Stmt::RecordKeySet {
                 obj, key, value, ..
             } => expr(obj) || expr(key) || expr(value),
@@ -807,6 +810,15 @@ fn statement_with_flow(
                 expr(obj, function, module),
                 expr(value, function, module),
                 field_name(field)
+            )
+            .unwrap();
+        }
+        Stmt::ArraySetLength { arr, length, .. } => {
+            writeln!(
+                output,
+                "{{ let array = {}; let length = {}; runtime::array_set_length(&array, length); }}",
+                expr(arr, function, module),
+                expr(length, function, module)
             )
             .unwrap();
         }

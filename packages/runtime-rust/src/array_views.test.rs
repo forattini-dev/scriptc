@@ -80,3 +80,33 @@ fn mapped_array_backing_edges_are_collectible() {
     finish();
     assert_eq!(live_heap_objects(), 0);
 }
+
+#[test]
+fn mapped_arrays_retain_live_holes_undefined_and_sparse_keys_without_decoding() {
+    ARRAY_VIEW_READS.with(|count| count.set(0));
+    let source = array_new(vec![1.0, 2.0, 3.0]);
+    let view = array_mapped(source.clone(), mapped_number, mapped_string);
+    let nested = array_mapped(view.clone(), |value| value, |value| value);
+    array_delete(&source, 1.0);
+    array_set_undefined(&source, 2.0);
+    array_set_length(&source, 5.0);
+    for array in [&view, &nested] {
+        assert_eq!(array_len(array), 5.0);
+        assert_eq!((array_state(array, 0.0), array_state(array, 1.0), array_state(array, 2.0), array_state(array, 4.0)), (1.0, 0.0, 2.0, 0.0));
+        assert!(!array_has(array, 1.0));
+        assert!(array_has(array, 2.0));
+        assert_eq!(array_next_present(array, 1.0), 2.0);
+        assert_eq!(array_next_present(array, 3.0), 5.0);
+        assert_eq!(array_own_index_keys(array), vec![string("0"), string("2")]);
+    }
+    ARRAY_VIEW_READS.with(|count| assert_eq!(count.get(), 0));
+    array_set(&source, 1.0, 9.0);
+    assert_eq!(array_state(&nested, 1.0), 1.0);
+    assert_eq!(array_get(&nested, 1.0), string("9"));
+    array_set_length(&source, 1.0);
+    assert_eq!(array_next_present(&nested, 1.0), 1.0);
+    assert_eq!(array_own_index_keys(&nested), vec![string("0")]);
+    drop((source, view, nested));
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}

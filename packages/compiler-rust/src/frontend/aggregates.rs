@@ -961,6 +961,14 @@ impl Lowerer<'_> {
         if self.nullable_record(&obj.ty()).is_some() {
             return self.nullable_record_set(node, obj);
         }
+        if member.name().text() == "length" && matches!(obj.ty(), Type::Array { .. }) {
+            let length = self.expected_expression(node.right(), Type::F64)?;
+            return Ok(Stmt::ArraySetLength {
+                arr: obj,
+                length,
+                loc: self.loc(node),
+            });
+        }
         if obj.ty() == Type::Dyn
             || matches!(obj.ty(), Type::Func { .. })
             || matches!(obj.ty(), Type::Array { elem } if *elem == Type::Dyn)

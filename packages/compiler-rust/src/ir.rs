@@ -767,6 +767,11 @@ impl Expr {
     rename_all_fields = "camelCase"
 )]
 pub enum Stmt {
+    ArraySetLength {
+        arr: Expr,
+        length: Expr,
+        loc: Loc,
+    },
     Break {
         loc: Loc,
     },
@@ -2953,6 +2958,13 @@ fn validate_function(
                     }
                 }
                 Stmt::RecordKeySet { .. } => return Err("mixed keyed writes are not ported".into()),
+                Stmt::ArraySetLength { arr, length, .. } => {
+                    expr(arr, locals, initialized, functions, module)?;
+                    expr(length, locals, initialized, functions, module)?;
+                    if !matches!(arr.ty(), Type::Array { .. }) || length.ty() != Type::F64 {
+                        return Err("invalid array length write".into());
+                    }
+                }
                 Stmt::RecordSet {
                     obj,
                     shape_id,
@@ -4902,6 +4914,49 @@ mod tests {
         m.records[0].tuple = true;
         m.records[0].index_value = Some(Type::F64);
         assert!(validate(&m).is_err());
+    }
+
+    #[test]
+    fn array_length_writes_validate_receiver_and_numeric_length() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        m.functions[0].body = vec![Stmt::ArraySetLength {
+            arr: Expr::ArrayLit {
+                elems: vec![],
+                r#type: Type::Array {
+                    elem: Box::new(Type::F64),
+                },
+                loc: loc.clone(),
+            },
+            length: Expr::NumLit {
+                value: 3.0,
+                spelling: None,
+                r#type: Type::F64,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        validate(&m).unwrap();
+        assert_eq!(
+            serde_json::to_value(&m.functions[0].body[0]).unwrap()["kind"],
+            "arraySetLength"
+        );
+        if let Stmt::ArraySetLength { length, .. } = &mut m.functions[0].body[0] {
+            *length = Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc: loc.clone(),
+            };
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid array length write");
+        if let Stmt::ArraySetLength { arr, .. } = &mut m.functions[0].body[0] {
+            *arr = Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc,
+            };
+        }
+        assert_eq!(validate(&m).unwrap_err(), "invalid array length write");
     }
 
     #[test]

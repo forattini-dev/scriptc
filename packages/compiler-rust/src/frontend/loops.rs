@@ -176,7 +176,9 @@ impl Lowerer<'_> {
         let mut parent = node.parent();
         while !parent.is_nil() {
             match parent.kind() {
-                SyntaxKind::WhileStatement | SyntaxKind::ForStatement => {
+                SyntaxKind::WhileStatement
+                | SyntaxKind::ForStatement
+                | SyntaxKind::ForOfStatement => {
                     return Ok(if node.kind() == SyntaxKind::BreakStatement {
                         Stmt::Break {
                             loc: self.loc(node),
@@ -196,7 +198,6 @@ impl Lowerer<'_> {
                 | SyntaxKind::SetAccessor
                 | SyntaxKind::SourceFile
                 | SyntaxKind::SwitchStatement
-                | SyntaxKind::ForOfStatement
                 | SyntaxKind::ForInStatement
                 | SyntaxKind::DoStatement => break,
                 _ => parent = parent.parent(),

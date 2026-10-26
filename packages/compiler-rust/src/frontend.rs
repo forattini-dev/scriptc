@@ -40,6 +40,7 @@ mod exceptions;
 mod filesystem;
 mod filesystem_reads;
 mod filesystem_writes;
+mod for_of;
 mod function_properties;
 mod function_reflection;
 mod functions;
@@ -768,6 +769,7 @@ impl<'a> Lowerer<'a> {
             SyntaxKind::TryStatement => return self.try_statement(node),
             SyntaxKind::WhileStatement => return self.while_statement(node),
             SyntaxKind::ForStatement => return self.for_statement(node),
+            SyntaxKind::ForOfStatement => return self.for_of_statement(node),
             SyntaxKind::BreakStatement | SyntaxKind::ContinueStatement => self.loop_jump(node)?,
             SyntaxKind::ThrowStatement => {
                 let value = self.expression(node.expression())?;

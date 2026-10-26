@@ -2,7 +2,7 @@ import { isRegexCaptureRow } from "../../ir/regex-captures.js";
 import { rustJsString } from "./string-literals.js";
 import { emitNativeMapFrom } from "./native-map-values.js";
 import { nativeArrayViewSupported, nativeIndexedRecordValue } from "../../ir/native-record.js";
-import { emitNativeArrayFrom } from "./native-array-values.js";
+import { emitNativeArrayFrom, nativeOptionalArrayViewSupported } from "./native-array-values.js";
 import type { IrType, SrcLoc } from "../../ir/ir.js";
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/ir.js";
 import { mangleField } from "../mangle.js";
@@ -117,7 +117,7 @@ export class RustDynamicFromEmitter {
         return `${name}::${this.context.dynFunctionVariant(shape)}(${value}, ${rustJsString(functionName, text => this.context.rustString(text))}, runtime::map_new())`;
       }
       case "array": {
-        if (nativeArrayViewSupported(type, id => this.context.records.get(id), id => this.context.union(id, loc)) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayFrom(type, value, name,
+        if (nativeArrayViewSupported(type, id => this.context.records.get(id), id => this.context.union(id, loc)) || nativeOptionalArrayViewSupported(type, id => this.context.union(id, loc)) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayFrom(type, value, name,
           (element, item) => this.emit(element, item, loc), (element, item) => this.check(element, item, loc));
         const source = this.context.nextTemporary();
         const output = this.context.nextTemporary();

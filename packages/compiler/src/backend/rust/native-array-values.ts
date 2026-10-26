@@ -1,8 +1,17 @@
 import type { RustExpressionContext } from "./expression-context.js";
-import type { IrExpr, IrType } from "../../ir/ir.js";
+import type { IrExpr, IrType, IrUnionDef } from "../../ir/ir.js";
 
 type ArrayType = Extract<IrType, { kind: "array" }>;
 type Convert = (type: IrType, value: string, path?: string) => string;
+
+/** Optional primitive elements keep a live view, including sparse metadata.
+ * Other unions still require their own owning representation contract. */
+export function nativeOptionalArrayViewSupported(type: IrType, union: (id: string) => IrUnionDef | undefined): boolean {
+  if (type.kind !== "array" || type.elem.kind !== "union") return false;
+  const arms = union(type.elem.unionId)?.arms;
+  return arms !== undefined && arms.some(arm => arm.kind === "undefinedT") &&
+    arms.every(arm => ["f64", "bool", "string", "undefinedT", "nullT"].includes(arm.kind));
+}
 
 /** Recover the original dynamic storage on a return crossing; otherwise
  * project the typed storage. Both callbacks are capture-free Rust functions. */
@@ -27,7 +36,7 @@ export function emitNativeArrayCheck(type: ArrayType, value: string, dyn: string
   return `{ let sc_value = ${value}; let sc_path = ${path}; match sc_value { ${dyn}::Array(sc_array) => ` +
     `runtime::array_mapped_source(&sc_array).unwrap_or_else(|| { ` +
     `${guard}let mut sc_index = 0.0; while sc_index < runtime::array_len(&sc_array) { ` +
-    `let sc_item = runtime::array_get(&sc_array, sc_index); let _ = ${validate}; sc_index += 1.0; } ` +
+    `let sc_item = if runtime::array_state(&sc_array, sc_index) == 1.0 { runtime::array_get(&sc_array, sc_index) } else { ${dyn}::Undefined }; let _ = ${validate}; sc_index += 1.0; } ` +
     `${guardEnd}runtime::array_mapped(sc_array, |sc_item| ${read}, |sc_item| ${write}) }), ` +
     `sc_other => sc_dyn_check_fail_at("array", &sc_other, sc_path), } }`;
 }

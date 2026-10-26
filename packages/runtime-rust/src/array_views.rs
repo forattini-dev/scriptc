@@ -8,6 +8,9 @@ trait ArrayView<T: ArrayElement>: Trace {
     fn regex_metadata(&self) -> Option<(f64, JsString)>;
     fn regex_groups(&self) -> Option<Vec<(JsString, usize)>>;
     fn len(&self) -> f64;
+    fn state(&self, index: f64) -> f64;
+    fn next_present(&self, start: f64) -> f64;
+    fn own_index_keys(&self) -> Vec<JsString>;
     fn get(&self, index: f64) -> T;
     fn set(&self, index: f64, value: T);
     fn push(&self, value: T) -> f64;
@@ -37,6 +40,9 @@ impl<S: ArrayElement, T: ArrayElement> ArrayView<T> for MappedArray<S, T> {
     fn regex_metadata(&self) -> Option<(f64, JsString)> { array_regex_metadata(&self.source) }
     fn regex_groups(&self) -> Option<Vec<(JsString, usize)>> { array_regex_groups(&self.source) }
     fn len(&self) -> f64 { array_len(&self.source) }
+    fn state(&self, index: f64) -> f64 { array_state(&self.source, index) }
+    fn next_present(&self, start: f64) -> f64 { array_next_present(&self.source, start) }
+    fn own_index_keys(&self) -> Vec<JsString> { array_own_index_keys(&self.source) }
     fn get(&self, index: f64) -> T { (self.read)(array_get(&self.source, index)) }
     fn set(&self, index: f64, value: T) { array_set(&self.source, index, (self.write)(value)); }
     fn push(&self, value: T) -> f64 { array_push(&self.source, (self.write)(value)) }

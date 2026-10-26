@@ -453,6 +453,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-object-presence/groups.ts",
         "rust-native-object-presence/caught.ts",
         "rust-native-object-presence/raw.ts",
+        "rust-native-for-of/values.ts",
+        "rust-native-for-of/mutations.ts",
+        "rust-native-for-of/captures.ts",
+        "rust-native-for-of/strings.ts",
+        "rust-native-for-of/control.ts",
         "rust-native-presence-guards/strings.ts",
         "rust-native-presence-guards/compound.ts",
         "rust-native-presence-guards/effects.ts",
@@ -6733,6 +6738,7 @@ function check(value: unknown, key: unknown): void {
     console.log("refused");
   }
 }
+
 check([], "length"); check([], Symbol.iterator);
 check(() => 1, "length"); check(() => 1, Symbol.iterator);
 check(new Map(), "size"); check(/x/, "source");
@@ -6767,4 +6773,53 @@ check(new Packet(), "value");
         "refused\n".repeat(7)
     );
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn for_of_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "for-of-boundary");
+    for source in [
+        "for (var value of [1]) console.log(value);",
+        "let value = 0; for (value of [1]) console.log(value);",
+        "for (const [value] of [[1]]) console.log(value);",
+        "for (const {value} of [{value: 1}]) console.log(value);",
+        "async function run(){ for await (const value of [1]) console.log(value); } run();",
+        "function run(value: unknown) { for (const item of value) console.log(item); } run([1]);",
+        "for (const value of new Set([1])) console.log(value);",
+        "for (const value of new Map([[1, 2]])) console.log(value);",
+        "for (const value of [] as const) console.log(value);",
+        "const array = [1]; array[Symbol.iterator] = () => ({next: () => ({done: true})}); for (const value of array) console.log(value);",
+        "outer: for (const value of [1]) { break outer; }",
+        "for (const value of [1]) { const fn = () => { continue; }; fn(); }",
+        "for (const value of [1]) { const fn = () => { break; }; fn(); }",
+        "for (const value of value) console.log(value);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
 }

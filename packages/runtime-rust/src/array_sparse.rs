@@ -27,6 +27,7 @@ pub fn array_get<T: ArrayElement>(array: &JsArray<T>, index: f64) -> T {
 }
 
 pub fn array_next_present<T: ArrayElement>(array: &JsArray<T>, start: f64) -> f64 {
+    if let Some(view) = array_view(array) { return view.next_present(start); }
     let len = array_len(array);
     if start.is_nan() || start >= len {
         return len;
@@ -189,6 +190,7 @@ pub fn array_includes_missing_by<T: ArrayElement>(
 /// Enumerable indexed properties, excluding holes and the array's length.
 /// Sparse length growth must not allocate or scan the missing index range.
 pub fn array_own_index_keys<T: ArrayElement>(array: &JsArray<T>) -> Vec<JsString> {
+    if let Some(view) = array_view(array) { return view.own_index_keys(); }
     array.with(|data| {
         let mut indices = if let Some(view) = &data.view {
             (0..view.len() as usize).collect::<Vec<_>>()

@@ -9,7 +9,7 @@ import { sharedDiscriminatedUnion, discriminatedUnionCheck } from "./discriminat
 import { emitNativeUnionCheck } from "./native-union-check.js";
 import { emitNativeMapCheck } from "./native-map-values.js";
 import { nativeArrayCheckSupported, nativeIndexedRecordValue, nativeTupleCheckSupported } from "../../ir/native-record.js";
-import { emitNativeArrayCheck } from "./native-array-values.js";
+import { emitNativeArrayCheck, nativeOptionalArrayViewSupported } from "./native-array-values.js";
 import { emitRustDynamicErrorAndCloneHelpers } from "./dynamic-error-clone.js";
 import { emitRustDynamicIslandSupport } from "./dynamic-island.js";
 import type { IrType, SrcLoc } from "../../ir/ir.js";
@@ -1178,7 +1178,7 @@ export class RustDynamicEmitter {
       }
       case "array": {
         const name = this.context.dynTypeName();
-        if (nativeArrayCheckSupported(type, id => this.context.records.get(id), id => this.context.union(id, loc)) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayCheck(type, value, name,
+        if (nativeArrayCheckSupported(type, id => this.context.records.get(id), id => this.context.union(id, loc)) || nativeOptionalArrayViewSupported(type, id => this.context.union(id, loc)) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayCheck(type, value, name,
           (element, item) => this.emitDynFromValue(element, item, loc), (element, item, itemPath) => this.emitDynCheckValue(element, item, loc, itemPath), path, recursiveNativeReference(type, id => this.context.records.get(id), id => this.context.union(id, loc)) ? typeKey(type) : undefined);
         if (type.elem.kind === "dyn" || type.elem.kind === "jsval") {
           return `match ${value} { ${name}::Array(array) => array, value => sc_dyn_check_fail_at("array", &value, ${path}) }`;

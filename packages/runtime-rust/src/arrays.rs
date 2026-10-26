@@ -284,7 +284,7 @@ pub fn array_has<T: ArrayElement>(array: &JsArray<T>, index: f64) -> bool {
     if index < 0.0 || index.fract() != 0.0 || index.is_nan() || index >= array_len(array) {
         return false;
     }
-    array.with(|data| data.view.is_some() || data.slot_state(index as usize) != ARRAY_HOLE)
+    array_state(array, index) != f64::from(ARRAY_HOLE)
 }
 
 /// The IR's slot state: 0 hole/missing, 1 value, 2 present undefined.
@@ -295,7 +295,7 @@ pub fn array_state<T: ArrayElement>(array: &JsArray<T>, index: f64) -> f64 {
     if index < 0.0 || index.fract() != 0.0 || index.is_nan() || index >= array_len(array) {
         return ARRAY_HOLE as f64;
     }
-    array.with(|data| if data.view.is_some() { ARRAY_VALUE as f64 } else { data.slot_state(index as usize) as f64 })
+    array.with(|data| data.view.as_ref().map_or_else(|| f64::from(data.slot_state(index as usize)), |view| view.state(index)))
 }
 
 

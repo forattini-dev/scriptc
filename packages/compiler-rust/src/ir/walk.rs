@@ -24,6 +24,10 @@ fn statements(body: &[Stmt], visitor: &mut impl FnMut(&Expr)) {
     for statement in body {
         match statement {
             Stmt::Throw { value, .. } => expression(value, visitor),
+            Stmt::ArraySetLength { arr, length, .. } => {
+                expression(arr, visitor);
+                expression(length, visitor);
+            }
             Stmt::TryCatch {
                 try_body,
                 catch_body,
