@@ -934,7 +934,10 @@ impl Lowerer<'_> {
             return Err(self.refuse(member, "ordinary prototype writes are not ported"));
         }
         let obj = self.expression(member.expression())?;
-        if obj.ty() == Type::Dyn || matches!(obj.ty(), Type::Func { .. }) {
+        if obj.ty() == Type::Dyn
+            || matches!(obj.ty(), Type::Func { .. })
+            || matches!(obj.ty(), Type::Array { elem } if *elem == Type::Dyn)
+        {
             if matches!(obj.ty(), Type::Func { .. }) {
                 self.function_data_key(member, member.name().text())?;
             }

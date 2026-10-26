@@ -261,7 +261,10 @@ impl Lowerer<'_> {
 
     pub(super) fn dictionary_set_value(&mut self, node: Node, obj: Expr) -> Result<Stmt, String> {
         let member = node.left();
-        if obj.ty() == Type::Dyn || matches!(obj.ty(), Type::Func { .. }) {
+        if obj.ty() == Type::Dyn
+            || matches!(obj.ty(), Type::Func { .. })
+            || matches!(obj.ty(), Type::Array { elem } if *elem == Type::Dyn)
+        {
             if matches!(obj.ty(), Type::Func { .. }) {
                 self.function_member_key(member)?;
             }

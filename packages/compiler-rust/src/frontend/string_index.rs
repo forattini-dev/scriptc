@@ -2,6 +2,91 @@
 use super::*;
 
 impl Lowerer<'_> {
+    pub(super) fn string_method_receiver(
+        &mut self,
+        member: Node,
+        receiver: Expr,
+    ) -> Result<Expr, String> {
+        if receiver.ty() == Type::String {
+            return Ok(receiver);
+        }
+        if !self.string_view(&receiver.ty()) {
+            return Err(self.refuse(
+                member,
+                "standard string methods require a represented string receiver",
+            ));
+        }
+        self.ensure_exception_classes(member)?;
+        let Type::Union { union_id } = receiver.ty() else {
+            unreachable!()
+        };
+        let arms = self.unions[union_id].arms.clone();
+        let mut helper = helpers::Helper::new(
+            &format!("string_method_get_{}", member.name().text()),
+            vec![receiver.ty()],
+            Type::String,
+            self.loc(member),
+        );
+        for (tag, arm) in arms.iter().enumerate() {
+            let value = if *arm == Type::String {
+                Expr::UnionNarrow {
+                    union_id: format!("u{union_id}"),
+                    tag,
+                    value: Box::new(helper.read(&helper.param(0))),
+                    r#type: Type::String,
+                    loc: helper.loc(),
+                }
+            } else {
+                // GetValue of the method reference throws before argument
+                // evaluation. A type-only non-null assertion cannot remove it.
+                let unit = Expr::UnitLit {
+                    unit: if *arm == Type::Null {
+                        "null"
+                    } else {
+                        "undefined"
+                    },
+                    r#type: arm.clone(),
+                    loc: helper.loc(),
+                };
+                let object = self.coerce(unit, Type::Dyn, member)?;
+                let key = Expr::StrLit {
+                    value: member.name().text().into(),
+                    r#type: Type::String,
+                    loc: helper.loc(),
+                };
+                let read = self.dynamic_get(member, object, key);
+                self.coerce(read, Type::String, member)?
+            };
+            let ret = Stmt::Return {
+                value: Some(value),
+                loc: helper.loc(),
+            };
+            if tag + 1 == arms.len() {
+                helper.function.body.push(ret);
+            } else {
+                helper.function.body.push(Stmt::If {
+                    cond: Expr::UnionIsTag {
+                        union_id: format!("u{union_id}"),
+                        tag,
+                        value: Box::new(helper.read(&helper.param(0))),
+                        negated: false,
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    },
+                    then: vec![ret],
+                    else_: None,
+                    loc: helper.loc(),
+                });
+            }
+        }
+        Ok(Expr::Call {
+            callee: self.install_helper(helper.function),
+            args: vec![receiver],
+            r#type: Type::String,
+            loc: self.loc(member),
+        })
+    }
+
     pub(super) fn string_view(&self, ty: &Type) -> bool {
         match ty {
             Type::String => true,

@@ -2115,6 +2115,14 @@ fn validate_function(
                 }
                 let valid = match method.as_str() {
                     "length" => *r#type == Type::F64 && args.is_empty(),
+                    "nextPresent" => {
+                        *r#type == Type::F64 && args.len() == 1 && args[0].ty() == Type::F64
+                    }
+                    "slice" => {
+                        *r#type == receiver.ty()
+                            && args.len() <= 2
+                            && args.iter().all(|arg| arg.ty() == Type::F64)
+                    }
                     "push" => *r#type == Type::F64 && args.iter().all(|arg| arg.ty() == *elem),
                     "pop" => {
                         args.is_empty()
@@ -3143,7 +3151,7 @@ mod tests {
         module.functions.truncate(1);
         let loc = module.functions[0].loc.clone();
         let string = Expr::StrLit {
-            value: "ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¹Ã…â€œÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬".into(),
+            value: "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬".into(),
             r#type: Type::String,
             loc: loc.clone(),
         };
@@ -4894,6 +4902,64 @@ mod tests {
             };
         }
         assert_eq!(validate(&m).unwrap_err(), "non-boolean loop condition");
+    }
+
+    #[test]
+    fn array_sequence_intrinsics_validate_indices_and_preserve_element_abi() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let array = Type::Array {
+            elem: Box::new(Type::F64),
+        };
+        let number = Expr::NumLit {
+            value: 1.0,
+            spelling: None,
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        for (method, args, result, valid) in [
+            ("slice", vec![], array.clone(), true),
+            ("slice", vec![number.clone()], array.clone(), true),
+            (
+                "slice",
+                vec![number.clone(), number.clone()],
+                array.clone(),
+                true,
+            ),
+            (
+                "slice",
+                vec![number.clone(), number.clone(), number.clone()],
+                array.clone(),
+                false,
+            ),
+            (
+                "slice",
+                vec![],
+                Type::Array {
+                    elem: Box::new(Type::String),
+                },
+                false,
+            ),
+            ("nextPresent", vec![number.clone()], Type::F64, true),
+            ("nextPresent", vec![], Type::F64, false),
+            ("nextPresent", vec![number], Type::Bool, false),
+        ] {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::ArrayIntrinsic {
+                    method: method.into(),
+                    receiver: Box::new(Expr::ArrayLit {
+                        elems: vec![],
+                        r#type: array.clone(),
+                        loc: loc.clone(),
+                    }),
+                    args,
+                    r#type: result,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid, "{method}");
+        }
     }
 
     #[test]

@@ -14,6 +14,7 @@ use std::{
     path::Path,
 };
 mod aggregates;
+mod array_methods;
 mod arrays;
 mod async_context;
 mod bigint;

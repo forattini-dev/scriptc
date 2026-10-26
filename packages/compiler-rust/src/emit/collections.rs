@@ -150,6 +150,25 @@ pub(super) fn expression(value: &Expr, function: &Function, module: &Module) -> 
                     "runtime::array_len(&({}))",
                     expr(receiver, function, module)
                 )
+            } else if method == "nextPresent" {
+                format!(
+                    "{{ let array = {}; let start = {}; runtime::array_next_present(&array, start) }}",
+                    expr(receiver, function, module),
+                    expr(&args[0], function, module)
+                )
+            } else if method == "slice" {
+                let start = args
+                    .first()
+                    .map(|value| expr(value, function, module))
+                    .unwrap_or_else(|| "0.0_f64".into());
+                let end = args
+                    .get(1)
+                    .map(|value| expr(value, function, module))
+                    .unwrap_or_else(|| "f64::INFINITY".into());
+                format!(
+                    "{{ let array = {}; let start = {start}; let end = {end}; runtime::array_slice(&array, start, end) }}",
+                    expr(receiver, function, module)
+                )
             } else if method == "pop" {
                 let Type::Array { elem } = receiver.ty() else {
                     unreachable!("IR validated")

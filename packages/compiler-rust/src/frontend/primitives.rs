@@ -123,12 +123,8 @@ impl Lowerer<'_> {
         let mut values = Vec::new();
         if string.is_some() || string_identity {
             let receiver = self.primitive_operand(member.expression())?;
-            if receiver.ty() != Type::String {
-                return Err(self.refuse(
-                    member,
-                    "standard string methods require a represented string receiver",
-                ));
-            }
+            let receiver = self.live_member_receiver(member.expression(), receiver);
+            let receiver = self.string_method_receiver(member, receiver)?;
             values.push(receiver);
             if string.is_some() {
                 self.ensure_exception_classes(node)?;
@@ -466,12 +462,15 @@ impl Lowerer<'_> {
             return Ok(default);
         }
         if let Type::Union { union_id } = value.ty() {
-            let mut helper = Helper::new(
-                "string_argument",
-                vec![value.ty()],
-                argument.ty(),
-                self.loc(node),
-            );
+            // The omitted/undefined default is semantic input. Parameters and
+            // return type alone cannot distinguish a start of 0 from an end
+            // of Infinity (or different default separator strings).
+            let identity = match argument {
+                Argument::Number(number) => format!("string_argument_number_{}", number.to_bits()),
+                Argument::Text(text) => format!("string_argument_text_{:?}", text.as_bytes()),
+            };
+            let mut helper =
+                Helper::new(&identity, vec![value.ty()], argument.ty(), self.loc(node));
             let slot = helper.param(0);
             for (tag, arm) in self.unions[union_id].arms.clone().into_iter().enumerate() {
                 let result = if arm == Type::Undefined {
@@ -543,14 +542,22 @@ impl Lowerer<'_> {
     /// Only represented primitives participate. Objects require observable
     /// ToPrimitive hooks; a numeric type assertion must never erase that work.
     pub(super) fn primitive_number(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
+        let loc = self.loc(node);
         let number = |n| Expr::NumLit {
             value: n,
             spelling: None,
             r#type: Type::F64,
-            loc: self.loc(node),
+            loc: loc.clone(),
         };
         match value.ty() {
             Type::F64 => Ok(value),
+            Type::Bigint | Type::Symbol => {
+                self.ensure_exception_classes(node)?;
+                let kind = if value.ty() == Type::Bigint { "BigInt" } else { "Symbol" };
+                let mut helper = Helper::new(&format!("primitive_number_error_{kind}"), vec![value.ty()], Type::F64, self.loc(node));
+                helper.function.body.push(Stmt::Throw { value: Expr::LibCall { r#fn: "error.new".into(), args: vec![Expr::StrLit { value: format!("Cannot convert a {kind} value to a number"), r#type: Type::String, loc: self.loc(node) }], r#type: Type::Object { class_name: "%TypeError".into() }, loc: self.loc(node) }, loc: self.loc(node) });
+                Ok(Expr::Call { callee: self.install_helper(helper.function), args: vec![value], r#type: Type::F64, loc: self.loc(node) })
+            }
             Type::String => Ok(Expr::LibCall { r#fn: "num.fromString".into(), args: vec![value], r#type: Type::F64, loc: self.loc(node) }),
             Type::Bool => Ok(Expr::Ternary { cond: Box::new(value), then: Box::new(number(1.0)), else_: Box::new(number(0.0)), r#type: Type::F64, loc: self.loc(node) }),
             Type::Null => Ok(number(0.0)),

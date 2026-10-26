@@ -259,6 +259,14 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-regex-exec/state.ts",
         "rust-native-regex-exec/unicode.ts",
         "rust-native-regex-exec/optional.ts",
+        "rust-native-sequence-methods/nullable-string.ts",
+        "rust-native-sequence-methods/nullable-errors.ts",
+        "rust-native-sequence-methods/nullable-order.ts",
+        "rust-native-sequence-methods/some.ts",
+        "rust-native-sequence-methods/slice.ts",
+        "rust-native-sequence-methods/sparse.ts",
+        "rust-native-sequence-methods/callbacks.ts",
+        "rust-native-sequence-methods/order.ts",
         "rust-native-function-properties/aliases.ts",
         "rust-native-function-properties/closures.ts",
         "rust-native-function-properties/keys.ts",
@@ -4873,7 +4881,7 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
             "iterable call spreads are not ported",
         ),
         (
-            "'x'.repeat(Symbol('count') as any);",
+            "'x'.repeat({ valueOf: () => 1 } as any);",
             "standard numeric arguments require represented primitives",
         ),
         (
@@ -6217,6 +6225,50 @@ fn public_declaration_constructor_boundaries_preserve_artifacts() {
     );
     for path in artifacts {
         assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+    }
+}
+
+#[test]
+fn array_sequence_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "array-sequence-boundary");
+    for source in [
+        "[1].some();",
+        "[1].some(1);",
+        "[1].some(...[() => true]);",
+        "[1].slice({ valueOf() { return 0; } });",
+        "function f(value: number[] | undefined) { return value!.slice(); } f(undefined);",
+        "function f(value: number[] | undefined) { return value!.some(() => true); } f(undefined);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            target.clone(),
+            target.with_extension("rs"),
+            target.with_extension("ir.json"),
+        ];
+        for path in &artifacts {
+            fs::write(path, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for path in artifacts {
+            assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
     }
 }
 
