@@ -317,6 +317,9 @@ impl Lowerer<'_> {
 
     pub(super) fn array_call(&mut self, node: Node) -> Result<Expr, String> {
         let member = node.expression();
+        if member.name().text() == "includes" {
+            return self.array_includes(node);
+        }
         if matches!(member.name().text(), "some" | "every" | "slice") {
             return self.array_sequence_method(node);
         }

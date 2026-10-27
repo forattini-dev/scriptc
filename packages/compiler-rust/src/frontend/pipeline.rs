@@ -32,10 +32,15 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             .map(|f| source_file_info(f).file_name.to_string())
             .filter(|f| !is_declaration(f))
             .collect();
+        let method_demands = declarations::member_demands(&source)?;
         let contracts = crate::project::contract_view(options, roots);
         let _contracts_scope = source_frontend::core::enter_program(Some(contracts));
         program::bind_all();
-        Some(declarations::snapshot(&source, console_prelude.clone())?)
+        Some(declarations::snapshot(
+            &source,
+            console_prelude.clone(),
+            method_demands,
+        )?)
     } else {
         None
     };

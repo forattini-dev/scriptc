@@ -15,6 +15,7 @@ use std::{
 };
 mod aggregates;
 mod array_methods;
+mod array_search;
 mod arrays;
 mod async_context;
 mod bigint;
@@ -86,6 +87,7 @@ mod storage;
 mod string_construction;
 mod string_index;
 mod strings;
+mod switch;
 mod symbols;
 mod tuples;
 mod type_graph;
@@ -797,6 +799,7 @@ impl<'a> Lowerer<'a> {
             SyntaxKind::WhileStatement => return self.while_statement(node),
             SyntaxKind::ForStatement => return self.for_statement(node),
             SyntaxKind::ForOfStatement => return self.for_of_statement(node),
+            SyntaxKind::SwitchStatement => return self.switch_statement(node),
             SyntaxKind::BreakStatement | SyntaxKind::ContinueStatement => self.loop_jump(node)?,
             SyntaxKind::ThrowStatement => {
                 let value = self.expression(node.expression())?;
@@ -1507,6 +1510,8 @@ impl<'a> Lowerer<'a> {
                     SyntaxKind::GreaterThanEqualsToken => ">=",
                     SyntaxKind::EqualsEqualsEqualsToken => "===",
                     SyntaxKind::ExclamationEqualsEqualsToken => "!==",
+                    SyntaxKind::EqualsEqualsToken => "==",
+                    SyntaxKind::ExclamationEqualsToken => "!=",
                     SyntaxKind::AmpersandAmpersandToken => "&&",
                     SyntaxKind::BarBarToken => "||",
                     SyntaxKind::QuestionQuestionToken => "??",

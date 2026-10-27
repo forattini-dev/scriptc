@@ -458,6 +458,15 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-for-of/captures.ts",
         "rust-native-for-of/strings.ts",
         "rust-native-for-of/control.ts",
+        "rust-native-for-of/erased.ts",
+        "rust-native-for-of/typed-views.ts",
+        "rust-native-switch/values.ts",
+        "rust-native-switch/order.ts",
+        "rust-native-switch/control.ts",
+        "rust-native-switch/ownership.ts",
+        "rust-native-object-method-contracts/main.ts",
+        "rust-native-nullish-equality/main.ts",
+        "rust-native-array-includes/main.ts",
         "rust-native-local-call-abi/values.mjs",
         "rust-native-local-call-abi/effects.mjs",
         "rust-native-local-call-abi/completion.mjs",
@@ -6872,6 +6881,46 @@ check(new Packet(), "value");
 }
 
 #[test]
+fn switch_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "switch-boundary");
+    for source in [
+        "switch (1) { case 1: let value = 3; case 2: console.log(value); }",
+        "function run(value: number) { switch (value) { default: const local = 2; return local; } } run(1);",
+        "switch (1) { default: continue; }",
+        "outer: switch (1) { default: break outer; }",
+        "switch (new Set([1])) { default: break; }",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
 fn for_of_boundaries_preserve_existing_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     metadata_project(temp.path());
@@ -6883,7 +6932,6 @@ fn for_of_boundaries_preserve_existing_artifacts() {
         "for (const [[value]] of [[[1]]]) console.log(value);",
         "for (const {value} of [{value: 1}]) console.log(value);",
         "async function run(){ for await (const value of [1]) console.log(value); } run();",
-        "function run(value: unknown) { for (const item of value) console.log(item); } run([1]);",
         "for (const value of new Set([1])) console.log(value);",
         "for (const value of new Map([[1, 2]])) console.log(value);",
         "for (const value of [] as const) console.log(value);",
@@ -6892,6 +6940,8 @@ fn for_of_boundaries_preserve_existing_artifacts() {
         "for (const value of [1]) { const fn = () => { continue; }; fn(); }",
         "for (const value of [1]) { const fn = () => { break; }; fn(); }",
         "for (const value of value) console.log(value);",
+        "const values = [1]; const index = 0; values[index] = 2;",
+        "const values = [1]; values[0.5] = 2;",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let artifacts = [

@@ -768,12 +768,29 @@ impl Expr {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct SwitchCase {
+    pub test: Option<Expr>,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 pub enum Stmt {
+    Switch {
+        disc: Expr,
+        cases: Vec<SwitchCase>,
+        loc: Loc,
+    },
+    ArraySet {
+        arr: Expr,
+        index: Expr,
+        value: Expr,
+        loc: Loc,
+    },
     BytesSet {
         arr: Expr,
         index: Expr,
@@ -3026,6 +3043,18 @@ fn validate_function(
                         return Err("invalid native bytes write".into());
                     }
                 }
+                Stmt::ArraySet {
+                    arr, index, value, ..
+                } => {
+                    expr(arr, locals, initialized, functions, module)?;
+                    expr(index, locals, initialized, functions, module)?;
+                    expr(value, locals, initialized, functions, module)?;
+                    if !matches!(arr.ty(), Type::Array { elem } if *elem == value.ty())
+                        || index.ty() != Type::F64
+                    {
+                        return Err("invalid native array element write".into());
+                    }
+                }
                 Stmt::ArraySetLength { arr, length, .. } => {
                     expr(arr, locals, initialized, functions, module)?;
                     expr(length, locals, initialized, functions, module)?;
@@ -3121,6 +3150,38 @@ fn validate_function(
                     if let Some(other) = else_ {
                         body(
                             other,
+                            locals,
+                            &mut initialized.clone(),
+                            functions,
+                            return_type.clone(),
+                            module,
+                            function,
+                        )?;
+                    }
+                }
+                Stmt::Switch { disc, cases, .. } => {
+                    expr(disc, locals, initialized, functions, module)?;
+                    if !matches!(disc.ty(), Type::F64 | Type::String | Type::Bool)
+                        || cases.iter().filter(|case| case.test.is_none()).count() > 1
+                    {
+                        return Err("invalid native switch discriminant/default".into());
+                    }
+                    for case in cases {
+                        if case
+                            .body
+                            .iter()
+                            .any(|statement| matches!(statement, Stmt::VarDecl { .. }))
+                        {
+                            return Err("native switch shared case locals require declaration instantiation".into());
+                        }
+                        if let Some(test) = &case.test {
+                            expr(test, locals, initialized, functions, module)?;
+                            if test.ty() != disc.ty() {
+                                return Err("native switch case type mismatch".into());
+                            }
+                        }
+                        body(
+                            &case.body,
                             locals,
                             &mut initialized.clone(),
                             functions,
@@ -5088,6 +5149,102 @@ mod tests {
         m.records[0].tuple = true;
         m.records[0].index_value = Some(Type::F64);
         assert!(validate(&m).is_err());
+    }
+
+    #[test]
+    fn switches_validate_case_types_defaults_and_jump_targets() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        let disc = Expr::BoolLit {
+            value: true,
+            r#type: Type::Bool,
+            loc: loc.clone(),
+        };
+        let switch = Stmt::Switch {
+            disc: disc.clone(),
+            cases: vec![SwitchCase {
+                test: None,
+                body: vec![Stmt::Break { loc: loc.clone() }],
+            }],
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![switch.clone()];
+        validate(&m).unwrap();
+        let wire = serde_json::to_value(&switch).unwrap();
+        assert_eq!(wire["kind"], "switch");
+        assert!(wire["cases"][0]["test"].is_null());
+        if let Stmt::Switch { cases, .. } = &mut m.functions[0].body[0] {
+            cases[0].test = Some(Expr::NumLit {
+                value: 1.0,
+                spelling: None,
+                r#type: Type::F64,
+                loc: loc.clone(),
+            });
+        }
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "native switch case type mismatch"
+        );
+        m.functions[0].body = vec![switch.clone()];
+        if let Stmt::Switch { cases, .. } = &mut m.functions[0].body[0] {
+            cases.push(cases[0].clone());
+        }
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native switch discriminant/default"
+        );
+        let mut continued = switch;
+        if let Stmt::Switch { cases, .. } = &mut continued {
+            cases[0].body = vec![Stmt::Continue { loc: loc.clone() }];
+        }
+        m.functions[0].body = vec![continued.clone()];
+        assert_eq!(validate(&m).unwrap_err(), "loop jump has no enclosing loop");
+        m.functions[0].body = vec![Stmt::While {
+            cond: disc,
+            body: vec![continued],
+            loc,
+        }];
+        validate(&m).unwrap();
+    }
+
+    #[test]
+    fn array_element_writes_keep_the_portable_storage_contract() {
+        let mut m = callable_module();
+        let loc = m.functions[0].loc.clone();
+        let number = Expr::NumLit {
+            value: 1.0,
+            spelling: None,
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::ArraySet {
+            arr: Expr::ArrayLit {
+                elems: vec![number.clone()],
+                r#type: Type::Array {
+                    elem: Box::new(Type::F64),
+                },
+                loc: loc.clone(),
+            },
+            index: number.clone(),
+            value: number,
+            loc: loc.clone(),
+        }];
+        validate(&m).unwrap();
+        assert_eq!(
+            serde_json::to_value(&m.functions[0].body[0]).unwrap()["kind"],
+            "arraySet"
+        );
+        if let Stmt::ArraySet { value, .. } = &mut m.functions[0].body[0] {
+            *value = Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc,
+            };
+        }
+        assert_eq!(
+            validate(&m).unwrap_err(),
+            "invalid native array element write"
+        );
     }
 
     #[test]

@@ -8,17 +8,28 @@ const BREAK: u8 = 8;
 const CONTINUE: u8 = 16;
 
 pub(super) fn validate_targets(body: &[Stmt], depth: usize) -> Result<(), String> {
+    targets(body, depth, depth)
+}
+fn targets(body: &[Stmt], breaks: usize, continues: usize) -> Result<(), String> {
     for stmt in body {
         match stmt {
-            Stmt::Break { .. } | Stmt::Continue { .. } if depth == 0 => {
+            Stmt::Break { .. } if breaks == 0 => {
                 return Err("loop jump has no enclosing loop".into());
             }
-            Stmt::While { body, .. } => validate_targets(body, depth + 1)?,
-            Stmt::Block { body, .. } => validate_targets(body, depth)?,
+            Stmt::Continue { .. } if continues == 0 => {
+                return Err("loop jump has no enclosing loop".into());
+            }
+            Stmt::While { body, .. } => targets(body, breaks + 1, continues + 1)?,
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    targets(&case.body, breaks + 1, continues)?;
+                }
+            }
+            Stmt::Block { body, .. } => targets(body, breaks, continues)?,
             Stmt::If { then, else_, .. } => {
-                validate_targets(then, depth)?;
+                targets(then, breaks, continues)?;
                 if let Some(body) = else_ {
-                    validate_targets(body, depth)?;
+                    targets(body, breaks, continues)?;
                 }
             }
             Stmt::TryCatch {
@@ -27,9 +38,9 @@ pub(super) fn validate_targets(body: &[Stmt], depth: usize) -> Result<(), String
                 finally_body,
                 ..
             } => {
-                validate_targets(try_body, depth)?;
+                targets(try_body, breaks, continues)?;
                 for body in [catch_body, finally_body].into_iter().flatten() {
-                    validate_targets(body, depth)?;
+                    targets(body, breaks, continues)?;
                 }
             }
             _ => {}
@@ -55,6 +66,21 @@ fn completion(stmt: &Stmt) -> u8 {
         Stmt::Throw { .. } => THROW,
         Stmt::Break { .. } => BREAK,
         Stmt::Continue { .. } => CONTINUE,
+        Stmt::Switch { cases, .. } => {
+            let mut tail = NORMAL;
+            let mut entries = if cases.iter().any(|case| case.test.is_none()) {
+                0
+            } else {
+                NORMAL
+            };
+            for case in cases.iter().rev() {
+                let body = completions(&case.body);
+                let entry = (body & !NORMAL) | if body & NORMAL != 0 { tail } else { 0 };
+                entries |= entry;
+                tail = entry;
+            }
+            (entries & !BREAK) | if entries & BREAK != 0 { NORMAL } else { 0 } | THROW
+        }
         Stmt::Block { body, .. } => completions(body),
         Stmt::If { then, else_, .. } => {
             completions(then) | else_.as_ref().map_or(NORMAL, |b| completions(b)) | THROW
@@ -98,6 +124,52 @@ pub(super) fn function_exits(body: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switch_fallthrough_and_breaks_keep_distinct_completions() {
+        let loc = Loc {
+            file: "switch.ts".into(),
+            start: 0,
+            end: 1,
+        };
+        let mut cases = vec![SwitchCase {
+            test: None,
+            body: vec![Stmt::Return {
+                value: None,
+                loc: loc.clone(),
+            }],
+        }];
+        let make = |cases| Stmt::Switch {
+            disc: Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc: loc.clone(),
+            },
+            cases,
+            loc: loc.clone(),
+        };
+        assert!(function_exits(&[make(cases.clone())]));
+        cases.insert(
+            0,
+            SwitchCase {
+                test: Some(Expr::BoolLit {
+                    value: true,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                }),
+                body: vec![],
+            },
+        );
+        assert!(function_exits(&[make(cases.clone())]));
+        cases[0].body = vec![Stmt::Break { loc: loc.clone() }];
+        assert!(!function_exits(&[make(cases.clone())]));
+        cases.remove(1);
+        cases[0].body = vec![Stmt::Return {
+            value: None,
+            loc: loc.clone(),
+        }];
+        assert!(!function_exits(&[make(cases)]));
+    }
     fn loc() -> Loc {
         Loc {
             file: "loops.ts".into(),

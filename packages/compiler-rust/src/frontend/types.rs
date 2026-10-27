@@ -59,6 +59,9 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn type_id(&mut self, id: TypeId) -> Option<Type> {
+        if let Some(ty) = self.declared_callable_type(id) {
+            return ty;
+        }
         // This structural platform interface is a view of a thrown owning
         // value. Its annotation must not turn Error into a checked record.
         if self.standard_errno_type(id) {

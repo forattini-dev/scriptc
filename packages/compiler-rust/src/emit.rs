@@ -263,9 +263,11 @@ pub fn uses_runtime(module: &Module) -> bool {
         stmts.iter().any(|stmt| match stmt {
             Stmt::Break { .. } | Stmt::Continue { .. } => false,
             Stmt::FieldSet { .. }
+            | Stmt::Switch { .. }
             | Stmt::Throw { .. }
             | Stmt::TryCatch { .. }
             | Stmt::ArraySetLength { .. }
+            | Stmt::ArraySet { .. }
             | Stmt::BytesSet { .. } => true,
             Stmt::RecordKeySet {
                 obj, key, value, ..
@@ -786,7 +788,7 @@ fn statement_in(
         output,
         &FlowContext {
             region: usize::from(protected),
-            loops: vec![],
+            targets: vec![],
         },
     );
 }
@@ -794,7 +796,12 @@ fn statement_in(
 #[derive(Clone, Default)]
 struct FlowContext {
     region: usize,
-    loops: Vec<usize>,
+    targets: Vec<JumpTarget>,
+}
+#[derive(Clone)]
+struct JumpTarget {
+    region: usize,
+    allows_continue: bool,
 }
 
 fn statement_with_flow(
@@ -807,6 +814,40 @@ fn statement_with_flow(
     use std::fmt::Write;
     let protected = flow.region != 0;
     match stmt {
+        Stmt::Switch { disc, cases, .. } => {
+            let id = flow.targets.len();
+            writeln!(output, "{{ let native_switch_disc = {}; let mut native_switch_start = {}usize; let mut native_switch_matched = false;", expr(disc, function, module), cases.len()).unwrap();
+            for (index, case) in cases.iter().enumerate() {
+                if let Some(test) = &case.test {
+                    writeln!(output, "if !native_switch_matched {{ let test = {}; if native_switch_disc == test {{ native_switch_start = {index}; native_switch_matched = true; }} }}", expr(test, function, module)).unwrap();
+                }
+            }
+            if let Some(index) = cases.iter().position(|case| case.test.is_none()) {
+                writeln!(
+                    output,
+                    "if !native_switch_matched {{ native_switch_start = {index}; }}"
+                )
+                .unwrap();
+            }
+            writeln!(output, "'native_loop_{id}: {{").unwrap();
+            let mut inner = flow.clone();
+            inner.targets.push(JumpTarget {
+                region: flow.region,
+                allows_continue: false,
+            });
+            for (index, case) in cases.iter().enumerate() {
+                writeln!(output, "if native_switch_start <= {index} {{").unwrap();
+                for statement in &case.body {
+                    statement_with_flow(statement, function, module, output, &inner);
+                }
+                output.push_str("}\n");
+            }
+            output.push_str("}\n");
+            if crate::ir::always_returns(std::slice::from_ref(stmt)) {
+                output.push_str("unreachable!(\"validated switch completion\");\n");
+            }
+            output.push_str("}\n");
+        }
         Stmt::Throw { value, .. } => {
             writeln!(
                 output,
@@ -836,6 +877,11 @@ fn statement_with_flow(
                 field_name(field)
             )
             .unwrap();
+        }
+        Stmt::ArraySet {
+            arr, index, value, ..
+        } => {
+            writeln!(output, "{{ let array = {}; let index = {}; let value = {}; runtime::array_set(&array, index, value); }}", expr(arr, function, module), expr(index, function, module), expr(value, function, module)).unwrap();
         }
         Stmt::BytesSet {
             arr, index, value, ..
@@ -955,7 +1001,7 @@ fn statement_with_flow(
             output.push('\n');
         }
         Stmt::While { cond, body, .. } => {
-            let id = flow.loops.len();
+            let id = flow.targets.len();
             let head = if matches!(cond, Expr::BoolLit { value: true, .. }) {
                 "loop".into()
             } else {
@@ -963,7 +1009,10 @@ fn statement_with_flow(
             };
             writeln!(output, "'native_loop_{id}: {head} {{").unwrap();
             let mut inner = flow.clone();
-            inner.loops.push(flow.region);
+            inner.targets.push(JumpTarget {
+                region: flow.region,
+                allows_continue: true,
+            });
             for stmt in body {
                 statement_with_flow(stmt, function, module, output, &inner);
             }
@@ -971,11 +1020,11 @@ fn statement_with_flow(
         }
         Stmt::Break { .. } | Stmt::Continue { .. } => {
             let id = flow
-                .loops
-                .len()
-                .checked_sub(1)
-                .expect("validated loop target");
-            if flow.loops[id] == flow.region {
+                .targets
+                .iter()
+                .rposition(|target| matches!(stmt, Stmt::Break { .. }) || target.allows_continue)
+                .expect("validated jump target");
+            if flow.targets[id].region == flow.region {
                 let jump = if matches!(stmt, Stmt::Break { .. }) {
                     "break"
                 } else {

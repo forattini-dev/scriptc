@@ -4,6 +4,9 @@ use source_frontend::prelude::SignatureKind;
 
 impl Lowerer<'_> {
     pub(super) fn function_type(&mut self, id: TypeId) -> Option<Type> {
+        if let Some(ty) = self.declared_callable_type(id) {
+            return ty;
+        }
         if let Some(ty) = self
             .standard_callable_type(id)
             .or_else(|| self.json_callable_type(id))

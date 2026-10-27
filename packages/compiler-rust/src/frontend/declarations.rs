@@ -57,14 +57,26 @@ struct Edge {
     specifier: String,
     target: String,
 }
+pub(super) struct MemberDemands {
+    edges: Vec<Edge>,
+    files: Vec<String>,
+    objects: HashMap<(String, String), HashSet<String>>,
+}
 struct Export {
     file: String,
     name: String,
     hint: Hint,
 }
+struct MemberExport {
+    file: String,
+    name: String,
+    member: String,
+    signature: Type,
+}
 pub(super) struct Catalog {
     edges: Vec<Edge>,
     exports: Vec<Export>,
+    members: Vec<MemberExport>,
     records: Vec<ir::Record>,
     unions: Vec<ir::Union>,
     callables: HashMap<usize, Type>,
@@ -117,7 +129,162 @@ fn edges(checker: &mut Checker, files: &[Node]) -> Vec<Edge> {
     edges
 }
 
-pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<Catalog, String> {
+// Discover only source-owned direct object methods while the execution graph
+// is current. Paths and export/member names survive the checker version change;
+// nodes, symbols and checker type IDs never cross it.
+pub(super) fn member_demands(source: &str) -> Result<MemberDemands, String> {
+    let files = program::source_files();
+    let entry = files
+        .iter()
+        .copied()
+        .find(|file| source_file_info(*file).file_name == source)
+        .ok_or("SCN0002: missing execution entry for object method contracts")?;
+    Ok(program::with_type_checker_for_file(entry, move |checker| {
+        let mut objects = HashMap::new();
+        for file in &files {
+            let path = source_file_info(*file).file_name.to_string();
+            if !is_javascript(&path) || file.symbol().0 == 0 {
+                continue;
+            }
+            for exported in checker.get_exports_of_module_as_array(file.symbol()) {
+                let name = checker.sym(exported).name.to_string();
+                let symbol = unalias(checker, exported);
+                if symbol.0 == 0 {
+                    continue;
+                }
+                let declaration = checker.sym(symbol).value_declaration;
+                if declaration.is_nil()
+                    || declaration.kind() != SyntaxKind::VariableDeclaration
+                    || declaration.initializer().is_nil()
+                {
+                    continue;
+                }
+                let object = receivers::reference_node(declaration.initializer());
+                if object.kind() != SyntaxKind::ObjectLiteralExpression
+                    || object
+                        .properties()
+                        .into_iter()
+                        .any(|p| p.kind() == SyntaxKind::SpreadAssignment)
+                {
+                    continue;
+                }
+                let mut methods = HashSet::new();
+                let mut counts: HashMap<String, usize> = HashMap::new();
+                for property in object.properties() {
+                    if matches!(
+                        property.kind(),
+                        SyntaxKind::MethodDeclaration | SyntaxKind::PropertyAssignment
+                    ) && matches!(
+                        property.name().kind(),
+                        SyntaxKind::Identifier | SyntaxKind::StringLiteral
+                    ) {
+                        *counts
+                            .entry(property.name().text().to_string())
+                            .or_default() += 1;
+                    }
+                }
+                for property in object.properties() {
+                    if !matches!(
+                        property.kind(),
+                        SyntaxKind::MethodDeclaration | SyntaxKind::PropertyAssignment
+                    ) || !matches!(
+                        property.name().kind(),
+                        SyntaxKind::Identifier | SyntaxKind::StringLiteral
+                    ) {
+                        continue;
+                    }
+                    let member = property.name().text().to_string();
+                    if counts.get(&member) != Some(&1) {
+                        continue;
+                    }
+                    let function = if property.kind() == SyntaxKind::MethodDeclaration {
+                        property
+                    } else {
+                        receivers::reference_node(property.initializer())
+                    };
+                    if matches!(
+                        function.kind(),
+                        SyntaxKind::MethodDeclaration
+                            | SyntaxKind::ArrowFunction
+                            | SyntaxKind::FunctionExpression
+                    ) {
+                        methods.insert(member);
+                    }
+                }
+                if !methods.is_empty() {
+                    objects.insert((path.clone(), name), methods);
+                }
+            }
+        }
+        MemberDemands {
+            edges: edges(checker, &files),
+            files: files
+                .iter()
+                .map(|f| source_file_info(*f).file_name.to_string())
+                .collect(),
+            objects,
+        }
+    }))
+}
+
+fn paired_paths(
+    checked: &[Edge],
+    execution: &[Edge],
+    files: &[String],
+) -> HashSet<(String, String)> {
+    let checked_files = checked
+        .iter()
+        .flat_map(|edge| [&edge.importer, &edge.target])
+        .collect::<HashSet<_>>();
+    let mut pairs = files
+        .iter()
+        .filter_map(|name| {
+            checked_files
+                .contains(name)
+                .then_some((name.clone(), name.clone()))
+        })
+        .collect::<HashSet<_>>();
+    let mut checked_by_file: HashMap<&str, Vec<&Edge>> = HashMap::new();
+    for edge in checked {
+        checked_by_file
+            .entry(&edge.importer)
+            .or_default()
+            .push(edge);
+    }
+    let mut runtime_by_import: HashMap<(&str, &str), Vec<&str>> = HashMap::new();
+    for edge in execution {
+        runtime_by_import
+            .entry((&edge.importer, &edge.specifier))
+            .or_default()
+            .push(&edge.target);
+    }
+    let mut pending = pairs.iter().cloned().collect::<Vec<_>>();
+    while let Some((checked_file, runtime)) = pending.pop() {
+        for edge in checked_by_file
+            .get(checked_file.as_str())
+            .into_iter()
+            .flatten()
+        {
+            if let Some(targets) =
+                runtime_by_import.get(&(runtime.as_str(), edge.specifier.as_str()))
+            {
+                for target in targets {
+                    let pair = (edge.target.clone(), (*target).to_string());
+                    if pairs.insert(pair.clone()) {
+                        pending.push(pair);
+                    }
+                }
+            }
+        }
+    }
+    pairs
+}
+
+pub(super) fn snapshot(
+    source: &str,
+    console_prelude: Option<String>,
+    demands: MemberDemands,
+) -> Result<Catalog, String> {
     let files = program::source_files();
     let entry = files
         .iter()
@@ -127,6 +294,18 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
     let source = source.to_string();
     Ok(program::with_type_checker_for_file(entry, move |checker| {
         let edges = edges(checker, &files);
+        let pairs = paired_paths(&edges, &demands.edges, &demands.files);
+        let mut needed: HashMap<(String, String), HashSet<String>> = HashMap::new();
+        for (checked, runtime) in pairs {
+            for ((path, name), members) in &demands.objects {
+                if *path == runtime {
+                    needed
+                        .entry((checked.clone(), name.clone()))
+                        .or_default()
+                        .extend(members.iter().cloned());
+                }
+            }
+        }
         // Follow actual non-builtin imports/reexports. Bundled/global type
         // libraries aren't runtime modules and must not seed contract tables.
         let mut reachable = files
@@ -150,6 +329,7 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
         let mut lowerer = Lowerer::new(checker, source, console_prelude);
         lowerer.declaration_abi = true;
         let mut exports = Vec::new();
+        let mut members = Vec::new();
         for file in &files {
             let file = *file;
             let path = source_file_info(file).file_name.to_string();
@@ -272,6 +452,35 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
                         }
                     }
                 } else {
+                    let Some(wanted) = needed.get(&(path.clone(), name.clone())) else {
+                        continue;
+                    };
+                    // A public object is not itself callable. Its method
+                    // declarations still define implementation parameter ABIs.
+                    // Resolve each member independently: an unrelated field
+                    // with no portable layout must not erase a proven method.
+                    for property in lowerer.checker.get_properties_of_type(ty).to_vec() {
+                        if !wanted.contains(lowerer.checker.sym(property).name.as_ref()) {
+                            continue;
+                        }
+                        if lowerer
+                            .checker
+                            .sym(property)
+                            .flags
+                            .intersects(SymbolFlags::ACCESSOR)
+                        {
+                            continue;
+                        }
+                        let id = lowerer.checker.get_type_of_symbol(property);
+                        if let Some(signature) = lowerer.function_type(id) {
+                            members.push(MemberExport {
+                                file: path.clone(),
+                                name: name.clone(),
+                                member: lowerer.checker.sym(property).name.to_string(),
+                                signature,
+                            });
+                        }
+                    }
                     continue;
                 }
                 exports.push(Export {
@@ -375,6 +584,7 @@ pub(super) fn snapshot(source: &str, console_prelude: Option<String>) -> Result<
             literal_choices: lowerer.literal_choices,
             edges,
             exports,
+            members,
             records: lowerer.records,
             unions: lowerer.unions,
             callables: lowerer.callables,
@@ -386,44 +596,16 @@ impl Catalog {
     pub(super) fn link(self, checker: &mut Checker) -> Linked {
         let files = program::source_files();
         let execution_edges = edges(checker, &files);
-        let checked_files = self
-            .edges
-            .iter()
-            .flat_map(|e| [&e.importer, &e.target])
-            .collect::<HashSet<_>>();
-        let mut pairs = files
-            .iter()
-            .filter_map(|f| {
-                let name = source_file_info(*f).file_name.to_string();
-                checked_files
-                    .contains(&name)
-                    .then_some((name.clone(), name))
-            })
-            .collect::<HashSet<_>>();
         // Resolve identical specifiers in corresponding importer modules.
         // This also handles package exports that put types and JS in wholly
         // different directories, without probing/guessing sibling filenames.
-        loop {
-            let mut additions = Vec::new();
-            for (checked, runtime) in &pairs {
-                for edge in self.edges.iter().filter(|e| e.importer == *checked) {
-                    for target in execution_edges
-                        .iter()
-                        .filter(|e| e.importer == *runtime && e.specifier == edge.specifier)
-                    {
-                        additions.push((edge.target.clone(), target.target.clone()));
-                    }
-                }
-            }
-            let mut changed = false;
-            for pair in additions {
-                changed |= pairs.insert(pair);
-            }
-            if !changed {
-                break;
-            }
-        }
+        let runtime_files = files
+            .iter()
+            .map(|file| source_file_info(*file).file_name.to_string())
+            .collect::<Vec<_>>();
+        let pairs = paired_paths(&self.edges, &execution_edges, &runtime_files);
         let mut targets = HashMap::new();
+        let mut object_targets = HashMap::new();
         for file in files {
             let path = source_file_info(file).file_name.to_string();
             if !is_javascript(&path) || file.symbol().0 == 0 {
@@ -444,6 +626,16 @@ impl Catalog {
                             | SyntaxKind::ClassDeclaration
                     )
                 {
+                    if node.kind() == SyntaxKind::VariableDeclaration
+                        && !node.initializer().is_nil()
+                    {
+                        let initial = receivers::reference_node(node.initializer());
+                        if !initial.is_nil()
+                            && initial.kind() == SyntaxKind::ObjectLiteralExpression
+                        {
+                            object_targets.insert((path.clone(), name.clone()), initial);
+                        }
+                    }
                     targets.insert((path.clone(), name), Key::of(node));
                 }
             }
@@ -464,6 +656,71 @@ impl Catalog {
                 }
             }
         }
+        for member in self.members {
+            for (_, runtime) in pairs.iter().filter(|(checked, _)| *checked == member.file) {
+                let Some(object) = object_targets.get(&(runtime.clone(), member.name.clone()))
+                else {
+                    continue;
+                };
+                let matching = object
+                    .properties()
+                    .into_iter()
+                    .filter(|property| {
+                        matches!(
+                            property.kind(),
+                            SyntaxKind::MethodDeclaration | SyntaxKind::PropertyAssignment
+                        ) && matches!(
+                            property.name().kind(),
+                            SyntaxKind::Identifier | SyntaxKind::StringLiteral
+                        ) && property.name().text() == member.member
+                    })
+                    .collect::<Vec<_>>();
+                // Duplicates/spreads require a source-order property plan.
+                if matching.len() != 1
+                    || object
+                        .properties()
+                        .into_iter()
+                        .any(|p| p.kind() == SyntaxKind::SpreadAssignment)
+                {
+                    continue;
+                }
+                let property = matching[0];
+                let function = if property.kind() == SyntaxKind::MethodDeclaration {
+                    property
+                } else {
+                    receivers::reference_node(property.initializer())
+                };
+                if !matches!(
+                    function.kind(),
+                    SyntaxKind::MethodDeclaration
+                        | SyntaxKind::ArrowFunction
+                        | SyntaxKind::FunctionExpression
+                ) {
+                    continue;
+                }
+                let Type::Func { params, ret, rest } = &member.signature else {
+                    unreachable!("member signature")
+                };
+                let hint = Hint {
+                    rest: *rest,
+                    params: params.iter().cloned().map(Some).collect(),
+                    ret: Some((**ret).clone()),
+                    reason: None,
+                    value_type: None,
+                    class: None,
+                };
+                let key = Key::of(function);
+                if let Some(previous) = hints.get_mut(&key) {
+                    if *previous != hint {
+                        previous.reason = Some(
+                            "conflicting public JavaScript method contracts are not ported".into(),
+                        );
+                    }
+                } else {
+                    hints.insert(key, hint);
+                }
+            }
+        }
         Linked {
             projections: self.projections,
             literal_choices: self.literal_choices,
@@ -480,6 +737,26 @@ fn is_javascript(path: &str) -> bool {
 }
 
 impl Lowerer<'_> {
+    pub(super) fn declared_callable_type(&self, id: TypeId) -> Option<Option<Type>> {
+        let symbol = self.checker.ty(id).symbol();
+        if symbol.0 == 0 {
+            return None;
+        }
+        let declaration = self.checker.sym(symbol).value_declaration;
+        if declaration.is_nil()
+            || !matches!(
+                declaration.kind(),
+                SyntaxKind::MethodDeclaration
+                    | SyntaxKind::ArrowFunction
+                    | SyntaxKind::FunctionExpression
+            )
+        {
+            return None;
+        }
+        let hint = self.declared(declaration)?;
+        (hint.class.is_none() && (hint.ret.is_some() || hint.reason.is_some()))
+            .then(|| hint.function_type())
+    }
     pub(super) fn declared(&self, node: Node) -> Option<&Hint> {
         if node.is_nil() {
             return None;
@@ -500,5 +777,59 @@ impl Lowerer<'_> {
         }
         let id = self.checker.get_type_at_location(node);
         self.checker.ty(id).flags.intersects(TypeFlags::ANY)
+    }
+}
+
+#[cfg(test)]
+mod method_contract_tests {
+    use super::*;
+
+    #[test]
+    fn module_pairing_keeps_multiple_implementations_and_terminates_cycles() {
+        let edge = |importer: &str, specifier: &str, target: &str| Edge {
+            importer: importer.into(),
+            specifier: specifier.into(),
+            target: target.into(),
+        };
+        let checked = vec![
+            edge("entry.ts", "a", "types/api.d.ts"),
+            edge("entry.ts", "b", "types/api.d.ts"),
+            edge("types/api.d.ts", "./helper", "types/helper.d.ts"),
+            edge("types/helper.d.ts", "./api", "types/api.d.ts"),
+        ];
+        let runtime = vec![
+            edge("entry.ts", "a", "runtime/a.js"),
+            edge("entry.ts", "b", "runtime/b.js"),
+            edge("runtime/a.js", "./helper", "runtime/a-helper.js"),
+            edge("runtime/b.js", "./helper", "runtime/b-helper.js"),
+            edge("runtime/a-helper.js", "./api", "runtime/a.js"),
+            edge("runtime/b-helper.js", "./api", "runtime/b.js"),
+            edge("entry.ts", "unrelated", "runtime/unused.js"),
+        ];
+        let files = [
+            "entry.ts",
+            "runtime/a.js",
+            "runtime/b.js",
+            "runtime/a-helper.js",
+            "runtime/b-helper.js",
+            "runtime/unused.js",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>();
+        let pairs = paired_paths(&checked, &runtime, &files);
+        assert_eq!(
+            pairs,
+            [
+                ("entry.ts", "entry.ts"),
+                ("types/api.d.ts", "runtime/a.js"),
+                ("types/api.d.ts", "runtime/b.js"),
+                ("types/helper.d.ts", "runtime/a-helper.js"),
+                ("types/helper.d.ts", "runtime/b-helper.js"),
+            ]
+            .into_iter()
+            .map(|(left, right)| (left.into(), right.into()))
+            .collect()
+        );
     }
 }

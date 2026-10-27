@@ -4,6 +4,19 @@ use helpers::Helper;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
 impl Lowerer<'_> {
+    // The execution checker can expose any for a JS formal whose portable
+    // declaration ABI proves a primitive string. No object is recognized by
+    // its member spelling, and custom declarations keep their own dispatch.
+    fn represented_string_member(&mut self, node: Node, symbol: u32) -> bool {
+        if symbol != 0 {
+            return false;
+        }
+        let source = receivers::reference_node(node.expression());
+        source.kind() == SyntaxKind::Identifier
+            && self
+                .binding(source)
+                .is_ok_and(|local| local.r#type == Type::String)
+    }
     pub(super) fn primitive_symbol(&self, id: u32, name: &str, owner: Option<&str>) -> bool {
         if id == 0 {
             return false;
@@ -66,7 +79,9 @@ impl Lowerer<'_> {
             return Ok(None);
         }
         let id = self.symbol(node.name());
-        if !self.primitive_symbol(id, "length", Some("String")) {
+        if !self.primitive_symbol(id, "length", Some("String"))
+            && !self.represented_string_member(node, id)
+        {
             return Ok(None);
         }
         let receiver = self.primitive_operand(node.expression())?;
@@ -125,8 +140,11 @@ impl Lowerer<'_> {
                 self.primitive_symbol(id, "Math", None)
             }
             && self.primitive_symbol(member_id, name, Some("Math"));
-        let string = crate::string_builtins::by_method(name)
-            .filter(|_| name != "length" && self.primitive_symbol(member_id, name, Some("String")));
+        let proven_string = self.primitive_symbol(member_id, name, Some("String"))
+            || (crate::string_builtins::by_method(name).is_some()
+                && self.represented_string_member(member, member_id));
+        let string =
+            crate::string_builtins::by_method(name).filter(|_| name != "length" && proven_string);
         let string_identity = matches!(name, "toString" | "valueOf")
             && self.primitive_symbol(member_id, name, Some("String"));
         if !math && string.is_none() && !string_identity {

@@ -1114,6 +1114,23 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn binary(&mut self, node: Node, op: &str) -> Result<Expr, String> {
+        if matches!(op, "==" | "!=") {
+            for (value, unit) in [(node.left(), node.right()), (node.right(), node.left())] {
+                if primitives::primitive_source(unit).kind() == SyntaxKind::NullKeyword {
+                    // Nullish equality does not invoke ToPrimitive. Observe
+                    // the live owning tag once, including a stale checker view.
+                    let value = self.condition_value(value)?;
+                    let value = self.primitive_capture(value, node)?;
+                    return Ok(Expr::DynTest {
+                        value: Box::new(self.coerce(value, Type::Dyn, node)?),
+                        test: "nullish".into(),
+                        negated: op == "!=",
+                        r#type: Type::Bool,
+                        loc: self.loc(node),
+                    });
+                }
+            }
+        }
         if matches!(op, "<" | "<=" | ">" | ">=") {
             return self.relational(node, op);
         }

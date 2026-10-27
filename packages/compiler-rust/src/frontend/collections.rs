@@ -261,6 +261,24 @@ impl Lowerer<'_> {
 
     pub(super) fn dictionary_set_value(&mut self, node: Node, obj: Expr) -> Result<Stmt, String> {
         let member = node.left();
+        if let Type::Array { elem } = obj.ty()
+            && *elem != Type::Dyn
+        {
+            // Named properties require a separate array property store. Admit
+            // proven ordinary indices while retaining an explicit boundary.
+            let index = self.expected_expression(member.argument_expression(), Type::F64)?;
+            if !matches!(&index, Expr::NumLit { value, .. } if value.is_finite() && *value >= 0.0 && *value < 4_294_967_295.0 && value.trunc() == *value)
+            {
+                return Err(self.refuse(member, "array writes require a constant ordinary array index; dynamic keys are not ported"));
+            }
+            let value = self.expected_expression(node.right(), *elem)?;
+            return Ok(Stmt::ArraySet {
+                arr: obj,
+                index,
+                value,
+                loc: self.loc(node),
+            });
+        }
         if matches!(obj.ty(), Type::Bytes { .. }) {
             let expr = self.bytes_assignment_value(node, obj, None)?;
             return Ok(Stmt::Expression {

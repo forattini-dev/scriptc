@@ -23,8 +23,20 @@ impl Module {
 fn statements(body: &[Stmt], visitor: &mut impl FnMut(&Expr)) {
     for statement in body {
         match statement {
+            Stmt::Switch { disc, cases, .. } => {
+                expression(disc, visitor);
+                for case in cases {
+                    if let Some(test) = &case.test {
+                        expression(test, visitor);
+                    }
+                    statements(&case.body, visitor);
+                }
+            }
             Stmt::Throw { value, .. } => expression(value, visitor),
-            Stmt::BytesSet {
+            Stmt::ArraySet {
+                arr, index, value, ..
+            }
+            | Stmt::BytesSet {
                 arr, index, value, ..
             } => {
                 expression(arr, visitor);

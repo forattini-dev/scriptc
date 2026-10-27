@@ -386,6 +386,14 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
                 )
                 .unwrap();
             }
+            if r.tuple {
+                writeln!(
+                    out,
+                    "\"length\" => NativeValue::Number({}.0),",
+                    r.fields.len()
+                )
+                .unwrap();
+            }
             writeln!(out, "_ => native_value_missing(&key) }} }}),").unwrap();
         }
     }
@@ -397,7 +405,7 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
             } else {
                 "runtime::throw_type_error(\"scriptc: floating typed array byteOffset is not ported\".into())"
             };
-            writeln!(out, "NativeValue::V{i}(bytes) => {{ if !key.is_well_formed() {{ return NativeValue::Undefined; }} match key.well_formed_utf8().unwrap_or_else(|| unreachable!(\"ill-formed keys were checked before fixed-field dispatch\")) {{ \"length\" => NativeValue::Number(runtime::bytes_len(&bytes)), \"byteLength\" => NativeValue::Number(runtime::bytes_byte_len(&bytes)), \"byteOffset\" => {offset}, _ => runtime::throw_type_error(\"scriptc: erased Uint8Array member requires a typed receiver\".into()), }} }},").unwrap();
+            writeln!(out, "NativeValue::V{i}(bytes) => {{ if !key.is_well_formed() {{ return NativeValue::Undefined; }} if let Ok(index) = key.parse::<usize>() {{ if key == index.to_string() {{ return if (index as f64) < runtime::bytes_len(&bytes) {{ NativeValue::Number(runtime::bytes_get(&bytes, index as f64)) }} else {{ NativeValue::Undefined }}; }} }} match key.well_formed_utf8().unwrap_or_else(|| unreachable!(\"ill-formed keys were checked before fixed-field dispatch\")) {{ \"length\" => NativeValue::Number(runtime::bytes_len(&bytes)), \"byteLength\" => NativeValue::Number(runtime::bytes_byte_len(&bytes)), \"byteOffset\" => {offset}, _ => runtime::throw_type_error(\"scriptc: erased typed array member requires a typed receiver\".into()), }} }},").unwrap();
         }
         if matches!(t, Type::Func { .. }) {
             let name = functions::type_name(t, module);

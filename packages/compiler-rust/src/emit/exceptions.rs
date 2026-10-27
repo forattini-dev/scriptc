@@ -102,9 +102,20 @@ pub(super) fn statement(
         "return value"
     };
     writeln!(output, "match pending {{ runtime::Completion::Normal => {normal}, runtime::Completion::Return(value) => {{ {returned} }}, runtime::Completion::Throw(caught) => runtime::rethrow_caught(caught),").unwrap();
-    for (id, region) in flow.loops.iter().enumerate() {
-        if *region == flow.region {
-            writeln!(output, "runtime::Completion::Break({id}) => break 'native_loop_{id}, runtime::Completion::Continue({id}) => continue 'native_loop_{id},").unwrap();
+    for (id, target) in flow.targets.iter().enumerate() {
+        if target.region == flow.region {
+            writeln!(
+                output,
+                "runtime::Completion::Break({id}) => break 'native_loop_{id},"
+            )
+            .unwrap();
+            if target.allows_continue {
+                writeln!(
+                    output,
+                    "runtime::Completion::Continue({id}) => continue 'native_loop_{id},"
+                )
+                .unwrap();
+            }
         }
     }
     let jump = if flow.region != 0 {
