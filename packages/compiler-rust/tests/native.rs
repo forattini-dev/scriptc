@@ -476,6 +476,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-array-sort/values.ts",
         "rust-native-string-spread/main.ts",
         "rust-native-string-split/main.ts",
+        "rust-native-regex-guard/direct.ts",
         "rust-native-local-call-abi/values.mjs",
         "rust-native-local-call-abi/effects.mjs",
         "rust-native-local-call-abi/completion.mjs",
@@ -6960,6 +6961,54 @@ fn array_sort_boundaries_preserve_existing_artifacts() {
         assert!(
             !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
             "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn regex_capture_guard_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "regex-guard-boundary");
+    for tail in [
+        "const other = alias; other[1] = undefined; return use(alias[1]);",
+        "change(alias); return use(alias[1]);",
+        "return use(alias[2]);",
+        "return pair(change(alias), alias[1]);",
+    ] {
+        let source = format!(
+            "// @ts-nocheck\nfunction use(value: string): string {{ return value; }}\nfunction change(value: RegExpExecArray): string {{ value[1] = undefined; return 'x'; }}\nfunction pair(a: string, b: string): string {{ return a + b; }}\nfunction test(): string {{ const alias = /(a)/.exec('a'); if (alias?.[1] === undefined) throw new Error('absent'); {tail} }}\nconsole.log(test());\n"
+        );
+        let guarded_read = source.rfind("alias[").unwrap();
+        fs::write(&input, source).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{tail}: {stderr}"
+        );
+        assert!(
+            stderr.contains(&format!(":{guarded_read}..{}:", guarded_read + 8))
+                || stderr.contains(&format!(":{}..{}:", guarded_read - 1, guarded_read + 8)),
+            "{tail}: {stderr}"
         );
         for artifact in artifacts {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");

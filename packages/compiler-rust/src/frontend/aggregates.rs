@@ -843,6 +843,10 @@ impl Lowerer<'_> {
             }
             _ => {
                 let value = self.expression(node)?;
+                if let Some(narrowed) = self.guarded_capture_argument(node, value.clone(), &target)
+                {
+                    return Ok(narrowed);
+                }
                 self.coerce(value, target, node)
             }
         }
