@@ -154,6 +154,12 @@ pub(super) fn expression(
                     "runtime::array_len(&({}))",
                     expr(receiver, function, module)
                 )
+            } else if method == "join" {
+                format!(
+                    "{{ let array = {}; let separator = {}; runtime::array_join(&array, &separator) }}",
+                    expr(receiver, function, module),
+                    expr(&args[0], function, module)
+                )
             } else if method == "nextPresent" {
                 format!(
                     "{{ let array = {}; let start = {}; runtime::array_next_present(&array, start) }}",

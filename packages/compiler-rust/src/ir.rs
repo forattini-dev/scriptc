@@ -2209,6 +2209,12 @@ fn validate_function(
                 }
                 let valid = match method.as_str() {
                     "length" => *r#type == Type::F64 && args.is_empty(),
+                    "join" => {
+                        *elem == Type::String
+                            && *r#type == Type::String
+                            && args.len() == 1
+                            && args[0].ty() == Type::String
+                    }
                     "nextPresent" => {
                         *r#type == Type::F64 && args.len() == 1 && args[0].ty() == Type::F64
                     }
@@ -5404,6 +5410,41 @@ mod tests {
                 loc: loc.clone(),
             }];
             assert_eq!(validate(&module).is_ok(), valid, "{method}");
+        }
+    }
+
+    #[test]
+    fn string_array_join_requires_one_string_separator() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let string = Expr::StrLit {
+            value: ",".into(),
+            r#type: Type::String,
+            loc: loc.clone(),
+        };
+        for (elem, args, result, valid) in [
+            (Type::String, vec![string.clone()], Type::String, true),
+            (Type::F64, vec![string.clone()], Type::String, false),
+            (Type::String, vec![], Type::String, false),
+            (Type::String, vec![string], Type::Bool, false),
+        ] {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::ArrayIntrinsic {
+                    method: "join".into(),
+                    receiver: Box::new(Expr::ArrayLit {
+                        elems: vec![],
+                        r#type: Type::Array {
+                            elem: Box::new(elem),
+                        },
+                        loc: loc.clone(),
+                    }),
+                    args,
+                    r#type: result,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid);
         }
     }
 

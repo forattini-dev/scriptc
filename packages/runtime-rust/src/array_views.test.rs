@@ -110,3 +110,62 @@ fn mapped_arrays_retain_live_holes_undefined_and_sparse_keys_without_decoding() 
     finish();
     assert_eq!(live_heap_objects(), 0);
 }
+
+#[test]
+fn sorting_sparse_mapped_arrays_preserves_slots_and_identity() {
+    let source = array_new(vec![10.0, 2.0, 8.0, 1.0]);
+    let view = array_mapped(source.clone(), mapped_number, mapped_string);
+    array_delete(&source, 1.0);
+    array_set_undefined(&source, 2.0);
+    array_set_length(&source, 8.0);
+    let mut comparisons = 0;
+    let sorted = array_sort_by_snapshot(&view, |left, right| {
+        comparisons += 1;
+        left.cmp(right)
+    });
+    assert!(array_ptr_eq(&view, &sorted));
+    assert_eq!(comparisons, 1);
+    assert_eq!(array_len(&source), 8.0);
+    assert_eq!(array_get(&source, 0.0), 1.0);
+    assert_eq!(array_get(&source, 1.0), 10.0);
+    assert_eq!(array_state(&source, 2.0), 2.0);
+    assert_eq!(array_state(&source, 3.0), 0.0);
+    assert_eq!(array_next_present(&source, 3.0), 8.0);
+    assert_eq!(array_join(&view, &string("|")).as_ref(), "1|10||||||");
+    drop((source, view, sorted));
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}
+
+#[test]
+fn sort_snapshots_values_before_comparator_mutations() {
+    let array = array_new(vec![3.0, 1.0, 2.0]);
+    let alias = array.clone();
+    array_sort_by_snapshot(&array, |left, right| {
+        array_set_length(&alias, 1.0);
+        left.partial_cmp(right).unwrap()
+    });
+    assert_eq!(array_values(&array), vec![1.0, 2.0, 3.0]);
+    drop((array, alias));
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}
+
+#[test]
+fn sort_does_not_reextend_trailing_holes_after_comparator_shrinks_length() {
+    let array = array_new(vec![10.0, 9.0, 1.0]);
+    array_set_undefined(&array, 1.0);
+    array_set_length(&array, 8.0);
+    let alias = array.clone();
+    array_sort_by_snapshot(&array, |left, right| {
+        array_set_length(&alias, 1.0);
+        left.partial_cmp(right).unwrap()
+    });
+    assert_eq!(array_len(&array), 3.0);
+    assert_eq!(array_get(&array, 0.0), 1.0);
+    assert_eq!(array_get(&array, 1.0), 10.0);
+    assert_eq!(array_state(&array, 2.0), 2.0);
+    drop((array, alias));
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}

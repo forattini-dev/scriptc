@@ -320,6 +320,9 @@ impl Lowerer<'_> {
         if member.name().text() == "includes" {
             return self.array_includes(node);
         }
+        if member.name().text() == "sort" {
+            return self.array_sort(node);
+        }
         if matches!(member.name().text(), "some" | "every" | "slice") {
             return self.array_sequence_method(node);
         }
@@ -351,6 +354,33 @@ impl Lowerer<'_> {
             r#type: Type::F64,
             loc: self.loc(node),
         })
+    }
+
+    fn array_sort(&mut self, node: Node) -> Result<Expr, String> {
+        let member = node.expression();
+        let symbol = self.symbol(member.name());
+        if !self.primitive_symbol(symbol, "sort", Some("Array")) {
+            return Err(self.refuse(member, "array.sort requires its standard declaration"));
+        }
+        if !node.arguments().is_empty() {
+            return Err(self.refuse(node, "array.sort comparators are not ported"));
+        }
+        let receiver = self.expression(member.expression())?;
+        let receiver = self.live_member_receiver(member.expression(), receiver);
+        let ty = receiver.ty();
+        if !matches!(&ty, Type::Array { elem } if **elem == Type::String) {
+            return Err(self.refuse(node, "default array.sort requires a native string array"));
+        }
+        let value = self.coerce(receiver, Type::Dyn, node)?;
+        let sorted = Expr::DynInvoke {
+            recv: Box::new(value),
+            method: "sort".into(),
+            callee_name: "Array.sort".into(),
+            args: vec![],
+            r#type: Type::Dyn,
+            loc: self.loc(node),
+        };
+        self.coerce(sorted, ty, node)
     }
 
     fn array_pop(&mut self, node: Node) -> Result<Expr, String> {

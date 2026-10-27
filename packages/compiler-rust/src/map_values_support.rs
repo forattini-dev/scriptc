@@ -10,6 +10,7 @@ fn native_map_key(key: NativeValue) -> NativeValue {
     }
 }
 fn native_value_method(recv: NativeValue, method: &str) -> NativeValue {
+    if native_value_is_array(&recv) && method == "sort" { return recv; }
     if matches!(&recv, NativeValue::BigInt(_)) && matches!(method, "toString" | "valueOf") { return recv; }
     if native_value_is_function(&recv) && matches!(method, "call" | "apply") { return recv; }
     if matches!(&recv, NativeValue::Promise(_)) && method == "then" {
@@ -30,6 +31,12 @@ fn native_value_invoke(
     args: Vec<NativeValue>,
     name: &str,
 ) -> NativeValue {
+    if method == "sort" && native_value_is_array(&holder) {
+        if !args.is_empty() {
+            runtime::throw_type_error("scriptc: native array.sort comparators are not ported".into());
+        }
+        return native_value_sort_strings(holder);
+    }
     if let NativeValue::BigInt(value) = &recv {
         return match method {
             "valueOf" => recv,

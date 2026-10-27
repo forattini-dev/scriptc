@@ -330,8 +330,9 @@ pub fn array_set_length<T: ArrayElement>(array: &JsArray<T>, length: f64) {
 
 /// Store an explicit present `undefined` without shrinking the length.
 pub fn array_set_undefined<T: ArrayElement>(array: &JsArray<T>, index: f64) {
-    if array_view(array).is_some() {
-        throw_error_code("storing undefined in an array view is not supported yet".to_owned(), "SC3001");
+    if let Some(view) = array_view(array) {
+        view.set_undefined(index);
+        return;
     }
     let index = array_canonical_index(index);
     array.with_mut(|data| {
@@ -350,8 +351,9 @@ pub fn array_set_undefined<T: ArrayElement>(array: &JsArray<T>, index: f64) {
 /// `delete a[i]`: the slot becomes a hole; the length is unchanged.
 pub fn array_delete<T: ArrayElement>(array: &JsArray<T>, index: f64) {
     if !array_has(array, index) { return; }
-    if array_view(array).is_some() {
-        throw_error_code("deleting an element of an array view is not supported yet".to_owned(), "SC3001");
+    if let Some(view) = array_view(array) {
+        view.delete(index);
+        return;
     }
     let index = index as usize;
     array.with_mut(|data| {
@@ -553,17 +555,36 @@ where
     T: ArrayElement,
     F: FnMut(&T, &T) -> std::cmp::Ordering,
 {
-    let mut elements = array.with(|data| data.elements().into_owned());
-    elements.sort_by(|left, right| compare(left, right));
-    if let Some(view) = array_view(array) {
-        for (index, value) in elements.into_iter().take(view.len() as usize).enumerate() { view.set(index as f64, value); }
-        return array.clone();
-    }
-    array.with_mut(|data| {
-        for (stored, sorted) in data.elements.iter_mut().zip(elements) {
-            *stored = sorted;
+    // Snapshot only present entries: comparison callbacks may mutate the
+    // original array. Undefined values are never passed to the comparator,
+    // and holes remain absent after the defined values and undefined slots.
+    let length = array_len(array);
+    let mut elements = Vec::new();
+    let mut undefined = 0usize;
+    let mut index = array_next_present(array, 0.0);
+    while index < length {
+        if array_state(array, index) == f64::from(ARRAY_UNDEFINED) {
+            undefined += 1;
+        } else {
+            elements.push(array_get(array, index));
         }
-    });
+        index = array_next_present(array, index + 1.0);
+    }
+    elements.sort_by(|left, right| compare(left, right));
+    let mut destination = 0.0;
+    for value in elements {
+        array_set(array, destination, value);
+        destination += 1.0;
+    }
+    for _ in 0..undefined {
+        array_set_undefined(array, destination);
+        destination += 1.0;
+    }
+    let mut index = array_next_present(array, destination);
+    while index < length && index < array_len(array) {
+        array_delete(array, index);
+        index = array_next_present(array, index + 1.0);
+    }
     array.clone()
 }
 
@@ -802,6 +823,9 @@ fn array_join_holey<T: ArrayElement>(
 }
 
 pub fn array_join<T: JoinElement>(array: &JsArray<T>, separator: &JsString) -> JsString {
+    if array_view(array).is_some() {
+        return array_join_by(array, separator, |element, output| element.append_joined(output));
+    }
     array.with(|data| {
         if data.sparse.is_some() && data.view.is_none() {
             return array_join_holey(data, separator, |element, output| element.append_joined(output));
@@ -822,6 +846,17 @@ where
     T: ArrayElement,
     F: Fn(&T, &mut JsStringBuilder),
 {
+    if array_view(array).is_some() {
+        let length = array_len(array) as usize;
+        let mut output = JsStringBuilder::new();
+        for index in 0..length {
+            if index > 0 { output.push_str(separator); }
+            if array_state(array, index as f64) == f64::from(ARRAY_VALUE) {
+                append(&array_get(array, index as f64), &mut output);
+            }
+        }
+        return output.finish();
+    }
     array.with(|data| {
         if data.sparse.is_some() && data.view.is_none() {
             return array_join_holey(data, separator, &append);

@@ -365,6 +365,17 @@ impl Lowerer<'_> {
         let Type::Array { elem } = receiver.ty() else {
             unreachable!()
         };
+        if *elem == Type::String {
+            // The shared string-array join reads sparse slot states. A typed
+            // arrayGet would try to extract holes as strings and throw.
+            return Ok(Expr::ArrayIntrinsic {
+                method: "join".into(),
+                receiver: Box::new(receiver),
+                args: vec![separator],
+                r#type: Type::String,
+                loc: self.loc(node),
+            });
+        }
         let mut helper = Helper::new(
             "array_join",
             vec![receiver.ty(), Type::String],

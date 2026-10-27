@@ -90,7 +90,7 @@ fn native_value_has_own(value: NativeValue, key: runtime::JsString) -> bool {
     }
     native_value_own_keys(&value).iter().any(|k| k == &key)
 }
-fn native_array_index_keys(array: &runtime::JsArray<NativeValue>) -> Vec<runtime::JsString> {
+fn native_array_index_keys<T: runtime::ArrayElement>(array: &runtime::JsArray<T>) -> Vec<runtime::JsString> {
     runtime::array_own_index_keys(array)
 }
 fn native_index_keys(length: usize) -> Vec<runtime::JsString> {

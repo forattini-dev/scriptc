@@ -13,6 +13,8 @@ trait ArrayView<T: ArrayElement>: Trace {
     fn own_index_keys(&self) -> Vec<JsString>;
     fn get(&self, index: f64) -> T;
     fn set(&self, index: f64, value: T);
+    fn set_undefined(&self, index: f64);
+    fn delete(&self, index: f64);
     fn push(&self, value: T) -> f64;
     fn pop(&self) -> T;
     fn splice(&self, start: f64, count: f64, items: Vec<T>) -> Vec<T>;
@@ -45,6 +47,8 @@ impl<S: ArrayElement, T: ArrayElement> ArrayView<T> for MappedArray<S, T> {
     fn own_index_keys(&self) -> Vec<JsString> { array_own_index_keys(&self.source) }
     fn get(&self, index: f64) -> T { (self.read)(array_get(&self.source, index)) }
     fn set(&self, index: f64, value: T) { array_set(&self.source, index, (self.write)(value)); }
+    fn set_undefined(&self, index: f64) { array_set_undefined(&self.source, index); }
+    fn delete(&self, index: f64) { array_delete(&self.source, index); }
     fn push(&self, value: T) -> f64 { array_push(&self.source, (self.write)(value)) }
     fn pop(&self) -> T { (self.read)(array_pop(&self.source)) }
     fn splice(&self, start: f64, count: f64, items: Vec<T>) -> Vec<T> {

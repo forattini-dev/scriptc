@@ -473,6 +473,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-object-method-contracts/main.ts",
         "rust-native-nullish-equality/main.ts",
         "rust-native-array-includes/main.ts",
+        "rust-native-array-sort/values.ts",
         "rust-native-local-call-abi/values.mjs",
         "rust-native-local-call-abi/effects.mjs",
         "rust-native-local-call-abi/completion.mjs",
@@ -6898,6 +6899,44 @@ fn switch_boundaries_preserve_existing_artifacts() {
         "switch (1) { default: continue; }",
         "outer: switch (1) { default: break outer; }",
         "switch (new Set([1])) { default: break; }",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn array_sort_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "array-sort-boundary");
+    for source in [
+        "const values = ['b', 'a']; values.sort((a, b) => a.localeCompare(b));",
+        "const values = [3, 1]; values.sort();",
+        "const values = ['b', 'a']; values.sort(undefined);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let artifacts = [

@@ -142,6 +142,15 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     out.push_str(include_str!("../map_values_support.rs"));
     out.push_str(include_str!("../promise_values_support.rs"));
     let types = types(module);
+    out.push_str(
+        "fn native_value_sort_strings(value: NativeValue) -> NativeValue { match value {\n",
+    );
+    for (index, ty) in types.iter().enumerate() {
+        if matches!(ty, Type::Array { elem } if **elem == Type::String) {
+            writeln!(out, "NativeValue::V{index}(array) => {{ runtime::array_sort_by_snapshot(&array, |left, right| left.cmp(right)); NativeValue::V{index}(array) }},").unwrap();
+        }
+    }
+    out.push_str("_ => runtime::throw_type_error(\"scriptc: default native array.sort requires a string array\".into()), } }\n");
     out.push_str("fn native_value_collection_brand(value: &NativeValue, kind: &str) -> bool { match (kind,value) { (\"map\", NativeValue::Map(_)) => true,\n");
     for (index, ty) in types.iter().enumerate() {
         let kind = match ty {
@@ -596,16 +605,12 @@ fn own_key_definitions(types: &[Type], module: &Emission<'_>, out: &mut String) 
     // reader shared with hasOwn, JSON and process environment validation.
     out.push_str("fn native_value_keys(value: NativeValue) -> NativeValue { let mut keys = match &value { NativeValue::Undefined | NativeValue::Null => runtime::throw_type_error(\"Cannot convert undefined or null to object\".into()), NativeValue::BigInt(_) | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::Symbol(_) => Vec::new(), NativeValue::String(text) => native_index_keys(text.encode_utf16().count()), NativeValue::Array(array) => native_array_index_keys(array),\n");
     for (index, ty) in types.iter().enumerate() {
-        let length = match ty {
-            Type::Array { elem } if **elem != Type::Dyn => "runtime::array_len(value)",
-            Type::Bytes { .. } => "runtime::bytes_len(value)",
+        let keys = match ty {
+            Type::Array { elem } if **elem != Type::Dyn => "native_array_index_keys(value)",
+            Type::Bytes { .. } => "native_index_keys(runtime::bytes_len(value) as usize)",
             _ => continue,
         };
-        writeln!(
-            out,
-            "NativeValue::V{index}(value) => native_index_keys({length} as usize),"
-        )
-        .unwrap();
+        writeln!(out, "NativeValue::V{index}(value) => {keys},").unwrap();
     }
     out.push_str("_ => native_value_own_keys(&value) }; keys.sort_by_key(|key| key.parse::<u32>().ok().filter(|i| *i != u32::MAX && *key == i.to_string()).map(|i| (0, i)).unwrap_or((1, 0))); NativeValue::Array(runtime::array_new(keys.into_iter().map(NativeValue::String).collect())) }\n");
 }

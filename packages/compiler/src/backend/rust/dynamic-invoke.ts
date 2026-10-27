@@ -194,7 +194,7 @@ class RustDynamicInvokeEmitter {
     this.close("};");
     this.context.line("return if value < 0.0 { std::cmp::Ordering::Less } else if value > 0.0 { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal };");
     this.close("}");
-    this.context.line("sc_dyn_to_string(left).as_bytes().cmp(sc_dyn_to_string(right).as_bytes())");
+    this.context.line("runtime::string_compare_utf16(&sc_dyn_to_string(left), &sc_dyn_to_string(right)).cmp(&0)");
     this.close("}");
 
     const callable = `${this.dyn}::Undefined | ${this.functionPatterns}`;
