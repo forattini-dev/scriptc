@@ -5752,8 +5752,6 @@ fn compound_assignment_boundaries_preserve_existing_artifacts() {
     let target = binary(temp.path(), "compound-boundary");
     for source in [
         "const n = 1; n += 2;",
-        "let n: unknown = 1; n += 2;",
-        "let n = 1n; n += 2n;",
         "let n = 1; n += 'x';",
         "let n = 'a'; n += 1;",
         "let n = 'a'; n -= 1;",
@@ -5762,6 +5760,11 @@ fn compound_assignment_boundaries_preserve_existing_artifacts() {
         "const d: Record<string, number> = { n: 1 }; d.n += 2;",
         "class C { #n = 1; f(): void { this.#n += 2; } } new C().f();",
         "enum E { A = 1 } E.A += 1;",
+        "let n=1; const rhs:any='x'; n += rhs;",
+        "const r={n:1}; r.n |= 2;",
+        "const a=[1]; a[0] <<= 2;",
+        "const r={valueOf:()=>1}; console.log(r | 2);",
+        "const r={valueOf:()=>1}; console.log(~r);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let artifacts = [

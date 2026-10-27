@@ -2772,7 +2772,9 @@ fn validate_function(
                 expr(left, locals, initialized, functions, module)?;
                 expr(right, locals, initialized, functions, module)?;
                 let result = match op.as_str() {
-                    "+" | "-" | "*" | "/" | "%" | "**" => Type::F64,
+                    "+" | "-" | "*" | "/" | "%" | "**" | "&" | "|" | "^" | "<<" | ">>" | ">>>" => {
+                        Type::F64
+                    }
                     "<" | "<=" | ">" | ">=" | "===" | "!==" => Type::Bool,
                     _ => return Err("invalid numeric operator".into()),
                 };
@@ -2807,7 +2809,9 @@ fn validate_function(
                 ..
             } => {
                 expr(operand, locals, initialized, functions, module)?;
-                if (op == "-" && operand.ty() == Type::F64 && *r#type == Type::F64)
+                if (matches!(op.as_str(), "-" | "~")
+                    && operand.ty() == Type::F64
+                    && *r#type == Type::F64)
                     || (op == "!" && operand.ty() == Type::Bool && *r#type == Type::Bool)
                 {
                     Ok(())

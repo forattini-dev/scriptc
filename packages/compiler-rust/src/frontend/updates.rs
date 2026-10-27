@@ -21,6 +21,12 @@ pub(super) fn compound_operator(kind: SyntaxKind) -> Option<&'static str> {
         SyntaxKind::SlashEqualsToken => "/",
         SyntaxKind::PercentEqualsToken => "%",
         SyntaxKind::AsteriskAsteriskEqualsToken => "**",
+        SyntaxKind::AmpersandEqualsToken => "&",
+        SyntaxKind::BarEqualsToken => "|",
+        SyntaxKind::CaretEqualsToken => "^",
+        SyntaxKind::LessThanLessThanEqualsToken => "<<",
+        SyntaxKind::GreaterThanGreaterThanEqualsToken => ">>",
+        SyntaxKind::GreaterThanGreaterThanGreaterThanEqualsToken => ">>>",
         _ => return None,
     })
 }
@@ -38,11 +44,11 @@ impl Lowerer<'_> {
         let local = self.binding(operand)?;
         let storage = local.r#type.clone();
         let numeric = |ty: &Type| {
-            *ty == Type::F64
-                || matches!(ty, Type::Union { union_id } if self.unions[*union_id].arms.contains(&Type::F64) && self.unions[*union_id].arms.iter().all(|arm| matches!(arm, Type::F64 | Type::Undefined)))
+            matches!(ty, Type::F64 | Type::Bigint | Type::Dyn)
+                || matches!(ty, Type::Union { union_id } if self.unions[*union_id].arms.iter().any(|arm| matches!(arm, Type::F64 | Type::Bigint)) && self.unions[*union_id].arms.iter().all(|arm| matches!(arm, Type::F64 | Type::Bigint | Type::Undefined)))
         };
         if !local.mutable || !(numeric(&storage) || op == "+" && storage == Type::String) {
-            return Err(self.refuse(node, "compound assignment requires mutable number, undefined-capable numeric, or string += storage"));
+            return Err(self.refuse(node, "compound assignment requires mutable numeric, erased primitive, or string += storage"));
         }
         let loc = self.loc(node);
         let mut stmts = Vec::new();
@@ -58,31 +64,51 @@ impl Lowerer<'_> {
             node,
         );
         let right = self.primitive_operand(node.right())?;
-        let right_numeric = right.ty() == Type::F64
-            || matches!(right.ty(), Type::Undefined | Type::Void)
-            || matches!(right.ty(), Type::Union { union_id } if self.unions[union_id].arms.contains(&Type::F64) && self.unions[union_id].arms.iter().all(|arm| matches!(arm, Type::F64 | Type::Undefined)));
+        let right_numeric = self.numeric_operand_domain(&right.ty()) || right.ty() == Type::Void;
         if (storage == Type::String && right.ty() != Type::String)
             || (storage != Type::String && !right_numeric)
         {
-            return Err(self.refuse(node, "compound operand domain is not ported; numeric bindings require number/undefined and string += requires string"));
+            return Err(self.refuse(node, "compound operand domain is not ported; numeric bindings require primitives and string += requires string"));
         }
         let right = self.primitive_capture(right, node.right())?;
         let right = self.update_temp(right, &mut stmts, node);
-        // Conversions belong after RHS GetValue. The supported domains cannot
-        // invoke user coercion hooks or change the binding's published ABI.
+        // Conversions belong after RHS GetValue. Typed numeric += cannot
+        // publish a string into its already allocated storage contract.
+        if op == "+"
+            && storage != Type::Dyn
+            && storage != Type::String
+            && self.numeric_domain(&right.ty(), true) & 4 != 0
+        {
+            return Err(self.refuse(
+                node,
+                "compound += operand may change numeric storage to string",
+            ));
+        }
         let value = if storage == Type::String {
             self.string_concat(old, right, node)
-        } else {
+        } else if old.ty() == Type::F64 && right.ty() == Type::F64 {
             Expr::Bin {
                 op: op.into(),
-                left: Box::new(self.primitive_number(old, node)?),
-                right: Box::new(self.primitive_number(right, node)?),
+                left: Box::new(old),
+                right: Box::new(right),
                 r#type: Type::F64,
                 loc: loc.clone(),
             }
+        } else {
+            self.numeric_binary(old, right, op, node)?
         };
         let result_type = value.ty();
         let value = self.update_temp(value, &mut stmts, node);
+        if storage == Type::Bigint && op == ">>>" {
+            // ToNumeric retains this left BigInt. Every RHS domain throws,
+            // so there is no successful Number payload to store in the cell.
+            return Ok(Expr::Sequence {
+                stmts,
+                result: Box::new(value),
+                r#type: result_type,
+                loc,
+            });
+        }
         let stored = self.coerce(value.clone(), storage, node)?;
         if self.var_types.contains_key(&symbol) {
             self.var_assignment_fact(symbol, &stored);

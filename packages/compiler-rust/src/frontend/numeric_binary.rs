@@ -24,6 +24,12 @@ impl Lowerer<'_> {
             "/" => "div",
             "%" => "rem",
             "**" => "pow",
+            "&" => "and",
+            "|" => "or",
+            "^" => "xor",
+            "<<" => "shl",
+            ">>" => "shr",
+            ">>>" => "ushr",
             _ => unreachable!("numeric operator family"),
         };
         // Boxing only retains the original values. In particular it must not
@@ -86,22 +92,30 @@ impl Lowerer<'_> {
             "Cannot mix BigInt and other types, use explicit conversions",
             helper.loc(),
         );
-        let bigint = self.bigint_operation(
-            &format!("bigint.{operation}"),
-            vec![
-                self.coerce(helper.read(&a), Type::Bigint, node)?,
-                self.coerce(helper.read(&b), Type::Bigint, node)?,
-            ],
-            node,
-        );
+        let bigint_branch = if op == ">>>" {
+            numeric_type_error(
+                "BigInts have no unsigned right shift, use >> instead",
+                helper.loc(),
+            )
+        } else {
+            let bigint = self.bigint_operation(
+                &format!("bigint.{operation}"),
+                vec![
+                    self.coerce(helper.read(&a), Type::Bigint, node)?,
+                    self.coerce(helper.read(&b), Type::Bigint, node)?,
+                ],
+                node,
+            );
+            Stmt::Return {
+                value: Some(self.coerce(bigint, Type::Dyn, node)?),
+                loc: helper.loc(),
+            }
+        };
         helper.function.body.push(Stmt::If {
             cond: is_bigint(helper.read(&a)),
             then: vec![Stmt::If {
                 cond: is_bigint(helper.read(&b)),
-                then: vec![Stmt::Return {
-                    value: Some(self.coerce(bigint, Type::Dyn, node)?),
-                    loc: helper.loc(),
-                }],
+                then: vec![bigint_branch],
                 else_: Some(vec![mixed.clone()]),
                 loc: helper.loc(),
             }],
@@ -134,7 +148,7 @@ impl Lowerer<'_> {
         self.coerce(call, result_type, node)
     }
 
-    fn numeric_operand_domain(&self, ty: &Type) -> bool {
+    pub(super) fn numeric_operand_domain(&self, ty: &Type) -> bool {
         match ty {
             Type::Dyn
             | Type::F64
@@ -143,6 +157,7 @@ impl Lowerer<'_> {
             | Type::Bool
             | Type::Null
             | Type::Undefined
+            | Type::Void
             | Type::Symbol => true,
             Type::Union { union_id } => self.unions[*union_id]
                 .arms
@@ -152,9 +167,9 @@ impl Lowerer<'_> {
         }
     }
 
-    fn numeric_domain(&self, ty: &Type, addition: bool) -> u8 {
+    pub(super) fn numeric_domain(&self, ty: &Type, addition: bool) -> u8 {
         match ty {
-            Type::F64 | Type::Bool | Type::Null | Type::Undefined => 1,
+            Type::F64 | Type::Bool | Type::Null | Type::Undefined | Type::Void => 1,
             Type::Bigint => 2,
             Type::String => {
                 if addition {
@@ -179,6 +194,10 @@ impl Lowerer<'_> {
     }
 
     fn numeric_result_type(&mut self, left: &Type, right: &Type, op: &str) -> Type {
+        // Every successful unsigned shift is a Number, including erased inputs.
+        if op == ">>>" {
+            return Type::F64;
+        }
         let a = self.numeric_domain(left, op == "+");
         let b = self.numeric_domain(right, op == "+");
         let result = (a & b & 3) | if op == "+" && (a | b) & 4 != 0 { 4 } else { 0 };
@@ -195,6 +214,14 @@ impl Lowerer<'_> {
     /// Checker-only `number` inference for `any - any` loses valid BigInts.
     pub(super) fn numeric_initializer_type(&mut self, node: Node) -> Option<Type> {
         let node = receivers::reference_node(node);
+        if node.kind() == SyntaxKind::PrefixUnaryExpression
+            && node.operator() == SyntaxKind::TildeToken
+        {
+            let operand = self.numeric_source_type(node.operand())?;
+            return self
+                .numeric_operand_domain(&operand)
+                .then(|| self.numeric_result_type(&operand, &operand, "~"));
+        }
         if node.kind() != SyntaxKind::BinaryExpression {
             return None;
         }
@@ -205,6 +232,12 @@ impl Lowerer<'_> {
             SyntaxKind::SlashToken => "/",
             SyntaxKind::PercentToken => "%",
             SyntaxKind::AsteriskAsteriskToken => "**",
+            SyntaxKind::AmpersandToken => "&",
+            SyntaxKind::BarToken => "|",
+            SyntaxKind::CaretToken => "^",
+            SyntaxKind::LessThanLessThanToken => "<<",
+            SyntaxKind::GreaterThanGreaterThanToken => ">>",
+            SyntaxKind::GreaterThanGreaterThanGreaterThanToken => ">>>",
             _ => return None,
         };
         let left = self.numeric_source_type(node.left())?;
@@ -213,6 +246,61 @@ impl Lowerer<'_> {
             return None;
         }
         Some(self.numeric_result_type(&left, &right, op))
+    }
+
+    pub(super) fn numeric_not(&mut self, operand: Expr, node: Node) -> Result<Expr, String> {
+        if !self.numeric_operand_domain(&operand.ty()) {
+            return Err(self.refuse(node, "numeric object coercion hooks are not ported"));
+        }
+        if operand.ty() == Type::F64 {
+            return Ok(Expr::Unary {
+                op: "~".into(),
+                operand: Box::new(operand),
+                r#type: Type::F64,
+                loc: self.loc(node),
+            });
+        }
+        self.ensure_exception_classes(node)?;
+        let result_type = self.numeric_result_type(&operand.ty(), &operand.ty(), "~");
+        let arg = self.coerce(operand, Type::Dyn, node.operand())?;
+        let mut helper = Helper::new("numeric_not", vec![Type::Dyn], Type::Dyn, self.loc(node));
+        let value = helper.local("numeric", Type::Dyn, false);
+        let converted = self.numeric_primitive(helper.read(&helper.param(0)), node)?;
+        helper.declare(&value, converted);
+        let bigint = self.coerce(helper.read(&value), Type::Bigint, node)?;
+        let bigint = self.bigint_operation("bigint.not", vec![bigint], node);
+        helper.function.body.push(Stmt::If {
+            cond: Expr::DynTest {
+                value: Box::new(helper.read(&value)),
+                test: "bigint".into(),
+                negated: false,
+                r#type: Type::Bool,
+                loc: helper.loc(),
+            },
+            then: vec![Stmt::Return {
+                value: Some(self.coerce(bigint, Type::Dyn, node)?),
+                loc: helper.loc(),
+            }],
+            else_: None,
+            loc: helper.loc(),
+        });
+        let number = Expr::Unary {
+            op: "~".into(),
+            operand: Box::new(self.coerce(helper.read(&value), Type::F64, node)?),
+            r#type: Type::F64,
+            loc: helper.loc(),
+        };
+        helper.function.body.push(Stmt::Return {
+            value: Some(self.coerce(number, Type::Dyn, node)?),
+            loc: helper.loc(),
+        });
+        let call = Expr::Call {
+            callee: self.install_helper(helper.function),
+            args: vec![arg],
+            r#type: Type::Dyn,
+            loc: self.loc(node),
+        };
+        self.coerce(call, result_type, node)
     }
 
     fn numeric_source_type(&mut self, node: Node) -> Option<Type> {

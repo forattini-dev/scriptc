@@ -1358,6 +1358,11 @@ impl Lowerer<'_> {
                 });
             }
         }
+        if matches!(op, "&" | "|" | "^" | "<<" | ">>" | ">>>")
+            && (left.ty() != Type::F64 || right.ty() != Type::F64)
+        {
+            return self.numeric_binary(left, right, op, node);
+        }
         if left.ty() == Type::Bigint && right.ty() == Type::Bigint {
             if matches!(op, "===" | "!==") {
                 return Ok(Expr::DynScalarEq {
@@ -1428,7 +1433,10 @@ impl Lowerer<'_> {
             op: op.into(),
             left: Box::new(left),
             right: Box::new(right),
-            r#type: if matches!(op, "+" | "-" | "*" | "/" | "%" | "**") {
+            r#type: if matches!(
+                op,
+                "+" | "-" | "*" | "/" | "%" | "**" | "&" | "|" | "^" | "<<" | ">>" | ">>>"
+            ) {
                 Type::F64
             } else {
                 Type::Bool

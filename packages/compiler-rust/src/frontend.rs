@@ -1430,6 +1430,7 @@ impl<'a> Lowerer<'a> {
                 let op = match node.operator() {
                     SyntaxKind::MinusToken => "-",
                     SyntaxKind::ExclamationToken => "!",
+                    SyntaxKind::TildeToken => "~",
                     _ => return Err(self.refuse(node, "unary operator is not ported")),
                 };
                 if op == "!" {
@@ -1443,6 +1444,9 @@ impl<'a> Lowerer<'a> {
                     });
                 }
                 let raw = self.expression(node.operand())?;
+                if op == "~" {
+                    return self.numeric_not(raw, node);
+                }
                 let operand = Box::new(raw);
                 if op == "-" && operand.ty() == Type::Bigint {
                     return Ok(self.bigint_operation("bigint.neg", vec![*operand], node));
@@ -1484,6 +1488,12 @@ impl<'a> Lowerer<'a> {
                     SyntaxKind::SlashToken => "/",
                     SyntaxKind::PercentToken => "%",
                     SyntaxKind::AsteriskAsteriskToken => "**",
+                    SyntaxKind::AmpersandToken => "&",
+                    SyntaxKind::BarToken => "|",
+                    SyntaxKind::CaretToken => "^",
+                    SyntaxKind::LessThanLessThanToken => "<<",
+                    SyntaxKind::GreaterThanGreaterThanToken => ">>",
+                    SyntaxKind::GreaterThanGreaterThanGreaterThanToken => ">>>",
                     SyntaxKind::LessThanToken => "<",
                     SyntaxKind::LessThanEqualsToken => "<=",
                     SyntaxKind::GreaterThanToken => ">",

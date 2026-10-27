@@ -233,10 +233,17 @@ pub fn uses_runtime(module: &Module) -> bool {
             Expr::MapNew { seed, .. } => seed.iter().any(|p| expr(&p.key) || expr(&p.value)),
             Expr::MapIntrinsic { receiver, args, .. } => expr(receiver) || args.iter().any(expr),
             Expr::RecordKeyGet { obj, key, .. } => expr(obj) || expr(key),
-            Expr::Bin { left, right, .. }
-            | Expr::UnionEq { left, right, .. }
-            | Expr::Logical { left, right, .. } => expr(left) || expr(right),
-            Expr::Unary { operand, .. } => expr(operand),
+            Expr::Bin {
+                op, left, right, ..
+            } => {
+                matches!(op.as_str(), "&" | "|" | "^" | "<<" | ">>" | ">>>")
+                    || expr(left)
+                    || expr(right)
+            }
+            Expr::UnionEq { left, right, .. } | Expr::Logical { left, right, .. } => {
+                expr(left) || expr(right)
+            }
+            Expr::Unary { op, operand, .. } => op == "~" || expr(operand),
             Expr::Call { args, .. } | Expr::Intrinsic { args, .. } => args.iter().any(expr),
             Expr::Closure { .. } => false,
             Expr::CallValue { callee, args, .. } => expr(callee) || args.iter().any(expr),
@@ -714,8 +721,17 @@ fn expr(value: &Expr, function: &Function, module: &Emission<'_>) -> String {
                 "===" => format!("({left} == {right})"),
                 "!==" => format!("({left} != {right})"),
                 "**" => format!("js_pow({left}, {right})"),
+                "&" => format!("runtime::bit_and({left}, {right})"),
+                "|" => format!("runtime::bit_or({left}, {right})"),
+                "^" => format!("runtime::bit_xor({left}, {right})"),
+                "<<" => format!("runtime::shift_left({left}, {right})"),
+                ">>" => format!("runtime::shift_right({left}, {right})"),
+                ">>>" => format!("runtime::shift_right_unsigned({left}, {right})"),
                 _ => format!("({left} {op} {right})"),
             }
+        }
+        Expr::Unary { op, operand, .. } if op == "~" => {
+            format!("runtime::bit_not({})", expr(operand, function, module))
         }
         Expr::Unary { op, operand, .. } => format!("({op}({}))", expr(operand, function, module)),
         Expr::Call { callee, args, .. } => format!(
