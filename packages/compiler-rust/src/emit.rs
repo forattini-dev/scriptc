@@ -7,6 +7,7 @@ mod child_process;
 mod classes;
 mod collections;
 mod context;
+mod iteration;
 use context::Emission;
 mod exceptions;
 mod functions;
@@ -112,6 +113,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         functions::definitions(module, &mut output);
         values::definitions(module, &mut output);
         buffer_values::definitions(module, &mut output);
+        iteration::definitions(module, &mut output);
         exceptions::definitions(module, &mut output);
         child_process::definitions(module, &mut output);
         json_functions::definitions(module, &mut output);
@@ -201,6 +203,7 @@ pub fn uses_runtime(module: &Module) -> bool {
             | Expr::ToString { .. }
             | Expr::DynFrom { .. }
             | Expr::DynCheck { .. }
+            | Expr::DynIterN { .. }
             | Expr::DynObjLit { .. }
             | Expr::DynArrLit { .. }
             | Expr::DynKeyGet { .. }
@@ -362,6 +365,7 @@ fn expr(value: &Expr, function: &Function, module: &Emission<'_>) -> String {
         | Expr::CaughtTest { .. }
         | Expr::DynFrom { .. }
         | Expr::DynCheck { .. }
+        | Expr::DynIterN { .. }
         | Expr::DynObjLit { .. }
         | Expr::DynArrLit { .. }
         | Expr::DynKeyGet { .. }

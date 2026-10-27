@@ -142,6 +142,19 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     out.push_str(include_str!("../map_values_support.rs"));
     out.push_str(include_str!("../promise_values_support.rs"));
     let types = types(module);
+    out.push_str("fn native_value_collection_brand(value: &NativeValue, kind: &str) -> bool { match (kind,value) { (\"map\", NativeValue::Map(_)) => true,\n");
+    for (index, ty) in types.iter().enumerate() {
+        let kind = match ty {
+            Type::Bytes { .. } => "bytes",
+            Type::Map { .. } => "map",
+            Type::Set { .. } => "set",
+            _ => continue,
+        };
+        if specialized(ty, module) {
+            writeln!(out, "({kind:?}, NativeValue::V{index}(_)) => true,").unwrap();
+        }
+    }
+    out.push_str("_ => false, } }\n");
     out.push_str("fn native_value_is_array(value: &NativeValue) -> bool { match value { NativeValue::Array(_) => true,\n");
     for (index, ty) in types.iter().enumerate() {
         if matches!(ty, Type::Array { elem } if **elem != Type::Dyn)
@@ -335,7 +348,7 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
         };
         writeln!(out, "(NativeValue::V{i}(a), NativeValue::V{i}(b)) => {eq},").unwrap();
     }
-    out.push_str("_ => false } }\nfn native_value_test(value: &NativeValue, test: &str) -> bool { match test { \"bigint\" => matches!(value, NativeValue::BigInt(_)), \"number\" => matches!(value, NativeValue::Number(_)), \"boolean\" => matches!(value, NativeValue::Boolean(_)), \"string\" => matches!(value, NativeValue::String(_)), \"symbol\" => matches!(value, NativeValue::Symbol(_)), \"undefined\" => matches!(value, NativeValue::Undefined), \"null\" => matches!(value, NativeValue::Null), \"nullish\" => matches!(value, NativeValue::Undefined | NativeValue::Null), \"array\" => native_value_is_array(value), \"truthy\" => match value { NativeValue::Undefined | NativeValue::Null => false, NativeValue::BigInt(v) => runtime::bigint_truthy(v), NativeValue::Number(v) => *v != 0.0 && !v.is_nan(), NativeValue::Boolean(v) => *v, NativeValue::String(v) => !v.is_empty(), _ => true }, \"function\" => match value {\n");
+    out.push_str("_ => false } }\nfn native_value_test(value: &NativeValue, test: &str) -> bool { match test { \"bigint\" => matches!(value, NativeValue::BigInt(_)), \"number\" => matches!(value, NativeValue::Number(_)), \"boolean\" => matches!(value, NativeValue::Boolean(_)), \"string\" => matches!(value, NativeValue::String(_)), \"symbol\" => matches!(value, NativeValue::Symbol(_)), \"undefined\" => matches!(value, NativeValue::Undefined), \"null\" => matches!(value, NativeValue::Null), \"nullish\" => matches!(value, NativeValue::Undefined | NativeValue::Null), \"array\" => native_value_is_array(value), \"bytes\" | \"map\" | \"set\" => native_value_collection_brand(value, test), \"truthy\" => match value { NativeValue::Undefined | NativeValue::Null => false, NativeValue::BigInt(v) => runtime::bigint_truthy(v), NativeValue::Number(v) => *v != 0.0 && !v.is_nan(), NativeValue::Boolean(v) => *v, NativeValue::String(v) => !v.is_empty(), _ => true }, \"function\" => match value {\n");
     for (i, t) in types.iter().enumerate() {
         if matches!(t, Type::Func { .. } | Type::Classval { .. }) {
             writeln!(out, "NativeValue::V{i}(_) => true,").unwrap();
@@ -590,6 +603,10 @@ pub(super) fn expression(
     module: &Emission<'_>,
 ) -> Option<String> {
     Some(match value {
+        Expr::DynIterN { value, count, .. } => format!(
+            "native_value_iter_n({}, {count})",
+            expr(value, function, module)
+        ),
         Expr::LibCall { r#fn, args, .. } if r#fn == "dyn.objectRestCheck" => format!(
             "{{ let value = {}; match value {{ NativeValue::Object(_) | NativeValue::Record(..) => (), _ => runtime::throw_error_code(\"scriptc SC1031: checked-dynamic object rest requires an ordinary object without descriptor-defined properties\".into(), \"SC1031\"), }} }}",
             expr(&args[0], function, module)

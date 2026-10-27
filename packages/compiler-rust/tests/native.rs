@@ -466,6 +466,14 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-local-call-abi/catalog-errors.ts",
         "rust-native-buffer-from/protocols.ts",
         "rust-native-buffer-from/unicode.ts",
+        "rust-native-sequence-bindings/unit-effects.ts",
+        "rust-native-sequence-bindings/values.ts",
+        "rust-native-sequence-bindings/absence.ts",
+        "rust-native-sequence-bindings/strings.ts",
+        "rust-native-sequence-bindings/bytes.ts",
+        "rust-native-sequence-bindings/parameters.ts",
+        "rust-native-sequence-bindings/iteration.ts",
+        "rust-native-sequence-bindings/storage.ts",
         "rust-native-buffer-from/values.ts",
         "rust-native-buffer-from/order.ts",
         "rust-native-buffer-from/errors.ts",
@@ -6862,7 +6870,7 @@ fn for_of_boundaries_preserve_existing_artifacts() {
     for source in [
         "for (var value of [1]) console.log(value);",
         "let value = 0; for (value of [1]) console.log(value);",
-        "for (const [value] of [[1]]) console.log(value);",
+        "for (const [[value]] of [[[1]]]) console.log(value);",
         "for (const {value} of [{value: 1}]) console.log(value);",
         "async function run(){ for await (const value of [1]) console.log(value); } run();",
         "function run(value: unknown) { for (const item of value) console.log(item); } run([1]);",
@@ -7033,6 +7041,49 @@ fn tuple_numeric_boundaries_preserve_existing_artifacts() {
         "const a:[number|undefined,number]=[1,2]; function read(key:number){console.log(a[key]);} read(0);",
         "const a:[number?]=[1]; function read(key:number){console.log(a[key]);} read(0);",
         "const a=[1,2] as const; function read(key:number):number{return a[key];} read(9);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn sequence_binding_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "sequence-boundary");
+    for source in [
+        "const [value=1]=[undefined];",
+        "const [...values]=[1,2];",
+        "const [[value]]=[[1]];",
+        "const [value]:number[]=[1];",
+        "var [value]=[1];",
+        "function f([value]=[1]){} f();",
+        "for(const [value=1] of [[1]]){}",
+        "const [value]=new Map([['a',1]]);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let artifacts = [

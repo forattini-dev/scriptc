@@ -342,6 +342,63 @@ impl Lowerer<'_> {
         if value.ty() == target {
             return Ok(value);
         }
+        // Unit payloads have no stored fields, but their producing expressions
+        // can still evaluate conditions, reads and calls. Lift their control
+        // flow before boxing a unit or constructing a payload-free union arm.
+        let value = if matches!(value.ty(), Type::Null | Type::Undefined)
+            && !matches!(value, Expr::UnitLit { .. })
+        {
+            match value {
+                Expr::Ternary {
+                    cond,
+                    then,
+                    else_,
+                    loc,
+                    ..
+                } => {
+                    return Ok(Expr::Ternary {
+                        cond,
+                        then: Box::new(self.coerce(*then, target.clone(), node)?),
+                        else_: Box::new(self.coerce(*else_, target.clone(), node)?),
+                        r#type: target,
+                        loc,
+                    });
+                }
+                Expr::Sequence {
+                    stmts, result, loc, ..
+                } => {
+                    return Ok(Expr::Sequence {
+                        stmts,
+                        result: Box::new(self.coerce(*result, target.clone(), node)?),
+                        r#type: target,
+                        loc,
+                    });
+                }
+                value if target != Type::Dyn => {
+                    let unit = Expr::UnitLit {
+                        unit: if value.ty() == Type::Null {
+                            "null"
+                        } else {
+                            "undefined"
+                        },
+                        r#type: value.ty(),
+                        loc: self.loc(node),
+                    };
+                    return Ok(Expr::Sequence {
+                        stmts: vec![Stmt::Expression {
+                            expr: self.coerce(value, Type::Dyn, node)?,
+                            loc: self.loc(node),
+                        }],
+                        result: Box::new(self.coerce(unit, target.clone(), node)?),
+                        r#type: target,
+                        loc: self.loc(node),
+                    });
+                }
+                value => value,
+            }
+        } else {
+            value
+        };
         if matches!(value.ty(), Type::Promise { .. }) && matches!(target, Type::Promise { .. }) {
             let value = self.coerce(value, Type::Dyn, node)?;
             return self.coerce(value, target, node);
@@ -1302,6 +1359,23 @@ impl Lowerer<'_> {
                 vec![left, right],
                 node,
             ));
+        }
+        let numeric_slot = |ty: Type| match ty {
+            Type::F64 | Type::Undefined => true,
+            Type::Union { union_id } => self.unions[union_id]
+                .arms
+                .iter()
+                .all(|arm| matches!(arm, Type::F64 | Type::Undefined)),
+            _ => false,
+        };
+        if matches!(op, "+" | "-" | "*" | "/" | "%" | "**")
+            && numeric_slot(left.ty())
+            && numeric_slot(right.ty())
+        {
+            // Missing sequence elements participate as NaN. This is a
+            // primitive conversion; it performs no object hooks or throws.
+            left = self.primitive_number(left, node.left())?;
+            right = self.primitive_number(right, node.right())?;
         }
         let supported = if matches!(op, "===" | "!==") {
             left.ty() == right.ty()

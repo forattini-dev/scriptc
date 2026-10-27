@@ -1,7 +1,16 @@
 //! Lexical object bindings retain the owning source and evaluate it once.
 use super::*;
 
+pub(super) fn omitted(element: Node) -> bool {
+    element.is_nil()
+        || element.kind() == SyntaxKind::OmittedExpression
+        || (element.kind() == SyntaxKind::BindingElement && element.name().is_nil())
+}
+
 pub(super) fn names(name: Node, out: &mut Vec<Node>) {
+    if name.is_nil() {
+        return;
+    }
     if name.kind() == SyntaxKind::Identifier {
         out.push(name);
     } else if matches!(
@@ -9,7 +18,7 @@ pub(super) fn names(name: Node, out: &mut Vec<Node>) {
         SyntaxKind::ObjectBindingPattern | SyntaxKind::ArrayBindingPattern
     ) {
         for element in name.elements() {
-            if element.kind() == SyntaxKind::BindingElement {
+            if !element.is_nil() && element.kind() == SyntaxKind::BindingElement {
                 names(element.name(), out);
             }
         }
@@ -172,46 +181,55 @@ impl Lowerer<'_> {
                     },
                 )
             };
-            let ty = value.ty();
-            let symbol = self.symbol(name);
-            if ty == Type::Dyn {
-                self.var_types.insert(symbol, Type::Dyn);
-                self.var_defined.remove(&symbol);
-            } else if self.optional_storage(&ty) {
-                self.var_types.insert(symbol, ty.clone());
-                self.var_assignment_fact(symbol, &value);
-            }
-            if module {
-                let local = self.module_binding(name, ty, mutable);
-                if local.r#type != value.ty() {
-                    return Err(self.refuse(
-                        element,
-                        "module object binding layout differs from its field",
-                    ));
-                }
-                body.push(Stmt::Assign {
-                    local_id: local.id,
-                    initializes_global: true,
-                    value,
-                    loc: self.loc(element),
-                });
-            } else {
-                let local = Local {
-                    id: format!("v{}", self.locals.len()),
-                    name: name.text().into(),
-                    r#type: ty,
-                    mutable,
-                    boxed: false,
-                };
-                self.locals.push(local.clone());
-                self.bindings.insert(symbol, local.clone());
-                body.push(Stmt::VarDecl {
-                    local_id: local.id,
-                    init: value,
-                    loc: self.loc(element),
-                });
-            }
+            body.push(self.publish_binding(name, value, mutable, module, element)?);
         }
         Ok(body)
+    }
+    pub(super) fn publish_binding(
+        &mut self,
+        name: Node,
+        value: Expr,
+        mutable: bool,
+        module: bool,
+        node: Node,
+    ) -> Result<Stmt, String> {
+        let ty = value.ty();
+        let symbol = self.symbol(name);
+        if ty == Type::Dyn {
+            self.var_types.insert(symbol, Type::Dyn);
+            self.var_defined.remove(&symbol);
+        } else if self.optional_storage(&ty) {
+            self.var_types.insert(symbol, ty.clone());
+            self.var_assignment_fact(symbol, &value);
+        }
+        if module {
+            let local = self.module_binding(name, ty, mutable);
+            if local.r#type != value.ty() {
+                return Err(
+                    self.refuse(node, "module binding layout differs from its owning value")
+                );
+            }
+            Ok(Stmt::Assign {
+                local_id: local.id,
+                initializes_global: true,
+                value,
+                loc: self.loc(node),
+            })
+        } else {
+            let local = Local {
+                id: format!("v{}", self.locals.len()),
+                name: name.text().into(),
+                r#type: ty,
+                mutable,
+                boxed: false,
+            };
+            self.locals.push(local.clone());
+            self.bindings.insert(symbol, local.clone());
+            Ok(Stmt::VarDecl {
+                local_id: local.id,
+                init: value,
+                loc: self.loc(node),
+            })
+        }
     }
 }

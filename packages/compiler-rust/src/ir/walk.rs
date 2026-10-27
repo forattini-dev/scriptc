@@ -87,6 +87,7 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
         | Expr::CaughtTest { value, .. }
         | Expr::DynFrom { value, .. }
         | Expr::DynCheck { value, .. }
+        | Expr::DynIterN { value, .. }
         | Expr::DynTest { value, .. }
         | Expr::Upcast { value, .. }
         | Expr::Downcast { value, .. }

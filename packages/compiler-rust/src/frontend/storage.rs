@@ -17,6 +17,12 @@ impl Lowerer<'_> {
                     // Flat dynamic/primitive object bindings publish owning
                     // value snapshots. Plan their module cells before function
                     // bodies can capture a checker-only property projection.
+                    let sequence = declaration.name().kind() == SyntaxKind::ArrayBindingPattern;
+                    let sequence_source = if sequence && !declaration.initializer().is_nil() {
+                        self.ty(declaration.initializer()).ok()
+                    } else {
+                        None
+                    };
                     let dynamic_binding = declaration.name().kind()
                         == SyntaxKind::ObjectBindingPattern
                         && !declaration.initializer().is_nil()
@@ -35,14 +41,26 @@ impl Lowerer<'_> {
                         }
                         // An untyped JavaScript initializer can provide a more
                         // precise native contract when lowered at its source site.
-                        let storage = if dynamic_binding {
+                        let storage = if sequence {
+                            let position = declaration
+                                .name()
+                                .elements()
+                                .iter()
+                                .position(|element| !element.is_nil() && element.name() == name)
+                                .unwrap_or(0);
+                            self.sequence_slot_type(
+                                sequence_source.as_ref().unwrap_or(&Type::Dyn),
+                                position,
+                                name,
+                            )
+                        } else if dynamic_binding {
                             Ok(Type::Dyn)
                         } else {
                             self.storage_type(name)
                         };
                         if let Ok(mut ty) = storage {
-                            if dynamic_binding {
-                                self.var_types.insert(symbol, Type::Dyn);
+                            if dynamic_binding || sequence {
+                                self.var_types.insert(symbol, ty.clone());
                                 self.var_defined.remove(&symbol);
                             }
                             if declaration.initializer().is_nil() {

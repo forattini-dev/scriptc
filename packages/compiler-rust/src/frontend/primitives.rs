@@ -572,8 +572,13 @@ impl Lowerer<'_> {
             }
             Type::String => Ok(Expr::LibCall { r#fn: "num.fromString".into(), args: vec![value], r#type: Type::F64, loc: self.loc(node) }),
             Type::Bool => Ok(Expr::Ternary { cond: Box::new(value), then: Box::new(number(1.0)), else_: Box::new(number(0.0)), r#type: Type::F64, loc: self.loc(node) }),
-            Type::Null => Ok(number(0.0)),
-            Type::Undefined => Ok(number(f64::NAN)),
+            Type::Null | Type::Undefined => {
+                if matches!(value, Expr::UnitLit { .. }) {
+                    Ok(number(if value.ty() == Type::Null { 0.0 } else { f64::NAN }))
+                } else {
+                    self.strict_number_primitive(value, node)
+                }
+            }
             ty @ Type::Union { union_id } => {
                 let mut helper = Helper::new("primitive_number", vec![ty], Type::F64, self.loc(node));
                 let slot = helper.param(0);

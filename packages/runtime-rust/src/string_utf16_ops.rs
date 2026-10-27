@@ -1,3 +1,21 @@
+/// ECMAScript string iteration combines surrogate pairs and keeps lone units.
+/// Only consume the requested prefix; array patterns need not traverse the tail.
+pub fn string_iteration_prefix(value: &JsString, count: usize) -> Vec<JsString> {
+    let mut units = value.encode_utf16().peekable();
+    let mut output = Vec::new();
+    for _ in 0..count {
+        let Some(first) = units.next() else { break };
+        if (0xd800..=0xdbff).contains(&first)
+            && units.peek().is_some_and(|second| (0xdc00..=0xdfff).contains(second))
+        {
+            output.push(JsString::from_utf16(&[first, units.next().unwrap()]));
+        } else {
+            output.push(JsString::from_utf16(&[first]));
+        }
+    }
+    output
+}
+
 fn string_change_case(value: &JsString, upper: bool) -> JsString {
     let mut output = JsStringBuilder::new();
     let mut run = String::new();
@@ -72,4 +90,18 @@ fn json_source_utf8(text: &JsString) -> std::borrow::Cow<'_, str> {
         }
     }
     std::borrow::Cow::Owned(output)
+}
+
+#[cfg(test)]
+mod string_iteration_tests {
+    use super::*;
+    #[test]
+    fn bounded_string_iteration_retains_lone_units_and_surrogate_pairs() {
+        let text = JsString::from_utf16(&[65, 0xd83d, 0xde00, 0xd800, 120, 0xdc00]);
+        assert!(string_iteration_prefix(&text, 0).is_empty());
+        let prefix = string_iteration_prefix(&text, 3);
+        assert_eq!(prefix.iter().map(|v| v.encode_utf16().collect::<Vec<_>>()).collect::<Vec<_>>(), vec![vec![65], vec![0xd83d, 0xde00], vec![0xd800]]);
+        assert_eq!(string_iteration_prefix(&text, 100).len(), 5);
+        assert!(string_iteration_prefix(&string(""), 3).is_empty());
+    }
 }

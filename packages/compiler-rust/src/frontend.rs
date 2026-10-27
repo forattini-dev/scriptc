@@ -76,6 +76,7 @@ mod reflection;
 mod regex;
 mod regex_captures;
 mod runtime_types;
+mod sequence_bindings;
 mod sets;
 mod standard_functions;
 mod standard_objects;
@@ -476,7 +477,17 @@ impl<'a> Lowerer<'a> {
     }
 
     fn symbol(&mut self, node: Node) -> u32 {
-        let mut symbol = if node.parent().kind() == SyntaxKind::ShorthandPropertyAssignment {
+        if node.is_nil()
+            || matches!(
+                node.kind(),
+                SyntaxKind::ObjectBindingPattern | SyntaxKind::ArrayBindingPattern
+            )
+        {
+            return 0;
+        }
+        let mut symbol = if !node.parent().is_nil()
+            && node.parent().kind() == SyntaxKind::ShorthandPropertyAssignment
+        {
             self.checker
                 .get_shorthand_assignment_value_symbol(node.parent())
         } else {
@@ -545,7 +556,9 @@ impl<'a> Lowerer<'a> {
         for (index, param) in parameters.iter().copied().enumerate() {
             if !matches!(
                 param.name().kind(),
-                SyntaxKind::Identifier | SyntaxKind::ObjectBindingPattern
+                SyntaxKind::Identifier
+                    | SyntaxKind::ObjectBindingPattern
+                    | SyntaxKind::ArrayBindingPattern
             ) || (!param.dot_dot_dot_token().is_nil() && index + 1 != parameters.len())
             {
                 return Err(self.refuse(
@@ -555,6 +568,8 @@ impl<'a> Lowerer<'a> {
             }
             if param.name().kind() == SyntaxKind::ObjectBindingPattern {
                 self.validate_object_parameter(param)?;
+            } else if param.name().kind() == SyntaxKind::ArrayBindingPattern {
+                self.validate_array_parameter(param)?;
             }
             if unpack_rest {
                 continue;
@@ -566,8 +581,10 @@ impl<'a> Lowerer<'a> {
                         "public JavaScript parameter type has no native representation",
                     )
                 })?
-            } else if param.name().kind() == SyntaxKind::ObjectBindingPattern
-                && parameter_abi::is_javascript(param)
+            } else if matches!(
+                param.name().kind(),
+                SyntaxKind::ObjectBindingPattern | SyntaxKind::ArrayBindingPattern
+            ) && parameter_abi::is_javascript(param)
                 && param.type_().is_nil()
             {
                 Type::Dyn
@@ -579,7 +596,11 @@ impl<'a> Lowerer<'a> {
             }
             params.push(Param {
                 local_id: format!("p{index}"),
-                name: param.name().text().into(),
+                name: if param.name().kind() == SyntaxKind::Identifier {
+                    param.name().text().into()
+                } else {
+                    format!("binding{index}")
+                },
                 r#type: self.parameter_type(param, ty)?,
             });
         }
@@ -836,6 +857,14 @@ impl<'a> Lowerer<'a> {
                     let name = declaration.name();
                     let symbol = self.symbol(name);
                     if self.native_namespaces.contains_key(&symbol) {
+                        continue;
+                    }
+                    if name.kind() == SyntaxKind::ArrayBindingPattern {
+                        out.extend(self.array_binding_declaration(
+                            declaration,
+                            !flags.intersects(NodeFlags::CONST),
+                            node.parent().kind() == SyntaxKind::SourceFile,
+                        )?);
                         continue;
                     }
                     if name.kind() == SyntaxKind::ObjectBindingPattern {

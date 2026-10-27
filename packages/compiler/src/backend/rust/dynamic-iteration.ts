@@ -22,8 +22,8 @@ export function emitRustDynamicIteration(
   context.pushIndent();
   context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("iteration"),`);
   context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("iteration"),`);
-  context.line(`${name}::Array(array) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::array_len(array) { runtime::array_get(array, index) } else { ${name}::Undefined }); },`);
-  context.line(`${name}::String(text) => { let mut chars = text.chars(); for _ in 0..count { runtime::array_push(&output, chars.next().map_or(${name}::Undefined, |character| ${name}::String(runtime::string(&character.to_string())))); } },`);
+  context.line(`${name}::Array(array) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::array_len(array) && runtime::array_state(array, index) == 1.0 { runtime::array_get(array, index) } else { ${name}::Undefined }); },`);
+  context.line(`${name}::String(text) => { let points = runtime::string_iteration_prefix(text, count); for index in 0..count { runtime::array_push(&output, points.get(index).cloned().map_or(${name}::Undefined, ${name}::String)); } },`);
   context.line(`${name}::Bytes(bytes) | ${name}::Buffer(bytes) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::bytes_len(bytes) { ${name}::Number(runtime::bytes_get(bytes, index)) } else { ${name}::Undefined }); },`);
   context.line(`${name}::TypedBytes(bytes) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::typed_bytes_len(bytes) { ${name}::Number(runtime::typed_bytes_get(bytes, index)) } else { ${name}::Undefined }); },`);
   if (context.hasEmbeddedModules()) {
@@ -39,6 +39,8 @@ export function emitRustDynamicIteration(
   context.line(`${name}::Null => "object null".to_owned(),`);
   context.line(`${name}::Boolean(value) => format!("boolean {value}"),`);
   context.line(`${name}::Number(value) => format!("number {}", runtime::display_number(*value)),`);
+  context.line(`${name}::BigInt(..) => "bigint".to_owned(),`);
+  context.line(`${name}::Symbol(..) => "symbol".to_owned(),`);
   if (boxedShapes.length > 0) {
     context.line(`${boxedShapes.map((shape) => `${name}::${context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function".to_owned(),`);
   }

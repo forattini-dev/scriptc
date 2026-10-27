@@ -234,6 +234,21 @@ impl Lowerer<'_> {
         param: &Param,
     ) -> Result<Vec<Stmt>, String> {
         if let Some(node) = node
+            && node.name().kind() == SyntaxKind::ArrayBindingPattern
+        {
+            self.validate_array_parameter(node)?;
+            let mut body = self.bind_parameter(None, param)?;
+            let incoming = self.locals.last().unwrap().clone();
+            body.extend(self.bind_sequence_pattern(
+                node.name(),
+                self.construction_read(&incoming, node),
+                true,
+                false,
+                None,
+            )?);
+            return Ok(body);
+        }
+        if let Some(node) = node
             && node.name().kind() == SyntaxKind::ObjectBindingPattern
         {
             return self.bind_object_parameter(node, param);

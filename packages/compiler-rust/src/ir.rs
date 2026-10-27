@@ -366,6 +366,12 @@ pub enum Expr {
         r#type: Type,
         loc: Loc,
     },
+    DynIterN {
+        value: Box<Expr>,
+        count: usize,
+        r#type: Type,
+        loc: Loc,
+    },
     DynObjLit {
         fields: Vec<DynamicField>,
         r#type: Type,
@@ -704,6 +710,7 @@ impl Expr {
             | Self::CaughtTest { r#type, .. } => r#type.clone(),
             Self::DynFrom { r#type, .. }
             | Self::DynCheck { r#type, .. }
+            | Self::DynIterN { r#type, .. }
             | Self::DynObjLit { r#type, .. }
             | Self::DynArrLit { r#type, .. }
             | Self::DynKeyGet { r#type, .. }
@@ -1421,6 +1428,14 @@ fn validate_function(
                     Err("invalid native value boxing".into())
                 }
             }
+            Expr::DynIterN { value, r#type, .. } => {
+                expr(value, locals, initialized, functions, module)?;
+                if value.ty() == Type::Dyn && *r#type == Type::Dyn {
+                    Ok(())
+                } else {
+                    Err("invalid native bounded iteration".into())
+                }
+            }
             Expr::DynCheck { value, r#type, .. } => {
                 if contains_stats(r#type, &module.records, &module.unions) {
                     return Err(
@@ -1494,6 +1509,9 @@ fn validate_function(
                             | "nullish"
                             | "object"
                             | "array"
+                            | "bytes"
+                            | "map"
+                            | "set"
                             | "function"
                             | "truthy"
                     )
@@ -4289,6 +4307,50 @@ mod tests {
             loc,
         }];
         assert_eq!(validate(&m).unwrap_err(), "invalid native value call");
+    }
+
+    #[test]
+    fn bounded_iteration_validates_and_visits_its_owning_operand() {
+        let mut module = error_module();
+        let loc = module.functions[0].loc.clone();
+        for count in [0, 3] {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::DynIterN {
+                    value: Box::new(Expr::DynArrLit {
+                        elems: vec![],
+                        r#type: Type::Dyn,
+                        loc: loc.clone(),
+                    }),
+                    count,
+                    r#type: Type::Dyn,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            validate(&module).unwrap();
+            let wire = serde_json::to_value(&module).unwrap();
+            assert_eq!(wire["functions"][0]["body"][0]["expr"]["kind"], "dynIterN");
+            assert_eq!(wire["functions"][0]["body"][0]["expr"]["count"], count);
+            let mut visited = 0;
+            module.functions[0].visit_expressions(&mut |_| visited += 1);
+            assert_eq!(visited, 2);
+        }
+        let Stmt::Expression {
+            expr: Expr::DynIterN { value, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        else {
+            unreachable!()
+        };
+        **value = Expr::BoolLit {
+            value: true,
+            r#type: Type::Bool,
+            loc: loc.clone(),
+        };
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "invalid native bounded iteration"
+        );
     }
 
     #[test]

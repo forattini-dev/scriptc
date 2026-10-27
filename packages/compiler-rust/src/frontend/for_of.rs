@@ -52,16 +52,22 @@ impl Lowerer<'_> {
         }
         let declarations = head.declarations().nodes().into_iter().collect::<Vec<_>>();
         if declarations.len() != 1
-            || declarations[0].name().kind() != SyntaxKind::Identifier
+            || !matches!(
+                declarations[0].name().kind(),
+                SyntaxKind::Identifier | SyntaxKind::ArrayBindingPattern
+            )
             || !declarations[0].initializer().is_nil()
             || !declarations[0].type_().is_nil()
         {
             return Err(self.refuse(
                 head,
-                "for-of requires one identifier binding; destructuring heads are not ported",
+                "for-of requires one identifier or flat array binding; object heads are not ported",
             ));
         }
         let declaration = declarations[0];
+        if declaration.name().kind() == SyntaxKind::ArrayBindingPattern {
+            self.validate_array_pattern(declaration.name())?;
+        }
         let loc = self.loc(node);
         let value = self.primitive_operand(node.expression())?;
         let (element, length) = match value.ty() {
@@ -151,32 +157,38 @@ impl Lowerer<'_> {
                 self.coerce(item, element.clone(), node)?
             }
         };
-        let binding = self.iteration_local(
-            declaration.name().text(),
-            element.clone(),
-            !head.flags().intersects(NodeFlags::CONST),
-        );
-        let symbol = self.symbol(declaration.name());
-        self.bindings.insert(symbol, binding.clone());
-        if self.optional_storage(&element) {
-            self.var_types.insert(symbol, element);
-        }
-        // The declaration executes inside the loop: captured bindings get a
-        // new owning cell on every iteration, including mutable let bindings.
-        // Advance before the source body, so continue/finally cannot repeat a slot.
-        let mut body = vec![
-            Stmt::VarDecl {
+        let mut body = if declaration.name().kind() == SyntaxKind::ArrayBindingPattern {
+            self.bind_sequence_pattern(
+                declaration.name(),
+                item,
+                !head.flags().intersects(NodeFlags::CONST),
+                false,
+                None,
+            )?
+        } else {
+            let binding = self.iteration_local(
+                declaration.name().text(),
+                element.clone(),
+                !head.flags().intersects(NodeFlags::CONST),
+            );
+            let symbol = self.symbol(declaration.name());
+            self.bindings.insert(symbol, binding.clone());
+            if self.optional_storage(&element) {
+                self.var_types.insert(symbol, element);
+            }
+            vec![Stmt::VarDecl {
                 local_id: binding.id,
                 init: item,
                 loc: loc.clone(),
-            },
-            Stmt::Assign {
-                local_id: index.id.clone(),
-                value: binary("+", read(&index, &loc), step, &loc),
-                initializes_global: false,
-                loc: loc.clone(),
-            },
-        ];
+            }]
+        };
+        // Fresh head cells execute inside each iteration, before advancing.
+        body.push(Stmt::Assign {
+            local_id: index.id.clone(),
+            value: binary("+", read(&index, &loc), step, &loc),
+            initializes_global: false,
+            loc: loc.clone(),
+        });
         body.extend(self.statement(node.statement())?);
         let length = match length {
             Some(length) => number(length as f64, &loc),

@@ -194,13 +194,17 @@ impl Lowerer<'_> {
         for (index, param) in parameters.iter().copied().enumerate() {
             if !matches!(
                 param.name().kind(),
-                SyntaxKind::Identifier | SyntaxKind::ObjectBindingPattern
+                SyntaxKind::Identifier
+                    | SyntaxKind::ObjectBindingPattern
+                    | SyntaxKind::ArrayBindingPattern
             ) || (!param.dot_dot_dot_token().is_nil() && (!*rest || index + 1 != types.len()))
             {
                 return Err(self.refuse(param, "callback parameter form is not ported"));
             }
             if param.name().kind() == SyntaxKind::ObjectBindingPattern {
                 self.validate_object_parameter(param)?;
+            } else if param.name().kind() == SyntaxKind::ArrayBindingPattern {
+                self.validate_array_parameter(param)?;
             }
         }
         let name = format!("lambda{}", self.next_closure);
@@ -259,7 +263,13 @@ impl Lowerer<'_> {
         for (index, ty) in types.iter().enumerate().filter(|_| !unpack_rest) {
             let name = nodes
                 .get(index)
-                .map(|n| n.name().text().to_string())
+                .map(|n| {
+                    if n.name().kind() == SyntaxKind::Identifier {
+                        n.name().text().to_string()
+                    } else {
+                        format!("binding{index}")
+                    }
+                })
                 .unwrap_or_else(|| format!("ignored{index}"));
             let param = Param {
                 local_id: format!("p{index}"),
