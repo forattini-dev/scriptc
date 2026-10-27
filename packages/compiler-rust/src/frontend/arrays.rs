@@ -175,10 +175,15 @@ impl Lowerer<'_> {
                 match source.ty() {
                     Type::Array { .. } => self.array_extend(element, read(self.loc(element)), source)?,
                     Type::String => self.string_extend(element, read(self.loc(element)), source)?,
+                    Type::Set { ref elem } => {
+                        let array = Type::Array { elem: elem.clone() };
+                        let values = Expr::SetIntrinsic { method: "toArray".into(), receiver: Box::new(source), args: vec![], r#type: array, loc: self.loc(element) };
+                        self.array_extend(element, read(self.loc(element)), values)?
+                    }
                     Type::Record { shape_id } if self.records[shape_id].tuple => {
                         self.tuple_extend(element, read(self.loc(element)), source)?
                     }
-                    _ => return Err(self.refuse(element, "array spread requires a native array, string or fixed tuple; general iterators are not ported")),
+                    _ => return Err(self.refuse(element, "array spread requires a native array, string, Set or fixed tuple; general iterators are not ported")),
                 }
             } else {
                 let value = self.expected_expression(element, (**elem).clone())?;

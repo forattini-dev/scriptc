@@ -2131,6 +2131,7 @@ fn validate_function(
                     "has" | "delete" => (1, Type::Bool),
                     "clear" => (0, Type::Void),
                     "size" => (0, Type::F64),
+                    "toArray" => (0, Type::Array { elem: elem.clone() }),
                     _ => return Err("invalid Set operation".into()),
                 };
                 if args.len() != arity || *r#type != result || args.iter().any(|a| a.ty() != *elem)
@@ -6880,6 +6881,43 @@ mod tests {
                 value: true,
                 r#type: Type::Bool,
                 loc,
+            };
+        }
+        assert_eq!(validate(&module).unwrap_err(), "invalid Set operation");
+    }
+
+    #[test]
+    fn set_to_array_requires_the_matching_element_type() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        let set = Expr::SetNew {
+            seed: None,
+            r#type: Type::Set {
+                elem: Box::new(Type::String),
+            },
+            loc: loc.clone(),
+        };
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::SetIntrinsic {
+                method: "toArray".into(),
+                receiver: Box::new(set),
+                args: vec![],
+                r#type: Type::Array {
+                    elem: Box::new(Type::String),
+                },
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        assert!(validate(&module).is_ok());
+        if let Stmt::Expression {
+            expr: Expr::SetIntrinsic { r#type, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        {
+            *r#type = Type::Array {
+                elem: Box::new(Type::F64),
             };
         }
         assert_eq!(validate(&module).unwrap_err(), "invalid Set operation");

@@ -62,6 +62,7 @@ pub(super) fn expression(
             let equal = equality(&elem);
             let operation = match method.as_str() {
                 "size" => "set.with(|set| set.entries.len() as f64)".into(),
+                "toArray" => "runtime::array_new(set.with(|set| set.entries.iter().map(|(value, _)| value.clone()).collect()))".into(),
                 "clear" => "set.with_mut(|set| set.entries.clear())".into(),
                 "has" => format!(
                     "set.with(|set| set.entries.iter().any(|(a,_)| {{ let b = &arg0; {equal} }}))"

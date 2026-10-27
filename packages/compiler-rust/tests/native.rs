@@ -477,6 +477,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-string-spread/main.ts",
         "rust-native-string-split/main.ts",
         "rust-native-regex-guard/direct.ts",
+        "rust-native-set-spread/main.ts",
+        "rust-native-set-spread/identity.ts",
         "rust-native-local-call-abi/values.mjs",
         "rust-native-local-call-abi/effects.mjs",
         "rust-native-local-call-abi/completion.mjs",
