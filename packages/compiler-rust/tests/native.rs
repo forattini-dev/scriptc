@@ -310,6 +310,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-object-bindings/presence.ts",
         "rust-native-object-rest-local/main.ts",
         "rust-native-array-rest/main.ts",
+        "rust-native-array-find/main.ts",
         "rust-native-for-loops/counting.ts",
         "rust-native-for-loops/order.ts",
         "rust-native-for-loops/finally.ts",
@@ -7030,6 +7031,45 @@ fn string_split_boundaries_preserve_existing_artifacts() {
         "'abc'.split();",
         "'abc'.split(/b/);",
         "'abc'.split('b', 1);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn array_find_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "array-find-boundary");
+    for source in [
+        "const values: number[] = [1]; const predicate = (value: number) => value === 1; values.find(predicate);",
+        "const values: any[] = [1]; values.find(123);",
+        "const values: any[] = [1]; values.find();",
+        "const values: any[] = [1]; values.find(...[() => true]);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let artifacts = [

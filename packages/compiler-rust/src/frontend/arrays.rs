@@ -398,7 +398,7 @@ impl Lowerer<'_> {
         if member.name().text() == "sort" {
             return self.array_sort(node);
         }
-        if matches!(member.name().text(), "some" | "every" | "slice") {
+        if matches!(member.name().text(), "some" | "every" | "slice" | "find") {
             return self.array_sequence_method(node);
         }
         if member.name().text() == "map" {
