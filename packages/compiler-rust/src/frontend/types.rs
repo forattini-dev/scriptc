@@ -285,6 +285,20 @@ impl Lowerer<'_> {
         {
             let declaration = node.parent();
             let initial = receivers::reference_node(declaration.initializer());
+            if declaration.type_().is_nil()
+                && let Some(storage) = self.numeric_initializer_type(initial)
+            {
+                self.var_types.entry(symbol).or_insert(storage.clone());
+                if declaration
+                    .parent()
+                    .flags()
+                    .intersects(NodeFlags::LET | NodeFlags::CONST)
+                    && declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile
+                {
+                    self.module_vars.entry(symbol).or_insert(storage.clone());
+                }
+                return Ok(storage);
+            }
             if declaration.type_().is_nil() && initial.kind() == SyntaxKind::Identifier {
                 let source = self.symbol(initial);
                 let storage = self

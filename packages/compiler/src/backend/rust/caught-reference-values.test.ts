@@ -20,6 +20,16 @@ test("ordinary values mentioning arrays are not treated as thrown payloads", () 
   expect(caughtReferenceValues(fixture([{ kind: "exprStmt", expr: array, loc }, { kind: "throw", value: { kind: "strLit", value: "text", type: { kind: "string" }, loc }, loc }]))).toEqual([]);
 });
 
+test("retains a thrown Number/BigInt union while direct BigInts use the primitive bridge", () => {
+  const type = { kind: "union", unionId: "numeric" } as const;
+  const mod = fixture([
+    { kind: "throw", value: { kind: "varRef", localId: "result", type, loc }, loc },
+    { kind: "throw", value: { kind: "varRef", localId: "bigint", type: { kind: "bigint" }, loc }, loc },
+  ]);
+  mod.unions = [{ id: "numeric", arms: [{ kind: "f64" }, { kind: "bigint" }] }];
+  expect(caughtReferenceValues(mod)).toEqual([{ type, loc }]);
+});
+
 test("retains the union ABI when an array is one of its payload arms", () => {
   const type = { kind: "union", unionId: "u0" } as const;
   const mod = fixture([{ kind: "throw", value: { kind: "varRef", localId: "payload", type, loc }, loc }]);

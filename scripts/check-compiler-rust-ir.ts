@@ -19,7 +19,7 @@ async function main(): Promise<void> {
     const helper = join(directory, process.platform === "win32" ? "exec-file-helper.exe" : "exec-file-helper");
     const helperBuild = spawnSync("rustc", [join(root, "tests/fixtures/native-exec-file-helper.rs"), "-o", helper], { windowsHide: true, timeout: 30_000 });
     assert.ifError(helperBuild.error); assert.equal(helperBuild.status, 0, String(helperBuild.stderr));
-    for (const [index, fixture] of ["rust-native-buffer-from/protocols.ts", "rust-native-buffer-from/unicode.ts",         "rust-native-sequence-bindings/unit-effects.ts", "rust-native-sequence-bindings/values.ts",
+    for (const [index, fixture] of ["rust-native-buffer-from/protocols.ts", "rust-native-buffer-from/unicode.ts",         "rust-native-numeric-binary/values.ts", "rust-native-numeric-binary/errors.ts", "rust-native-numeric-binary/effects.ts", "rust-native-numeric-binary/storage.ts", "rust-native-numeric-binary/addition.ts", "rust-native-numeric-binary/caught.ts", "rust-native-numeric-binary/hoisting.ts", "rust-native-sequence-bindings/unit-effects.ts", "rust-native-sequence-bindings/values.ts",
         "rust-native-sequence-bindings/absence.ts",
         "rust-native-sequence-bindings/strings.ts",
         "rust-native-sequence-bindings/bytes.ts",

@@ -480,6 +480,7 @@ export class RustDynamicEmitter {
     this.context.line(`if runtime::caught_is::<${name}>(&caught) { runtime::caught_narrow::<${name}>(&caught) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsEffect>(&caught) { ${name}::Effect(runtime::caught_narrow::<runtime::JsEffect>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<f64>(&caught) { ${name}::Number(runtime::caught_narrow::<f64>(&caught)) }`);
+    this.context.line(`else if runtime::caught_is::<runtime::JsBigInt>(&caught) { ${name}::BigInt(runtime::caught_narrow::<runtime::JsBigInt>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<bool>(&caught) { ${name}::Boolean(runtime::caught_narrow::<bool>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsString>(&caught) { ${name}::String(runtime::caught_narrow::<runtime::JsString>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsSymbol>(&caught) { ${name}::Symbol(runtime::caught_narrow::<runtime::JsSymbol>(&caught)) }`);

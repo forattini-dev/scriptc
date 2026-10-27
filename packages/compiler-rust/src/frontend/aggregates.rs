@@ -448,6 +448,30 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             });
         }
+        if let (
+            Type::Union { union_id: source },
+            Type::Union {
+                union_id: destination,
+            },
+        ) = (value.ty(), &target)
+            && self.unions[source].arms.iter().all(|arm| {
+                matches!(
+                    arm,
+                    Type::F64
+                        | Type::Bigint
+                        | Type::String
+                        | Type::Bool
+                        | Type::Null
+                        | Type::Undefined
+                        | Type::Symbol
+                ) && self.unions[*destination].arms.contains(arm)
+            })
+        {
+            // Widening a primitive union changes its tag layout, not its
+            // value. Retain the active payload through the owning bridge.
+            let value = self.coerce(value, Type::Dyn, node)?;
+            return self.coerce(value, target, node);
+        }
         if let Type::Record { shape_id } = value.ty()
             && self.callables.get(&shape_id) == Some(&target)
         {
@@ -1360,22 +1384,10 @@ impl Lowerer<'_> {
                 node,
             ));
         }
-        let numeric_slot = |ty: Type| match ty {
-            Type::F64 | Type::Undefined => true,
-            Type::Union { union_id } => self.unions[union_id]
-                .arms
-                .iter()
-                .all(|arm| matches!(arm, Type::F64 | Type::Undefined)),
-            _ => false,
-        };
         if matches!(op, "+" | "-" | "*" | "/" | "%" | "**")
-            && numeric_slot(left.ty())
-            && numeric_slot(right.ty())
+            && (left.ty() != Type::F64 || right.ty() != Type::F64)
         {
-            // Missing sequence elements participate as NaN. This is a
-            // primitive conversion; it performs no object hooks or throws.
-            left = self.primitive_number(left, node.left())?;
-            right = self.primitive_number(right, node.right())?;
+            return self.numeric_binary(left, right, op, node);
         }
         let supported = if matches!(op, "===" | "!==") {
             left.ty() == right.ty()

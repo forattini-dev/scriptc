@@ -466,6 +466,13 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-local-call-abi/catalog-errors.ts",
         "rust-native-buffer-from/protocols.ts",
         "rust-native-buffer-from/unicode.ts",
+        "rust-native-numeric-binary/values.ts",
+        "rust-native-numeric-binary/errors.ts",
+        "rust-native-numeric-binary/effects.ts",
+        "rust-native-numeric-binary/storage.ts",
+        "rust-native-numeric-binary/addition.ts",
+        "rust-native-numeric-binary/caught.ts",
+        "rust-native-numeric-binary/hoisting.ts",
         "rust-native-sequence-bindings/unit-effects.ts",
         "rust-native-sequence-bindings/values.ts",
         "rust-native-sequence-bindings/absence.ts",
@@ -7104,6 +7111,48 @@ fn sequence_binding_boundaries_preserve_previous_artifacts() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn numeric_object_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "numeric-boundary");
+    for source in [
+        "const object={value:1}; console.log(object / 2);",
+        "const object={valueOf:()=>1}; console.log(object * 2);",
+        "console.log([1] - 2);",
+        "const callable=()=>1; console.log(callable ** 2);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && stderr.contains("numeric object coercion hooks are not ported")
+                && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );
         for artifact in artifacts {

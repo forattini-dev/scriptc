@@ -58,6 +58,7 @@ mod namespace_values;
 mod number_constructor;
 mod number_parsers;
 mod number_predicates;
+mod numeric_binary;
 mod object_methods;
 mod object_presence;
 mod optional_access;
