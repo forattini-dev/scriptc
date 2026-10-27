@@ -174,10 +174,11 @@ impl Lowerer<'_> {
                 };
                 match source.ty() {
                     Type::Array { .. } => self.array_extend(element, read(self.loc(element)), source)?,
+                    Type::String => self.string_extend(element, read(self.loc(element)), source)?,
                     Type::Record { shape_id } if self.records[shape_id].tuple => {
                         self.tuple_extend(element, read(self.loc(element)), source)?
                     }
-                    _ => return Err(self.refuse(element, "array spread requires a native array or fixed tuple; general iterators are not ported")),
+                    _ => return Err(self.refuse(element, "array spread requires a native array, string or fixed tuple; general iterators are not ported")),
                 }
             } else {
                 let value = self.expected_expression(element, (**elem).clone())?;
@@ -198,6 +199,75 @@ impl Lowerer<'_> {
             stmts,
             result: Box::new(read(self.loc(node))),
             r#type: ty.clone(),
+            loc: self.loc(node),
+        })
+    }
+
+    fn string_extend(&mut self, node: Node, output: Expr, source: Expr) -> Result<Expr, String> {
+        let Type::Array { elem } = output.ty() else {
+            unreachable!()
+        };
+        let mut helper = Helper::new(
+            "string_extend",
+            vec![output.ty(), Type::String],
+            output.ty(),
+            self.loc(node),
+        );
+        let result = helper.param(0);
+        let input = helper.param(1);
+        let index = helper.local("index", Type::F64, true);
+        helper.declare(&index, helper.number(0.0));
+        let loc = helper.loc();
+        let width = self.string_iteration_width(helper.read(&input), helper.read(&index), node);
+        let next = Expr::Bin {
+            op: "+".into(),
+            left: Box::new(helper.read(&index)),
+            right: Box::new(width),
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        let item = Expr::StringIntrinsic {
+            method: "slice".into(),
+            receiver: Box::new(helper.read(&input)),
+            args: vec![helper.read(&index), next.clone()],
+            r#type: Type::String,
+            loc: loc.clone(),
+        };
+        let item = self.coerce(item, *elem, node)?;
+        let length = Expr::StringIntrinsic {
+            method: "length".into(),
+            receiver: Box::new(helper.read(&input)),
+            args: vec![],
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        helper.function.body.push(Stmt::While {
+            cond: helper.less(&index, length),
+            body: vec![
+                Stmt::Expression {
+                    expr: Expr::ArrayIntrinsic {
+                        method: "push".into(),
+                        receiver: Box::new(helper.read(&result)),
+                        args: vec![item],
+                        r#type: Type::F64,
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                },
+                Stmt::Assign {
+                    local_id: index.id.clone(),
+                    value: next,
+                    initializes_global: false,
+                    loc: loc.clone(),
+                },
+            ],
+            loc,
+        });
+        let callee = self.install_helper(helper.finish(&result));
+        Ok(Expr::Call {
+            callee,
+            args: vec![output, source],
+            r#type: result.r#type,
             loc: self.loc(node),
         })
     }

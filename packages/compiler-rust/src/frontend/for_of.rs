@@ -377,7 +377,7 @@ impl Lowerer<'_> {
         Ok(vec![Stmt::Block { body: outer, loc }])
     }
 
-    fn string_iteration_width(&mut self, value: Expr, index: Expr, node: Node) -> Expr {
+    pub(super) fn string_iteration_width(&mut self, value: Expr, index: Expr, node: Node) -> Expr {
         let mut helper = Helper::new(
             "string_iteration_width",
             vec![Type::String, Type::F64],

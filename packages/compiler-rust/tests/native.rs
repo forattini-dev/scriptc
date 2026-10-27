@@ -474,6 +474,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-nullish-equality/main.ts",
         "rust-native-array-includes/main.ts",
         "rust-native-array-sort/values.ts",
+        "rust-native-string-spread/main.ts",
         "rust-native-local-call-abi/values.mjs",
         "rust-native-local-call-abi/effects.mjs",
         "rust-native-local-call-abi/completion.mjs",
