@@ -89,6 +89,7 @@ mod strings;
 mod symbols;
 mod tuples;
 mod type_graph;
+mod typed_arrays;
 mod types;
 mod union_literals;
 mod union_spreads;
@@ -1211,7 +1212,7 @@ impl<'a> Lowerer<'a> {
                 if matches!(obj.ty(), Type::Object { .. }) {
                     return self.class_index_get(node, obj);
                 }
-                if obj.ty() == Type::bytes() {
+                if matches!(obj.ty(), Type::Bytes { .. }) {
                     return self.bytes_index(node, obj);
                 }
                 if obj.ty() == Type::Dyn || matches!(obj.ty(), Type::Func { .. }) {
@@ -1464,6 +1465,11 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::BinaryExpression => {
+                if node.operator_token().kind() == SyntaxKind::EqualsToken
+                    && let Some(value) = self.bytes_assignment(node, None)?
+                {
+                    return Ok(value);
+                }
                 if let Some(op) = updates::compound_operator(node.operator_token().kind()) {
                     return self.compound_assignment(node, op);
                 }

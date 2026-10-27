@@ -35,9 +35,14 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     out.push_str("_ => None, } }\nfn native_buffer_copy(value: &NativeValue) -> Option<runtime::JsBytes<u8>> { match value {\n");
     for (index, ty) in values::types(module).iter().enumerate() {
         if matches!(ty, Type::Bytes { .. }) {
+            let source = if *ty == Type::bytes() {
+                "bytes".into()
+            } else {
+                "&runtime::bytes_from_array::<u8>(&runtime::bytes_to_array(bytes))".to_string()
+            };
             writeln!(
                 out,
-                "NativeValue::V{index}(bytes) => Some(runtime::buffer_from_bytes(bytes)),"
+                "NativeValue::V{index}(bytes) => Some(runtime::buffer_from_bytes({source})),"
             )
             .unwrap();
         }

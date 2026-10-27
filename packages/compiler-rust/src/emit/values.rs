@@ -166,7 +166,7 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     out.push_str("_ => false } }\n");
     out.push_str("fn native_value_is_buffer(value: &NativeValue) -> bool { match value {\n");
     for (index, ty) in types.iter().enumerate() {
-        if matches!(ty, Type::Bytes { .. }) {
+        if *ty == Type::bytes() {
             writeln!(
                 out,
                 "NativeValue::V{index}(bytes) => runtime::bytes_is_buffer(bytes),"
@@ -392,7 +392,12 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
     out.push_str("NativeValue::Symbol(symbol) => { if key == \"description\" { runtime::symbol_description(&symbol).map(|s| NativeValue::String(s)).unwrap_or(NativeValue::Undefined) } else { native_value_missing_kind(&key, \"symbol\") } }, NativeValue::Regex(_) => native_value_missing_kind(&key, \"regex\"), NativeValue::Number(_) => native_value_missing_kind(&key, \"number\"),\n");
     for (i, t) in types.iter().enumerate() {
         if matches!(t, Type::Bytes { .. }) {
-            writeln!(out, "NativeValue::V{i}(bytes) => {{ if !key.is_well_formed() {{ return NativeValue::Undefined; }} match key.well_formed_utf8().unwrap_or_else(|| unreachable!(\"ill-formed keys were checked before fixed-field dispatch\")) {{ \"length\" | \"byteLength\" => NativeValue::Number(runtime::bytes_len(&bytes)), \"byteOffset\" => NativeValue::Number(runtime::bytes_byte_offset(&bytes)), _ => runtime::throw_type_error(\"scriptc: erased Uint8Array member requires a typed receiver\".into()), }} }},").unwrap();
+            let offset = if *t == Type::bytes() {
+                "NativeValue::Number(runtime::bytes_byte_offset(&bytes))"
+            } else {
+                "runtime::throw_type_error(\"scriptc: floating typed array byteOffset is not ported\".into())"
+            };
+            writeln!(out, "NativeValue::V{i}(bytes) => {{ if !key.is_well_formed() {{ return NativeValue::Undefined; }} match key.well_formed_utf8().unwrap_or_else(|| unreachable!(\"ill-formed keys were checked before fixed-field dispatch\")) {{ \"length\" => NativeValue::Number(runtime::bytes_len(&bytes)), \"byteLength\" => NativeValue::Number(runtime::bytes_byte_len(&bytes)), \"byteOffset\" => {offset}, _ => runtime::throw_type_error(\"scriptc: erased Uint8Array member requires a typed receiver\".into()), }} }},").unwrap();
         }
         if matches!(t, Type::Func { .. }) {
             let name = functions::type_name(t, module);

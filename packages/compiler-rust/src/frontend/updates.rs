@@ -33,6 +33,9 @@ pub(super) fn compound_operator(kind: SyntaxKind) -> Option<&'static str> {
 
 impl Lowerer<'_> {
     pub(super) fn compound_assignment(&mut self, node: Node, op: &str) -> Result<Expr, String> {
+        if let Some(value) = self.bytes_assignment(node, Some(op))? {
+            return Ok(value);
+        }
         let operand = primitives::primitive_source(node.left());
         if operand.kind() != SyntaxKind::Identifier {
             return Err(self.refuse(node, "compound assignment requires a mutable native binding; property references are not ported"));
@@ -283,7 +286,7 @@ impl Lowerer<'_> {
         })
     }
 
-    fn update_temp(&mut self, init: Expr, stmts: &mut Vec<Stmt>, node: Node) -> Expr {
+    pub(super) fn update_temp(&mut self, init: Expr, stmts: &mut Vec<Stmt>, node: Node) -> Expr {
         let local = Local {
             id: format!("update{}", self.locals.len()),
             name: "update reference value".into(),

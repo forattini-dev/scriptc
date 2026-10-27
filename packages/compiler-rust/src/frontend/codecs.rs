@@ -1,4 +1,4 @@
-//! Nominal codecs and owning u8 views lower through the portable IR ABI.
+//! Nominal codecs and owning typed views lower through the portable IR ABI.
 use super::*;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 impl Lowerer<'_> {
@@ -26,10 +26,22 @@ impl Lowerer<'_> {
     pub(super) fn standard_codec_symbol(&self, symbol: u32) -> Option<String> {
         self.standard_name(symbol, &["TextEncoder", "TextDecoder"])
     }
-    pub(super) fn standard_byte_type(&self, id: TypeId) -> bool {
-        self.standard_name(self.checker.ty(id).symbol().0, &["Uint8Array"])
-            .is_some()
-            || self.standard_buffer_type(id)
+    pub(super) fn standard_byte_type(&self, id: TypeId) -> Option<Type> {
+        if self.standard_buffer_type(id) {
+            return Some(Type::bytes());
+        }
+        self.standard_name(
+            self.checker.ty(id).symbol().0,
+            &["Uint8Array", "Float32Array", "Float64Array"],
+        )
+        .map(|name| Type::Bytes {
+            elem: match name.as_str() {
+                "Float32Array" => "f32",
+                "Float64Array" => "f64",
+                _ => "u8",
+            }
+            .into(),
+        })
     }
     pub(super) fn codec_new(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let symbol = self.symbol(node.expression());
@@ -40,20 +52,49 @@ impl Lowerer<'_> {
     }
     pub(super) fn bytes_new(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let symbol = self.symbol(node.expression());
-        if self.standard_name(symbol, &["Uint8Array"]).is_none() {
+        let Some(name) =
+            self.standard_name(symbol, &["Uint8Array", "Float32Array", "Float64Array"])
+        else {
             return Ok(None);
-        }
+        };
+        let ty = Type::Bytes {
+            elem: match name.as_str() {
+                "Float32Array" => "f32",
+                "Float64Array" => "f64",
+                _ => "u8",
+            }
+            .into(),
+        };
         let args = node.arguments().into_iter().collect::<Vec<_>>();
         if args.len() > 1 {
             return Err(self.refuse(
                 node,
-                "Uint8Array buffer views and constructor offsets are not ported",
+                "typed array buffer views and constructor offsets are not ported",
             ));
         }
         let source = args.first().map(|arg| self.expression(*arg)).transpose()?;
+        let source = source
+            .map(|source| {
+                if matches!(source.ty(), Type::Bytes { .. }) && source.ty() != ty {
+                    Ok(self.bytes_operation(
+                        node,
+                        source,
+                        "toArray",
+                        vec![],
+                        Type::Array {
+                            elem: Box::new(Type::F64),
+                        },
+                    ))
+                } else if source.ty() != Type::F64 && self.numeric_operand_domain(&source.ty()) {
+                    self.strict_number_primitive(source, node)
+                } else {
+                    Ok(source)
+                }
+            })
+            .transpose()?;
         if source.as_ref().is_some_and(|s| {
             s.ty() != Type::F64
-                && s.ty() != Type::bytes()
+                && !matches!(s.ty(), Type::Bytes { .. })
                 && s.ty()
                     != (Type::Array {
                         elem: Box::new(Type::F64),
@@ -61,12 +102,12 @@ impl Lowerer<'_> {
         }) {
             return Err(self.refuse(
                 node,
-                "Uint8Array constructor requires length, numeric array or represented u8 bytes",
+                "typed array constructor requires length, numeric array or represented typed bytes",
             ));
         }
         Ok(Some(Expr::BytesNew {
             source: source.map(Box::new),
-            r#type: Type::bytes(),
+            r#type: ty,
             loc: self.loc(node),
         }))
     }
@@ -74,13 +115,21 @@ impl Lowerer<'_> {
     // and retain undefined rather than fabricate a byte or trust checker bounds.
     pub(super) fn bytes_index(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
         let index = self.expression(node.argument_expression())?;
+        self.bytes_index_value(node, receiver, index)
+    }
+    pub(super) fn bytes_index_value(
+        &mut self,
+        node: Node,
+        receiver: Expr,
+        index: Expr,
+    ) -> Result<Expr, String> {
         if index.ty() != Type::F64 {
             return Err(self.refuse(node, "byte indexing requires a represented numeric key"));
         }
         let result = self.intern_union(vec![Type::F64, Type::Undefined]).unwrap();
         let mut helper = helpers::Helper::new(
             "bytes_index",
-            vec![Type::bytes(), Type::F64],
+            vec![receiver.ty(), Type::F64],
             result.clone(),
             self.loc(node),
         );
@@ -207,15 +256,18 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn codec_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
-        if self.ty(node.expression()).ok() == Some(Type::bytes()) {
+        if let Ok(ty @ Type::Bytes { .. }) = self.ty(node.expression()) {
             if !matches!(node.name().text(), "length" | "byteLength" | "byteOffset") {
                 return Err(self.refuse(
                     node,
-                    "Uint8Array property or extracted method is not ported",
+                    "typed array property or extracted method is not ported",
                 ));
             }
-            let receiver = self.expected_expression(node.expression(), Type::bytes())?;
+            let receiver = self.expected_expression(node.expression(), ty.clone())?;
             if node.name().text() == "byteOffset" {
+                if ty != Type::bytes() {
+                    return Err(self.refuse(node, "floating typed array byteOffset observations require a portable IR offset contract"));
+                }
                 let source_type = self.checker.get_type_at_location(node.expression());
                 if self.standard_buffer_type(source_type) {
                     return Err(self.refuse(
@@ -290,10 +342,16 @@ impl Lowerer<'_> {
         }
         let method = member.name().text();
         let args = node.arguments().into_iter().collect::<Vec<_>>();
-        if self.ty(member.expression()).ok() == Some(Type::bytes()) {
-            let receiver = self.expected_expression(member.expression(), Type::bytes())?;
+        if let Ok(ty @ Type::Bytes { .. }) = self.ty(member.expression()) {
+            let receiver = self.expected_expression(member.expression(), ty.clone())?;
             if method == "toString" {
-                return self.bytes_string_call(node, receiver).map(Some);
+                if ty == Type::bytes() {
+                    return self.bytes_string_call(node, receiver).map(Some);
+                }
+                return Err(self.refuse(
+                    node,
+                    "floating typed array toString is not ported; use join",
+                ));
             }
             let (method, result, values) = match method {
                 "join" if args.len() <= 1 => (
@@ -311,21 +369,21 @@ impl Lowerer<'_> {
                 ),
                 "slice" | "subarray" if args.len() <= 2 => (
                     method,
-                    Type::bytes(),
+                    ty.clone(),
                     args.iter()
                         .map(|a| self.expected_expression(*a, Type::F64))
                         .collect::<Result<Vec<_>, _>>()?,
                 ),
                 "set" if args.len() == 1 || args.len() == 2 => {
-                    let mut values = vec![self.expected_expression(args[0], Type::bytes())?];
+                    let mut values = vec![self.expected_expression(args[0], ty.clone())?];
                     if args.len() == 2 {
                         values.push(self.expected_expression(args[1], Type::F64)?);
                     }
                     ("setFrom", Type::Void, values)
                 }
-                _ => return Err(self.refuse(node, "Uint8Array method/arity is not ported")),
+                _ => return Err(self.refuse(node, "typed array method/arity is not ported")),
             };
-            if method == "slice" {
+            if method == "slice" && ty == Type::bytes() {
                 let mut args = vec![receiver];
                 args.extend(values);
                 if args.len() == 1 {

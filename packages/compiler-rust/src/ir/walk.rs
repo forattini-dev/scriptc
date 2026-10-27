@@ -24,6 +24,13 @@ fn statements(body: &[Stmt], visitor: &mut impl FnMut(&Expr)) {
     for statement in body {
         match statement {
             Stmt::Throw { value, .. } => expression(value, visitor),
+            Stmt::BytesSet {
+                arr, index, value, ..
+            } => {
+                expression(arr, visitor);
+                expression(index, visitor);
+                expression(value, visitor);
+            }
             Stmt::ArraySetLength { arr, length, .. } => {
                 expression(arr, visitor);
                 expression(length, visitor);

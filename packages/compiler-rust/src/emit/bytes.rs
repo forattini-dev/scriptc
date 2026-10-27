@@ -1,4 +1,4 @@
-//! Owned u8 views reuse the shared portable bytes ABI.
+//! Owned typed views reuse the shared portable bytes ABI.
 use super::*;
 pub(super) fn expression(
     value: &Expr,
@@ -7,20 +7,25 @@ pub(super) fn expression(
 ) -> Option<String> {
     let emit = |v: &Expr| expr(v, function, module);
     Some(match value {
-        Expr::BytesNew { source, .. } => match source.as_deref() {
-            None => "runtime::bytes_empty::<u8>()".into(),
-            Some(v) => format!(
-                "runtime::{}(&({}))",
-                if v.ty() == Type::bytes() {
-                    "bytes_copy"
-                } else if v.ty() == Type::F64 {
-                    return Some(format!("runtime::bytes_alloc::<u8>({})", emit(v)));
-                } else {
-                    "bytes_from_array::<u8>"
-                },
-                emit(v)
-            ),
-        },
+        Expr::BytesNew { source, r#type, .. } => {
+            let Type::Bytes { elem } = r#type else {
+                unreachable!("validated bytes constructor")
+            };
+            match source.as_deref() {
+                None => format!("runtime::bytes_empty::<{elem}>()"),
+                Some(v) => format!(
+                    "runtime::{}(&({}))",
+                    if v.ty() == *r#type {
+                        "bytes_copy".into()
+                    } else if v.ty() == Type::F64 {
+                        return Some(format!("runtime::bytes_alloc::<{elem}>({})", emit(v)));
+                    } else {
+                        format!("bytes_from_array::<{elem}>")
+                    },
+                    emit(v)
+                ),
+            }
+        }
         Expr::BytesIntrinsic {
             method,
             receiver,
@@ -33,8 +38,10 @@ pub(super) fn expression(
                 .map(|(i, a)| format!("let arg{i} = {};", emit(a)))
                 .collect::<String>();
             let operation = match method.as_str() {
-                "length" | "byteLength" => "runtime::bytes_len(&bytes)".into(),
+                "length" => "runtime::bytes_len(&bytes)".into(),
+                "byteLength" => "runtime::bytes_byte_len(&bytes)".into(),
                 "get" => "runtime::bytes_get(&bytes, arg0)".into(),
+                "toArray" => "runtime::bytes_to_array(&bytes)".into(),
                 "byteOffset" => "runtime::bytes_byte_offset(&bytes)".into(),
                 "join" => "runtime::bytes_join(&bytes, &runtime::JsString::from(arg0))".into(),
                 "toStringVar" => {

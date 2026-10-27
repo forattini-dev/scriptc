@@ -6266,7 +6266,7 @@ function canBoxDynComposite(
     case "nullT":
       return true;
     case "bytes":
-      return t.elem === "u8";
+      return t.elem === "u8" || t.elem === "f32" || t.elem === "f64";
     case "func":
       return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
     case "promise":

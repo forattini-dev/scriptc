@@ -52,6 +52,10 @@ export function emitRustDynamicBufferFrom(
       match sc_value {
         ${dyn}::String(sc_text) => return runtime::buffer_from_string(sc_text, sc_encoding),
         ${dyn}::Bytes(sc_bytes) | ${dyn}::Buffer(sc_bytes) => return runtime::buffer_from_bytes(sc_bytes),
+        ${dyn}::TypedBytes(sc_bytes) => {
+          let sc_elements = runtime::array_new((0..runtime::typed_bytes_len(sc_bytes) as usize).map(|sc_index| runtime::typed_bytes_get(sc_bytes, sc_index as f64)).collect());
+          return runtime::buffer_from_bytes(&runtime::bytes_from_array::<u8>(&sc_elements));
+        },
         ${dyn}::Array(sc_array) => return sc_buffer_array_like(sc_value, runtime::array_len(sc_array)),
         ${dyn}::Proxy(..) => return sc_dyn_proxy_unsupported("Buffer.from"),
         ${dyn}::Object(..) => {

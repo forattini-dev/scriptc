@@ -774,6 +774,12 @@ impl Expr {
     rename_all_fields = "camelCase"
 )]
 pub enum Stmt {
+    BytesSet {
+        arr: Expr,
+        index: Expr,
+        value: Expr,
+        loc: Loc,
+    },
     ArraySetLength {
         arr: Expr,
         length: Expr,
@@ -1089,7 +1095,7 @@ impl Module {
                 !matches!(*elem, Type::Func { .. } | Type::Stats)
                     && self.valid_type_cached(*elem, active, proven)
             }
-            Type::Bytes { elem } => elem == "u8",
+            Type::Bytes { elem } => matches!(elem.as_str(), "u8" | "f32" | "f64"),
             Type::Promise { inner } => {
                 *inner == Type::Void || self.valid_type_cached(*inner, active, proven)
             }
@@ -1325,9 +1331,10 @@ fn validate_function(
             } => {
                 fn allowed(stmts: &[Stmt]) -> bool {
                     stmts.iter().all(|stmt| match stmt {
-                        Stmt::VarDecl { .. } | Stmt::RecordSet { .. } | Stmt::Expression { .. } => {
-                            true
-                        }
+                        Stmt::VarDecl { .. }
+                        | Stmt::RecordSet { .. }
+                        | Stmt::BytesSet { .. }
+                        | Stmt::Expression { .. } => true,
                         Stmt::If { then, else_, .. } => {
                             allowed(then) && else_.as_ref().is_none_or(|other| allowed(other))
                         }
@@ -1633,13 +1640,15 @@ fn validate_function(
                 }
             }
             Expr::BytesNew { source, r#type, .. } => {
-                if *r#type != Type::bytes() {
+                if !matches!(r#type, Type::Bytes { .. })
+                    || !module.valid_type(r#type.clone(), &mut vec![])
+                {
                     return Err("invalid native bytes type".into());
                 }
                 if let Some(source) = source {
                     expr(source, locals, initialized, functions, module)?;
                     if source.ty() != Type::F64
-                        && source.ty() != Type::bytes()
+                        && source.ty() != *r#type
                         && source.ty()
                             != (Type::Array {
                                 elem: Box::new(Type::F64),
@@ -1661,15 +1670,31 @@ fn validate_function(
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
                 }
-                let valid = receiver.ty() == Type::bytes()
+                let valid = matches!(receiver.ty(), Type::Bytes { .. })
                     && match method.as_str() {
-                        "length" | "byteLength" | "byteOffset" => {
-                            args.is_empty() && *r#type == Type::F64
+                        "length" | "byteLength" => args.is_empty() && *r#type == Type::F64,
+                        "byteOffset" => {
+                            receiver.ty() == Type::bytes()
+                                && args.is_empty()
+                                && *r#type == Type::F64
+                        }
+                        "toArray" => {
+                            args.is_empty()
+                                && *r#type
+                                    == (Type::Array {
+                                        elem: Box::new(Type::F64),
+                                    })
                         }
                         "get" => {
                             args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::F64
                         }
-                        "join" | "toStringVar" => {
+                        "toStringVar" => {
+                            receiver.ty() == Type::bytes()
+                                && args.len() == 1
+                                && args[0].ty() == Type::String
+                                && *r#type == Type::String
+                        }
+                        "join" => {
                             args.len() == 1
                                 && args[0].ty() == Type::String
                                 && *r#type == Type::String
@@ -1677,11 +1702,11 @@ fn validate_function(
                         "slice" | "subarray" => {
                             args.len() <= 2
                                 && args.iter().all(|a| a.ty() == Type::F64)
-                                && *r#type == Type::bytes()
+                                && *r#type == receiver.ty()
                         }
                         "setFrom" => {
                             (args.len() == 1 || args.len() == 2)
-                                && args[0].ty() == Type::bytes()
+                                && args[0].ty() == receiver.ty()
                                 && args.get(1).is_none_or(|a| a.ty() == Type::F64)
                                 && *r#type == Type::Void
                         }
@@ -2988,6 +3013,19 @@ fn validate_function(
                     }
                 }
                 Stmt::RecordKeySet { .. } => return Err("mixed keyed writes are not ported".into()),
+                Stmt::BytesSet {
+                    arr, index, value, ..
+                } => {
+                    expr(arr, locals, initialized, functions, module)?;
+                    expr(index, locals, initialized, functions, module)?;
+                    expr(value, locals, initialized, functions, module)?;
+                    if !matches!(arr.ty(), Type::Bytes { .. })
+                        || index.ty() != Type::F64
+                        || value.ty() != Type::F64
+                    {
+                        return Err("invalid native bytes write".into());
+                    }
+                }
                 Stmt::ArraySetLength { arr, length, .. } => {
                     expr(arr, locals, initialized, functions, module)?;
                     expr(length, locals, initialized, functions, module)?;
@@ -6891,6 +6929,98 @@ mod tests {
             finally_body: None,
             loc
         }]));
+    }
+    #[test]
+    fn floating_bytes_validate_storage_kind_writes_and_portable_abi() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let number = |value| Expr::NumLit {
+            value,
+            spelling: None,
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        for elem in ["f32", "f64"] {
+            let ty = Type::Bytes { elem: elem.into() };
+            let owner = || Expr::BytesNew {
+                source: Some(Box::new(number(2.0))),
+                r#type: ty.clone(),
+                loc: loc.clone(),
+            };
+            module.functions[0].body = vec![
+                Stmt::BytesSet {
+                    arr: owner(),
+                    index: number(0.0),
+                    value: number(0.1),
+                    loc: loc.clone(),
+                },
+                Stmt::Expression {
+                    expr: Expr::BytesIntrinsic {
+                        receiver: Box::new(owner()),
+                        method: "byteLength".into(),
+                        args: vec![],
+                        r#type: Type::F64,
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                },
+            ];
+            validate(&module).unwrap();
+            let wire = serde_json::to_value(&module).unwrap();
+            assert_eq!(wire["functions"][0]["body"][0]["kind"], "bytesSet");
+            assert_eq!(wire["functions"][0]["body"][0]["arr"]["type"]["elem"], elem);
+            let rust = crate::emit::rust(&module).unwrap();
+            assert!(rust.contains(&format!("bytes_alloc::<{elem}>")));
+            assert!(rust.contains("runtime::bytes_byte_len(&bytes)"));
+            if let Stmt::BytesSet { value, .. } = &mut module.functions[0].body[0] {
+                *value = Expr::BoolLit {
+                    value: true,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                };
+            }
+            assert_eq!(validate(&module).unwrap_err(), "invalid native bytes write");
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::BytesIntrinsic {
+                    receiver: Box::new(owner()),
+                    method: "slice".into(),
+                    args: vec![],
+                    r#type: Type::bytes(),
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(
+                validate(&module).unwrap_err(),
+                "invalid native bytes operation"
+            );
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::BytesNew {
+                    source: Some(Box::new(owner())),
+                    r#type: Type::bytes(),
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(
+                validate(&module).unwrap_err(),
+                "invalid native bytes source"
+            );
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::BytesIntrinsic {
+                    receiver: Box::new(owner()),
+                    method: "byteOffset".into(),
+                    args: vec![],
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(
+                validate(&module).unwrap_err(),
+                "invalid native bytes operation"
+            );
+        }
     }
     #[test]
     fn byte_operations_validate_owned_layouts_and_signatures() {

@@ -33,7 +33,7 @@ impl Lowerer<'_> {
         // The portable Map ABI accepts owning union values, but not a bare
         // bytes slot. Keep u8 payloads typed and traced in the same optional
         // union needed by Map.get; an absent entry still has no stored value.
-        if value == Type::bytes() {
+        if matches!(value, Type::Bytes { .. }) {
             value = self.intern_union(vec![value, Type::Undefined])?;
         }
         if !matches!(key, Type::String | Type::F64 | Type::Dyn)
@@ -261,6 +261,13 @@ impl Lowerer<'_> {
 
     pub(super) fn dictionary_set_value(&mut self, node: Node, obj: Expr) -> Result<Stmt, String> {
         let member = node.left();
+        if matches!(obj.ty(), Type::Bytes { .. }) {
+            let expr = self.bytes_assignment_value(node, obj, None)?;
+            return Ok(Stmt::Expression {
+                expr,
+                loc: self.loc(node),
+            });
+        }
         if obj.ty() == Type::Dyn
             || matches!(obj.ty(), Type::Func { .. })
             || matches!(obj.ty(), Type::Array { elem } if *elem == Type::Dyn)

@@ -39,7 +39,7 @@ fn rust_type(ty: Type, module: &Emission<'_>) -> String {
         Type::Bool => "bool",
         Type::Regex => "runtime::JsRegex",
         Type::Symbol => "runtime::JsSymbol",
-        Type::Bytes { .. } => "runtime::JsBytes<u8>",
+        Type::Bytes { elem } => return format!("runtime::JsBytes<{elem}>"),
         Type::Object { .. } => "runtime::Gc<NativeInstance>",
         Type::Classval { .. } => "NativeClass",
         Type::String => "runtime::JsString",
@@ -265,7 +265,8 @@ pub fn uses_runtime(module: &Module) -> bool {
             Stmt::FieldSet { .. }
             | Stmt::Throw { .. }
             | Stmt::TryCatch { .. }
-            | Stmt::ArraySetLength { .. } => true,
+            | Stmt::ArraySetLength { .. }
+            | Stmt::BytesSet { .. } => true,
             Stmt::RecordKeySet {
                 obj, key, value, ..
             } => expr(obj) || expr(key) || expr(value),
@@ -835,6 +836,11 @@ fn statement_with_flow(
                 field_name(field)
             )
             .unwrap();
+        }
+        Stmt::BytesSet {
+            arr, index, value, ..
+        } => {
+            writeln!(output, "{{ let bytes = {}; let index = {}; let value = {}; runtime::bytes_set(&bytes, index, value); }}", expr(arr, function, module), expr(index, function, module), expr(value, function, module)).unwrap();
         }
         Stmt::ArraySetLength { arr, length, .. } => {
             writeln!(

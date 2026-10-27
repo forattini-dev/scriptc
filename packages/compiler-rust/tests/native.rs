@@ -7207,3 +7207,49 @@ fn string_construction_boundaries_preserve_previous_artifacts() {
         }
     }
 }
+
+#[test]
+fn floating_array_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "floating-array-boundary");
+    for source in [
+        "console.log(new Float32Array(new ArrayBuffer(16),4,2));",
+        "console.log(new Float64Array([1]).byteOffset);",
+        "console.log(new Float32Array([1]).map(x=>x+1));",
+        "const values=new Float32Array(1); values['0']=2;",
+        "const values=new Float32Array(1); values[0]={valueOf:()=>2};",
+        "console.log(new Float32Array({length:1,0:2}));",
+        "console.log(new Float32Array([1]).set(new Float64Array([2])));",
+        "const make=Float32Array; console.log(new make([1]));",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}

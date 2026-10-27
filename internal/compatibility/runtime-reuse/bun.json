@@ -1,0 +1,81 @@
+{
+  "repository": "https://github.com/oven-sh/bun",
+  "revision": "9b8347a24e2de025d1bcca1f2e2a6b1518af64cb",
+  "date": "2026-10-27",
+  "scope": "Source dependency audit only; no extracted crate was compiled or adopted.",
+  "sources": [
+    {
+      "path": "Cargo.toml",
+      "sha256": "e0977221875e39840a26ce590408d3afb7d5d38c890af51ba86bf8351b5bb9ea",
+      "url": "https://github.com/oven-sh/bun/blob/9b8347a24e2de025d1bcca1f2e2a6b1518af64cb/Cargo.toml"
+    },
+    {
+      "path": "src/node_path/Cargo.toml",
+      "sha256": "9c902ddb79884b007deb81a68403ab4655286f2513331cbd3c2b4d796c968d0c",
+      "url": "https://github.com/oven-sh/bun/blob/9b8347a24e2de025d1bcca1f2e2a6b1518af64cb/src/node_path/Cargo.toml"
+    },
+    {
+      "path": "src/node_path/lib.rs",
+      "sha256": "d40069575e83dfd1c6b0ca40e136df6c7b8d56a30873fb73e0bea945a267e822",
+      "url": "https://github.com/oven-sh/bun/blob/9b8347a24e2de025d1bcca1f2e2a6b1518af64cb/src/node_path/lib.rs"
+    },
+    {
+      "path": "src/sha_hmac/Cargo.toml",
+      "sha256": "b4ecb9948086c50cb27f654105f2b0a21231821aee7a9c9ccf03a63a17222792",
+      "url": "https://github.com/oven-sh/bun/blob/9b8347a24e2de025d1bcca1f2e2a6b1518af64cb/src/sha_hmac/Cargo.toml"
+    },
+    {
+      "path": "src/jsc/array_buffer.rs",
+      "sha256": "fe704989de1047b6b44421f3a14852574cc83948ba80b10541db9332e7e1f30a",
+      "url": "https://github.com/oven-sh/bun/blob/9b8347a24e2de025d1bcca1f2e2a6b1518af64cb/src/jsc/array_buffer.rs"
+    },
+    {
+      "path": "LICENSE.md",
+      "sha256": "df7f5cd63ee45e082b7a4c3e6dbacaecf199152c1feabe886a8d77f1ba9b96aa",
+      "url": "https://github.com/oven-sh/bun/blob/9b8347a24e2de025d1bcca1f2e2a6b1518af64cb/LICENSE.md"
+    }
+  ],
+  "candidates": [
+    {
+      "area": "node:path",
+      "decision": "evaluate-algorithm-extraction",
+      "directDependencies": [
+        "bun_core",
+        "bun_paths",
+        "bun_sys"
+      ],
+      "constraints": [
+        "The current implementation uses nightly adt_const_params.",
+        "Full transitive dependencies were not audited.",
+        "No independent-crate build has been validated."
+      ],
+      "potential": "Adapt path algorithms and u16 representation where existing runtime differential evidence exposes a gap."
+    },
+    {
+      "area": "hashing",
+      "decision": "evaluate-underlying-library-and-contracts",
+      "directDependencies": [
+        "bun_core",
+        "bun_boringssl",
+        "bun_boringssl_sys"
+      ],
+      "constraints": [
+        "Not a standalone pure Rust crypto implementation.",
+        "No independent-crate build has been validated."
+      ]
+    },
+    {
+      "area": "ArrayBuffer and TypedArray bridge",
+      "decision": "do-not-import-engine-adapter",
+      "constraints": [
+        "ArrayBuffer stores a JSValue and raw pointer.",
+        "Construction and lifetimes are coupled to JavaScriptCore."
+      ],
+      "application": "Keep scriptc owning typed storage; distinguish element length from byte length, capture owners across effects, and validate with engine-free differential binaries."
+    }
+  ],
+  "codeImported": false,
+  "compilerFallbackAdded": false,
+  "compatibilityOracle": "Pinned Node 24.15.0 remains the behavior oracle; Bun source is architectural evidence, not a substitute for differential tests.",
+  "license": "Bun LICENSE.md and third-party notices must be reviewed and retained before copying any source."
+}
