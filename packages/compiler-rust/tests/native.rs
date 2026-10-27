@@ -475,6 +475,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-array-includes/main.ts",
         "rust-native-array-sort/values.ts",
         "rust-native-string-spread/main.ts",
+        "rust-native-string-split/main.ts",
         "rust-native-local-call-abi/values.mjs",
         "rust-native-local-call-abi/effects.mjs",
         "rust-native-local-call-abi/completion.mjs",
@@ -6938,6 +6939,44 @@ fn array_sort_boundaries_preserve_existing_artifacts() {
         "const values = ['b', 'a']; values.sort((a, b) => a.localeCompare(b));",
         "const values = [3, 1]; values.sort();",
         "const values = ['b', 'a']; values.sort(undefined);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn string_split_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "string-split-boundary");
+    for source in [
+        "'abc'.split();",
+        "'abc'.split(/b/);",
+        "'abc'.split('b', 1);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let artifacts = [

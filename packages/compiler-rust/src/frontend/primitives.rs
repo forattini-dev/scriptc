@@ -141,8 +141,44 @@ impl Lowerer<'_> {
             }
             && self.primitive_symbol(member_id, name, Some("Math"));
         let proven_string = self.primitive_symbol(member_id, name, Some("String"))
-            || (crate::string_builtins::by_method(name).is_some()
+            || ((crate::string_builtins::by_method(name).is_some() || name == "split")
                 && self.represented_string_member(member, member_id));
+        if name == "split" && proven_string {
+            let arguments = node.arguments().into_iter().collect::<Vec<_>>();
+            if arguments.len() != 1 || arguments[0].kind() == SyntaxKind::SpreadElement {
+                return Err(self.refuse(
+                    node,
+                    "string split currently requires exactly one represented string separator",
+                ));
+            }
+            let receiver = self.primitive_operand(member.expression())?;
+            let receiver = self.live_member_receiver(member.expression(), receiver);
+            let receiver = self.string_method_receiver(member, receiver)?;
+            let separator = self.primitive_operand(arguments[0])?;
+            if separator.ty() != Type::String {
+                return Err(self.refuse(
+                    arguments[0],
+                    "string split currently requires a represented string separator",
+                ));
+            }
+            return Ok(Some(Expr::StringIntrinsic {
+                method: "split".into(),
+                receiver: Box::new(receiver),
+                args: vec![
+                    separator,
+                    Expr::NumLit {
+                        value: u32::MAX as f64,
+                        spelling: None,
+                        r#type: Type::F64,
+                        loc: self.loc(node),
+                    },
+                ],
+                r#type: Type::Array {
+                    elem: Box::new(Type::String),
+                },
+                loc: self.loc(node),
+            }));
+        }
         let string =
             crate::string_builtins::by_method(name).filter(|_| name != "length" && proven_string);
         let string_identity = matches!(name, "toString" | "valueOf")

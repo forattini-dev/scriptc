@@ -2150,14 +2150,22 @@ fn validate_function(
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
                 }
-                let valid = crate::string_builtins::by_method(method).is_some_and(|operation| {
-                    args.len() == operation.args.len()
-                        && *r#type == operation.result
-                        && args
-                            .iter()
-                            .zip(operation.args)
-                            .all(|(value, argument)| value.ty() == argument.ty())
-                });
+                let valid = (method == "split"
+                    && args.len() == 2
+                    && args[0].ty() == Type::String
+                    && args[1].ty() == Type::F64
+                    && *r#type
+                        == (Type::Array {
+                            elem: Box::new(Type::String),
+                        }))
+                    || crate::string_builtins::by_method(method).is_some_and(|operation| {
+                        args.len() == operation.args.len()
+                            && *r#type == operation.result
+                            && args
+                                .iter()
+                                .zip(operation.args)
+                                .all(|(value, argument)| value.ty() == argument.ty())
+                    });
                 if receiver.ty() == Type::String && valid {
                     Ok(())
                 } else {
@@ -6875,6 +6883,50 @@ mod tests {
             };
         }
         assert_eq!(validate(&module).unwrap_err(), "invalid Set operation");
+    }
+
+    #[test]
+    fn string_split_requires_string_separator_and_numeric_limit() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        let string = |value: &str| Expr::StrLit {
+            value: value.into(),
+            r#type: Type::String,
+            loc: loc.clone(),
+        };
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::StringIntrinsic {
+                method: "split".into(),
+                receiver: Box::new(string("a.b")),
+                args: vec![
+                    string("."),
+                    Expr::NumLit {
+                        value: 42.0,
+                        spelling: None,
+                        r#type: Type::F64,
+                        loc: loc.clone(),
+                    },
+                ],
+                r#type: Type::Array {
+                    elem: Box::new(Type::String),
+                },
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert!(validate(&module).is_ok());
+        if let Stmt::Expression {
+            expr: Expr::StringIntrinsic { args, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        {
+            args[1] = string("invalid limit");
+        }
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "invalid native string operation"
+        );
     }
 
     #[test]

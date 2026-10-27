@@ -602,7 +602,13 @@ fn expr(value: &Expr, function: &Function, module: &Emission<'_>) -> String {
             args,
             ..
         } => {
-            let operation = crate::string_builtins::by_method(method).expect("IR validated");
+            let runtime = if method == "split" {
+                "string_split"
+            } else {
+                crate::string_builtins::by_method(method)
+                    .expect("IR validated")
+                    .runtime
+            };
             let receiver = expr(receiver, function, module);
             let args = args
                 .iter()
@@ -615,7 +621,7 @@ fn expr(value: &Expr, function: &Function, module: &Emission<'_>) -> String {
                     }
                 })
                 .collect::<String>();
-            format!("runtime::{}(&({receiver}){args})", operation.runtime)
+            format!("runtime::{runtime}(&({receiver}){args})")
         }
         Expr::LibCall { r#fn, .. } if r#fn == "dyn.this" => "native_this.clone()".into(),
         Expr::LibCall { r#fn, args, .. } => {
