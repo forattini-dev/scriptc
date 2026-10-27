@@ -3344,6 +3344,68 @@ mod tests {
     }
 
     #[test]
+    fn string_construction_requires_numeric_arrays_and_string_results() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let number = Expr::NumLit {
+            value: 65.0,
+            spelling: None,
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        let text = Expr::StrLit {
+            value: "65".into(),
+            r#type: Type::String,
+            loc: loc.clone(),
+        };
+        let array = Expr::ArrayLit {
+            elems: vec![number.clone()],
+            r#type: Type::Array {
+                elem: Box::new(Type::F64),
+            },
+            loc: loc.clone(),
+        };
+        let strings = Expr::ArrayLit {
+            elems: vec![text],
+            r#type: Type::Array {
+                elem: Box::new(Type::String),
+            },
+            loc: loc.clone(),
+        };
+        for name in ["string.fromCharCode", "string.fromCodePoint"] {
+            for (args, result, valid) in [
+                (vec![array.clone()], Type::String, true),
+                (vec![], Type::String, false),
+                (vec![number.clone()], Type::String, false),
+                (vec![strings.clone()], Type::String, false),
+                (vec![array.clone(), array.clone()], Type::String, false),
+                (vec![array.clone()], Type::F64, false),
+            ] {
+                module.functions[0].body = vec![Stmt::Expression {
+                    expr: Expr::LibCall {
+                        r#fn: name.into(),
+                        args,
+                        r#type: result,
+                        loc: loc.clone(),
+                    },
+                    loc: loc.clone(),
+                }];
+                assert_eq!(validate(&module).is_ok(), valid, "{name}");
+                if valid {
+                    let wire = serde_json::to_value(&module).unwrap();
+                    assert_eq!(wire["functions"][0]["body"][0]["expr"]["fn"], name);
+                    let rust = crate::emit::rust(&module).unwrap();
+                    assert!(rust.contains(if name == "string.fromCharCode" {
+                        "runtime::string_from_char_codes"
+                    } else {
+                        "runtime::string_from_code_points"
+                    }));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn relational_comparison_validates_arity_payloads_and_result() {
         let mut module = callable_module();
         let loc = module.functions[0].loc.clone();

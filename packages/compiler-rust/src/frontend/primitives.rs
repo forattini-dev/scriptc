@@ -92,6 +92,16 @@ impl Lowerer<'_> {
         }
         let name = member.name().text();
         let member_id = self.symbol(member.name());
+        if matches!(name, "fromCharCode" | "fromCodePoint")
+            && member.expression().kind() == SyntaxKind::Identifier
+            && {
+                let id = self.symbol(member.expression());
+                self.primitive_symbol(id, "String", None)
+            }
+            && self.primitive_symbol(member_id, name, Some("StringConstructor"))
+        {
+            return self.string_construction_call(node, name).map(Some);
+        }
         if matches!(name, "toString" | "toFixed")
             && self.primitive_symbol(member_id, name, Some("Number"))
         {

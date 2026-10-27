@@ -154,6 +154,7 @@ mod number;
 mod path;
 mod platform;
 mod process;
+mod string;
 #[cfg(test)]
 mod tests;
 
@@ -163,6 +164,7 @@ pub fn apis() -> &'static [Api] {
         [
             math::apis(),
             number::apis(),
+            string::apis(),
             buffer::apis(),
             path::apis(),
             platform::apis(),

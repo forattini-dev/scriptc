@@ -83,6 +83,7 @@ mod standard_functions;
 mod standard_objects;
 mod stats;
 mod storage;
+mod string_construction;
 mod string_index;
 mod strings;
 mod symbols;
