@@ -1,4 +1,4 @@
-//! Read/modify/write references retain their receiver and old numeric value.
+//! Read/modify/write references retain their receiver and old owning value.
 use super::*;
 
 enum Target {
@@ -13,7 +13,94 @@ enum Target {
     },
 }
 
+pub(super) fn compound_operator(kind: SyntaxKind) -> Option<&'static str> {
+    Some(match kind {
+        SyntaxKind::PlusEqualsToken => "+",
+        SyntaxKind::MinusEqualsToken => "-",
+        SyntaxKind::AsteriskEqualsToken => "*",
+        SyntaxKind::SlashEqualsToken => "/",
+        SyntaxKind::PercentEqualsToken => "%",
+        SyntaxKind::AsteriskAsteriskEqualsToken => "**",
+        _ => return None,
+    })
+}
+
 impl Lowerer<'_> {
+    pub(super) fn compound_assignment(&mut self, node: Node, op: &str) -> Result<Expr, String> {
+        let operand = primitives::primitive_source(node.left());
+        if operand.kind() != SyntaxKind::Identifier {
+            return Err(self.refuse(node, "compound assignment requires a mutable native binding; property references are not ported"));
+        }
+        let symbol = self.symbol(operand);
+        if self.enum_type(operand).is_some() || self.native_namespaces.contains_key(&symbol) {
+            return Err(self.refuse(node, "compound namespace assignments are not ported"));
+        }
+        let local = self.binding(operand)?;
+        let storage = local.r#type.clone();
+        let numeric = |ty: &Type| {
+            *ty == Type::F64
+                || matches!(ty, Type::Union { union_id } if self.unions[*union_id].arms.contains(&Type::F64) && self.unions[*union_id].arms.iter().all(|arm| matches!(arm, Type::F64 | Type::Undefined)))
+        };
+        if !local.mutable || !(numeric(&storage) || op == "+" && storage == Type::String) {
+            return Err(self.refuse(node, "compound assignment requires mutable number, undefined-capable numeric, or string += storage"));
+        }
+        let loc = self.loc(node);
+        let mut stmts = Vec::new();
+        // GetValue of the left reference precedes every RHS effect. Keep the
+        // actual owning tag, including undefined after a captured-slot write.
+        let old = self.update_temp(
+            Expr::VarRef {
+                local_id: local.id.clone(),
+                r#type: storage.clone(),
+                loc: loc.clone(),
+            },
+            &mut stmts,
+            node,
+        );
+        let right = self.primitive_operand(node.right())?;
+        let right_numeric = right.ty() == Type::F64
+            || matches!(right.ty(), Type::Undefined | Type::Void)
+            || matches!(right.ty(), Type::Union { union_id } if self.unions[union_id].arms.contains(&Type::F64) && self.unions[union_id].arms.iter().all(|arm| matches!(arm, Type::F64 | Type::Undefined)));
+        if (storage == Type::String && right.ty() != Type::String)
+            || (storage != Type::String && !right_numeric)
+        {
+            return Err(self.refuse(node, "compound operand domain is not ported; numeric bindings require number/undefined and string += requires string"));
+        }
+        let right = self.primitive_capture(right, node.right())?;
+        let right = self.update_temp(right, &mut stmts, node);
+        // Conversions belong after RHS GetValue. The supported domains cannot
+        // invoke user coercion hooks or change the binding's published ABI.
+        let value = if storage == Type::String {
+            self.string_concat(old, right, node)
+        } else {
+            Expr::Bin {
+                op: op.into(),
+                left: Box::new(self.primitive_number(old, node)?),
+                right: Box::new(self.primitive_number(right, node)?),
+                r#type: Type::F64,
+                loc: loc.clone(),
+            }
+        };
+        let result_type = value.ty();
+        let value = self.update_temp(value, &mut stmts, node);
+        let stored = self.coerce(value.clone(), storage, node)?;
+        if self.var_types.contains_key(&symbol) {
+            self.var_assignment_fact(symbol, &stored);
+        }
+        stmts.push(Stmt::Assign {
+            local_id: local.id,
+            initializes_global: false,
+            value: stored,
+            loc: loc.clone(),
+        });
+        Ok(Expr::Sequence {
+            stmts,
+            result: Box::new(value),
+            r#type: result_type,
+            loc,
+        })
+    }
+
     pub(super) fn update_expression(&mut self, node: Node) -> Result<Expr, String> {
         let operand = primitives::primitive_source(node.operand());
         let loc = self.loc(node);

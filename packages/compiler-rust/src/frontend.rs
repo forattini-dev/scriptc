@@ -1429,6 +1429,9 @@ impl<'a> Lowerer<'a> {
                 })
             }
             SyntaxKind::BinaryExpression => {
+                if let Some(op) = updates::compound_operator(node.operator_token().kind()) {
+                    return self.compound_assignment(node, op);
+                }
                 if node.operator_token().kind() == SyntaxKind::EqualsToken
                     && node.left().kind() == SyntaxKind::PropertyAccessExpression
                     && node.left().name().kind() == SyntaxKind::PrivateIdentifier

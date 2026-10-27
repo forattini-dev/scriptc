@@ -728,12 +728,25 @@ impl Lowerer<'_> {
                 self.expected_expression(node.expression(), target)
             }
             SyntaxKind::ConditionalExpression => {
-                let cond = Box::new(self.expression(node.condition())?);
-                if cond.ty() != Type::Bool {
-                    return Err(self.refuse(node, "conditional truthiness is not ported"));
+                let value = self.condition_value(node.condition())?;
+                let cond = Box::new(self.condition(value, node.condition())?);
+                let before = self.var_defined.clone();
+                if let Some(symbols) = self.guarded_vars(node.condition(), true) {
+                    self.var_defined.extend(symbols);
                 }
                 let then = Box::new(self.expected_expression(node.when_true(), target.clone())?);
+                let then_defined = self.var_defined.clone();
+                self.var_defined = before;
+                if let Some(symbols) = self.guarded_vars(node.condition(), false) {
+                    self.var_defined.extend(symbols);
+                }
                 let else_ = Box::new(self.expected_expression(node.when_false(), target.clone())?);
+                // Either arm can execute and can invalidate a captured slot.
+                // Only facts surviving both paths remain available afterward.
+                self.var_defined = then_defined
+                    .intersection(&self.var_defined)
+                    .copied()
+                    .collect();
                 Ok(Expr::Ternary {
                     cond,
                     then,

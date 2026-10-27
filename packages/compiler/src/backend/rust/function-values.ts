@@ -261,7 +261,7 @@ export class RustFunctionValueEmitter {
       case "<": case "<=": case ">": case ">=": case "===": case "!==":
         return `((${left}) ${expr.op === "===" ? "==" : expr.op === "!==" ? "!=" : expr.op} (${right}))`;
       case "**":
-        return `(${left}).powf(${right})`;
+        return `runtime::math_pow(${left}, ${right})`;
       case "&":
         return `runtime::bit_and(${left}, ${right})`;
       case "|":

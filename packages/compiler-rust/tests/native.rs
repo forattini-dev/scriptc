@@ -464,6 +464,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-local-call-abi/callbacks.ts",
         "rust-native-local-call-abi/default-options.mjs",
         "rust-native-local-call-abi/catalog-errors.ts",
+        "rust-native-conditional/values.ts",
+        "rust-native-conditional/effects.ts",
+        "rust-native-conditional/guards.ts",
+        "rust-native-conditional/compound-numeric.ts",
+        "rust-native-conditional/compound-effects.ts",
+        "rust-native-conditional/compound-absence.ts",
         "rust-native-presence-guards/strings.ts",
         "rust-native-presence-guards/compound.ts",
         "rust-native-presence-guards/effects.ts",
@@ -5683,6 +5689,55 @@ fn update_boundaries_preserve_existing_artifacts() {
             target.with_extension("rs"),
         ];
         for artifact in &artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn compound_assignment_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "compound-boundary");
+    for source in [
+        "const n = 1; n += 2;",
+        "let n: unknown = 1; n += 2;",
+        "let n = 1n; n += 2n;",
+        "let n = 1; n += 'x';",
+        "let n = 'a'; n += 1;",
+        "let n = 'a'; n -= 1;",
+        "const r = { n: 1 }; r.n += 2;",
+        "const a = [1]; a[0] += 2;",
+        "const d: Record<string, number> = { n: 1 }; d.n += 2;",
+        "class C { #n = 1; f(): void { this.#n += 2; } } new C().f();",
+        "enum E { A = 1 } E.A += 1;",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ];
+        for artifact in artifacts {
             fs::write(artifact, "preserve").unwrap();
         }
         let output = Command::new(compiler())
