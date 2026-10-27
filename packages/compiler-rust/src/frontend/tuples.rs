@@ -166,7 +166,7 @@ impl Lowerer<'_> {
             index.kind(),
             SyntaxKind::NumericLiteral | SyntaxKind::StringLiteral
         ) {
-            return Err(self.refuse(index, "tuple reads require a literal position"));
+            return self.numeric_tuple_get(node, object);
         }
         let field = self.records[shape_id]
             .fields
@@ -178,6 +178,91 @@ impl Lowerer<'_> {
             shape_id: format!("r{shape_id}"),
             field: field.name.clone(),
             r#type: field.r#type.clone(),
+            loc: self.loc(node),
+        })
+    }
+
+    pub(super) fn numeric_tuple_result(&mut self, shape_id: usize) -> Option<Type> {
+        let fields = &self.records[shape_id].fields;
+        if fields.is_empty() {
+            return Some(Type::Dyn);
+        }
+        // Keep concrete field slots as exact union arms. Widening an existing
+        // tagged slot needs its own tag mapping, rather than a guessed payload.
+        if fields
+            .iter()
+            .any(|field| matches!(field.r#type, Type::Union { .. }))
+        {
+            return None;
+        }
+        let mut arms = fields
+            .iter()
+            .map(|field| field.r#type.clone())
+            .collect::<Vec<_>>();
+        arms.push(Type::Undefined);
+        self.intern_union(arms)
+    }
+
+    fn numeric_tuple_get(&mut self, node: Node, object: Expr) -> Result<Expr, String> {
+        let Type::Record { shape_id } = object.ty() else {
+            unreachable!()
+        };
+        let index = self.primitive_operand(node.argument_expression())?;
+        if index.ty() != Type::F64 {
+            return Err(self.refuse(
+                node.argument_expression(),
+                "variable tuple reads require a represented numeric key",
+            ));
+        }
+        let result = self.numeric_tuple_result(shape_id).ok_or_else(|| self.refuse(node, "tuple numeric lookup requires concrete field slots with a native undefined-capable result"))?;
+        let mut helper = Helper::new(
+            "tuple_numeric_get",
+            vec![object.ty(), Type::F64],
+            result.clone(),
+            self.loc(node),
+        );
+        // Capture the owning receiver before evaluating the key. Only the
+        // selected field is read, after both source expressions have completed.
+        for field in self.records[shape_id].fields.clone() {
+            let value = Expr::RecordGet {
+                obj: Box::new(helper.read(&helper.param(0))),
+                shape_id: format!("r{shape_id}"),
+                field: field.name.clone(),
+                r#type: field.r#type,
+                loc: helper.loc(),
+            };
+            helper.function.body.push(Stmt::If {
+                cond: Expr::Bin {
+                    op: "===".into(),
+                    left: Box::new(helper.read(&helper.param(1))),
+                    right: Box::new(helper.number(field.name.parse::<usize>().unwrap() as f64)),
+                    r#type: Type::Bool,
+                    loc: helper.loc(),
+                },
+                then: vec![Stmt::Return {
+                    value: Some(self.coerce(value, result.clone(), node)?),
+                    loc: helper.loc(),
+                }],
+                else_: None,
+                loc: helper.loc(),
+            });
+        }
+        helper.function.body.push(Stmt::Return {
+            value: Some(self.coerce(
+                Expr::UnitLit {
+                    unit: "undefined",
+                    r#type: Type::Undefined,
+                    loc: helper.loc(),
+                },
+                result.clone(),
+                node,
+            )?),
+            loc: helper.loc(),
+        });
+        Ok(Expr::Call {
+            callee: self.install_helper(helper.function),
+            args: vec![object, index],
+            r#type: result,
             loc: self.loc(node),
         })
     }

@@ -464,6 +464,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-local-call-abi/callbacks.ts",
         "rust-native-local-call-abi/default-options.mjs",
         "rust-native-local-call-abi/catalog-errors.ts",
+        "rust-native-tuple-index/values.ts",
+        "rust-native-tuple-index/effects.ts",
+        "rust-native-tuple-index/storage.ts",
         "rust-native-dynamic-bindings/values.ts",
         "rust-native-dynamic-bindings/primitives.ts",
         "rust-native-dynamic-bindings/order.ts",
@@ -6980,6 +6983,48 @@ fn number_fixed_boundaries_preserve_existing_artifacts() {
         "const fixed = (1).toFixed; fixed(2);",
         "(1).toFixed.call(1, 2);",
         "Number.prototype.toFixed = () => 'changed'; console.log((1).toFixed(2));",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn tuple_numeric_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "tuple-numeric-boundary");
+    for source in [
+        "const a=['x','y'] as const; function read(key:string){return a[key as any];} read('0');",
+        "const a=['x','y'] as const; const key={toString(){return '0'}}; console.log(a[key as any]);",
+        "const a=['x','y'] as const; let key=0n; console.log(a[key as any]);",
+        "const a=['x','y'] as const; let key=true; console.log(a[key as any]);",
+        "const a:[number|undefined,number]=[1,2]; function read(key:number){console.log(a[key]);} read(0);",
+        "const a:[number?]=[1]; function read(key:number){console.log(a[key]);} read(0);",
+        "const a=[1,2] as const; function read(key:number):number{return a[key];} read(9);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let artifacts = [

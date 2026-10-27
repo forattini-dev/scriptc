@@ -400,6 +400,21 @@ impl Lowerer<'_> {
                         != Some("length")
                 {
                     let receiver = receivers::reference_node(initial.expression());
+                    if declaration.type_().is_nil()
+                        && !matches!(
+                            initial.argument_expression().kind(),
+                            SyntaxKind::NumericLiteral | SyntaxKind::StringLiteral
+                        )
+                        && let Some(Type::Record { shape_id }) = self.type_id(source)
+                        && self.records[shape_id].tuple
+                        && let Some(storage) = self.numeric_tuple_result(shape_id)
+                    {
+                        self.var_types.entry(symbol).or_insert(storage.clone());
+                        if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                            self.module_vars.entry(symbol).or_insert(storage.clone());
+                        }
+                        return Ok(storage);
+                    }
                     let name = if receiver.kind() == SyntaxKind::PropertyAccessExpression {
                         receiver.name()
                     } else {
