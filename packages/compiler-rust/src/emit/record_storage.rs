@@ -2,7 +2,9 @@
 use super::*;
 
 pub(super) fn shared(record: &crate::ir::Record) -> bool {
-    !record.tuple && record.index_value.is_none()
+    !record.tuple
+        && (record.index_value.is_none()
+            || (record.fields.is_empty() && record.index_value == Some(Type::Dyn)))
 }
 
 pub(super) fn definitions(out: &mut String) {

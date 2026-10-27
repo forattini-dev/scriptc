@@ -471,7 +471,9 @@ fn expr(value: &Expr, function: &Function, module: &Emission<'_>) -> String {
             r#type: Type::Record { shape_id },
             ..
         } => {
-            if module.records[*shape_id].index_value.is_some() {
+            if module.records[*shape_id].index_value.is_some()
+                && !record_storage::shared(&module.records[*shape_id])
+            {
                 let entries = fields
                     .iter()
                     .map(|f| {
@@ -906,7 +908,14 @@ fn statement_with_flow(
         Stmt::RecordKeySet {
             obj, key, value, ..
         } => {
-            writeln!(output, "{{ let object = {}; let key = {}; let value = {}; object.with_mut(|object| js_dict_set(&mut object.overflow, key, value)); }}", expr(obj, function, module), expr(key, function, module), expr(value, function, module)).unwrap();
+            let Type::Record { shape_id } = obj.ty() else {
+                unreachable!("IR validated")
+            };
+            if record_storage::shared(&module.records[shape_id]) {
+                writeln!(output, "{{ let object = {}; let key = {}; let value = {}; native_record_set(&object, key, value); }}", expr(obj, function, module), expr(key, function, module), expr(value, function, module)).unwrap();
+            } else {
+                writeln!(output, "{{ let object = {}; let key = {}; let value = {}; object.with_mut(|object| js_dict_set(&mut object.overflow, key, value)); }}", expr(obj, function, module), expr(key, function, module), expr(value, function, module)).unwrap();
+            }
         }
         Stmt::RecordSet {
             obj, field, value, ..

@@ -130,12 +130,12 @@ pub(super) fn expression(
                 unreachable!("IR validated")
             };
             let stored = module.records[shape_id].index_value.as_ref().unwrap();
-            let result = lookup(
-                "object.with(|object| js_dict_get(&object.overflow, &key))",
-                stored,
-                r#type,
-                module,
-            );
+            let entries = if record_storage::shared(&module.records[shape_id]) {
+                "object.with(|object| js_dict_get(&object.entries, &key))"
+            } else {
+                "object.with(|object| js_dict_get(&object.overflow, &key))"
+            };
+            let result = lookup(entries, stored, r#type, module);
             format!(
                 "{{ let object = {}; let key = {}; let result = {result}; result }}",
                 expr(obj, function, module),

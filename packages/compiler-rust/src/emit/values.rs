@@ -311,7 +311,10 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
         // A direct checked record conversion is an owning property view.
         // Union tag tests still use native_try and require a known record tag;
         // an untagged object must not arbitrarily select a union's first arm.
-        let object_view = if matches!(ty, Type::Record { shape_id } if record_storage::shared(&module.records[*shape_id]))
+        let object_view = if matches!(ty, Type::Record { shape_id } if module.records[*shape_id].fields.is_empty() && module.records[*shape_id].index_value == Some(Type::Dyn))
+        {
+            "if let NativeValue::Object(object) | NativeValue::Record(_, object) = value { return object.clone(); }"
+        } else if matches!(ty, Type::Record { shape_id } if record_storage::shared(&module.records[*shape_id]))
         {
             "if let NativeValue::Object(object) = value { return object.clone(); }"
         } else {

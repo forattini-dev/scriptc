@@ -649,6 +649,12 @@ impl Lowerer<'_> {
     }
 
     fn expected_expression_inner(&mut self, node: Node, target: Type) -> Result<Expr, String> {
+        if target == Type::Dyn && node.kind() == SyntaxKind::Identifier {
+            // An unknown-typed consumer receives the live value, not a
+            // checker-only projection that can lose object identity or tags.
+            let value = self.condition_value(node)?;
+            return self.coerce(value, target, node);
+        }
         if node.kind() == SyntaxKind::CallExpression
             && node.flags().intersects(NodeFlags::OPTIONAL_CHAIN)
         {

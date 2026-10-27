@@ -26,6 +26,7 @@ impl runtime::NativeDeleteValue for NativeValue {
     for (index, ty) in values::types(module).iter().enumerate() {
         if let Type::Record { shape_id } = ty
             && module.records[*shape_id].index_value.is_some()
+            && !record_storage::shared(&module.records[*shape_id])
         {
             writeln!(out, "Self::V{index}(object) => {{ object.with_mut(|data| data.overflow.retain(|(name, _)| name != key)); D::Deleted }},").unwrap();
         }
