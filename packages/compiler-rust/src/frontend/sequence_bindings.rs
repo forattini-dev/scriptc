@@ -75,14 +75,29 @@ impl Lowerer<'_> {
         module: bool,
         spelling: Option<String>,
     ) -> Result<Vec<Stmt>, String> {
+        let source_type = init.ty();
+        self.bind_sequence_pattern_value(pattern, (init, source_type), mutable, module, spelling)
+    }
+
+    /// Sequence binding checks the iterator and each extracted slot. Retain
+    /// an existing source layout for slot storage without casting an erased
+    /// element back into an aggregate before destructuring it.
+    pub(super) fn bind_sequence_pattern_value(
+        &mut self,
+        pattern: Node,
+        source: (Expr, Type),
+        mutable: bool,
+        module: bool,
+        spelling: Option<String>,
+    ) -> Result<Vec<Stmt>, String> {
+        let (init, source_type) = source;
         self.validate_array_pattern(pattern)?;
         self.ensure_exception_classes(pattern)?;
-        if self.native_type_contains(&init.ty(), |ty| {
+        if self.native_type_contains(&source_type, |ty| {
             matches!(ty, Type::Map { .. } | Type::Set { .. })
         }) {
             return Err(self.refuse(pattern, "array bindings currently require standard arrays, tuples, bytes or strings; Map/Set iterators are not ported"));
         }
-        let source_type = init.ty();
         let value = self.coerce(init, Type::Dyn, pattern)?;
         let source = self.construction_local(Type::Dyn, false);
         let mut body = vec![Stmt::VarDecl {

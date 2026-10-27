@@ -591,6 +591,7 @@ impl Lowerer<'_> {
         };
         match value.ty() {
             Type::F64 => Ok(value),
+            Type::Dyn => self.strict_number_primitive(value, node),
             Type::Bigint | Type::Symbol => {
                 self.ensure_exception_classes(node)?;
                 let kind = if value.ty() == Type::Bigint { "BigInt" } else { "Symbol" };

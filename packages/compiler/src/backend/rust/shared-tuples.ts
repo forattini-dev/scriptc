@@ -9,6 +9,7 @@ export function emitSharedTupleDefinition(context: RustDefinitionContext, shape:
   const element = nativeTupleElement(shape);
   if (!element) context.unsupported(`shared tuple '${shape.id}'`);
   const name = sharedRecordName(shape.id);
+  const mixed = element.kind === "dyn" && shape.fields.some(field => field.type.kind !== "dyn");
   const dyn = context.dynTypeName();
   const struct = mangleRecordStruct(shape.id);
   context.line(`#[derive(Clone)] struct ${name} { object: runtime::JsArray<${dyn}> }`);
@@ -27,15 +28,23 @@ export function emitSharedTupleDefinition(context: RustDefinitionContext, shape:
   context.line(`impl runtime::HeapValue for ${name} { fn trace_value(&self, tracer: &mut runtime::Tracer<'_>) { tracer.edge(&self.object); } }`);
   context.line(`impl runtime::ArrayElement for ${name} { fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { tracer.edge(&self.object); } }`);
   context.line(`impl runtime::JsonValue for ${name} { fn write_json(&self, writer: &mut runtime::JsonWriter) { runtime::JsonValue::write_json(&self.object, writer); } }`);
-  context.line(`impl runtime::JsonDecode for ${name} { fn decode_json(node: &runtime::JsonNode, path: &str) -> Result<Self, String> {`);
-  context.line(`let fields = runtime::json_expect_array(node, path)?; if fields.len() < ${shape.fields.length} { return Err(format!("expected at least ${shape.fields.length} tuple elements at {path}")); }`);
-  context.line(`for (index, value) in fields.iter().enumerate() { let _ = <${context.rustType(element)} as runtime::JsonDecode>::decode_json(value, &runtime::json_index_path(path, index))?; }`);
-  context.line("Ok(Self { object: runtime::JsonDecode::decode_json(node, path)? }) } }");
+  if (shape.fields.some(field => field.type.kind === "func")) {
+    context.line(`impl runtime::JsonDecode for ${name} { fn decode_json(_node: &runtime::JsonNode, path: &str) -> Result<Self, String> { Err(format!("JSON cannot contain native tuple callbacks at {path}")) } }`);
+  } else {
+    context.line(`impl runtime::JsonDecode for ${name} { fn decode_json(node: &runtime::JsonNode, path: &str) -> Result<Self, String> {`);
+    context.line(`let fields = runtime::json_expect_array(node, path)?; if fields.len() < ${shape.fields.length} { return Err(format!("expected at least ${shape.fields.length} tuple elements at {path}")); }`);
+    if (mixed) {
+      for (const field of shape.fields) context.line(`let _ = <${context.rustType(field.type)} as runtime::JsonDecode>::decode_json(&fields[${Number(field.name)}], &runtime::json_index_path(path, ${Number(field.name)}))?;`);
+    } else context.line(`for (index, value) in fields.iter().enumerate() { let _ = <${context.rustType(element)} as runtime::JsonDecode>::decode_json(value, &runtime::json_index_path(path, index))?; }`);
+    context.line("Ok(Self { object: runtime::JsonDecode::decode_json(node, path)? }) } }");
+  }
   context.line(`fn ${recordCheckName(shape.id)}(value: ${dyn}) -> ${name} { ${recordCheckName(shape.id)}_at(value, "$") }`);
   context.line(`fn ${recordCheckName(shape.id)}_at(value: ${dyn}, path: &str) -> ${name} {`);
   context.line(`let object = match value { ${dyn}::Array(array) => array, value => sc_dyn_check_fail_at("array", &value, path) };`);
   context.line(`if runtime::array_len(&object) < ${shape.fields.length}.0 { sc_dyn_check_fail_at("tuple arity", &${dyn}::Array(object), path); }`);
-  context.line(`let mut index = 0.0; while index < runtime::array_len(&object) { let value = runtime::array_get(&object, index); let _ = ${context.emitDynCheckValue(element, "value", undefined, "&runtime::json_index_path(path, index as usize)")}; index += 1.0; }`);
+  if (mixed) {
+    for (const field of shape.fields) context.line(`{ let value = runtime::array_get(&object, ${Number(field.name)}.0); let _ = ${context.emitDynCheckValue(field.type, "value", undefined, `&runtime::json_index_path(path, ${Number(field.name)})`)}; }`);
+  } else context.line(`let mut index = 0.0; while index < runtime::array_len(&object) { let value = runtime::array_get(&object, index); let _ = ${context.emitDynCheckValue(element, "value", undefined, "&runtime::json_index_path(path, index as usize)")}; index += 1.0; }`);
   context.line(`${name} { object } }`);
   context.line(`fn ${recordNewName(shape.id)}(value: ${struct}) -> ${name} {`);
   const fields = [...shape.fields].sort((a, b) => Number(a.name) - Number(b.name));

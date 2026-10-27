@@ -121,6 +121,10 @@ pub(super) fn function_exits(body: &[Stmt]) -> bool {
     completions(body) & (NORMAL | BREAK | CONTINUE) == 0
 }
 
+pub(super) fn falls_through(body: &[Stmt]) -> bool {
+    completions(body) & NORMAL != 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +180,46 @@ mod tests {
             start: 0,
             end: 1,
         }
+    }
+    #[test]
+    fn block_fallthrough_distinguishes_loop_jumps_from_function_exits() {
+        for jump in [Stmt::Break { loc: loc() }, Stmt::Continue { loc: loc() }] {
+            assert!(!falls_through(std::slice::from_ref(&jump)));
+            assert!(!function_exits(std::slice::from_ref(&jump)));
+        }
+        assert!(falls_through(&[]));
+        assert!(falls_through(&[Stmt::Switch {
+            disc: Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc: loc()
+            },
+            cases: vec![SwitchCase {
+                test: None,
+                body: vec![Stmt::Break { loc: loc() }]
+            }],
+            loc: loc(),
+        }]));
+        assert!(!falls_through(&[Stmt::TryCatch {
+            try_body: vec![Stmt::Return {
+                value: None,
+                loc: loc()
+            }],
+            catch_body: None,
+            catch_local_id: None,
+            finally_body: Some(vec![Stmt::Continue { loc: loc() }]),
+            loc: loc(),
+        }]));
+        assert!(falls_through(&[Stmt::If {
+            cond: Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc: loc()
+            },
+            then: vec![Stmt::Continue { loc: loc() }],
+            else_: None,
+            loc: loc(),
+        }]));
     }
     fn forever(body: Vec<Stmt>) -> Stmt {
         Stmt::While {

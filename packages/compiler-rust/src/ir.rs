@@ -3246,6 +3246,12 @@ pub fn always_returns(stmts: &[Stmt]) -> bool {
     control_flow::function_exits(stmts)
 }
 
+/// Whether execution can reach the next statement in the current block.
+/// A loop-local jump stops this block without exiting its function.
+pub fn falls_through(stmts: &[Stmt]) -> bool {
+    control_flow::falls_through(stmts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

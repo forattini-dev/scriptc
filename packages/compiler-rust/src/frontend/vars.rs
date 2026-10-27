@@ -239,23 +239,36 @@ impl Lowerer<'_> {
         if node.kind() != SyntaxKind::BinaryExpression {
             return None;
         }
-        let equal = match node.operator_token().kind() {
-            SyntaxKind::EqualsEqualsEqualsToken => true,
-            SyntaxKind::ExclamationEqualsEqualsToken => false,
+        let (equal, nullish) = match node.operator_token().kind() {
+            SyntaxKind::EqualsEqualsEqualsToken => (true, false),
+            SyntaxKind::ExclamationEqualsEqualsToken => (false, false),
+            SyntaxKind::EqualsEqualsToken => (true, true),
+            SyntaxKind::ExclamationEqualsToken => (false, true),
             _ => return None,
         };
         if equal == truth {
             return None;
         }
         for (value, unit) in [(node.left(), node.right()), (node.right(), node.left())] {
-            if value.kind() != SyntaxKind::Identifier
-                || unit.kind() != SyntaxKind::Identifier
-                || unit.text() != "undefined"
-            {
+            let value = primitives::primitive_source(value);
+            let unit = primitives::primitive_source(unit);
+            if value.kind() != SyntaxKind::Identifier {
                 continue;
             }
             let symbol = self.symbol(value);
             if !self.var_types.contains_key(&symbol) {
+                continue;
+            }
+            // Only the null-literal loose comparison is lowered. Its
+            // non-nullish outcome proves absence of both unit tags. Keep
+            // this fact on local cells, never on a mutable property path.
+            if nullish {
+                if unit.kind() == SyntaxKind::NullKeyword {
+                    return Some(symbol);
+                }
+                continue;
+            }
+            if unit.kind() != SyntaxKind::Identifier || unit.text() != "undefined" {
                 continue;
             }
             let unit_symbol = self.symbol(unit);
@@ -313,7 +326,10 @@ impl Lowerer<'_> {
         }
         if !matches!(
             op,
-            SyntaxKind::EqualsEqualsEqualsToken | SyntaxKind::ExclamationEqualsEqualsToken
+            SyntaxKind::EqualsEqualsEqualsToken
+                | SyntaxKind::ExclamationEqualsEqualsToken
+                | SyntaxKind::EqualsEqualsToken
+                | SyntaxKind::ExclamationEqualsToken
         ) {
             return None;
         }
@@ -404,9 +420,9 @@ impl Lowerer<'_> {
             Some(self.statement(node.else_statement())?)
         };
         let other_defined = self.var_defined.clone();
-        self.var_defined = if ir::always_returns(&then) {
+        self.var_defined = if !ir::falls_through(&then) {
             other_defined
-        } else if else_.as_ref().is_some_and(|body| ir::always_returns(body)) {
+        } else if else_.as_ref().is_some_and(|body| !ir::falls_through(body)) {
             then_defined
         } else {
             then_defined.intersection(&other_defined).copied().collect()

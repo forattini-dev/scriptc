@@ -707,24 +707,29 @@ impl Lowerer<'_> {
                 {
                     return self.tuple_literal(node, target);
                 }
-                let array = match &target {
+                let sequence = match &target {
                     Type::Array { .. } => target.clone(),
                     Type::Union { union_id } => {
-                        let arrays = self.unions[*union_id]
+                        let sequences = self.unions[*union_id]
                             .arms
                             .iter()
-                            .filter(|t| matches!(t, Type::Array { .. }))
+                            .filter(|t| matches!(t, Type::Array { .. }) || matches!(t, Type::Record { shape_id } if self.records[*shape_id].tuple))
                             .cloned()
                             .collect::<Vec<_>>();
-                        if arrays.len() != 1 {
+                        if sequences.len() != 1 {
                             return Err(
-                                self.refuse(node, "array literal needs one native array arm")
+                                self.refuse(node, "array literal needs one native sequence arm")
                             );
                         }
-                        arrays[0].clone()
+                        sequences[0].clone()
                     }
                     _ => return Err(self.refuse(node, "array literal needs a native array target")),
                 };
+                if matches!(sequence, Type::Record { .. }) {
+                    let value = self.tuple_literal(node, sequence)?;
+                    return self.coerce(value, target, node);
+                }
+                let array = sequence;
                 let Type::Array { elem } = &array else {
                     unreachable!()
                 };

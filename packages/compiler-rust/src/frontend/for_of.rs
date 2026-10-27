@@ -165,13 +165,17 @@ impl Lowerer<'_> {
                     loc: loc.clone(),
                 };
                 let item = self.dynamic_get(node, object, key);
-                self.coerce(item, element.clone(), node)?
+                if declaration.name().kind() == SyntaxKind::ArrayBindingPattern {
+                    item
+                } else {
+                    self.coerce(item, element.clone(), node)?
+                }
             }
         };
         let mut body = if declaration.name().kind() == SyntaxKind::ArrayBindingPattern {
-            self.bind_sequence_pattern(
+            self.bind_sequence_pattern_value(
                 declaration.name(),
-                item,
+                (item, element.clone()),
                 !head.flags().intersects(NodeFlags::CONST),
                 false,
                 None,

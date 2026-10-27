@@ -464,6 +464,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-switch/order.ts",
         "rust-native-switch/control.ts",
         "rust-native-switch/ownership.ts",
+        "rust-native-tuple-functions/values.ts",
+        "rust-native-tuple-functions/storage.ts",
+        "rust-native-tuple-functions/rows.ts",
+        "rust-native-tuple-functions/effects.ts",
+        "rust-native-math-erased/values.ts",
+        "rust-native-math-erased/effects.ts",
         "rust-native-object-method-contracts/main.ts",
         "rust-native-nullish-equality/main.ts",
         "rust-native-array-includes/main.ts",
@@ -4978,11 +4984,11 @@ fn standard_primitive_boundaries_preserve_previous_artifacts() {
         ),
         (
             "('7' as unknown as number).toString();",
-            "Number.toString requires a represented numeric receiver",
+            "Number formatting requires a represented numeric receiver",
         ),
         (
             "(255).toString(...[16]);",
-            "Number.toString iterable argument spreads are not ported",
+            "Number formatting iterable argument spreads are not ported",
         ),
         (
             "Math.floor({ valueOf: (): number => 2 } as unknown as number);",

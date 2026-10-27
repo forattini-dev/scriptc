@@ -10,9 +10,18 @@ test.each([F64, STRING, DYN])("homogeneous dense scalar tuples have a shared arr
   expect(nativeRecordCheckSupported({ kind: "record", shapeId: shape.id }, () => shape, () => undefined)).toBe(true);
 });
 
-test("heterogeneous, sparse, empty and composite tuples retain their fence", () => {
+test("mixed scalar and callback tuples retain owning tagged slots", () => {
+  const callback: IrType = { kind: "func", params: [F64], ret: F64 };
+  for (const shape of [tuple([STRING, F64]), tuple([F64, callback]), tuple([callback, callback])]) {
+    expect(nativeTupleElement(shape)).toEqual(DYN);
+    expect(nativeRecordCheckSupported({ kind: "record", shapeId: shape.id }, () => shape, () => undefined)).toBe(true);
+  }
+  expect(nativeTupleElement(tuple([{ ...callback, rest: true }]))).toBeUndefined();
+  expect(nativeTupleElement(tuple([{ kind: "func", params: [{ kind: "array", elem: STRING }], ret: F64 }]))).toBeUndefined();
+});
+
+test("sparse, empty and composite tuples retain their fence", () => {
   expect(nativeTupleElement(tuple([]))).toBeUndefined();
-  expect(nativeTupleElement(tuple([STRING, F64]))).toBeUndefined();
   expect(nativeTupleElement(tuple([{ kind: "array", elem: STRING }]))).toBeUndefined();
   expect(nativeTupleElement({ id: "record", fields: [{ name: "0", type: STRING }] })).toBeUndefined();
   expect(nativeTupleElement({ id: "hole", tuple: true, fields: [{ name: "1", type: STRING }] })).toBeUndefined();

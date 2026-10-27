@@ -92,12 +92,10 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn intern_tuple(&mut self, elements: Vec<Type>) -> Option<Type> {
-        if elements.iter().any(|ty| {
-            matches!(
-                ty,
-                Type::Void | Type::Null | Type::Undefined | Type::Func { .. }
-            )
-        }) {
+        if elements
+            .iter()
+            .any(|ty| matches!(ty, Type::Void | Type::Null | Type::Undefined))
+        {
             return None;
         }
         let order = (0..elements.len())
