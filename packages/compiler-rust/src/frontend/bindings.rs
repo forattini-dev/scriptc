@@ -44,16 +44,17 @@ impl Lowerer<'_> {
             .into_iter()
             .collect::<Vec<_>>();
         // Validate the entire pattern before lowering any initializer or binding.
-        for element in &elements {
+        for (index, element) in elements.iter().enumerate() {
+            let rest = !element.dot_dot_dot_token().is_nil();
             if element.name().kind() != SyntaxKind::Identifier
-                || !element.dot_dot_dot_token().is_nil()
+                || (rest && (index + 1 != elements.len() || !element.property_name().is_nil()))
                 || !element.initializer().is_nil()
                 || (!element.property_name().is_nil()
                     && self.data_property_name(element.property_name()).is_none())
             {
                 return Err(self.refuse(
                     *element,
-                    "nested, default, rest and computed object bindings are not ported",
+                    "object bindings require flat named data bindings and a terminal rest; nested, default and computed bindings are not ported",
                 ));
             }
         }
@@ -92,6 +93,19 @@ impl Lowerer<'_> {
         } else {
             init
         };
+        let has_rest = elements
+            .iter()
+            .any(|element| !element.dot_dot_dot_token().is_nil());
+        if has_rest
+            && shape
+                .as_ref()
+                .is_some_and(|shape| shape.index_value.is_some())
+        {
+            return Err(self.refuse(
+                declaration,
+                "object rest from indexed records needs an owning source contract",
+            ));
+        }
         let source = Local {
             id: format!("binding_source{}", self.locals.len()),
             name: "object binding source".into(),
@@ -135,14 +149,39 @@ impl Lowerer<'_> {
                 else_: None,
                 loc: self.loc(declaration),
             });
+            if has_rest {
+                body.push(Stmt::Expression {
+                    expr: Expr::LibCall {
+                        r#fn: "dyn.objectRestCheck".into(),
+                        args: vec![self.construction_read(&source, declaration)],
+                        r#type: Type::Void,
+                        loc: self.loc(declaration),
+                    },
+                    loc: self.loc(declaration),
+                });
+            }
         }
+        let mut excluded = Vec::new();
         for element in elements {
             let name = element.name();
+            if !element.dot_dot_dot_token().is_nil() {
+                let target = if shape.is_none() {
+                    Type::Dyn
+                } else {
+                    self.storage_type(name)?
+                };
+                let raw =
+                    self.coerce(self.construction_read(&source, element), Type::Dyn, element)?;
+                let value = self.object_parameter_rest(element, raw, &excluded, target)?;
+                body.push(self.publish_binding(name, value, mutable, module, element)?);
+                continue;
+            }
             let key = if element.property_name().is_nil() {
                 name.text().to_string()
             } else {
                 self.data_property_name(element.property_name()).unwrap()
             };
+            excluded.push(key.clone());
             let obj = Expr::VarRef {
                 local_id: source.id.clone(),
                 r#type: source.r#type.clone(),

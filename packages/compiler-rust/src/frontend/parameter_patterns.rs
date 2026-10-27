@@ -202,7 +202,7 @@ impl Lowerer<'_> {
         Ok(body)
     }
 
-    fn object_parameter_rest(
+    pub(super) fn object_parameter_rest(
         &mut self,
         node: Node,
         source: Expr,

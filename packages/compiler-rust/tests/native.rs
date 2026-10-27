@@ -308,6 +308,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-object-bindings/order.ts",
         "rust-native-object-bindings/module.ts",
         "rust-native-object-bindings/presence.ts",
+        "rust-native-object-rest-local/main.ts",
         "rust-native-for-loops/counting.ts",
         "rust-native-for-loops/order.ts",
         "rust-native-for-loops/finally.ts",
@@ -1585,11 +1586,10 @@ fn object_binding_boundaries_preserve_artifacts() {
     let target = binary(temp.path(), "object-binding-boundary");
     for source in [
         "const {x = 1} = {x: undefined};",
-        "const {...rest} = {x: 1};",
         "const {x: {y}} = {x: {y: 1}};",
         "const {['x']: x} = {x: 1};",
         "const {x = 1} = JSON.parse('{}');",
-        "const {...rest} = JSON.parse('{}');",
+        "const values: Record<string, string> = {x: 'x'}; const {...rest} = values;",
         "const {x}: {x: number} = {x: 1};",
         "var {x} = {x: 1};",
     ] {
