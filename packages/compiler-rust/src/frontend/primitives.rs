@@ -92,7 +92,9 @@ impl Lowerer<'_> {
         }
         let name = member.name().text();
         let member_id = self.symbol(member.name());
-        if name == "toString" && self.primitive_symbol(member_id, name, Some("Number")) {
+        if matches!(name, "toString" | "toFixed")
+            && self.primitive_symbol(member_id, name, Some("Number"))
+        {
             return self.number_string_call(node, member).map(Some);
         }
         if name == "isArray"
@@ -341,12 +343,13 @@ impl Lowerer<'_> {
     }
 
     fn number_string_call(&mut self, node: Node, member: Node) -> Result<Expr, String> {
+        let fixed = member.name().text() == "toFixed";
         self.ensure_exception_classes(node)?;
         let receiver = self.primitive_operand(member.expression())?;
         if receiver.ty() != Type::F64 {
             return Err(self.refuse(
                 member,
-                "Number.toString requires a represented numeric receiver",
+                "Number formatting requires a represented numeric receiver",
             ));
         }
         let mut values = vec![receiver];
@@ -354,26 +357,35 @@ impl Lowerer<'_> {
             if argument.kind() == SyntaxKind::SpreadElement {
                 return Err(self.refuse(
                     argument,
-                    "Number.toString iterable argument spreads are not ported",
+                    "Number formatting iterable argument spreads are not ported",
                 ));
             }
             let value = self.primitive_operand(argument)?;
             values.push(self.primitive_capture(value, argument)?);
         }
         let mut helper = Helper::new(
-            "number_to_string",
+            if fixed {
+                "number_to_fixed"
+            } else {
+                "number_to_string"
+            },
             values.iter().map(Expr::ty).collect(),
             Type::String,
             self.loc(node),
         );
         let radix = self.primitive_string_argument(
             (values.len() > 1).then(|| helper.read(&helper.param(1))),
-            crate::string_builtins::Argument::Number(10.0),
+            crate::string_builtins::Argument::Number(if fixed { 0.0 } else { 10.0 }),
             node,
         )?;
         helper.function.body.push(Stmt::Return {
             value: Some(Expr::LibCall {
-                r#fn: "num.toRadixString".into(),
+                r#fn: if fixed {
+                    "num.toFixed"
+                } else {
+                    "num.toRadixString"
+                }
+                .into(),
                 args: vec![helper.read(&helper.param(0)), radix],
                 r#type: Type::String,
                 loc: helper.loc(),

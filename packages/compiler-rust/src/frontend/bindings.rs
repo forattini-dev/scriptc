@@ -1,4 +1,4 @@
-//! Lexical data-record bindings retain the source store and evaluate it once.
+//! Lexical object bindings retain the owning source and evaluate it once.
 use super::*;
 
 pub(super) fn names(name: Node, out: &mut Vec<Node>) {
@@ -49,19 +49,40 @@ impl Lowerer<'_> {
             }
         }
         let init = self.expression(declaration.initializer())?;
-        let Type::Record { shape_id } = init.ty() else {
-            return Err(self.refuse(
-                declaration,
-                "object bindings require a native data record; dynamic and primitive sources are not ported",
-            ));
+        let shape = if let Type::Record { shape_id } = init.ty() {
+            let shape = self.records[shape_id].clone();
+            if shape.tuple || self.callables.contains_key(&shape_id) || self.enum_shape(shape_id) {
+                return Err(self.refuse(
+                    declaration,
+                    "tuple, callable and enum bindings require their native member contracts",
+                ));
+            }
+            Some(shape)
+        } else {
+            if self.native_type_contains(&init.ty(), |ty| {
+                !matches!(
+                    ty,
+                    Type::Dyn
+                        | Type::Caught
+                        | Type::F64
+                        | Type::Bool
+                        | Type::String
+                        | Type::Bigint
+                        | Type::Symbol
+                        | Type::Null
+                        | Type::Undefined
+                        | Type::Union { .. }
+                )
+            }) {
+                return Err(self.refuse(declaration, "object bindings require native data records or represented dynamic/primitive sources"));
+            }
+            None
         };
-        let shape = self.records[shape_id].clone();
-        if shape.tuple || self.callables.contains_key(&shape_id) || self.enum_shape(shape_id) {
-            return Err(self.refuse(
-                declaration,
-                "tuple, callable and enum bindings require their native member contracts",
-            ));
-        }
+        let init = if shape.is_none() {
+            self.coerce(init, Type::Dyn, declaration)?
+        } else {
+            init
+        };
         let source = Local {
             id: format!("binding_source{}", self.locals.len()),
             name: "object binding source".into(),
@@ -75,6 +96,37 @@ impl Lowerer<'_> {
             init,
             loc: self.loc(declaration),
         }];
+        if shape.is_none() {
+            self.ensure_exception_classes(declaration)?;
+            // RequireObjectCoercible runs even for {}. Do not enumerate keys
+            // or use the object-rest layout fence: primitives are valid here.
+            body.push(Stmt::If {
+                cond: Expr::DynTest {
+                    value: Box::new(self.construction_read(&source, declaration)),
+                    test: "nullish".into(),
+                    negated: false,
+                    r#type: Type::Bool,
+                    loc: self.loc(declaration),
+                },
+                then: vec![Stmt::Throw {
+                    value: Expr::LibCall {
+                        r#fn: "error.new".into(),
+                        args: vec![Expr::StrLit {
+                            value: "Cannot destructure null or undefined".into(),
+                            r#type: Type::String,
+                            loc: self.loc(declaration),
+                        }],
+                        r#type: Type::Object {
+                            class_name: "%TypeError".into(),
+                        },
+                        loc: self.loc(declaration),
+                    },
+                    loc: self.loc(declaration),
+                }],
+                else_: None,
+                loc: self.loc(declaration),
+            });
+        }
         for element in elements {
             let name = element.name();
             let key = if element.property_name().is_nil() {
@@ -89,16 +141,28 @@ impl Lowerer<'_> {
             };
             // Use the field's owning ABI, never a checker-only projection that
             // could drop undefined or substitute a different callable wrapper.
-            let value = if let Some(field) = shape.fields.iter().find(|field| field.name == key) {
-                Expr::RecordGet {
-                    obj: Box::new(obj),
-                    shape_id: format!("r{shape_id}"),
-                    field: key,
-                    r#type: field.r#type.clone(),
-                    loc: self.loc(element),
+            let value = if let Some(shape) = &shape {
+                if let Some(field) = shape.fields.iter().find(|field| field.name == key) {
+                    Expr::RecordGet {
+                        obj: Box::new(obj),
+                        shape_id: format!("r{}", shape.id),
+                        field: key,
+                        r#type: field.r#type.clone(),
+                        loc: self.loc(element),
+                    }
+                } else {
+                    self.dictionary_get(
+                        element,
+                        obj,
+                        Expr::StrLit {
+                            value: key,
+                            r#type: Type::String,
+                            loc: self.loc(element),
+                        },
+                    )?
                 }
             } else {
-                self.dictionary_get(
+                self.dynamic_get(
                     element,
                     obj,
                     Expr::StrLit {
@@ -106,11 +170,14 @@ impl Lowerer<'_> {
                         r#type: Type::String,
                         loc: self.loc(element),
                     },
-                )?
+                )
             };
             let ty = value.ty();
             let symbol = self.symbol(name);
-            if self.optional_storage(&ty) {
+            if ty == Type::Dyn {
+                self.var_types.insert(symbol, Type::Dyn);
+                self.var_defined.remove(&symbol);
+            } else if self.optional_storage(&ty) {
                 self.var_types.insert(symbol, ty.clone());
                 self.var_assignment_fact(symbol, &value);
             }

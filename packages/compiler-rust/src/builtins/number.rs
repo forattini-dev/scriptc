@@ -18,6 +18,12 @@ pub(super) fn apis() -> Vec<Api> {
             "tests/corpus/rust-native-number-string/errors.ts",
         ],
     )];
+    apis.push(Api::native(
+        "Number.prototype", "toFixed", Lowering::Primitive,
+        vec![call!("num.toFixed", [Type::F64, Type::F64], Type::String, "number_to_fixed")],
+        "Declaration-proven numeric receiver; eager ordinary arguments before primitive digits conversion; omitted/undefined digits default to zero; boxed receivers, object coercion hooks and iterable spreads refused",
+        &["tests/corpus/rust-native-number-fixed/values.ts", "tests/corpus/rust-native-number-fixed/order.ts", "tests/corpus/rust-native-number-fixed/errors.ts"],
+    ));
     for (name, operation) in [
         (
             "parseInt",

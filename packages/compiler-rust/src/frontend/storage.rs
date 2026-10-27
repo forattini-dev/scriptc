@@ -14,6 +14,15 @@ impl Lowerer<'_> {
                     continue;
                 }
                 for declaration in list.declarations().nodes() {
+                    // Flat dynamic/primitive object bindings publish owning
+                    // value snapshots. Plan their module cells before function
+                    // bodies can capture a checker-only property projection.
+                    let dynamic_binding = declaration.name().kind()
+                        == SyntaxKind::ObjectBindingPattern
+                        && !declaration.initializer().is_nil()
+                        && self
+                            .ty(declaration.initializer())
+                            .is_ok_and(|ty| !matches!(ty, Type::Record { .. }));
                     let mut names = Vec::new();
                     bindings::names(declaration.name(), &mut names);
                     for name in names {
@@ -26,7 +35,16 @@ impl Lowerer<'_> {
                         }
                         // An untyped JavaScript initializer can provide a more
                         // precise native contract when lowered at its source site.
-                        if let Ok(mut ty) = self.storage_type(name) {
+                        let storage = if dynamic_binding {
+                            Ok(Type::Dyn)
+                        } else {
+                            self.storage_type(name)
+                        };
+                        if let Ok(mut ty) = storage {
+                            if dynamic_binding {
+                                self.var_types.insert(symbol, Type::Dyn);
+                                self.var_defined.remove(&symbol);
+                            }
                             if declaration.initializer().is_nil() {
                                 let value_type = ty;
                                 let Ok(storage) =

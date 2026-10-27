@@ -464,6 +464,12 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-local-call-abi/callbacks.ts",
         "rust-native-local-call-abi/default-options.mjs",
         "rust-native-local-call-abi/catalog-errors.ts",
+        "rust-native-dynamic-bindings/values.ts",
+        "rust-native-dynamic-bindings/primitives.ts",
+        "rust-native-dynamic-bindings/order.ts",
+        "rust-native-number-fixed/values.ts",
+        "rust-native-number-fixed/order.ts",
+        "rust-native-number-fixed/errors.ts",
         "rust-native-conditional/values.ts",
         "rust-native-conditional/effects.ts",
         "rust-native-conditional/guards.ts",
@@ -1537,8 +1543,8 @@ fn object_binding_boundaries_preserve_artifacts() {
         "const {...rest} = {x: 1};",
         "const {x: {y}} = {x: {y: 1}};",
         "const {['x']: x} = {x: 1};",
-        "const {x} = JSON.parse('{\"x\":1}');",
-        "const {length} = 'hello';",
+        "const {x = 1} = JSON.parse('{}');",
+        "const {...rest} = JSON.parse('{}');",
         "const {x}: {x: number} = {x: 1};",
         "var {x} = {x: 1};",
     ] {
@@ -6957,5 +6963,47 @@ fn local_inferred_call_and_completion_boundaries_preserve_artifacts() {
             "{source}: {stderr}"
         );
         assert_eq!(fs::read_to_string(&target).unwrap(), "preserve");
+    }
+}
+
+#[test]
+fn number_fixed_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "number-fixed-boundary");
+    for source in [
+        "new Number(1).toFixed(2);",
+        "('1' as unknown as number).toFixed(2);",
+        "(1).toFixed({valueOf(){return 2}} as any);",
+        "(1).toFixed(...[2] as [number]);",
+        "const fixed = (1).toFixed; fixed(2);",
+        "(1).toFixed.call(1, 2);",
+        "Number.prototype.toFixed = () => 'changed'; console.log((1).toFixed(2));",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
     }
 }
