@@ -3,19 +3,20 @@ use super::*;
 
 impl Lowerer<'_> {
     pub(super) fn validate_array_pattern(&self, pattern: Node) -> Result<(), String> {
-        for element in pattern.elements() {
+        let elements = pattern.elements();
+        for (index, element) in elements.iter().enumerate() {
             if bindings::omitted(element) {
                 continue;
             }
             if element.kind() != SyntaxKind::BindingElement
                 || element.name().kind() != SyntaxKind::Identifier
                 || !element.initializer().is_nil()
-                || !element.dot_dot_dot_token().is_nil()
                 || !element.property_name().is_nil()
+                || (!element.dot_dot_dot_token().is_nil() && index + 1 != elements.len())
             {
                 return Err(self.refuse(
                     element,
-                    "nested, default and rest array bindings are not ported",
+                    "nested, default and non-terminal rest array bindings are not ported",
                 ));
             }
         }
@@ -92,6 +93,16 @@ impl Lowerer<'_> {
     ) -> Result<Vec<Stmt>, String> {
         let (init, source_type) = source;
         self.validate_array_pattern(pattern)?;
+        let elements = pattern.elements();
+        let has_rest = elements.last().is_some_and(|element| {
+            !bindings::omitted(element) && !element.dot_dot_dot_token().is_nil()
+        });
+        if has_rest && (module || !matches!(source_type, Type::Array { .. })) {
+            return Err(self.refuse(
+                pattern,
+                "array rest bindings require a local standard array source",
+            ));
+        }
         self.ensure_exception_classes(pattern)?;
         if self.native_type_contains(&source_type, |ty| {
             matches!(ty, Type::Map { .. } | Type::Set { .. })
@@ -156,7 +167,7 @@ impl Lowerer<'_> {
             local_id: items.id.clone(),
             init: Expr::DynIterN {
                 value: Box::new(self.construction_read(&source, pattern)),
-                count: pattern.elements().len(),
+                count: elements.len() - usize::from(has_rest),
                 r#type: Type::Dyn,
                 loc: self.loc(pattern),
             },
@@ -164,6 +175,15 @@ impl Lowerer<'_> {
         });
         for (index, element) in pattern.elements().iter().enumerate() {
             if bindings::omitted(element) {
+                continue;
+            }
+            if !element.dot_dot_dot_token().is_nil() {
+                let value = self.sequence_array_rest(
+                    self.construction_read(&source, element),
+                    index,
+                    element,
+                )?;
+                body.push(self.publish_binding(element.name(), value, mutable, module, element)?);
                 continue;
             }
             let value = self.dynamic_get(
@@ -191,6 +211,85 @@ impl Lowerer<'_> {
             body.push(self.publish_binding(element.name(), value, mutable, module, element)?);
         }
         Ok(body)
+    }
+
+    /// An array iterator reads every index, including holes as undefined. A
+    /// slice would incorrectly preserve holes, so build a fresh dense array.
+    fn sequence_array_rest(
+        &mut self,
+        source: Expr,
+        start: usize,
+        node: Node,
+    ) -> Result<Expr, String> {
+        let result_type = Type::Array {
+            elem: Box::new(Type::Dyn),
+        };
+        let mut helper = helpers::Helper::new(
+            "sequence_array_rest",
+            vec![Type::Dyn, Type::F64],
+            result_type.clone(),
+            self.loc(node),
+        );
+        let input = helper.param(0);
+        let index = helper.local("iterator index", Type::F64, true);
+        let output = helper.local("rest array", result_type.clone(), false);
+        helper.declare(&index, helper.read(&helper.param(1)));
+        helper.declare(
+            &output,
+            Expr::ArrayLit {
+                elems: vec![],
+                r#type: result_type.clone(),
+                loc: helper.loc(),
+            },
+        );
+        let length = self.dynamic_get(
+            node,
+            helper.read(&input),
+            Expr::StrLit {
+                value: "length".into(),
+                r#type: Type::String,
+                loc: helper.loc(),
+            },
+        );
+        let length = self.coerce(length, Type::F64, node)?;
+        let key = Expr::ToString {
+            operand: Box::new(helper.read(&index)),
+            r#type: Type::String,
+            loc: helper.loc(),
+        };
+        let value = self.dynamic_get(node, helper.read(&input), key);
+        helper.function.body.push(Stmt::While {
+            cond: helper.less(&index, length),
+            body: vec![
+                Stmt::Expression {
+                    expr: Expr::ArrayIntrinsic {
+                        method: "push".into(),
+                        receiver: Box::new(helper.read(&output)),
+                        args: vec![value],
+                        r#type: Type::F64,
+                        loc: helper.loc(),
+                    },
+                    loc: helper.loc(),
+                },
+                helper.advance(&index),
+            ],
+            loc: helper.loc(),
+        });
+        let callee = self.install_helper(helper.finish(&output));
+        Ok(Expr::Call {
+            callee,
+            args: vec![
+                source,
+                Expr::NumLit {
+                    value: start as f64,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: self.loc(node),
+                },
+            ],
+            r#type: result_type,
+            loc: self.loc(node),
+        })
     }
 
     pub(super) fn sequence_slot_type(
