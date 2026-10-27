@@ -24,10 +24,16 @@ fn source_contracts_are_unique_and_bind_only_implemented_operations() {
             assert!(root.join(evidence).is_file(), "missing evidence {evidence}");
         }
         assert!(!api.operations.is_empty() || api.special.is_some());
-        if api.access == Access::Call {
+        if api.access == Access::Call && api.special.is_none() {
             assert!(!api.operations.is_empty());
         }
         for op in &api.operations {
+            if let Implementation::NativeHelper(name) = op.implementation {
+                assert!(
+                    include_str!("../buffer_values_support.rs").contains(&format!("fn {name}(")),
+                    "missing native helper {name}"
+                );
+            }
             if let Some(previous) = operations.insert(op.ir, op) {
                 assert_eq!(previous, op, "conflicting ABI for {}", op.ir);
             }

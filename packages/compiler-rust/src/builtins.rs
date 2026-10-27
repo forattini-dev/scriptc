@@ -13,6 +13,7 @@ pub fn strings() -> Type {
 #[serde(tag = "kind", content = "symbol", rename_all = "kebab-case")]
 pub enum Implementation {
     Runtime(&'static str),
+    NativeHelper(&'static str),
     FloatMethod(&'static str),
     FloatBinaryMethod(&'static str),
 }

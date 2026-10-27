@@ -603,7 +603,18 @@ fn buffer_string_bytes(value: &JsString, encoding: &JsString) -> Vec<u8> {
 }
 
 pub fn buffer_from_string(value: &JsString, encoding: &JsString) -> JsBytes<u8> {
-    bytes_from_vec(buffer_string_bytes(value, encoding))
+    let encoding = if encoding.is_empty() { "utf8" } else { checked_buffer_encoding(encoding) };
+    let bytes = bytes_from_vec(buffer_string_bytes(value, &string(encoding)));
+    bytes.with_mut(|data| data.buffer = true);
+    bytes
+}
+
+/// Buffer.from(view) copies elements into an independent Buffer owner.
+/// Keep bytes_copy unbranded: Uint8Array construction has different semantics.
+pub fn buffer_from_bytes(value: &JsBytes<u8>) -> JsBytes<u8> {
+    let bytes = bytes_copy(value);
+    bytes.with_mut(|data| data.buffer = true);
+    bytes
 }
 
 pub fn buffer_concat(values: &JsArray<JsBytes<u8>>) -> JsBytes<u8> {
@@ -967,6 +978,32 @@ pub fn bytes_source_offset(bytes: &JsBytes<u8>) -> f64 {
 #[cfg(test)]
 mod buffer_allocation_tests {
     use super::*;
+    #[test]
+    fn string_factories_normalize_encodings_and_keep_buffer_brands() {
+        let value = buffer_from_string(&string("ab"), &string("UTF-16LE"));
+        assert!(bytes_is_buffer(&value));
+        assert_eq!(bytes_join(&value, &string(",")).as_ref(), "97,0,98,0");
+        let empty_encoding = buffer_from_string(&string("é"), &string(""));
+        assert_eq!(bytes_join(&empty_encoding, &string(",")).as_ref(), "195,169");
+        assert!(bytes_is_buffer(&empty_encoding));
+        let empty = buffer_from_string(&string(""), &string("utf8"));
+        assert!(bytes_is_buffer(&empty));
+        assert!(!empty.ptr_eq(&buffer_from_string(&string(""), &string("utf8"))));
+    }
+    #[test]
+    fn buffer_view_copies_keep_brand_without_sharing_storage() {
+        let plain = bytes_from_array::<u8>(&array_new(vec![65.0, 66.0]));
+        let copy = buffer_from_bytes(&plain);
+        assert!(!bytes_is_buffer(&plain));
+        assert!(bytes_is_buffer(&copy));
+        bytes_set(&plain, 0.0, 90.0);
+        assert_eq!(bytes_get(&copy, 0.0), 65.0);
+        let second = buffer_from_bytes(&copy);
+        bytes_set(&copy, 1.0, 91.0);
+        assert!(bytes_is_buffer(&second));
+        assert_eq!(bytes_get(&second, 1.0), 66.0);
+        assert!(!bytes_is_buffer(&bytes_copy(&second)));
+    }
     #[test]
     fn brands_follow_views_but_not_typed_array_copies() {
         let owner = buffer_alloc(4.0);

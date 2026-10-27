@@ -1651,7 +1651,7 @@ fn validate_function(
                         "get" => {
                             args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::F64
                         }
-                        "join" => {
+                        "join" | "toStringVar" => {
                             args.len() == 1
                                 && args[0].ty() == Type::String
                                 && *r#type == Type::String
@@ -2590,11 +2590,19 @@ fn validate_function(
                         Err("invalid native own-key reflection".into())
                     };
                 }
-                if matches!(r#fn.as_str(), "buffer.fromStr" | "text.decode") {
+                if matches!(
+                    r#fn.as_str(),
+                    "buffer.fromStr" | "buffer.fromDyn" | "text.decode"
+                ) {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
                     }
-                    let valid = if r#fn == "buffer.fromStr" {
+                    let valid = if r#fn == "buffer.fromDyn" {
+                        args.len() == 2
+                            && args[0].ty() == Type::Dyn
+                            && args[1].ty() == Type::String
+                            && *r#type == Type::bytes()
+                    } else if r#fn == "buffer.fromStr" {
                         args.len() == 2
                             && args.iter().all(|a| a.ty() == Type::String)
                             && *r#type == Type::bytes()

@@ -26,6 +26,12 @@ export function recursiveNativeReference(
         break;
       }
       case "array": valid = visit(type.elem, heapEdges + 1); break;
+      // A method returning its owning record closes a guarded reference
+      // cycle, just like an array element does. Keep other callable graphs
+      // outside this contract: rest/adapted parameters need their own ABI.
+      case "func": valid = type.rest !== true && type.ret.kind === "record" &&
+        type.params.every(param => ["f64", "bool", "string", "dyn"].includes(param.kind)) &&
+        visit(type.ret, heapEdges); break;
       case "union": {
         const union = getUnion(type.unionId);
         const tags = new Set<string>();

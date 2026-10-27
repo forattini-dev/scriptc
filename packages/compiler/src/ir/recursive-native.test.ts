@@ -5,6 +5,25 @@ import type { IrRecordShape, IrType, IrUnionDef } from "./ir.js";
 const record: IrType = { kind: "record", shapeId: "node" };
 const union: IrType = { kind: "union", unionId: "json" };
 
+test("self-returning record methods retain guarded native reference cycles", () => {
+  const method: IrType = { kind: "func", params: [], ret: record };
+  const shape: IrRecordShape = { id: "node", fields: [
+    { name: "value", type: { kind: "string" } },
+    { name: "valueOf", type: method },
+  ] };
+  const getRecord = (id: string) => id === "node" ? shape : undefined;
+  expect(recursiveNativeReference(record, getRecord, () => undefined)).toBe(true);
+  expect(recursiveNativeReference(method, getRecord, () => undefined)).toBe(true);
+  shape.fields.push({ name: "missing", type: { kind: "record", shapeId: "missing" } });
+  expect(recursiveNativeReference(record, getRecord, () => undefined)).toBe(false);
+  shape.fields.pop();
+  method.rest = true;
+  expect(recursiveNativeReference(record, getRecord, () => undefined)).toBe(false);
+  delete method.rest;
+  method.params.push({ kind: "object", className: "Unported" });
+  expect(recursiveNativeReference(record, getRecord, () => undefined)).toBe(false);
+});
+
 test("recursive views validate all members after following a back edge", () => {
   const shape: IrRecordShape = { id: "node", fields: [
     { name: "children", type: { kind: "array", elem: record } },

@@ -1,6 +1,7 @@
 use crate::ir::{Expr, Function, Module, Stmt, Type};
 mod async_context;
 mod bigint;
+mod buffer_values;
 mod bytes;
 mod child_process;
 mod classes;
@@ -110,6 +111,7 @@ pub fn rust(module: &Module) -> Result<String, String> {
         classes::definitions(module, &mut output);
         functions::definitions(module, &mut output);
         values::definitions(module, &mut output);
+        buffer_values::definitions(module, &mut output);
         exceptions::definitions(module, &mut output);
         child_process::definitions(module, &mut output);
         json_functions::definitions(module, &mut output);
@@ -629,6 +631,7 @@ fn expr(value: &Expr, function: &Function, module: &Emission<'_>) -> String {
                 crate::builtins::Implementation::Runtime(name) => {
                     format!("runtime::{name}({args})")
                 }
+                crate::builtins::Implementation::NativeHelper(name) => format!("{name}({args})"),
                 crate::builtins::Implementation::FloatMethod(name) => format!("({args}).{name}()"),
                 crate::builtins::Implementation::FloatBinaryMethod(_) => unreachable!(),
             }

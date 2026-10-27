@@ -13,10 +13,24 @@ export function emitRustDynamicBufferFrom(
   const value = context.nextTemporary();
   const encodingValue = context.nextTemporary();
   return `{
+    fn sc_buffer_has_value_of(sc_value: &${dyn}) -> bool {
+      let mut current = sc_value.clone();
+      for _ in 0..128 {
+        match &current {
+          ${dyn}::Object(object) => {
+            if sc_dyn_has_own(&current, &runtime::string("valueOf")) { return true; }
+            match runtime::map_prototype(object) { Some(prototype) => current = prototype, None => return false, }
+          },
+          ${dyn}::Array(array) => return runtime::array_property_has(array, &runtime::string("valueOf")),
+          _ => return false,
+        }
+      }
+      runtime::throw_error("scriptc: Buffer.from prototype lookup beyond 128 levels is not supported yet".to_owned())
+    }
     fn sc_buffer_array_like(sc_value: &${dyn}, sc_length: f64) -> runtime::JsBytes<u8> {
-      if sc_length <= 0.0 { return runtime::bytes_empty(); }
+      if sc_length.is_nan() || sc_length <= 0.0 { return runtime::buffer_alloc(0.0); }
       if sc_length == f64::INFINITY { runtime::throw_range_error("Array buffer allocation failed".to_owned()); }
-      let sc_bytes = runtime::bytes_alloc(sc_length);
+      let sc_bytes = runtime::buffer_alloc(sc_length);
       for sc_index in 0..runtime::bytes_len(&sc_bytes) as usize {
         let sc_element = sc_dyn_key_get(sc_value, &runtime::string(&sc_index.to_string()), false);
         runtime::bytes_set(&sc_bytes, sc_index as f64, sc_dyn_to_number(&sc_dyn_number_primitive(&sc_element)));
@@ -26,11 +40,7 @@ export function emitRustDynamicBufferFrom(
     fn sc_buffer_from(sc_value: &${dyn}, sc_encoding: &runtime::JsString, sc_depth: usize) -> runtime::JsBytes<u8> {
       if sc_depth > 128 { runtime::throw_error("scriptc: Buffer.from valueOf conversion beyond 128 levels is not supported yet".to_owned()); }
       let sc_key = runtime::string("valueOf");
-      let sc_has_value_of = match sc_value {
-        ${dyn}::Object(..) => sc_dyn_has_key(sc_value, &sc_key),
-        ${dyn}::Array(sc_array) => runtime::array_property_has(sc_array, &sc_key),
-        _ => false,
-      };
+      let sc_has_value_of = sc_buffer_has_value_of(sc_value);
       if sc_has_value_of && sc_dyn_is_truthy(&sc_dyn_key_get(sc_value, &sc_key, false)) {
         let sc_method = sc_dyn_key_get(sc_value, &sc_key, false);
         let sc_result = { let _sc_this = sc_dyn_this_push(sc_value.clone()); sc_dyn_call(&sc_method, &[], "value.valueOf") };
@@ -41,7 +51,7 @@ export function emitRustDynamicBufferFrom(
       }
       match sc_value {
         ${dyn}::String(sc_text) => return runtime::buffer_from_string(sc_text, sc_encoding),
-        ${dyn}::Bytes(sc_bytes) | ${dyn}::Buffer(sc_bytes) => return runtime::bytes_copy(sc_bytes),
+        ${dyn}::Bytes(sc_bytes) | ${dyn}::Buffer(sc_bytes) => return runtime::buffer_from_bytes(sc_bytes),
         ${dyn}::Array(sc_array) => return sc_buffer_array_like(sc_value, runtime::array_len(sc_array)),
         ${dyn}::Proxy(..) => return sc_dyn_proxy_unsupported("Buffer.from"),
         ${dyn}::Object(..) => {
@@ -52,7 +62,7 @@ export function emitRustDynamicBufferFrom(
                 ${dyn}::Number(sc_length) => sc_buffer_array_like(sc_value, sc_length),
                 sc_length => sc_buffer_array_like(sc_value, sc_dyn_to_number(&sc_dyn_number_primitive(&sc_length))),
               },
-              _ => runtime::bytes_empty(),
+              _ => runtime::buffer_alloc(0.0),
             };
           }
           let _ = sc_dyn_key_get(sc_value, &runtime::string("buffer"), false);
@@ -67,7 +77,11 @@ export function emitRustDynamicBufferFrom(
         },
         _ => {},
       }
-      runtime::throw_type_error_code(format!("The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received {}", sc_dyn_specific_type(sc_value)), "ERR_INVALID_ARG_TYPE")
+      let sc_received = match sc_value {
+        ${dyn}::Number(value) if *value == 0.0 && value.is_sign_negative() => "type number (-0)".to_owned(),
+        _ => sc_dyn_specific_type(sc_value),
+      };
+      runtime::throw_type_error_code(format!("The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received {}", sc_received), "ERR_INVALID_ARG_TYPE")
     }
     let ${value} = ${context.emitExpr(source)};
     let ${encodingValue} = ${context.emitExpr(encoding)};

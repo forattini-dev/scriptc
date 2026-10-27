@@ -292,6 +292,9 @@ impl Lowerer<'_> {
         let args = node.arguments().into_iter().collect::<Vec<_>>();
         if self.ty(member.expression()).ok() == Some(Type::bytes()) {
             let receiver = self.expected_expression(member.expression(), Type::bytes())?;
+            if method == "toString" {
+                return self.bytes_string_call(node, receiver).map(Some);
+            }
             let (method, result, values) = match method {
                 "join" if args.len() <= 1 => (
                     "join",
@@ -410,7 +413,7 @@ impl Lowerer<'_> {
                         loc: h.loc(),
                     });
                 }
-                Expr::LibCall {
+                let value = Expr::LibCall {
                     r#fn: if encoder {
                         "buffer.fromStr"
                     } else {
@@ -420,6 +423,17 @@ impl Lowerer<'_> {
                     args,
                     r#type: result,
                     loc: h.loc(),
+                };
+                if encoder {
+                    // The shared IR factory produces a Buffer. TextEncoder
+                    // returns an independent, unbranded Uint8Array instead.
+                    Expr::BytesNew {
+                        source: Some(Box::new(value)),
+                        r#type: Type::bytes(),
+                        loc: h.loc(),
+                    }
+                } else {
+                    value
                 }
             },
         )))

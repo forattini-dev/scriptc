@@ -464,6 +464,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-local-call-abi/callbacks.ts",
         "rust-native-local-call-abi/default-options.mjs",
         "rust-native-local-call-abi/catalog-errors.ts",
+        "rust-native-buffer-from/protocols.ts",
+        "rust-native-buffer-from/unicode.ts",
+        "rust-native-buffer-from/values.ts",
+        "rust-native-buffer-from/order.ts",
+        "rust-native-buffer-from/errors.ts",
         "rust-native-tuple-index/values.ts",
         "rust-native-tuple-index/effects.ts",
         "rust-native-tuple-index/storage.ts",
@@ -3904,7 +3909,10 @@ fn buffer_boundaries_preserve_existing_artifacts() {
             "Buffer.allocUnsafe(2, 1);",
             "Buffer factory overload is not ported",
         ),
-        ("Buffer.from([1]);", "Buffer static is not ported"),
+        (
+            "Buffer.from(...['a']);",
+            "Buffer.from iterable argument spreads are not ported",
+        ),
         ("Buffer.allocUnsafeSlow(1);", "Buffer static is not ported"),
         (
             "const alloc = Buffer.allocUnsafe; alloc(1);",
@@ -3919,8 +3927,8 @@ fn buffer_boundaries_preserve_existing_artifacts() {
             "Buffer pool and byteOffset observations are not ported",
         ),
         (
-            "Buffer.alloc(1).toString();",
-            "Uint8Array method/arity is not ported",
+            "Buffer.alloc(1).toString('utf8', 1);",
+            "Buffer.toString start/end overloads are not ported",
         ),
         (
             "Buffer.alloc(1).readUInt8(0);",

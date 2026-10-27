@@ -37,6 +37,10 @@ pub(super) fn expression(
                 "get" => "runtime::bytes_get(&bytes, arg0)".into(),
                 "byteOffset" => "runtime::bytes_byte_offset(&bytes)".into(),
                 "join" => "runtime::bytes_join(&bytes, &runtime::JsString::from(arg0))".into(),
+                "toStringVar" => {
+                    "runtime::bytes_to_string_checked(&bytes, &runtime::JsString::from(arg0))"
+                        .into()
+                }
                 "slice" | "subarray" => format!(
                     "runtime::bytes_slice(&bytes, {}, {}, {})",
                     if args.is_empty() { "0.0" } else { "arg0" },
@@ -61,6 +65,11 @@ pub(super) fn expression(
         Expr::LibCall { r#fn, args, .. } if r#fn == "buffer.isBuffer" => {
             format!("native_value_is_buffer(&({}))", emit(&args[0]))
         }
+        Expr::LibCall { r#fn, args, .. } if r#fn == "buffer.fromDyn" => format!(
+            "{{ let source = {}; let encoding = {}; native_buffer_from(source, encoding, 0) }}",
+            emit(&args[0]),
+            emit(&args[1])
+        ),
         Expr::LibCall { r#fn, args, .. } if r#fn == "buffer.fromStr" => format!(
             "{{ let value = {}; let encoding = {}; runtime::buffer_from_string(&runtime::JsString::from(value), &runtime::JsString::from(encoding)) }}",
             emit(&args[0]),
