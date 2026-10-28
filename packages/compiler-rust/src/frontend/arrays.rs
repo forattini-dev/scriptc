@@ -392,6 +392,9 @@ impl Lowerer<'_> {
 
     pub(super) fn array_call(&mut self, node: Node) -> Result<Expr, String> {
         let member = node.expression();
+        if member.name().text() == "at" {
+            return self.array_at(node);
+        }
         if member.name().text() == "includes" {
             return self.array_includes(node);
         }

@@ -3,6 +3,155 @@ use super::*;
 use helpers::Helper;
 
 impl Lowerer<'_> {
+    pub(super) fn array_at(&mut self, node: Node) -> Result<Expr, String> {
+        let member = node.expression();
+        let symbol = self.symbol(member.name());
+        if !self.primitive_symbol(symbol, "at", Some("Array"))
+            && !self.primitive_symbol(symbol, "at", Some("ReadonlyArray"))
+        {
+            return Err(self.refuse(member, "array.at requires its standard declaration"));
+        }
+        let arguments = node.arguments().into_iter().collect::<Vec<_>>();
+        if arguments.len() > 1
+            || arguments
+                .iter()
+                .any(|arg| arg.kind() == SyntaxKind::SpreadElement)
+        {
+            return Err(self.refuse(
+                node,
+                "array.at accepts at most one represented numeric index",
+            ));
+        }
+        let receiver = self.expression(member.expression())?;
+        let receiver = self.live_member_receiver(member.expression(), receiver);
+        let Type::Array { elem } = receiver.ty() else {
+            return Err(self.refuse(member, "array.at requires a non-null native array"));
+        };
+        let index = if let Some(argument) = arguments.first() {
+            self.expected_expression(*argument, Type::F64)?
+        } else {
+            Expr::NumLit {
+                value: 0.0,
+                spelling: None,
+                r#type: Type::F64,
+                loc: self.loc(node),
+            }
+        };
+        let result = self.undefined_storage_type(*elem, node)?;
+        let mut helper = Helper::new(
+            "array_at",
+            vec![receiver.ty(), Type::F64],
+            result.clone(),
+            self.loc(node),
+        );
+        let array = helper.param(0);
+        let input = helper.param(1);
+        let length = helper.local("length", Type::F64, false);
+        let integer = helper.local("integer index", Type::F64, false);
+        let position = helper.local("relative index", Type::F64, false);
+        helper.declare(&length, helper.length(&array));
+        let nan = Expr::Bin {
+            op: "!==".into(),
+            left: Box::new(helper.read(&input)),
+            right: Box::new(helper.read(&input)),
+            r#type: Type::Bool,
+            loc: helper.loc(),
+        };
+        let trunc = Expr::LibCall {
+            r#fn: "math.trunc".into(),
+            args: vec![helper.read(&input)],
+            r#type: Type::F64,
+            loc: helper.loc(),
+        };
+        helper.declare(
+            &integer,
+            Expr::Ternary {
+                cond: Box::new(nan),
+                then: Box::new(helper.number(0.0)),
+                else_: Box::new(trunc),
+                r#type: Type::F64,
+                loc: helper.loc(),
+            },
+        );
+        let negative = Expr::Bin {
+            op: "<".into(),
+            left: Box::new(helper.read(&integer)),
+            right: Box::new(helper.number(0.0)),
+            r#type: Type::Bool,
+            loc: helper.loc(),
+        };
+        let relative = Expr::Bin {
+            op: "+".into(),
+            left: Box::new(helper.read(&length)),
+            right: Box::new(helper.read(&integer)),
+            r#type: Type::F64,
+            loc: helper.loc(),
+        };
+        helper.declare(
+            &position,
+            Expr::Ternary {
+                cond: Box::new(negative),
+                then: Box::new(relative),
+                else_: Box::new(helper.read(&integer)),
+                r#type: Type::F64,
+                loc: helper.loc(),
+            },
+        );
+        let below = Expr::Bin {
+            op: "<".into(),
+            left: Box::new(helper.read(&position)),
+            right: Box::new(helper.number(0.0)),
+            r#type: Type::Bool,
+            loc: helper.loc(),
+        };
+        let above = Expr::Bin {
+            op: ">=".into(),
+            left: Box::new(helper.read(&position)),
+            right: Box::new(helper.read(&length)),
+            r#type: Type::Bool,
+            loc: helper.loc(),
+        };
+        let missing = self.coerce(
+            Expr::UnitLit {
+                unit: "undefined",
+                r#type: Type::Undefined,
+                loc: helper.loc(),
+            },
+            result.clone(),
+            node,
+        )?;
+        let key = Expr::ToString {
+            operand: Box::new(helper.read(&position)),
+            r#type: Type::String,
+            loc: helper.loc(),
+        };
+        let value = self.coerce(helper.read(&array), Type::Dyn, node)?;
+        let value = self.dynamic_get(node, value, key);
+        let value = self.coerce(value, result.clone(), node)?;
+        helper.function.body.push(Stmt::Return {
+            value: Some(Expr::Ternary {
+                cond: Box::new(Expr::Logical {
+                    op: "||".into(),
+                    left: Box::new(below),
+                    right: Box::new(above),
+                    r#type: Type::Bool,
+                    loc: helper.loc(),
+                }),
+                then: Box::new(missing),
+                else_: Box::new(value),
+                r#type: result.clone(),
+                loc: helper.loc(),
+            }),
+            loc: helper.loc(),
+        });
+        Ok(Expr::Call {
+            callee: self.install_helper(helper.function),
+            args: vec![receiver, index],
+            r#type: result,
+            loc: self.loc(node),
+        })
+    }
+
     pub(super) fn array_sequence_method(&mut self, node: Node) -> Result<Expr, String> {
         let member = node.expression();
         let name = member.name().text();
