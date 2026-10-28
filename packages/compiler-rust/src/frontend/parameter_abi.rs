@@ -230,6 +230,7 @@ impl Lowerer<'_> {
             return true;
         }
         match node.kind() {
+            SyntaxKind::NonNullExpression => self.argument_may_be_absent(node.expression(), seen),
             SyntaxKind::VoidExpression => true,
             SyntaxKind::Identifier => {
                 let symbol = self.symbol(node);

@@ -108,6 +108,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-record-index-values/values.ts",
+        "rust-native-record-index-values/order.ts",
         "rust-native-asserted-index/values.ts",
         "rust-native-int32-arrays/values.ts",
         "rust-native-int32-arrays/dataview.ts",
@@ -3229,6 +3231,29 @@ fn accessor_boundaries_preserve_previous_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn asserted_index_in_unplanned_record_is_refused() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let output = temp.path().join("main.ir.json");
+    fs::write(&input, "interface Point { x: number } function run(): void { const values = new Int32Array(0); const point: Point = { x: values[0]! }; console.log(point.x); } run();").unwrap();
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--emit", "ir", "--out"])
+        .arg(&output)
+        .arg("--no-engine")
+        .output()
+        .unwrap();
+    assert!(!result.status.success(), "unplanned record compiled");
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("coercion is not ported"),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!output.exists());
 }
 
 #[test]

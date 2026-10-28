@@ -1,4 +1,4 @@
-//! Inferred JS record arrays reserve field absence before owned layouts exist.
+//! Record arrays reserve field absence before owned layouts exist.
 use super::*;
 use source_frontend::{flags::ContextFlags, prelude::SymbolId};
 
@@ -46,14 +46,14 @@ impl Lowerer<'_> {
         let mut declarations = Vec::new();
         let mut calls = Vec::new();
         for file in files {
-            if parameter_abi::is_javascript(*file) {
-                collect(*file, &mut declarations, &mut calls);
-            }
+            collect(*file, &mut declarations, &mut calls);
         }
         let mut owners = HashMap::new();
         for declaration in declarations {
+            let javascript = parameter_abi::is_javascript(declaration);
             if declaration.name().kind() != SyntaxKind::Identifier
-                || !declaration.type_().is_nil()
+                || (javascript && !declaration.type_().is_nil())
+                || (!javascript && declaration.type_().is_nil())
                 || self.declared(declaration).is_some()
                 || declaration.initializer().is_nil()
             {
@@ -61,11 +61,12 @@ impl Lowerer<'_> {
             }
             let initial = receivers::reference_node(declaration.initializer());
             if initial.kind() != SyntaxKind::ArrayLiteralExpression
-                || self
-                    .checker
-                    .get_contextual_type(initial, ContextFlags::NONE)
-                    .0
-                    != 0
+                || (javascript
+                    && self
+                        .checker
+                        .get_contextual_type(initial, ContextFlags::NONE)
+                        .0
+                        != 0)
             {
                 continue;
             }
@@ -87,7 +88,7 @@ impl Lowerer<'_> {
             for seed in initial.elements() {
                 self.container_record(seed, &mut owner, &mut HashSet::new());
             }
-            if !owner.records.is_empty() {
+            if !owner.records.is_empty() || !javascript {
                 owners.insert(self.symbol(declaration.name()), owner);
             }
         }
