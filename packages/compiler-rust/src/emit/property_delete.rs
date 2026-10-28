@@ -24,7 +24,13 @@ impl runtime::NativeDeleteValue for NativeValue {
             Self::RawJson(_) => if *key == "rawJSON" { D::NonConfigurable("[object Object]") } else { D::Deleted },
 "#);
     for (index, ty) in values::types(module).iter().enumerate() {
-        if matches!(ty, Type::Array { elem } if **elem != Type::Dyn) {
+        // Typed reads must be able to observe a hole as undefined. Other
+        // element layouts remain refused until their reads have that ABI.
+        if matches!(ty, Type::Array { elem } if matches!(&**elem, Type::Union { union_id } if {
+            let arms = &module.unions[*union_id].arms;
+            arms.contains(&Type::Undefined)
+                && arms.iter().all(|arm| matches!(arm, Type::F64 | Type::Bool | Type::String | Type::Undefined | Type::Null))
+        })) {
             writeln!(
                 out,
                 "Self::V{index}(array) => runtime::native_array_delete(array, key),"

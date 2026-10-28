@@ -1536,6 +1536,38 @@ fn string_index_boundaries_preserve_artifacts() {
 }
 
 #[test]
+fn erased_delete_non_optional_array_remains_explicitly_unsupported() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "non-optional-array-delete");
+    for source in [
+        "const values: number[] = [1]; const alias: any = values; delete alias[0];",
+        "const values: ({name: string} | undefined)[] = [{name: 'x'}]; const alias: any = values; delete alias[0];",
+    ] {
+        fs::write(&input, source).unwrap();
+        let build = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let output = Command::new(&target).output().unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("native property deletion on this specialized value is not ported")
+        );
+    }
+}
+
+#[test]
 fn deletion_boundaries_preserve_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("main.ts");
