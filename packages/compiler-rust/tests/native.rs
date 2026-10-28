@@ -3260,6 +3260,7 @@ fn static_method_boundaries_are_refused_without_publication() {
         "class C { static f() { return 1; } } const value: any = C; console.log(value.f);",
         "class A { static f() { return 1; } } class B extends A {} const value: any = B; console.log(value.f);",
         "class C { static f() { return 1; } } C.f = () => 2; console.log(C.f());",
+        "class C { static f(value: string): string; static f(value: number): number; static f(value: any): any { return value; } } C.f(1);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
         fs::write(&output, "preserve").unwrap();

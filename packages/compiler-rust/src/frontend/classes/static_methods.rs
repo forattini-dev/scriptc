@@ -60,7 +60,19 @@ impl Lowerer<'_> {
         let signature = if let Some(signature) = self.classes.static_methods.get(&key) {
             signature.clone()
         } else {
-            if !node.type_parameters().is_empty() || node.body().is_nil() {
+            if !node.type_parameters().is_empty()
+                || node.body().is_nil()
+                || self.classes.definitions[owner]
+                    .node
+                    .members()
+                    .into_iter()
+                    .any(|member| {
+                        member.kind() == SyntaxKind::MethodDeclaration
+                            && member.modifier_flags().intersects(ModifierFlags::STATIC)
+                            && member.name().text() == name
+                            && member.body().is_nil()
+                    })
+            {
                 return Err(
                     self.refuse(node, "generic and overloaded static methods are not ported")
                 );
