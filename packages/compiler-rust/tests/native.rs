@@ -220,6 +220,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-optional-access/chains.ts",
         "rust-native-tuple-includes/contracts.ts",
         "rust-native-optional-dynamic-record/values.ts",
+        "rust-native-array-reduce/values.ts",
         "rust-native-zlib/values.ts",
         "rust-native-for-of-presence/values.ts",
         "rust-native-tuple-array-includes/values.ts",
@@ -4949,6 +4950,32 @@ fn zlib_unimplemented_options_preserve_existing_artifacts() {
             &target.with_extension("ir.json"),
             &target.with_extension("rs"),
         ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn array_reduce_unimplemented_overloads_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "reduce-boundary");
+    for source in [
+        "[1,2].reduce((a,b) => a+b);",
+        "[1,2].reduce((a,b) => a+String(b), '');",
+        "[1,2].reduce((a,b) => a+b, 0, side());",
+        "[1,2].reduce(...[(a,b) => a+b, 0]);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler()).arg("build").arg(&input)
+            .args(["--no-engine", "--out"]).arg(&target).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"), "{source}: {stderr}");
+        for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
