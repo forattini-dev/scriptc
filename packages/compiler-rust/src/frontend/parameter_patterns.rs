@@ -42,6 +42,9 @@ impl Lowerer<'_> {
             ty => ty.clone(),
         };
         if let Type::Record { shape_id } = source_type {
+            if self.is_data_view(&Type::Record { shape_id }) {
+                return Err(self.refuse(node, "DataView object parameters are not ported"));
+            }
             let shape = &self.records[shape_id];
             if shape.tuple
                 || shape.index_value.is_some()

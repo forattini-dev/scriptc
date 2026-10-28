@@ -56,6 +56,9 @@ impl Lowerer<'_> {
             let Type::Record { shape_id } = input else {
                 return Err(self.refuse(source, "union spread requires closed record alternatives"));
             };
+            if self.is_data_view(input) {
+                return Err(self.refuse(source, "DataView own-key projection is not ported"));
+            }
             let record = &self.records[*shape_id];
             let choices = outputs.iter().filter(|output| {
                 let Type::Record { shape_id } = output else { return false };

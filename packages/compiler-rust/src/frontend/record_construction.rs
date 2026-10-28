@@ -370,6 +370,9 @@ impl Lowerer<'_> {
         let Type::Record { shape_id } = value.ty() else {
             return Err(self.refuse(source, "spread source needs one closed native data record"));
         };
+        if self.is_data_view(&Type::Record { shape_id }) {
+            return Err(self.refuse(source, "DataView own-key projection is not ported"));
+        }
         let record = self.records[shape_id].clone();
         if record.tuple
             || record.index_value.is_some()

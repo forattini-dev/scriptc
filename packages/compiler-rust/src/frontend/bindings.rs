@@ -59,6 +59,9 @@ impl Lowerer<'_> {
             }
         }
         let init = self.expression(declaration.initializer())?;
+        if self.is_data_view(&init.ty()) {
+            return Err(self.refuse(declaration, "DataView object bindings are not ported"));
+        }
         let shape = if let Type::Record { shape_id } = init.ty() {
             let shape = self.records[shape_id].clone();
             if shape.tuple || self.callables.contains_key(&shape_id) || self.enum_shape(shape_id) {

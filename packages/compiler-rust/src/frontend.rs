@@ -1170,6 +1170,9 @@ impl<'a> Lowerer<'a> {
             }
             SyntaxKind::ClassExpression => self.class_expression(node),
             SyntaxKind::NewExpression => {
+                if let Some(value) = self.data_view_new(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.bytes_new(node)? {
                     return Ok(value);
                 }
@@ -1201,6 +1204,9 @@ impl<'a> Lowerer<'a> {
                     self.expression(node.expression())?
                 };
                 let obj = self.live_member_receiver(node.expression(), obj);
+                if self.is_data_view(&obj.ty()) {
+                    return Err(self.refuse(node, "computed DataView properties are not ported"));
+                }
                 if self.string_view(&obj.ty()) {
                     return self.string_index(node, obj);
                 }

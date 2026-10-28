@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-dataview/values.ts",
+        "rust-native-dataview/order.ts",
+        "rust-native-dataview/bounds.ts",
         "rust-native-optional-views/contracts.ts",
         "rust-native-optional-views/identity.ts",
         "rust-native-optional-views/callbacks.ts",
@@ -3219,6 +3222,49 @@ fn accessor_boundaries_preserve_previous_artifacts() {
         ] {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
+    }
+}
+
+#[test]
+fn data_view_brand_boundaries_are_refused_without_engine() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("tsconfig.json"), r#"{"compilerOptions":{"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","strict":true,"types":[],"lib":["ES2022","DOM"]}}"#).unwrap();
+    let input = temp.path().join("main.ts");
+    let output = temp.path().join("main.ir.json");
+    let prefix = "const bytes = new Uint8Array(8); const view = new DataView(bytes.buffer); ";
+    for (source, expected) in [
+        (
+            "const value: unknown = view; console.log(value);",
+            "DataView",
+        ),
+        ("console.log(Object.keys(view));", "DataView"),
+        ("const {...rest} = view; console.log(rest);", "DataView"),
+        (
+            "console.log(view['\\0scriptc.dataview.storage']);",
+            "DataView",
+        ),
+        (
+            "const method = view.getUint16; console.log(method);",
+            "DataView",
+        ),
+        ("console.log(view.getBigUint64(0));", "DataView"),
+    ] {
+        fs::write(&input, format!("{prefix}{source}")).unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--emit", "ir", "--out"])
+            .arg(&output)
+            .arg("--no-engine")
+            .output()
+            .unwrap();
+        assert!(!result.status.success(), "{source} unexpectedly compiled");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains(expected),
+            "{source}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(!output.exists(), "{source} published output after refusal");
     }
 }
 

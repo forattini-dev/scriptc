@@ -130,6 +130,9 @@ impl Lowerer<'_> {
         if let Some(ty) = self.standard_byte_type(id) {
             return Some(ty);
         }
+        if let Some(ty) = self.data_view_type(id) {
+            return Some(ty);
+        }
         if let Some(ty) = self.namespace_value_type(id) {
             return Some(ty);
         }

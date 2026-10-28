@@ -1,6 +1,7 @@
 //! Nominal codecs and owning typed views lower through the portable IR ABI.
 use super::*;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
+const DATA_VIEW_STORAGE: &str = "\0scriptc.dataview.storage";
 impl Lowerer<'_> {
     fn standard_name(&self, symbol: u32, names: &[&str]) -> Option<String> {
         if symbol == 0 {
@@ -25,6 +26,167 @@ impl Lowerer<'_> {
     }
     pub(super) fn standard_codec_symbol(&self, symbol: u32) -> Option<String> {
         self.standard_name(symbol, &["TextEncoder", "TextDecoder"])
+    }
+    pub(super) fn data_view_type(&mut self, id: TypeId) -> Option<Type> {
+        self.standard_name(self.checker.ty(id).symbol().0, &["DataView"])?;
+        if let Some(record) = self.records.iter().find(|record| {
+            record.fields.len() == 1
+                && record.fields[0].name == DATA_VIEW_STORAGE
+                && record.fields[0].r#type == Type::bytes()
+        }) {
+            return Some(Type::Record {
+                shape_id: record.id,
+            });
+        }
+        let shape_id = self.records.len();
+        self.records.push(ir::Record {
+            id: shape_id,
+            fields: vec![ir::Field {
+                name: DATA_VIEW_STORAGE.into(),
+                r#type: Type::bytes(),
+            }],
+            declared_order: vec![DATA_VIEW_STORAGE.into()],
+            tuple: false,
+            index_value: None,
+        });
+        Some(Type::Record { shape_id })
+    }
+    pub(super) fn is_data_view(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Record { shape_id } if self.records.get(*shape_id).is_some_and(|record| {
+            record.fields.len() == 1 && record.fields[0].name == DATA_VIEW_STORAGE
+                && record.fields[0].r#type == Type::bytes()
+        }))
+    }
+    pub(super) fn data_view_storage(&self, node: Node, value: Expr) -> Expr {
+        let Type::Record { shape_id } = value.ty() else {
+            unreachable!()
+        };
+        Expr::RecordGet {
+            obj: Box::new(value),
+            shape_id: format!("r{shape_id}"),
+            field: DATA_VIEW_STORAGE.into(),
+            r#type: Type::bytes(),
+            loc: self.loc(node),
+        }
+    }
+    pub(super) fn data_view_new(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let symbol = self.symbol(node.expression());
+        if self.standard_name(symbol, &["DataView"]).is_none() {
+            return Ok(None);
+        }
+        let args = node.arguments().into_iter().collect::<Vec<_>>();
+        if !(1..=3).contains(&args.len()) {
+            return Err(self.refuse(
+                node,
+                "DataView requires represented buffer and numeric offsets",
+            ));
+        }
+        let buffer = args[0];
+        if buffer.kind() != SyntaxKind::PropertyAccessExpression || buffer.name().text() != "buffer"
+        {
+            return Err(self.refuse(buffer, "DataView requires a represented typed array buffer"));
+        }
+        let owner = buffer.expression();
+        let source = self.checker.get_type_at_location(owner);
+        if self.standard_buffer_type(source) {
+            return Err(self.refuse(owner, "Buffer pool and backing ArrayBuffer are not ported"));
+        }
+        let Some(owner_type @ Type::Bytes { .. }) = self.standard_byte_type(source) else {
+            return Err(self.refuse(
+                owner,
+                "DataView buffer owner must be a supported typed array",
+            ));
+        };
+        let receiver = self.expected_expression(owner, owner_type)?;
+        let offsets = args[1..]
+            .iter()
+            .map(|arg| self.expected_expression(*arg, Type::F64))
+            .collect::<Result<Vec<_>, _>>()?;
+        let view = self.bytes_operation(node, receiver, "dataViewNew", offsets, Type::bytes());
+        let id = self.checker.get_type_at_location(node);
+        let target = self
+            .data_view_type(id)
+            .ok_or_else(|| self.refuse(node, "DataView result type is not represented"))?;
+        Ok(Some(Expr::RecordLit {
+            fields: vec![ir::FieldInit {
+                name: DATA_VIEW_STORAGE.into(),
+                value: view,
+                absent: false,
+                overflow: false,
+            }],
+            r#type: target,
+            loc: self.loc(node),
+        }))
+    }
+    fn data_view_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let Ok(ty) = self.ty(node.expression()) else {
+            return Ok(None);
+        };
+        if !self.is_data_view(&ty) {
+            return Ok(None);
+        }
+        let name = node.name().text();
+        if !matches!(name, "byteOffset" | "byteLength") {
+            return Err(self.refuse(node, "DataView property or extracted method is not ported"));
+        }
+        let receiver = self.expected_expression(node.expression(), ty)?;
+        let storage = self.data_view_storage(node, receiver);
+        Ok(Some(self.bytes_operation(
+            node,
+            storage,
+            name,
+            vec![],
+            Type::F64,
+        )))
+    }
+    fn data_view_call(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let member = node.expression();
+        let Ok(ty) = self.ty(member.expression()) else {
+            return Ok(None);
+        };
+        if !self.is_data_view(&ty) {
+            return Ok(None);
+        }
+        let method = member.name().text();
+        let portable = if let Some(suffix) = method.strip_prefix("get") {
+            format!("dvGet{suffix}")
+        } else if let Some(suffix) = method.strip_prefix("set") {
+            format!("dvSet{suffix}")
+        } else {
+            return Err(self.refuse(node, "DataView method is not ported"));
+        };
+        let Some((_, setter, byte)) = ir::data_view_operation(&portable) else {
+            return Err(self.refuse(node, "DataView method is not ported"));
+        };
+        // BigInt getters return a bigint; the Number-only IR form is not their ABI.
+        if method.starts_with("getBig") {
+            return Err(self.refuse(node, "DataView BigInt getters are not ported"));
+        }
+        let args = node.arguments().into_iter().collect::<Vec<_>>();
+        let required = if setter { 2 } else { 1 };
+        if args.len() < required || args.len() > required + usize::from(!byte) {
+            return Err(self.refuse(node, "DataView argument count is not ported"));
+        }
+        let receiver = self.expected_expression(member.expression(), ty)?;
+        let storage = self.data_view_storage(member, receiver);
+        let mut values = Vec::new();
+        for (index, arg) in args.iter().enumerate() {
+            values.push(self.expected_expression(
+                *arg,
+                if index < required {
+                    Type::F64
+                } else {
+                    Type::Bool
+                },
+            )?);
+        }
+        Ok(Some(self.bytes_operation(
+            node,
+            storage,
+            &portable,
+            values,
+            if setter { Type::Void } else { Type::F64 },
+        )))
     }
     pub(super) fn standard_byte_type(&self, id: TypeId) -> Option<Type> {
         if self.standard_buffer_type(id) {
@@ -256,6 +418,9 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn codec_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        if let Some(value) = self.data_view_get(node)? {
+            return Ok(Some(value));
+        }
         if let Ok(ty @ Type::Bytes { .. }) = self.ty(node.expression()) {
             if !matches!(node.name().text(), "length" | "byteLength" | "byteOffset") {
                 return Err(self.refuse(
@@ -339,6 +504,9 @@ impl Lowerer<'_> {
         let member = node.expression();
         if member.kind() != SyntaxKind::PropertyAccessExpression {
             return Ok(None);
+        }
+        if let Some(value) = self.data_view_call(node)? {
+            return Ok(Some(value));
         }
         let method = member.name().text();
         let args = node.arguments().into_iter().collect::<Vec<_>>();

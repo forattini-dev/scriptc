@@ -245,6 +245,7 @@ impl Lowerer<'_> {
             !r.tuple
                 && !self.pending_layout(&Type::Record { shape_id: r.id })
                 && !self.enum_shape(r.id)
+                && !self.is_data_view(&Type::Record { shape_id: r.id })
                 && !self.callables.contains_key(&r.id)
                 && r.fields == fields
                 && r.index_value == index_value
@@ -303,6 +304,9 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn dynamic_erasure_reason(&self, ty: &Type) -> Option<&'static str> {
+        if self.native_type_contains(ty, |ty| self.is_data_view(ty)) {
+            return Some("DataView erasure requires a native DataView brand contract");
+        }
         if ir::contains_stats(ty, &self.records, &self.unions) {
             return Some("Stats erasure requires a shared native Stats value contract");
         }
@@ -341,6 +345,14 @@ impl Lowerer<'_> {
     pub(super) fn coerce(&self, value: Expr, target: Type, node: Node) -> Result<Expr, String> {
         if value.ty() == target {
             return Ok(value);
+        }
+        if self.native_type_contains(&value.ty(), |ty| self.is_data_view(ty))
+            || self.native_type_contains(&target, |ty| self.is_data_view(ty))
+        {
+            return Err(self.refuse(
+                node,
+                "DataView conversions require a native DataView brand contract",
+            ));
         }
         // Unit payloads have no stored fields, but their producing expressions
         // can still evaluate conditions, reads and calls. Lift their control
@@ -931,7 +943,10 @@ impl Lowerer<'_> {
         let Type::Record { shape_id } = target else {
             return Err(self.refuse(node, "record literal needs a closed shape"));
         };
-        if self.callables.contains_key(&shape_id) || self.enum_shape(shape_id) {
+        if self.callables.contains_key(&shape_id)
+            || self.enum_shape(shape_id)
+            || self.is_data_view(&Type::Record { shape_id })
+        {
             return Err(self.refuse(
                 node,
                 "data literals cannot manufacture callable or enum namespace identities",
@@ -1224,6 +1239,23 @@ impl Lowerer<'_> {
         };
         if op == "+" && (left.ty() == Type::String || right.ty() == Type::String) {
             return self.string_addition(left, right, node);
+        }
+        if matches!(op, "===" | "!==")
+            && self.is_data_view(&left.ty())
+            && self.is_data_view(&right.ty())
+        {
+            let boxed_view = |value, site| Expr::DynFrom {
+                value: Box::new(self.data_view_storage(site, value)),
+                r#type: Type::Dyn,
+                loc: self.loc(site),
+            };
+            return Ok(Expr::DynScalarEq {
+                left: Box::new(boxed_view(left, node.left())),
+                right: Box::new(boxed_view(right, node.right())),
+                negated: op == "!==",
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            });
         }
         let data_records = |ty: Type| {
             let arms = match ty.clone() {
