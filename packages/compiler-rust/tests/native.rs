@@ -2772,7 +2772,7 @@ fn declaration_contracts_validate_js_bodies_and_refuse_ambiguous_abis() {
         (
             "public-any-unsupported-body",
             "export declare function value(n: any): number;",
-            "export function value(n) { while (n) {} return 1; }",
+            "export function value(n) { outer: while (n) { break outer; } return 1; }",
             "value(2)",
             "SCN1001",
         ),
