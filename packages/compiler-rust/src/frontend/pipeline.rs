@@ -9,41 +9,63 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         options,
         checked,
         console_prelude,
-    } = crate::project::load(input, work, project)?;
+    } = crate::trace_phase("frontend project load", || {
+        crate::project::load(input, work, project)
+    })?;
     let _checked_scope = source_frontend::core::enter_program(Some(checked));
-    program::bind_all();
-    check_program()?;
-    let needs_execution = needs_execution_view();
-    let execution = needs_execution.then(|| crate::project::execution_view(options.clone()));
+    crate::trace_phase("frontend binding", || {
+        program::bind_all();
+        Ok(())
+    })?;
+    crate::trace_phase("frontend type checking", check_program)?;
+    let execution = crate::trace_phase("frontend execution view", || {
+        Ok(needs_execution_view().then(|| crate::project::execution_view(options.clone())))
+    })?;
     let _execution_scope =
         execution.map(|program| source_frontend::core::enter_program(Some(program)));
-    let catalog = if execution.is_some() {
-        program::bind_all();
-        let syntax = program::get_syntactic_diagnostics(Node::NIL);
-        if !syntax.is_empty() {
-            return Err(syntax
-                .iter()
-                .map(program::format_diagnostic)
-                .collect::<Vec<_>>()
-                .join("\n"));
+    let catalog = crate::trace_phase("frontend declaration snapshot", || {
+        if execution.is_some() {
+            crate::trace_phase("frontend execution binding", || {
+                program::bind_all();
+                Ok(())
+            })?;
+            let syntax = crate::trace_phase("frontend execution syntax", || {
+                Ok(program::get_syntactic_diagnostics(Node::NIL))
+            })?;
+            if !syntax.is_empty() {
+                return Err(syntax
+                    .iter()
+                    .map(program::format_diagnostic)
+                    .collect::<Vec<_>>()
+                    .join("\n"));
+            }
+            let roots = program::source_files()
+                .into_iter()
+                .map(|f| source_file_info(f).file_name.to_string())
+                .filter(|f| !is_declaration(f))
+                .collect();
+            let method_demands = crate::trace_phase("frontend member demands", || {
+                declarations::member_demands(&source)
+            })?;
+            let contracts = crate::trace_phase("frontend contract view", || {
+                Ok(crate::project::contract_view(options, roots))
+            })?;
+            let _contracts_scope = source_frontend::core::enter_program(Some(contracts));
+            crate::trace_phase("frontend contract binding", || {
+                program::bind_all();
+                Ok(())
+            })?;
+            crate::trace_phase("frontend declaration catalog", || {
+                Ok(Some(declarations::snapshot(
+                    &source,
+                    console_prelude.clone(),
+                    method_demands,
+                )?))
+            })
+        } else {
+            Ok(None)
         }
-        let roots = program::source_files()
-            .into_iter()
-            .map(|f| source_file_info(f).file_name.to_string())
-            .filter(|f| !is_declaration(f))
-            .collect();
-        let method_demands = declarations::member_demands(&source)?;
-        let contracts = crate::project::contract_view(options, roots);
-        let _contracts_scope = source_frontend::core::enter_program(Some(contracts));
-        program::bind_all();
-        Some(declarations::snapshot(
-            &source,
-            console_prelude.clone(),
-            method_demands,
-        )?)
-    } else {
-        None
-    };
+    })?;
     let file = program::source_files()
         .into_iter()
         .find(|node| source_file_info(*node).file_name == source)
@@ -59,7 +81,9 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             lowerer.projections = linked.projections;
             lowerer.literal_choices = linked.literal_choices;
         }
-        let plan = modules::ModulePlan::link(lowerer.checker, file)?;
+        let plan = crate::trace_phase("frontend module planning", || {
+            modules::ModulePlan::link(lowerer.checker, file)
+        })?;
         lowerer.unobserved_default_exports =
             modules::unobserved_defaults(lowerer.checker, &plan.modules);
         lowerer.inventory_commonjs(&plan)?;
@@ -85,13 +109,16 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
                 }
             }
         }
-        lowerer.plan_value_layouts(&plan.modules);
-        lowerer.plan_contextual_record_storage(&plan.modules);
-        lowerer.inventory(&plan.modules);
-        lowerer.inventory_enums(&plan.modules)?;
-        lowerer.inventory_classes(&plan.modules);
-        lowerer.inventory_data_tables(&plan.modules);
-        lowerer.inventory_storage(&plan.modules);
+        crate::trace_phase("frontend inventories", || {
+            lowerer.plan_value_layouts(&plan.modules);
+            lowerer.plan_contextual_record_storage(&plan.modules);
+            lowerer.inventory(&plan.modules);
+            lowerer.inventory_enums(&plan.modules)?;
+            lowerer.inventory_classes(&plan.modules);
+            lowerer.inventory_data_tables(&plan.modules);
+            lowerer.inventory_storage(&plan.modules);
+            Ok(())
+        })?;
         let mut body = lowerer.commonjs_prelude();
         body.extend(lowerer.hoist_module_vars(&plan.modules)?);
         for file in &plan.execution_order {

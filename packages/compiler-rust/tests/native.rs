@@ -7202,6 +7202,31 @@ fn survey_collects_independent_failures_without_external_tools() {
 }
 
 #[test]
+fn frontend_phase_tracing_is_opt_in_and_keeps_ir_output() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = root().join("tests/fixtures/native-survey/supported.ts");
+    let project = root().join("tests/fixtures/native-survey/tsconfig.json");
+    let run = |name: &str, trace: bool| {
+        let mut command = Command::new(compiler());
+        command.arg("build").arg(&input).arg("--project").arg(&project)
+            .args(["--emit", "ir", "--out"]).arg(temp.path().join(name))
+            .env_remove("SCRIPTC_TRACE_PHASES");
+        if trace { command.env("SCRIPTC_TRACE_PHASES", "1"); }
+        command.output().unwrap()
+    };
+    let quiet = run("quiet.json", false);
+    let traced = run("traced.json", true);
+    success(&quiet);
+    success(&traced);
+    assert!(quiet.stderr.is_empty());
+    let stderr = String::from_utf8_lossy(&traced.stderr);
+    for phase in ["frontend project load", "frontend binding", "frontend type checking", "frontend execution view", "frontend declaration snapshot", "frontend module planning", "frontend inventories"] {
+        assert!(stderr.contains(&format!("scriptc: {phase} started")), "missing {phase}: {stderr}");
+    }
+    assert_eq!(fs::read(temp.path().join("quiet.json")).unwrap(), fs::read(temp.path().join("traced.json")).unwrap());
+}
+
+#[test]
 fn survey_reports_module_resolution_separately_from_native_refusals() {
     let temp = tempfile::tempdir().unwrap();
     let fixtures = root().join("tests/fixtures/native-survey");
