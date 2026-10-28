@@ -728,10 +728,8 @@ impl Lowerer<'_> {
         if node.kind() == SyntaxKind::CallExpression
             && node.flags().intersects(NodeFlags::OPTIONAL_CHAIN)
         {
-            return Err(self.refuse(
-                node,
-                "optional calls require a native receiver-call contract",
-            ));
+            let value = self.optional_access(node)?;
+            return self.coerce(value, target, node);
         }
         if matches!(target, Type::Promise { .. })
             && node.kind() == SyntaxKind::CallExpression

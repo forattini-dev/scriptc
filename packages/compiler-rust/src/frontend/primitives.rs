@@ -4,6 +4,53 @@ use helpers::Helper;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
 impl Lowerer<'_> {
+    pub(super) fn string_split_value(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
+        let arguments = node.arguments().into_iter().collect::<Vec<_>>();
+        if arguments.len() != 1 || arguments[0].kind() == SyntaxKind::SpreadElement {
+            return Err(self.refuse(
+                node,
+                "string split requires exactly one represented separator",
+            ));
+        }
+        let separator = self.primitive_operand(arguments[0])?;
+        let is_regex = separator.ty() == Type::Regex;
+        if is_regex && !self.regex_split_strings_only(arguments[0]) {
+            return Err(self.refuse(
+                arguments[0],
+                "regex split requires a literal with no captures or one always-present enclosing capture",
+            ));
+        }
+        if !is_regex && separator.ty() != Type::String {
+            return Err(self.refuse(
+                arguments[0],
+                "string split requires a represented string or RegExp separator",
+            ));
+        }
+        let args = vec![
+            separator,
+            Expr::NumLit {
+                value: u32::MAX as f64,
+                spelling: None,
+                r#type: Type::F64,
+                loc: self.loc(node),
+            },
+        ];
+        let result = Type::Array {
+            elem: Box::new(Type::String),
+        };
+        if is_regex {
+            Ok(Expr::RegexIntrinsic {
+                method: "split".into(), receiver: Box::new(receiver), args,
+                r#type: result, loc: self.loc(node),
+            })
+        } else {
+            Ok(Expr::StringIntrinsic {
+                method: "split".into(), receiver: Box::new(receiver), args,
+                r#type: result, loc: self.loc(node),
+            })
+        }
+    }
+
     pub(super) fn global_numeric_value(&self, node: Node, symbol: u32) -> Option<Expr> {
         let value = match node.text() {
             "NaN" => f64::NAN,
@@ -194,65 +241,10 @@ impl Lowerer<'_> {
             }));
         }
         if name == "split" && proven_string {
-            let arguments = node.arguments().into_iter().collect::<Vec<_>>();
-            if arguments.len() != 1 || arguments[0].kind() == SyntaxKind::SpreadElement {
-                return Err(self.refuse(
-                    node,
-                    "string split currently requires exactly one represented string separator",
-                ));
-            }
             let receiver = self.primitive_operand(member.expression())?;
             let receiver = self.live_member_receiver(member.expression(), receiver);
             let receiver = self.string_method_receiver(member, receiver)?;
-            let separator = self.primitive_operand(arguments[0])?;
-            if separator.ty() == Type::Regex {
-                if !self.regex_split_strings_only(arguments[0]) {
-                    return Err(self.refuse(
-                        arguments[0],
-                        "regex split requires a literal with no captures or one always-present enclosing capture",
-                    ));
-                }
-                return Ok(Some(Expr::RegexIntrinsic {
-                    method: "split".into(),
-                    receiver: Box::new(receiver),
-                    args: vec![
-                        separator,
-                        Expr::NumLit {
-                            value: u32::MAX as f64,
-                            spelling: None,
-                            r#type: Type::F64,
-                            loc: self.loc(node),
-                        },
-                    ],
-                    r#type: Type::Array {
-                        elem: Box::new(Type::String),
-                    },
-                    loc: self.loc(node),
-                }));
-            }
-            if separator.ty() != Type::String {
-                return Err(self.refuse(
-                    arguments[0],
-                    "string split currently requires a represented string separator",
-                ));
-            }
-            return Ok(Some(Expr::StringIntrinsic {
-                method: "split".into(),
-                receiver: Box::new(receiver),
-                args: vec![
-                    separator,
-                    Expr::NumLit {
-                        value: u32::MAX as f64,
-                        spelling: None,
-                        r#type: Type::F64,
-                        loc: self.loc(node),
-                    },
-                ],
-                r#type: Type::Array {
-                    elem: Box::new(Type::String),
-                },
-                loc: self.loc(node),
-            }));
+            return self.string_split_value(node, receiver).map(Some);
         }
         let string =
             crate::string_builtins::by_method(name).filter(|_| name != "length" && proven_string);

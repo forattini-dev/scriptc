@@ -1168,10 +1168,7 @@ impl<'a> Lowerer<'a> {
         if node.kind() == SyntaxKind::CallExpression
             && node.flags().intersects(NodeFlags::OPTIONAL_CHAIN)
         {
-            return Err(self.refuse(
-                node,
-                "optional calls require a native receiver-call contract",
-            ));
+            return self.optional_access(node);
         }
         if let Some(value) = self.boxed_get(node)? {
             return Ok(value);

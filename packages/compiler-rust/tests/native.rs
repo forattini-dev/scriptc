@@ -517,6 +517,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-string-split/main.ts",
         "rust-native-regex-split/values.ts",
         "rust-native-regex-match/values.ts",
+        "rust-native-optional-split/values.ts",
         "rust-native-regex-guard/direct.ts",
         "rust-native-set-spread/main.ts",
         "rust-native-set-spread/identity.ts",
@@ -7573,6 +7574,30 @@ fn string_match_unsupported_overloads_preserve_artifacts() {
     let input = temp.path().join("main.mts");
     let target = binary(temp.path(), "string-match-boundary");
     for source in ["'abc'.match();", "'abc'.match('b');", "'abc'.match(/b/, /c/);"] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [&target, &target.with_extension("rs"), &target.with_extension("ir.json")];
+        for artifact in artifacts { fs::write(artifact, "preserve").unwrap(); }
+        let output = Command::new(compiler()).arg("build").arg(&input)
+            .args(["--no-engine", "--out"]).arg(&target).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"), "{source}: {stderr}");
+        for artifact in artifacts { assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve"); }
+    }
+}
+
+#[test]
+fn optional_call_boundaries_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "optional-call-boundary");
+    for source in [
+        "function f(s: string | null) { return s?.split(); } f(null);",
+        "function f(s: string | null) { return s?.split(/(a)?/); } f(null);",
+        "function f(s: string | null) { return s?.split(...[',']); } f(null);",
+        "const s: string = 'x'; s.split?.(',');",
+        "const obj: any = {}; obj?.method();",
+    ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let artifacts = [&target, &target.with_extension("rs"), &target.with_extension("ir.json")];
         for artifact in artifacts { fs::write(artifact, "preserve").unwrap(); }

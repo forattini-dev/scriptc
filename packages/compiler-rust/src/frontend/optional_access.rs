@@ -54,19 +54,24 @@ impl Lowerer<'_> {
     pub(super) fn optional_access(&mut self, node: Node) -> Result<Expr, String> {
         let mut steps = Vec::new();
         let mut base = node;
-        while is_access(base) {
-            steps.push(base);
-            base = base.expression();
-        }
-        // Parentheses end a chain. A call inside a continuous chain needs its
-        // own receiver ABI and must not be reinterpreted as a property read.
-        if base.flags().intersects(NodeFlags::OPTIONAL_CHAIN)
-            && base.kind() == SyntaxKind::CallExpression
-        {
-            return Err(self.refuse(
-                base,
-                "optional calls require a native receiver-call contract",
-            ));
+        loop {
+            if is_access(base) {
+                steps.push(base);
+                base = base.expression();
+            } else if base.kind() == SyntaxKind::CallExpression
+                && base.flags().intersects(NodeFlags::OPTIONAL_CHAIN)
+            {
+                let member = base.expression();
+                if member.kind() != SyntaxKind::PropertyAccessExpression
+                    || !base.question_dot_token().is_nil()
+                {
+                    return Err(self.refuse(base, "optional calls require a native receiver-call contract"));
+                }
+                steps.push(base);
+                base = member.expression();
+            } else {
+                break;
+            }
         }
         steps.reverse();
         // Presence observes the live cell. Checker refinements can survive a
@@ -88,7 +93,12 @@ impl Lowerer<'_> {
         let Some((&node, rest)) = steps.split_first() else {
             return Ok(value);
         };
-        let optional = !node.question_dot_token().is_nil();
+        let call = node.kind() == SyntaxKind::CallExpression;
+        let optional = if call {
+            !node.expression().question_dot_token().is_nil()
+        } else {
+            !node.question_dot_token().is_nil()
+        };
         let known_nullish = matches!(value.ty(), Type::Null | Type::Undefined);
         if optional && known_nullish {
             let result_type = self.optional_result_type(Type::Undefined, node)?;
@@ -129,7 +139,12 @@ impl Lowerer<'_> {
         let (present, nullish) = self.optional_receiver(read(), node)?;
         let read_value = read();
         let before = self.var_defined.clone();
-        let operation = if !optional && nullish.is_some() {
+        let operation = if call {
+            if !optional && nullish.is_some() {
+                return Err(self.refuse(node, "nullable non-optional method calls need a native receiver-call contract"));
+            }
+            self.optional_string_split(node, present)?
+        } else if !optional && nullish.is_some() {
             // A non-optional continuation still evaluates its key and throws on
             // an absent value. Only a preceding ?. can skip the whole tail.
             let result_type = self.optional_member_type(node, &present.ty())?;
@@ -180,6 +195,17 @@ impl Lowerer<'_> {
             r#type: ty,
             loc: self.loc(node),
         })
+    }
+
+    fn optional_string_split(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
+        let member = node.expression();
+        let id = self.symbol(member.name());
+        if receiver.ty() != Type::String || member.name().text() != "split"
+            || !self.primitive_symbol(id, "split", Some("String"))
+        {
+            return Err(self.refuse(node, "optional calls require a native receiver-call contract"));
+        }
+        self.string_split_value(node, receiver)
     }
 
     fn optional_receiver(&self, value: Expr, node: Node) -> Result<(Expr, Option<Expr>), String> {
