@@ -1409,6 +1409,9 @@ impl<'a> Lowerer<'a> {
             }),
             SyntaxKind::Identifier => {
                 let symbol = self.symbol(node);
+                if let Some(value) = self.global_numeric_value(node, symbol) {
+                    return Ok(value);
+                }
                 if let Some(value) = self.class_value(node)? {
                     return Ok(value);
                 }

@@ -4,6 +4,25 @@ use helpers::Helper;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
 impl Lowerer<'_> {
+    pub(super) fn global_numeric_value(&self, node: Node, symbol: u32) -> Option<Expr> {
+        let value = match node.text() {
+            "NaN" => f64::NAN,
+            "Infinity" => f64::INFINITY,
+            _ => return None,
+        };
+        // Only the immutable standard global is intrinsic. Lexical parameters,
+        // imports and user-defined globals must keep their own binding.
+        if !self.primitive_symbol(symbol, node.text(), None) {
+            return None;
+        }
+        Some(Expr::NumLit {
+            value,
+            spelling: None,
+            r#type: Type::F64,
+            loc: self.loc(node),
+        })
+    }
+
     // The execution checker can expose any for a JS formal whose portable
     // declaration ABI proves a primitive string. No object is recognized by
     // its member spelling, and custom declarations keep their own dispatch.
