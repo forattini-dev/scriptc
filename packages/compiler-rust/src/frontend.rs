@@ -102,6 +102,7 @@ mod updates;
 mod values;
 mod vars;
 mod weak_maps;
+mod zlib;
 
 pub const REVISION: &str = "780dc512d64f40afebffa6a7028207649fb7ed1c";
 
@@ -439,6 +440,9 @@ impl<'a> Lowerer<'a> {
         }
         if api.lowering == builtins::Lowering::ReadFile {
             return self.read_file_call(node);
+        }
+        if api.lowering == builtins::Lowering::Zlib {
+            return self.zlib_call(node, member);
         }
         if module == "fs" && matches!(member, "statSync" | "lstatSync") {
             self.ensure_exception_classes(node)?;

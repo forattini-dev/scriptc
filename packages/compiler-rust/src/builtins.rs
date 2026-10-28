@@ -49,6 +49,7 @@ pub enum Lowering {
     AppendFile,
     ReadFile,
     Descriptor,
+    Zlib,
     Buffer,
     Property,
     Special,
@@ -157,6 +158,7 @@ mod process;
 mod string;
 #[cfg(test)]
 mod tests;
+mod zlib;
 
 pub fn apis() -> &'static [Api] {
     static APIS: std::sync::OnceLock<Vec<Api>> = std::sync::OnceLock::new();
@@ -172,6 +174,7 @@ pub fn apis() -> &'static [Api] {
             process::apis(),
             crypto::apis(),
             bun::apis(),
+            zlib::apis(),
         ]
         .into_iter()
         .flatten()

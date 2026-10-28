@@ -8,7 +8,7 @@ const ZLIB_BUF_ERROR: &str = "Z_BUF_ERROR";
 /// Compress bytes with Node's default zlib wrapper and compression level.
 pub fn zlib_deflate_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
     let output = zlib_with_input(input, |source| zlib_compress_bytes(source, true));
-    bytes_from_elements(output)
+    zlib_buffer(output)
 }
 
 /// A frontend-validated integer compression level.
@@ -25,7 +25,7 @@ pub fn zlib_deflate_sync_level(input: &JsBytes<u8>, level: f64) -> JsBytes<u8> {
     let output = zlib_with_input(input, |source| {
         zlib_compress_bytes_level(source, true, compression)
     });
-    bytes_from_elements(output)
+    zlib_buffer(output)
 }
 
 /// deflateRawSync: the same DEFLATE stream with no zlib wrapper.
@@ -44,10 +44,24 @@ pub fn zlib_inflate_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
     if source.len() < 2 {
         throw_error_code("unexpected end of file".to_owned(), ZLIB_BUF_ERROR);
     }
-    if !has_zlib_header(&source) {
+    let header = u16::from(source[0]) << 8 | u16::from(source[1]);
+    if header % 31 != 0 {
         throw_error_code("incorrect header check".to_owned(), ZLIB_DATA_ERROR);
     }
-    bytes_from_elements(zlib_decompress_bytes(&source, true).0)
+    if source[0] & 0x0f != 8 {
+        throw_error_code("unknown compression method".to_owned(), ZLIB_DATA_ERROR);
+    }
+    if source[0] >> 4 > 7 {
+        throw_error_code("invalid window size".to_owned(), ZLIB_DATA_ERROR);
+    }
+    zlib_buffer(zlib_decompress_bytes(&source, true).0)
+}
+
+// Synchronous zlib APIs return Node Buffers, not plain Uint8Array values.
+fn zlib_buffer(output: Vec<u8>) -> JsBytes<u8> {
+    let bytes = bytes_from_elements(output);
+    bytes.with_mut(|data| data.buffer = true);
+    bytes
 }
 
 /// inflateRawSync: a headerless DEFLATE stream (deflateRawSync's output).

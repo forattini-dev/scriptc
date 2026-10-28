@@ -21,6 +21,17 @@ fn zlib_round_trip_crosses_internal_buffer_boundaries() {
     assert_eq!(bytes_u8_values(&zlib_unzip_sync(&zipped)), source);
 }
 
+#[test]
+fn wrapped_zlib_results_are_node_buffers() {
+    let input = bytes_from_elements(b"round trip".to_vec());
+    let default = zlib_deflate_sync(&input);
+    let level = zlib_deflate_sync_level(&input, 9.0);
+    assert!(bytes_is_buffer(&default));
+    assert!(bytes_is_buffer(&level));
+    assert!(bytes_is_buffer(&zlib_inflate_sync(&level)));
+    assert!(!bytes_is_buffer(&input));
+}
+
 /// A gzip stream Node produced: the header bytes scriptc writes, and the
 /// payload every gzip decoder agrees on.
 #[test]

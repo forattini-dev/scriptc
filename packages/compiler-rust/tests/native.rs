@@ -220,6 +220,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-optional-access/chains.ts",
         "rust-native-tuple-includes/contracts.ts",
         "rust-native-optional-dynamic-record/values.ts",
+        "rust-native-zlib/values.ts",
         "rust-native-for-of-presence/values.ts",
         "rust-native-tuple-array-includes/values.ts",
         "rust-native-tuple-includes/order.ts",
@@ -4905,6 +4906,55 @@ fn tuple_includes_boundaries_preserve_existing_artifacts() {
 }
 
 #[test]
+fn zlib_unimplemented_options_preserve_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "zlib-boundary");
+    for source in [
+        "const level=1; deflateSync(new Uint8Array([1]), {level});",
+        "deflateSync(new Uint8Array([1]), {level: 10});",
+        "deflateSync(new Uint8Array([1]), {level: 1, strategy: 1});",
+        "inflateSync(new Uint8Array([1]), {finishFlush: 2});",
+        "deflateSync(new Uint8Array([1]), ...[{}]);",
+    ] {
+        fs::write(
+            &input,
+            format!(
+                "// @ts-nocheck\nimport {{deflateSync,inflateSync}} from 'node:zlib'; {source}\n"
+            ),
+        )
+        .unwrap();
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in [
+            &target,
+            &target.with_extension("ir.json"),
+            &target.with_extension("rs"),
+        ] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
 fn numeric_dictionary_boundaries_preserve_existing_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     metadata_project(temp.path());
@@ -7060,6 +7110,8 @@ fn survey_collects_independent_failures_without_external_tools() {
     assert_eq!(report["blocked"], 3);
     assert_eq!(report["toolFailures"], 0);
     assert_eq!(report["timedOut"], 0);
+    assert_eq!(report["diagnosticOrigins"]["none"], 1);
+    assert_eq!(report["diagnosticOrigins"]["native-refusal"], 3);
     assert_eq!(
         report["probes"]
             .as_array()
@@ -7094,6 +7146,48 @@ fn survey_collects_independent_failures_without_external_tools() {
     for (index, path) in paths.iter().enumerate() {
         assert_eq!(fs::read(fixtures.join(path)).unwrap(), originals[index]);
     }
+}
+
+#[test]
+fn survey_reports_module_resolution_separately_from_native_refusals() {
+    let temp = tempfile::tempdir().unwrap();
+    let fixtures = root().join("tests/fixtures/native-survey");
+    let source = temp.path().join("missing-module.ts");
+    let project = temp.path().join("tsconfig.json");
+    let manifest = temp.path().join("manifest.json");
+    let report = temp.path().join("report.json");
+    fs::copy(fixtures.join("tsconfig.json"), &project).unwrap();
+    fs::write(
+        &source,
+        "import { value } from './not-installed.js'; console.log(value);\n",
+    )
+    .unwrap();
+    fs::write(
+        &manifest,
+        serde_json::to_vec(&serde_json::json!({"entries": [
+            {"name":"missing-module","input":source,"project":project}
+        ]}))
+        .unwrap(),
+    )
+    .unwrap();
+    let output = Command::new(compiler())
+        .arg("survey")
+        .arg(&manifest)
+        .arg("--out")
+        .arg(&report)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
+    assert_eq!(value["blocked"], 1);
+    assert_eq!(value["probes"][0]["diagnosticOrigin"], "module-resolution");
+    assert_eq!(value["diagnosticOrigins"]["module-resolution"], 1);
+    assert!(
+        value["probes"][0]["stderr"]
+            .as_str()
+            .unwrap()
+            .contains("error TS2307:")
+    );
 }
 
 #[test]

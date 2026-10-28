@@ -48,6 +48,7 @@ struct Probe {
     project: Option<String>,
     scope: String,
     status: &'static str,
+    diagnostic_origin: &'static str,
     elapsed_ms: u128,
     exit_code: Option<i32>,
     stdout: String,
@@ -88,6 +89,7 @@ struct Report {
     blocked: usize,
     timed_out: usize,
     tool_failures: usize,
+    diagnostic_origins: BTreeMap<&'static str, usize>,
     probes: Vec<Probe>,
     families: Vec<Family>,
 }
@@ -221,6 +223,12 @@ pub(super) fn run(mut args: impl Iterator<Item = OsString>) -> Result<(), String
         result
     })?;
     let families = families(&probes);
+    let mut diagnostic_origins = BTreeMap::new();
+    for probe in &probes {
+        *diagnostic_origins
+            .entry(probe.diagnostic_origin)
+            .or_insert(0) += 1;
+    }
     let count = |status| probes.iter().filter(|p| p.status == status).count();
     let report = Report {
         kind: "native-survey",
@@ -239,6 +247,7 @@ pub(super) fn run(mut args: impl Iterator<Item = OsString>) -> Result<(), String
         blocked: count("blocked"),
         timed_out: count("timed-out"),
         tool_failures: count("tool-failure"),
+        diagnostic_origins,
         probes,
         families,
     };
@@ -319,6 +328,7 @@ fn probe(
             .map(crate::frontend::path_for_frontend),
         scope: entry.scope.clone(),
         status: "tool-failure",
+        diagnostic_origin: "tool-failure",
         elapsed_ms: 0,
         exit_code: None,
         stdout: String::new(),
@@ -388,8 +398,30 @@ fn probe(
         result.stderr.push('\n');
     }
     result.stderr.push_str(&captured);
+    result.diagnostic_origin = diagnostic_origin(result.status, &result.stderr);
     result.elapsed_ms = start.elapsed().as_millis();
     result
+}
+
+// The status remains backward compatible; origin distinguishes unresolved
+// imports/type definitions from native lowering refusals and other errors.
+fn diagnostic_origin(status: &str, stderr: &str) -> &'static str {
+    match status {
+        "ir-accepted" => "none",
+        "timed-out" => "timeout",
+        "tool-failure" => "tool-failure",
+        _ if stderr.lines().any(|line| line.starts_with("SCN1001:")) => "native-refusal",
+        _ if stderr.lines().any(|line| {
+            ["error TS2307:", "error TS2688:", "error TS6053:"]
+                .iter()
+                .any(|code| line.contains(code))
+        }) =>
+        {
+            "module-resolution"
+        }
+        _ if stderr.lines().any(|line| line.contains("error TS")) => "typescript-diagnostic",
+        _ => "project-diagnostic",
+    }
 }
 
 struct RunningFrontend(Child);
@@ -516,6 +548,7 @@ mod tests {
             project: None,
             scope: module_scope(),
             status: "blocked",
+            diagnostic_origin: "native-refusal",
             elapsed_ms: 0,
             exit_code: Some(1),
             stdout: String::new(),
@@ -531,6 +564,37 @@ mod tests {
         assert_eq!(classify("thread 'main' panicked at a.rs:2"), "tool-failure");
         assert_eq!(classify("main.ts(2,1): error TS2339: no field"), "blocked");
         assert_eq!(classify("access denied"), "tool-failure");
+    }
+    #[test]
+    fn diagnostic_origins_distinguish_refusals_and_resolution_errors() {
+        assert_eq!(
+            diagnostic_origin(
+                "blocked",
+                "src.ts(1,1): error TS2307: Cannot find module 'x'."
+            ),
+            "module-resolution"
+        );
+        assert_eq!(
+            diagnostic_origin(
+                "blocked",
+                "error TS2688: Cannot find type definition file for 'node'."
+            ),
+            "module-resolution"
+        );
+        assert_eq!(
+            diagnostic_origin("blocked", "src.ts(1,1): error TS2322: Type mismatch."),
+            "typescript-diagnostic"
+        );
+        assert_eq!(
+            diagnostic_origin("blocked", "SCN1001: x: native lowering refused"),
+            "native-refusal"
+        );
+        assert_eq!(diagnostic_origin("timed-out", ""), "timeout");
+        assert_eq!(
+            diagnostic_origin("tool-failure", "panicked at x"),
+            "tool-failure"
+        );
+        assert_eq!(diagnostic_origin("ir-accepted", ""), "none");
     }
 
     #[test]
