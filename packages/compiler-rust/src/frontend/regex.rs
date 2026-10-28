@@ -3,6 +3,63 @@ use super::*;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
 impl Lowerer<'_> {
+    // The current split ABI contains strings only. Accept a capture only when
+    // its enclosing group necessarily participates in every match.
+    pub(super) fn regex_split_strings_only(&mut self, node: Node) -> bool {
+        let mut node = primitives::primitive_source(node);
+        let mut seen = std::collections::HashSet::new();
+        while node.kind() == SyntaxKind::Identifier {
+            let symbol = self.symbol(node);
+            if symbol == 0 || !seen.insert(symbol) {
+                return false;
+            }
+            let declaration = self.checker.sym(SymbolId(symbol)).value_declaration;
+            if declaration.is_nil()
+                || declaration.kind() != SyntaxKind::VariableDeclaration
+                || !declaration.parent().flags().intersects(NodeFlags::CONST)
+                || declaration.initializer().is_nil()
+            {
+                return false;
+            }
+            node = primitives::primitive_source(declaration.initializer());
+        }
+        if node.kind() != SyntaxKind::RegularExpressionLiteral {
+            return false;
+        }
+        let text = node.text();
+        let Some(end) = text.rfind('/').filter(|end| *end > 0) else {
+            return false;
+        };
+        let pattern = &text.as_bytes()[1..end];
+        let outer = pattern.first() == Some(&b'(') && pattern.get(1) != Some(&b'?');
+        let mut class = false;
+        let mut escaped = false;
+        let mut closed = false;
+        for (i, byte) in pattern.iter().copied().enumerate() {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'[' && !class {
+                class = true;
+            } else if byte == b']' && class {
+                class = false;
+            } else if !class && byte == b'(' {
+                if !outer || i != 0 {
+                    return false;
+                }
+            } else if !class && byte == b')' {
+                if !outer || i + 1 != pattern.len() || closed {
+                    return false;
+                }
+                closed = true;
+            }
+        }
+        !class && !escaped && (!outer || closed)
+    }
+
     pub(super) fn regex_callable_type(&self, id: TypeId) -> Option<Type> {
         self.primitive_symbol(self.checker.ty(id).symbol().0, "test", Some("RegExp"))
             .then(|| Type::Func {

@@ -66,6 +66,10 @@ pub(super) fn expression(
                     "{{ let regex = {receiver}; let text = {}; runtime::regex_test(&regex, &runtime::JsString::from(text)) }}",
                     arg.unwrap()
                 ),
+                "split" => {
+                    let limit = expr(&args[1], function, module);
+                    format!("{{ let subject = {receiver}; let regex = {}; let limit = {limit}; runtime::regex_split(&subject, &regex, limit) }}", arg.unwrap())
+                }
                 "replace" | "replaceAll" => {
                     let replacement = expr(&args[1], function, module);
                     let operation = if method == "replace" {

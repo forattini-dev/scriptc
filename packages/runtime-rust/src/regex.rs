@@ -488,11 +488,6 @@ pub fn regex_split(subject: &JsString, regex: &JsRegex, limit: f64) -> JsArray<J
             position = advance_string_index(&units, position, regex.unicode);
             continue;
         };
-        if !matched.captures.is_empty() {
-            throw_type_error(
-                "split() with capture groups in the pattern is not supported (JS splices the captured values into the result); use a non-capturing group (?:...)".to_owned(),
-            );
-        }
         let range = matched.range();
         if range.end == previous {
             position = advance_string_index(&units, range.start, regex.unicode);
@@ -500,6 +495,17 @@ pub fn regex_split(subject: &JsString, regex: &JsRegex, limit: f64) -> JsArray<J
             pieces.push(string_from_utf16(&units[previous..range.start]));
             if pieces.len() == limit {
                 return array_new(pieces);
+            }
+            for capture in &matched.captures {
+                let Some(capture) = capture else {
+                    throw_type_error(
+                        "split() with an unmatched capture needs an undefined-capable result".to_owned(),
+                    );
+                };
+                pieces.push(string_from_utf16(&units[capture.clone()]));
+                if pieces.len() == limit {
+                    return array_new(pieces);
+                }
             }
             previous = range.end;
             position = previous;

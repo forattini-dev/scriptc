@@ -514,6 +514,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-array-sort/values.ts",
         "rust-native-string-spread/main.ts",
         "rust-native-string-split/main.ts",
+        "rust-native-regex-split/values.ts",
         "rust-native-regex-guard/direct.ts",
         "rust-native-set-spread/main.ts",
         "rust-native-set-spread/identity.ts",
@@ -7507,7 +7508,11 @@ fn string_split_boundaries_preserve_existing_artifacts() {
     let target = binary(temp.path(), "string-split-boundary");
     for source in [
         "'abc'.split();",
-        "'abc'.split(/b/);",
+        "'abc'.split(/(b)?/);",
+        "'abc'.split(/(a)|(b)/);",
+        "'abc'.split(/((b))/);",
+        "let separator = /b/; 'abc'.split(separator);",
+        "const separator = new RegExp('b'); 'abc'.split(separator);",
         "'abc'.split('b', 1);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();

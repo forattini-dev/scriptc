@@ -174,6 +174,31 @@ impl Lowerer<'_> {
             let receiver = self.live_member_receiver(member.expression(), receiver);
             let receiver = self.string_method_receiver(member, receiver)?;
             let separator = self.primitive_operand(arguments[0])?;
+            if separator.ty() == Type::Regex {
+                if !self.regex_split_strings_only(arguments[0]) {
+                    return Err(self.refuse(
+                        arguments[0],
+                        "regex split requires a literal with no captures or one always-present enclosing capture",
+                    ));
+                }
+                return Ok(Some(Expr::RegexIntrinsic {
+                    method: "split".into(),
+                    receiver: Box::new(receiver),
+                    args: vec![
+                        separator,
+                        Expr::NumLit {
+                            value: u32::MAX as f64,
+                            spelling: None,
+                            r#type: Type::F64,
+                            loc: self.loc(node),
+                        },
+                    ],
+                    r#type: Type::Array {
+                        elem: Box::new(Type::String),
+                    },
+                    loc: self.loc(node),
+                }));
+            }
             if separator.ty() != Type::String {
                 return Err(self.refuse(
                     arguments[0],

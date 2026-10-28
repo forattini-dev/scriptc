@@ -1806,7 +1806,13 @@ fn validate_function(
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
                 }
-                let valid = if matches!(method.as_str(), "replace" | "replaceAll") {
+                let valid = if method == "split" {
+                    receiver.ty() == Type::String
+                        && args.len() == 2
+                        && args[0].ty() == Type::Regex
+                        && args[1].ty() == Type::F64
+                        && *r#type == (Type::Array { elem: Box::new(Type::String) })
+                } else if matches!(method.as_str(), "replace" | "replaceAll") {
                     receiver.ty() == Type::String
                         && args.len() == 2
                         && args[0].ty() == Type::Regex
@@ -4426,6 +4432,29 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn regex_split_contract_rejects_malformed_operands() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let text = Expr::StrLit { value: "x".into(), r#type: Type::String, loc: loc.clone() };
+        let regex = Expr::RegexLit { pattern: "x".into(), flags: "".into(), r#type: Type::Regex, loc: loc.clone() };
+        let limit = Expr::NumLit { value: 2.0, spelling: None, r#type: Type::F64, loc: loc.clone() };
+        let result = Type::Array { elem: Box::new(Type::String) };
+        for (receiver, args, ty, valid) in [
+            (text.clone(), vec![regex.clone(), limit.clone()], result.clone(), true),
+            (regex.clone(), vec![regex.clone(), limit.clone()], result.clone(), false),
+            (text.clone(), vec![text.clone(), limit.clone()], result.clone(), false),
+            (text.clone(), vec![regex.clone()], result.clone(), false),
+            (text.clone(), vec![regex.clone(), limit.clone()], Type::String, false),
+        ] {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::RegexIntrinsic { method: "split".into(), receiver: Box::new(receiver), args, r#type: ty, loc: loc.clone() },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid);
         }
     }
 

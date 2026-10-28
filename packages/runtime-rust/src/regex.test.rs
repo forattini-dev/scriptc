@@ -163,6 +163,31 @@ fn regex_replacement_and_split_use_utf16_ranges() {
 }
 
 #[test]
+fn regex_split_captures_limits_and_preserves_last_index() {
+    let regex = regex_new(r"(\d)", "gy");
+    regex_set_last_index(&regex, 7.0);
+    let values = regex_split(&string("a1b2c"), &regex, u32::MAX as f64);
+    let expected = ["a", "1", "b", "2", "c"];
+    assert_eq!(array_len(&values), expected.len() as f64);
+    for (index, value) in expected.iter().enumerate() {
+        assert_eq!(array_get(&values, index as f64).as_ref(), *value);
+    }
+    assert_eq!(regex_last_index(&regex), 7.0);
+    let limited = regex_split(&string("a1b"), &regex, 2.0);
+    assert_eq!(array_len(&limited), 2.0);
+    assert_eq!(array_get(&limited, 1.0).as_ref(), "1");
+    let empty = regex_split(&string(""), &regex_new("()", ""), 10.0);
+    assert_eq!(array_len(&empty), 0.0);
+    let missing = regex_new("(a)?b", "");
+    let before_capture = regex_split(&string("xb"), &missing, 1.0);
+    assert_eq!(array_get(&before_capture, 0.0).as_ref(), "x");
+    let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        regex_split(&string("xb"), &missing, 2.0)
+    }));
+    assert!(error.is_err());
+}
+
+#[test]
 fn regex_match_search_and_match_all_preserve_utf16_semantics() {
     let subject = string("😀a12 b");
     let matched = regex_match(&subject, &regex_new(r"(a)(\d+)", ""), |value| {
