@@ -32,6 +32,7 @@ pub(super) struct ClassGraph {
     pending: VecDeque<usize>,
     layout_active: HashSet<usize>,
     methods: HashMap<(usize, String), Signature>,
+    static_methods: HashMap<(usize, String), Signature>,
     symbol_nodes: HashMap<(usize, ir::SymbolMethodKey), Node>,
     symbol_signatures: HashMap<(usize, ir::SymbolMethodKey), Signature>,
     accessors: HashMap<(usize, String, bool), Signature>,
@@ -42,6 +43,27 @@ pub(super) struct ClassGraph {
 }
 
 impl ClassGraph {
+    pub(super) fn has_static_methods(&self, name: &str) -> bool {
+        let mut current = self
+            .definitions
+            .iter()
+            .position(|definition| definition.name == name);
+        for _ in 0..=self.definitions.len() {
+            let Some(index) = current else { return false };
+            let definition = &self.definitions[index];
+            if !definition.node.is_nil()
+                && definition.node.members().into_iter().any(|member| {
+                    member.kind() == SyntaxKind::MethodDeclaration
+                        && member.modifier_flags().intersects(ModifierFlags::STATIC)
+                })
+            {
+                return true;
+            }
+            current = definition.base;
+        }
+        false
+    }
+
     pub fn next(&mut self) -> Option<usize> {
         self.pending.pop_front()
     }
@@ -441,6 +463,14 @@ impl Lowerer<'_> {
             self.resolve_class(base)?;
         }
         for member in node.members() {
+            let static_method = member.modifier_flags().intersects(ModifierFlags::STATIC)
+                && member.kind() == SyntaxKind::MethodDeclaration
+                && matches!(
+                    member.name().kind(),
+                    SyntaxKind::Identifier | SyntaxKind::StringLiteral
+                )
+                && !receivers::reads_this(member)
+                && !static_methods::reads_super(member);
             let symbol_method = if member.kind() == SyntaxKind::MethodDeclaration
                 && member.name().kind() == SyntaxKind::ComputedPropertyName
             {
@@ -448,7 +478,7 @@ impl Lowerer<'_> {
             } else {
                 None
             };
-            if member.modifier_flags().intersects(ModifierFlags::STATIC)
+            if (member.modifier_flags().intersects(ModifierFlags::STATIC) && !static_method)
                 || member
                     .modifiers()
                     .nodes()
@@ -485,10 +515,11 @@ impl Lowerer<'_> {
             matches!(
                 m.kind(),
                 SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor | SyntaxKind::SetAccessor
-            ) && !matches!(
-                m.name().kind(),
-                SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
-            )
+            ) && !m.modifier_flags().intersects(ModifierFlags::STATIC)
+                && !matches!(
+                    m.name().kind(),
+                    SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
+                )
         }) {
             let name = member.name().text();
             if name.starts_with('%')
@@ -509,10 +540,11 @@ impl Lowerer<'_> {
             matches!(
                 m.kind(),
                 SyntaxKind::MethodDeclaration | SyntaxKind::PropertyDeclaration
-            ) && !matches!(
-                m.name().kind(),
-                SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
-            )
+            ) && !m.modifier_flags().intersects(ModifierFlags::STATIC)
+                && !matches!(
+                    m.name().kind(),
+                    SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
+                )
         }) {
             if let Some(base) = base
                 && self.classes.accessor(base, member.name().text()).is_some()
@@ -542,10 +574,12 @@ impl Lowerer<'_> {
                         matches!(
                             m.kind(),
                             SyntaxKind::MethodDeclaration | SyntaxKind::PropertyDeclaration
-                        ) && !matches!(
-                            m.name().kind(),
-                            SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
-                        ) && m.name().text() == name
+                        ) && !m.modifier_flags().intersects(ModifierFlags::STATIC)
+                            && !matches!(
+                                m.name().kind(),
+                                SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
+                            )
+                            && m.name().text() == name
                     })
                 {
                     return Err(self.refuse(
@@ -777,10 +811,11 @@ impl Lowerer<'_> {
                     SyntaxKind::MethodDeclaration
                         | SyntaxKind::GetAccessor
                         | SyntaxKind::SetAccessor
-                ) && !matches!(
-                    member.name().kind(),
-                    SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
-                )
+                ) && !member.modifier_flags().intersects(ModifierFlags::STATIC)
+                    && !matches!(
+                        member.name().kind(),
+                        SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier
+                    )
             })
             .map(|member| member.name().text().to_string())
             .collect();
@@ -847,6 +882,7 @@ mod boxed;
 mod constructors;
 mod methods;
 mod private_slots;
+mod static_methods;
 mod symbol_methods;
 mod values;
 pub(super) mod weak_sets;

@@ -12,6 +12,7 @@ impl ClassGraph {
             if !definition.node.is_nil()
                 && let Some(node) = definition.node.members().into_iter().rev().find(|node| {
                     node.kind() == SyntaxKind::MethodDeclaration
+                        && !node.modifier_flags().intersects(ModifierFlags::STATIC)
                         && !matches!(
                             node.name().kind(),
                             SyntaxKind::ComputedPropertyName | SyntaxKind::PrivateIdentifier

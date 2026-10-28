@@ -108,6 +108,10 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-static-methods/values.ts",
+        "rust-native-static-methods/inheritance.ts",
+        "rust-native-static-methods/order.ts",
+        "rust-native-static-methods/public.mts",
         "rust-native-unobserved-default/main.ts",
         "rust-native-unobserved-default/entry.ts",
         "rust-native-writable-abi/identity.ts",
@@ -3240,6 +3244,38 @@ fn accessor_boundaries_preserve_previous_artifacts() {
         ] {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
+    }
+}
+
+#[test]
+fn static_method_boundaries_are_refused_without_publication() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let output = temp.path().join("main.ir.json");
+    for source in [
+        "class C { static f() { return this; } } C.f();",
+        "class A { static f() { return 1; } } class B extends A { static f() { return super.f(); } } B.f();",
+        "class C { static f() { return 1; } } const method = C.f; console.log(method());",
+        "class C { static f() { return 1; } } const alias = C; console.log(alias.f());",
+        "class C { static f() { return 1; } } const value: any = C; console.log(value.f);",
+        "class A { static f() { return 1; } } class B extends A {} const value: any = B; console.log(value.f);",
+        "class C { static f() { return 1; } } C.f = () => 2; console.log(C.f());",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        fs::write(&output, "preserve").unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(&output)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("SCN1001"),
+            "{source}: {stderr}"
+        );
+        assert_eq!(fs::read_to_string(&output).unwrap(), "preserve");
     }
 }
 

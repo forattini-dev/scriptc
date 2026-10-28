@@ -304,6 +304,15 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn dynamic_erasure_reason(&self, ty: &Type) -> Option<&'static str> {
+        if self.native_type_contains(ty, |ty| {
+            if let Type::Classval { class_name } = ty {
+                self.classes.has_static_methods(class_name)
+            } else {
+                false
+            }
+        }) {
+            return Some("erasing class static methods requires a native descriptor contract");
+        }
         if self.native_type_contains(
             ty,
             |ty| matches!(ty, Type::Bytes { elem } if matches!(elem.as_str(), "i32" | "u32")),

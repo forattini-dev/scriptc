@@ -713,7 +713,10 @@ impl<'a> Lowerer<'a> {
         let method = matches!(
             signature.node.kind(),
             SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor | SyntaxKind::SetAccessor
-        );
+        ) && !signature
+            .node
+            .modifier_flags()
+            .intersects(ModifierFlags::STATIC);
         if method {
             self.bind_parameter(None, &signature.params[0])?;
             self.instance_this = Some(self.locals[0].clone());
@@ -1687,6 +1690,9 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 if let Some(value) = self.class_symbol_call(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.class_static_call(node)? {
                     return Ok(value);
                 }
                 if let Some(value) = self.class_call(node)? {
