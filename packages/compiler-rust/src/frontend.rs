@@ -1364,6 +1364,9 @@ impl<'a> Lowerer<'a> {
                 self.expression(node.name())
             }
             SyntaxKind::PropertyAccessExpression => {
+                if let Some(value) = self.immediate_set_first(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.module_metadata(node)? {
                     return Ok(value);
                 }

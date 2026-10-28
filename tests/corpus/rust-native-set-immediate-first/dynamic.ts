@@ -1,0 +1,11 @@
+const values = new Set<string | undefined>([undefined, 'later']);
+console.log('undefined', values.values().next().value === undefined, values.size);
+values.delete(undefined);
+console.log('next', values.values().next().value === 'later');
+const first = { id: 1 };
+const second = { id: 1 };
+const records = new Set([first, second]);
+console.log('record', records.values().next().value === first, records.values().next().value === second);
+const symbol = Symbol('first');
+const symbols = new Set([symbol, Symbol('first')]);
+console.log('symbol', symbols.values().next().value === symbol);

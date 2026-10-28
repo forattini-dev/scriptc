@@ -3,6 +3,118 @@ use super::*;
 use source_frontend::prelude::get_source_file_of_node;
 
 impl Lowerer<'_> {
+    /// An immediately consumed built-in iterator has no observable lifetime.
+    /// Keep this separate from general Set iterators, which must remain live
+    /// across mutations and cannot be implemented by taking a snapshot.
+    pub(super) fn immediate_set_first(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        if node.name().text() != "value" || !node.question_dot_token().is_nil() {
+            return Ok(None);
+        }
+        let next = node.expression();
+        if next.kind() != SyntaxKind::CallExpression
+            || !next.question_dot_token().is_nil()
+            || next.arguments().into_iter().next().is_some()
+        {
+            return Ok(None);
+        }
+        let next_member = next.expression();
+        if next_member.kind() != SyntaxKind::PropertyAccessExpression
+            || next_member.name().text() != "next"
+            || !next_member.question_dot_token().is_nil()
+        {
+            return Ok(None);
+        }
+        let values = next_member.expression();
+        if values.kind() != SyntaxKind::CallExpression
+            || !values.question_dot_token().is_nil()
+            || values.arguments().into_iter().next().is_some()
+        {
+            return Ok(None);
+        }
+        let member = values.expression();
+        if member.kind() != SyntaxKind::PropertyAccessExpression
+            || member.name().text() != "values"
+            || !member.question_dot_token().is_nil()
+        {
+            return Ok(None);
+        }
+        let symbol = self.symbol(member.name());
+        if !self.primitive_symbol(symbol, "values", Some("Set"))
+            && !self.primitive_symbol(symbol, "values", Some("ReadonlySet"))
+        {
+            return Ok(None);
+        }
+        let receiver = self.expression(member.expression())?;
+        let Type::Set { elem } = receiver.ty() else {
+            return Ok(None);
+        };
+        if matches!(*elem, Type::Func { .. }) {
+            return Err(self.refuse(
+                node,
+                "immediate Set iteration of functions requires an owning callable array ABI",
+            ));
+        }
+        let result = self
+            .intern_union(vec![(*elem).clone(), Type::Undefined])
+            .ok_or_else(|| self.refuse(node, "Set iterator result has no native representation"))?;
+        let mut helper = helpers::Helper::new(
+            "set_immediate_first",
+            vec![receiver.ty()],
+            result.clone(),
+            self.loc(node),
+        );
+        let array_ty = Type::Array { elem: elem.clone() };
+        let array = helper.local("values", array_ty.clone(), false);
+        helper.declare(
+            &array,
+            Expr::SetIntrinsic {
+                method: "toArray".into(),
+                receiver: Box::new(helper.read(&helper.param(0))),
+                args: vec![],
+                r#type: array_ty,
+                loc: helper.loc(),
+            },
+        );
+        let present = Expr::ArrayGet {
+            arr: Box::new(helper.read(&array)),
+            index: Box::new(helper.number(0.0)),
+            r#type: *elem,
+            loc: helper.loc(),
+        };
+        let missing = Expr::UnitLit {
+            unit: "undefined",
+            r#type: Type::Undefined,
+            loc: helper.loc(),
+        };
+        let test = Expr::Bin {
+            op: "!==".into(),
+            left: Box::new(helper.length(&array)),
+            right: Box::new(helper.number(0.0)),
+            r#type: Type::Bool,
+            loc: helper.loc(),
+        };
+        helper.function.body.push(Stmt::If {
+            cond: test,
+            then: vec![Stmt::Return {
+                value: Some(self.coerce(present, result.clone(), node)?),
+                loc: helper.loc(),
+            }],
+            else_: None,
+            loc: helper.loc(),
+        });
+        helper.function.body.push(Stmt::Return {
+            value: Some(self.coerce(missing, result.clone(), node)?),
+            loc: helper.loc(),
+        });
+        let callee = self.install_helper(helper.function);
+        Ok(Some(Expr::Call {
+            callee,
+            args: vec![receiver],
+            r#type: result,
+            loc: self.loc(node),
+        }))
+    }
+
     pub(super) fn set_type(&mut self, id: TypeId) -> Option<Type> {
         let symbol = self.checker.ty(id).symbol();
         if symbol.0 == 0 {

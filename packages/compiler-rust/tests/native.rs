@@ -514,6 +514,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-regex-guard/direct.ts",
         "rust-native-set-spread/main.ts",
         "rust-native-set-spread/identity.ts",
+        "rust-native-set-immediate-first/values.ts",
+        "rust-native-set-immediate-first/dynamic.ts",
+        "rust-native-set-immediate-first/custom.ts",
         "rust-native-dynamic-dictionary/main.ts",
         "rust-native-local-call-abi/values.mjs",
         "rust-native-local-call-abi/effects.mjs",
@@ -7796,6 +7799,49 @@ fn string_construction_boundaries_preserve_previous_artifacts() {
         "console.log(String.fromCodePoint(...[65,66]));",
         "console.log(String.fromCharCode(...new Uint8Array([65])));",
         "const make=String.fromCharCode; console.log(make(65));",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn set_iterator_lifetime_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "set-iterator-boundary");
+    for source in [
+        "const s=new Set([1,2]); const i=s.values(); s.delete(1); console.log(i.next().value);",
+        "const s=new Set([1]); let n=0; console.log(s.values().next(n++).value,n);",
+        "const s=new Set([1]); console.log(s.values()?.next().value);",
+        "const s=new Set([1]); s.values=()=>({next:()=>({value:99})}); console.log(s.values().next().value);",
+        "const f=()=>1; const s=new Set([f]); console.log(s.values().next().value===f);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         let artifacts = [
