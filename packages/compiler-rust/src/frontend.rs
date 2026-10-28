@@ -897,6 +897,14 @@ impl<'a> Lowerer<'a> {
                         continue;
                     }
                     let storage = self.storage_type(name);
+                    // Type assertions and non-null assertions disappear at
+                    // runtime. Inspect the underlying indexed source so an
+                    // inferred local retains an actual undefined result.
+                    let source_initializer = if declaration.initializer().is_nil() {
+                        declaration.initializer()
+                    } else {
+                        primitives::primitive_source(declaration.initializer())
+                    };
                     let (ty, init) = if declaration.initializer().is_nil() {
                         let value_type = storage?;
                         let ty = self.undefined_storage_type(value_type.clone(), declaration)?;
@@ -936,15 +944,14 @@ impl<'a> Lowerer<'a> {
                     } else if self.declared(declaration).is_none()
                         && declaration.type_().is_nil()
                         && matches!(
-                            declaration.initializer().kind(),
+                            source_initializer.kind(),
                             SyntaxKind::PropertyAccessExpression
                                 | SyntaxKind::ElementAccessExpression
                         )
                     {
-                        let init = self.expression(declaration.initializer())?;
+                        let init = self.expression(source_initializer)?;
                         if matches!(init, Expr::RecordKeyGet { .. })
-                            || (declaration.initializer().kind()
-                                == SyntaxKind::ElementAccessExpression
+                            || (source_initializer.kind() == SyntaxKind::ElementAccessExpression
                                 && self.optional_storage(&init.ty()))
                         {
                             // An inferred slot retains an index lookup's actual
