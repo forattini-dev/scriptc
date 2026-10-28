@@ -904,6 +904,33 @@ fn number<S: serde::Serializer>(value: &f64, serializer: S) -> Result<S::Ok, S::
 
 /// Validate the supported subset before either serialization or emission.
 /// Branches receive independent initialization facts; declarations are lexical.
+// The portable DataView ABI uses explicit numeric kinds; keep validation and
+// code generation on the same closed list so an unknown operation is refused.
+pub fn data_view_operation(method: &str) -> Option<(&'static str, bool, bool)> {
+    let (kind, set, byte) = match method {
+        "dvGetUint8" => ("u8", false, true),
+        "dvGetInt8" => ("i8", false, true),
+        "dvGetUint16" => ("u16", false, false),
+        "dvGetInt16" => ("i16", false, false),
+        "dvGetUint32" => ("u32", false, false),
+        "dvGetInt32" => ("i32", false, false),
+        "dvGetFloat32" => ("f32", false, false),
+        "dvGetFloat64" => ("f64", false, false),
+        "dvGetBigUint64Number" => ("u64", false, false),
+        "dvGetBigInt64Number" => ("i64", false, false),
+        "dvSetUint8" => ("u8", true, true),
+        "dvSetInt8" => ("i8", true, true),
+        "dvSetUint16" => ("u16", true, false),
+        "dvSetInt16" => ("i16", true, false),
+        "dvSetUint32" => ("u32", true, false),
+        "dvSetInt32" => ("i32", true, false),
+        "dvSetFloat32" => ("f32", true, false),
+        "dvSetFloat64" => ("f64", true, false),
+        _ => return None,
+    };
+    Some((kind, set, byte))
+}
+
 pub fn validate(module: &Module) -> Result<(), String> {
     if module.ir_version != VERSION || module.functions.is_empty() {
         return Err("invalid native module/version".into());
@@ -1694,6 +1721,21 @@ fn validate_function(
                             receiver.ty() == Type::bytes()
                                 && args.is_empty()
                                 && *r#type == Type::F64
+                        }
+                        "dataViewNew" => {
+                            args.len() <= 2
+                                && args.iter().all(|a| a.ty() == Type::F64)
+                                && *r#type == Type::bytes()
+                        }
+                        method if data_view_operation(method).is_some() => {
+                            let (_, is_set, is_byte) = data_view_operation(method).unwrap();
+                            let required = if is_set { 2 } else { 1 };
+                            receiver.ty() == Type::bytes()
+                                && args.len() >= required
+                                && args.len() <= required + usize::from(!is_byte)
+                                && args[..required].iter().all(|a| a.ty() == Type::F64)
+                                && args.get(required).is_none_or(|a| a.ty() == Type::Bool)
+                                && *r#type == if is_set { Type::Void } else { Type::F64 }
                         }
                         "toArray" => {
                             args.is_empty()
@@ -7329,6 +7371,355 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn data_view_portable_signatures_validate_and_emit() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let number = || Expr::NumLit {
+            value: 1.0,
+            spelling: None,
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        let boolean = || Expr::BoolLit {
+            value: true,
+            r#type: Type::Bool,
+            loc: loc.clone(),
+        };
+        let bytes = |elem: &str| Expr::BytesNew {
+            source: None,
+            r#type: Type::Bytes { elem: elem.into() },
+            loc: loc.clone(),
+        };
+        let operation = |method: &str, receiver, args, result| Expr::BytesIntrinsic {
+            method: method.into(),
+            receiver: Box::new(receiver),
+            args,
+            r#type: result,
+            loc: loc.clone(),
+        };
+        let check = |module: &mut Module, expr: Expr| {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr,
+                loc: loc.clone(),
+            }];
+            validate(module)
+        };
+
+        for elem in ["u8", "f32", "f64"] {
+            for args in [vec![], vec![number()], vec![number(), number()]] {
+                check(
+                    &mut module,
+                    operation("dataViewNew", bytes(elem), args, Type::bytes()),
+                )
+                .unwrap();
+                let rust = crate::emit::rust(&module).unwrap();
+                assert!(rust.contains("runtime::data_view_new(&bytes,"));
+            }
+        }
+        assert!(
+            check(
+                &mut module,
+                operation("dataViewNew", bytes("u8"), vec![boolean()], Type::bytes())
+            )
+            .is_err()
+        );
+        assert!(
+            check(
+                &mut module,
+                operation(
+                    "dataViewNew",
+                    bytes("u8"),
+                    vec![number(), number(), number()],
+                    Type::bytes()
+                )
+            )
+            .is_err()
+        );
+        assert!(
+            check(
+                &mut module,
+                operation("dataViewNew", bytes("u8"), vec![], Type::F64)
+            )
+            .is_err()
+        );
+
+        let methods = [
+            "dvGetUint8",
+            "dvGetInt8",
+            "dvGetUint16",
+            "dvGetInt16",
+            "dvGetUint32",
+            "dvGetInt32",
+            "dvGetFloat32",
+            "dvGetFloat64",
+            "dvGetBigUint64Number",
+            "dvGetBigInt64Number",
+            "dvSetUint8",
+            "dvSetInt8",
+            "dvSetUint16",
+            "dvSetInt16",
+            "dvSetUint32",
+            "dvSetInt32",
+            "dvSetFloat32",
+            "dvSetFloat64",
+        ];
+        for method in methods {
+            let (kind, is_set, is_byte) = data_view_operation(method).unwrap();
+            let required = if is_set { 2 } else { 1 };
+            let result = if is_set { Type::Void } else { Type::F64 };
+            let args = (0..required).map(|_| number()).collect::<Vec<_>>();
+            check(
+                &mut module,
+                operation(method, bytes("u8"), args.clone(), result.clone()),
+            )
+            .unwrap();
+            let rust = crate::emit::rust(&module).unwrap();
+            let expected = format!(
+                "runtime::data_view_{}(&bytes, \"{}\",",
+                if is_set { "set" } else { "get" },
+                kind
+            );
+            assert!(rust.contains(&expected), "{method}");
+            assert!(rust.contains(", false)"), "{method} defaults to big-endian");
+            assert!(
+                check(
+                    &mut module,
+                    operation(method, bytes("f32"), args.clone(), result.clone())
+                )
+                .is_err(),
+                "{method} rejects non-u8 views"
+            );
+            assert!(
+                check(
+                    &mut module,
+                    operation(method, bytes("u8"), vec![], result.clone())
+                )
+                .is_err(),
+                "{method} requires arguments"
+            );
+            assert!(
+                check(
+                    &mut module,
+                    operation(method, bytes("u8"), args.clone(), Type::String)
+                )
+                .is_err(),
+                "{method} rejects wrong return"
+            );
+            let mut with_endian = args.clone();
+            with_endian.push(boolean());
+            assert_eq!(
+                check(
+                    &mut module,
+                    operation(method, bytes("u8"), with_endian, result.clone())
+                )
+                .is_ok(),
+                !is_byte,
+                "{method} endian argument"
+            );
+            let mut wrong_endian = args;
+            wrong_endian.push(number());
+            assert!(
+                check(
+                    &mut module,
+                    operation(method, bytes("u8"), wrong_endian, result)
+                )
+                .is_err(),
+                "{method} rejects numeric endian"
+            );
+        }
+        assert!(
+            check(
+                &mut module,
+                operation("dvGetUnknown", bytes("u8"), vec![number()], Type::F64)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the offline Rust runtime toolchain and Node"]
+    fn data_view_emitted_program_matches_node() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        let num = |value| Expr::NumLit {
+            value,
+            spelling: None,
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        let bool_lit = |value| Expr::BoolLit {
+            value,
+            r#type: Type::Bool,
+            loc: loc.clone(),
+        };
+        let var = |name: &str| Expr::VarRef {
+            local_id: name.into(),
+            r#type: Type::bytes(),
+            loc: loc.clone(),
+        };
+        let op =
+            |method: &str, receiver: Expr, args: Vec<Expr>, r#type: Type| Expr::BytesIntrinsic {
+                method: method.into(),
+                receiver: Box::new(receiver),
+                args,
+                r#type,
+                loc: loc.clone(),
+            };
+        module.functions[0].locals = ["owner", "view"]
+            .into_iter()
+            .map(|name| Local {
+                boxed: false,
+                id: name.into(),
+                name: name.into(),
+                r#type: Type::bytes(),
+                mutable: false,
+            })
+            .collect();
+        module.functions[0].body = vec![
+            Stmt::VarDecl {
+                local_id: "owner".into(),
+                init: Expr::BytesNew {
+                    source: Some(Box::new(num(16.0))),
+                    r#type: Type::bytes(),
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            },
+            Stmt::VarDecl {
+                local_id: "view".into(),
+                init: op(
+                    "dataViewNew",
+                    var("owner"),
+                    vec![num(1.0), num(14.0)],
+                    Type::bytes(),
+                ),
+                loc: loc.clone(),
+            },
+            Stmt::Expression {
+                expr: op(
+                    "dvSetUint32",
+                    var("view"),
+                    vec![num(0.0), num(305419896.0)],
+                    Type::Void,
+                ),
+                loc: loc.clone(),
+            },
+            Stmt::Expression {
+                expr: Expr::Intrinsic {
+                    name: "console.log".into(),
+                    args: vec![
+                        op("dvGetUint32", var("view"), vec![num(0.0)], Type::F64),
+                        op(
+                            "dvGetUint32",
+                            var("view"),
+                            vec![num(0.0), bool_lit(true)],
+                            Type::F64,
+                        ),
+                        op("get", var("owner"), vec![num(1.0)], Type::F64),
+                        op("byteOffset", var("view"), vec![], Type::F64),
+                        op("byteLength", var("view"), vec![], Type::F64),
+                    ],
+                    r#type: Type::Void,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            },
+        ];
+        let mut script = String::from(
+            r#"
+            const owner = new Uint8Array(16);
+            const view = new DataView(owner.buffer, 1, 14);
+            view.setUint32(0, 305419896);
+            console.log(view.getUint32(0), view.getUint32(0, true), owner[1], view.byteOffset, view.byteLength);
+        "#,
+        );
+        for (name, value, byte) in [
+            ("Uint8", 250.0, true),
+            ("Int8", -2.0, true),
+            ("Uint16", 4660.0, false),
+            ("Int16", -1234.0, false),
+            ("Uint32", 305419896.0, false),
+            ("Int32", -123456.0, false),
+            ("Float32", -1.25, false),
+            ("Float64", -42.5, false),
+        ] {
+            let mut args = vec![num(0.0), num(value)];
+            if !byte {
+                args.push(bool_lit(true));
+            }
+            module.functions[0].body.push(Stmt::Expression {
+                expr: op(&format!("dvSet{name}"), var("view"), args, Type::Void),
+                loc: loc.clone(),
+            });
+            let mut read_args = vec![num(0.0)];
+            if !byte {
+                read_args.push(bool_lit(true));
+            }
+            module.functions[0].body.push(Stmt::Expression {
+                expr: Expr::Intrinsic {
+                    name: "console.log".into(),
+                    args: vec![op(
+                        &format!("dvGet{name}"),
+                        var("view"),
+                        read_args,
+                        Type::F64,
+                    )],
+                    r#type: Type::Void,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            });
+            script.push_str(&format!(
+                "view.set{name}(0, {value}{}); console.log(view.get{name}(0{}));\n",
+                if byte { "" } else { ", true" },
+                if byte { "" } else { ", true" }
+            ));
+        }
+        for (method, js_method) in [
+            ("dvGetBigUint64Number", "getBigUint64"),
+            ("dvGetBigInt64Number", "getBigInt64"),
+        ] {
+            module.functions[0].body.push(Stmt::Expression {
+                expr: Expr::Intrinsic {
+                    name: "console.log".into(),
+                    args: vec![op(
+                        method,
+                        var("view"),
+                        vec![num(0.0), bool_lit(true)],
+                        Type::F64,
+                    )],
+                    r#type: Type::Void,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            });
+            script.push_str(&format!(
+                "console.log(Number(view.{js_method}(0, true)));\n"
+            ));
+        }
+        let rust = crate::emit::rust(&module).unwrap();
+        let work = tempfile::Builder::new()
+            .prefix("scriptc_dataview_")
+            .tempdir()
+            .unwrap();
+        let binary = crate::compile(&rust, work.path(), true).unwrap();
+        let native = std::process::Command::new(binary).output().unwrap();
+        let node = std::process::Command::new("node")
+            .args(["-e", &script])
+            .output()
+            .unwrap();
+        assert_eq!(
+            native.status.code(),
+            node.status.code(),
+            "native stderr: {}",
+            String::from_utf8_lossy(&native.stderr)
+        );
+        assert_eq!(native.stdout, node.stdout);
+        assert_eq!(native.stderr, node.stderr);
+    }
+
     #[test]
     fn byte_operations_validate_owned_layouts_and_signatures() {
         let mut module = callable_module();

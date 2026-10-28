@@ -43,6 +43,26 @@ pub(super) fn expression(
                 "get" => "runtime::bytes_get(&bytes, arg0)".into(),
                 "toArray" => "runtime::bytes_to_array(&bytes)".into(),
                 "byteOffset" => "runtime::bytes_byte_offset(&bytes)".into(),
+                "dataViewNew" => format!(
+                    "runtime::data_view_new(&bytes, {}, {}, {})",
+                    if args.is_empty() { "0.0" } else { "arg0" },
+                    args.len() == 2,
+                    if args.len() < 2 { "0.0" } else { "arg1" }
+                ),
+                method if crate::ir::data_view_operation(method).is_some() => {
+                    let (kind, is_set, _) = crate::ir::data_view_operation(method).unwrap();
+                    if is_set {
+                        format!(
+                            "runtime::data_view_set(&bytes, \"{kind}\", arg0, arg1, {})",
+                            if args.len() < 3 { "false" } else { "arg2" }
+                        )
+                    } else {
+                        format!(
+                            "runtime::data_view_get(&bytes, \"{kind}\", arg0, {})",
+                            if args.len() < 2 { "false" } else { "arg1" }
+                        )
+                    }
+                }
                 "join" => "runtime::bytes_join(&bytes, &runtime::JsString::from(arg0))".into(),
                 "toStringVar" => {
                     "runtime::bytes_to_string_checked(&bytes, &runtime::JsString::from(arg0))"
