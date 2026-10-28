@@ -48,7 +48,7 @@ test("keeps a recursive union intact when its reference arm is nested", () => {
   const type = { kind: "union", unionId: "outer" } as const;
   const mod = fixture([{ kind: "throw", value: { kind: "varRef", localId: "payload", type, loc }, loc }]);
   mod.unions = [
-    { id: "outer", arms: [{ kind: "union", unionId: "inner" }, { kind: "undefined" }] },
+    { id: "outer", arms: [{ kind: "union", unionId: "inner" }, { kind: "undefinedT" }] },
     { id: "inner", arms: [type, { kind: "record", shapeId: "r0" }] },
   ];
   expect(caughtReferenceValues(mod)).toEqual([{ type, loc }]);

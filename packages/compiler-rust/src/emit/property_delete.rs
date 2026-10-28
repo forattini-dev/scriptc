@@ -29,7 +29,14 @@ impl runtime::NativeDeleteValue for NativeValue {
         if matches!(ty, Type::Array { elem } if matches!(&**elem, Type::Union { union_id } if {
             let arms = &module.unions[*union_id].arms;
             arms.contains(&Type::Undefined)
-                && arms.iter().all(|arm| matches!(arm, Type::F64 | Type::Bool | Type::String | Type::Undefined | Type::Null))
+                && (arms.iter().all(|arm| !matches!(arm, Type::Record { .. }))
+                    || (arms.iter().filter(|arm| matches!(arm, Type::Record { .. })).count() == 1
+                        && arms.iter().all(|arm| matches!(arm, Type::Record { .. } | Type::Undefined | Type::Null))))
+                && arms.iter().all(|arm| match arm {
+                    Type::F64 | Type::Bool | Type::String | Type::Undefined | Type::Null => true,
+                    Type::Record { shape_id } => record_storage::shared(&module.records[*shape_id]),
+                    _ => false,
+                })
         })) {
             writeln!(
                 out,

@@ -1,16 +1,19 @@
 import type { RustExpressionContext } from "./expression-context.js";
-import type { IrExpr, IrType, IrUnionDef } from "../../ir/ir.js";
+import type { IrExpr, IrRecordShape, IrType, IrUnionDef } from "../../ir/ir.js";
+import { isSharedRecord } from "./shared-records.js";
 
 type ArrayType = Extract<IrType, { kind: "array" }>;
 type Convert = (type: IrType, value: string, path?: string) => string;
 
-/** Optional primitive elements keep a live view, including sparse metadata.
- * Other unions still require their own owning representation contract. */
-export function nativeOptionalArrayViewSupported(type: IrType, union: (id: string) => IrUnionDef | undefined): boolean {
+/** Optional primitive and shared-record elements retain live sparse storage. */
+export function nativeOptionalArrayViewSupported(type: IrType, union: (id: string) => IrUnionDef | undefined, record: (id: string) => IrRecordShape | undefined): boolean {
   if (type.kind !== "array" || type.elem.kind !== "union") return false;
   const arms = union(type.elem.unionId)?.arms;
   return arms !== undefined && arms.some(arm => arm.kind === "undefinedT") &&
-    arms.every(arm => ["f64", "bool", "string", "undefinedT", "nullT"].includes(arm.kind));
+    (arms.every(arm => arm.kind !== "record") ||
+      arms.filter(arm => arm.kind === "record").length === 1 && arms.every(arm => ["record", "undefinedT", "nullT"].includes(arm.kind))) &&
+    arms.every(arm => ["f64", "bool", "string", "undefinedT", "nullT"].includes(arm.kind) ||
+      arm.kind === "record" && isSharedRecord(record(arm.shapeId)));
 }
 
 /** Recover the original dynamic storage on a return crossing; otherwise

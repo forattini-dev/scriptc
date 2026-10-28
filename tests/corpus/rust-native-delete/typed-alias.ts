@@ -26,5 +26,12 @@ const numbersAlias: any = numbers;
 delete numbersAlias[0];
 const [...numberRest] = numbers;
 console.log("numbers", numbers.length, numberRest[0] === undefined, numberRest[1] === 2);
+const records: ({ name: string } | undefined)[] = [{ name: "first" }, { name: "second" }];
+const recordsAlias: any = records;
+delete recordsAlias[0];
+const [...recordRest] = records;
+console.log("records", recordRest[0] === undefined, recordRest[1] === recordsAlias[1]);
+recordsAlias[1].name = "changed";
+console.log("record-alias", recordRest[1].name === "changed");
 }
 test();

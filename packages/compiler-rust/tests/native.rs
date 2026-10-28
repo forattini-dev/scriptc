@@ -1543,7 +1543,7 @@ fn erased_delete_non_optional_array_remains_explicitly_unsupported() {
     let target = binary(temp.path(), "non-optional-array-delete");
     for source in [
         "const values: number[] = [1]; const alias: any = values; delete alias[0];",
-        "const values: ({name: string} | undefined)[] = [{name: 'x'}]; const alias: any = values; delete alias[0];",
+        "const values: ([number, number] | undefined)[] = [[1, 2]]; const alias: any = values; delete alias[0];",
     ] {
         fs::write(&input, source).unwrap();
         let build = Command::new(compiler())
