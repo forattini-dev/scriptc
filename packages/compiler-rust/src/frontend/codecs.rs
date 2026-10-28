@@ -296,6 +296,97 @@ impl Lowerer<'_> {
         let index = self.expression(node.argument_expression())?;
         self.bytes_index_value(node, receiver, index)
     }
+    pub(super) fn nullable_bytes_index(
+        &mut self,
+        node: Node,
+        receiver: Expr,
+    ) -> Result<Option<Expr>, String> {
+        let Type::Union { union_id } = receiver.ty() else {
+            return Ok(None);
+        };
+        let arms = self.unions[union_id].arms.clone();
+        if arms
+            .iter()
+            .filter(|arm| matches!(arm, Type::Bytes { .. }))
+            .count()
+            != 1
+            || !arms
+                .iter()
+                .all(|arm| matches!(arm, Type::Bytes { .. } | Type::Null | Type::Undefined))
+        {
+            return Ok(None);
+        }
+        let index = self.expression(node.argument_expression())?;
+        if index.ty() != Type::F64 {
+            return Err(self.refuse(node, "byte indexing requires a represented numeric key"));
+        }
+        let result = self.intern_union(vec![Type::F64, Type::Undefined]).unwrap();
+        let mut helper = helpers::Helper::new(
+            "nullable_bytes_index",
+            vec![receiver.ty(), Type::F64],
+            result.clone(),
+            self.loc(node),
+        );
+        let source = helper.param(0);
+        let key = helper.param(1);
+        for (tag, arm) in arms.iter().enumerate() {
+            let value = if matches!(arm, Type::Bytes { .. }) {
+                let bytes = Expr::UnionNarrow {
+                    union_id: format!("u{union_id}"),
+                    tag,
+                    value: Box::new(helper.read(&source)),
+                    r#type: arm.clone(),
+                    loc: helper.loc(),
+                };
+                self.bytes_index_value(node, bytes, helper.read(&key))?
+            } else {
+                let unit = Expr::UnitLit {
+                    unit: if *arm == Type::Null {
+                        "null"
+                    } else {
+                        "undefined"
+                    },
+                    r#type: arm.clone(),
+                    loc: helper.loc(),
+                };
+                let unit = self.coerce(unit, Type::Dyn, node)?;
+                let property = Expr::ToString {
+                    operand: Box::new(helper.read(&key)),
+                    r#type: Type::String,
+                    loc: helper.loc(),
+                };
+                let read = self.dynamic_get(node, unit, property);
+                self.coerce(read, result.clone(), node)?
+            };
+            let ret = Stmt::Return {
+                value: Some(value),
+                loc: helper.loc(),
+            };
+            if tag + 1 == arms.len() {
+                helper.function.body.push(ret);
+            } else {
+                helper.function.body.push(Stmt::If {
+                    cond: Expr::UnionIsTag {
+                        value: Box::new(helper.read(&source)),
+                        union_id: format!("u{union_id}"),
+                        tag,
+                        negated: false,
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    },
+                    then: vec![ret],
+                    else_: None,
+                    loc: helper.loc(),
+                });
+            }
+        }
+        Ok(Some(Expr::Call {
+            callee: self.install_helper(helper.function),
+            args: vec![receiver, index],
+            r#type: result,
+            loc: self.loc(node),
+        }))
+    }
     pub(super) fn bytes_index_value(
         &mut self,
         node: Node,

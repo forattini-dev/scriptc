@@ -280,6 +280,9 @@ impl Lowerer<'_> {
     }
 
     fn optional_member_type(&mut self, node: Node, receiver: &Type) -> Result<Type, String> {
+        if matches!(receiver, Type::Bytes { .. }) && node.kind() == SyntaxKind::ElementAccessExpression {
+            return self.undefined_storage_type(Type::F64, node);
+        }
         if let Type::Array { elem } = receiver {
             let name = if node.kind() == SyntaxKind::PropertyAccessExpression {
                 Some(node.name().text().to_owned())
@@ -340,6 +343,9 @@ impl Lowerer<'_> {
     }
 
     fn optional_member(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
+        if matches!(receiver.ty(), Type::Bytes { .. }) && node.kind() == SyntaxKind::ElementAccessExpression {
+            return self.bytes_index(node, receiver);
+        }
         if receiver.ty() == Type::String {
             return self.string_index(node, receiver);
         }

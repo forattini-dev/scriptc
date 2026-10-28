@@ -1298,6 +1298,9 @@ impl<'a> Lowerer<'a> {
                 if matches!(obj.ty(), Type::Bytes { .. }) {
                     return self.bytes_index(node, obj);
                 }
+                if let Some(value) = self.nullable_bytes_index(node, obj.clone())? {
+                    return Ok(value);
+                }
                 if obj.ty() == Type::Dyn || matches!(obj.ty(), Type::Func { .. }) {
                     if matches!(obj.ty(), Type::Func { .. }) {
                         self.function_member_key(node)?;
@@ -1374,6 +1377,15 @@ impl<'a> Lowerer<'a> {
             }
             SyntaxKind::ConditionalExpression => {
                 let ty = self.ty(node)?;
+                let ty = if matches!(ty, Type::F64 | Type::String | Type::Bool)
+                    && self.argument_may_be_absent(node, &mut HashSet::new())
+                {
+                    // A branch can produce undefined despite the checked type.
+                    // Leave conversion to the consuming JavaScript operation.
+                    self.undefined_storage_type(ty, node)?
+                } else {
+                    ty
+                };
                 self.expected_expression(node, ty)
             }
             SyntaxKind::NullKeyword => Ok(Expr::UnitLit {
