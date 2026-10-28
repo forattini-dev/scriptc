@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-writable-abi/identity.ts",
+        "rust-native-writable-abi/shadows.ts",
+        "rust-native-writable-abi/public.mts",
         "rust-native-process/brackets.ts",
         "rust-native-global-numbers/values.ts",
         "rust-native-global-numbers/shadows.ts",

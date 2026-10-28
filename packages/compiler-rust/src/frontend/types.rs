@@ -113,6 +113,12 @@ impl Lowerer<'_> {
         if self.standard_stats_type(id) {
             return Some(Type::Stats);
         }
+        if self.node_writable_owning_type(id) {
+            // Writable is an open nominal interface: the annotation may refer
+            // to distinct native objects, not just a process output stream.
+            // Keep the owning value and do not invent its operations here.
+            return Some(Type::Dyn);
+        }
         if symbol != 0
             && self
                 .checker

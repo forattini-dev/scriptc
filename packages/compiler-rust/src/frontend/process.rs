@@ -2,6 +2,24 @@
 use super::*;
 
 impl Lowerer<'_> {
+    pub(super) fn node_writable_owning_type(&self, id: TypeId) -> bool {
+        let symbol = self.checker.ty(id).symbol();
+        if symbol.0 == 0 {
+            return false;
+        }
+        let info = self.checker.sym(symbol);
+        info.name.as_ref() == "Writable"
+            && info.flags.intersects(SymbolFlags::CLASS)
+            && info.declarations.iter().any(|declaration| {
+                let file = source_file_info(source_frontend::prelude::get_source_file_of_node(
+                    *declaration,
+                ));
+                declaration.kind() == SyntaxKind::ClassDeclaration
+                    && file.file_name.contains("/@types/node/")
+                    && file.file_name.ends_with("/stream.d.ts")
+            })
+    }
+
     pub(super) fn process_write(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let member = node.expression();
         let write = match member.kind() {

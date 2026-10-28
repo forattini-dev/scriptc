@@ -746,7 +746,8 @@ impl Lowerer<'_> {
         if declaration.is_nil()
             || !matches!(
                 declaration.kind(),
-                SyntaxKind::MethodDeclaration
+                SyntaxKind::FunctionDeclaration
+                    | SyntaxKind::MethodDeclaration
                     | SyntaxKind::ArrowFunction
                     | SyntaxKind::FunctionExpression
             )
@@ -754,8 +755,10 @@ impl Lowerer<'_> {
             return None;
         }
         let hint = self.declared(declaration)?;
-        (hint.class.is_none() && (hint.ret.is_some() || hint.reason.is_some()))
-            .then(|| hint.function_type())
+        (hint.class.is_none()
+            && (declaration.kind() != SyntaxKind::FunctionDeclaration || hint.value_type.is_none())
+            && (hint.ret.is_some() || hint.reason.is_some()))
+        .then(|| hint.function_type())
     }
     pub(super) fn declared(&self, node: Node) -> Option<&Hint> {
         if node.is_nil() {
