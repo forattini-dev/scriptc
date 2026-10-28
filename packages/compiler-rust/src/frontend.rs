@@ -175,6 +175,7 @@ struct Lowerer<'a> {
     locals: Vec<Local>,
     bindings: HashMap<u32, Local>,
     module_bindings: HashMap<u32, Local>,
+    unobserved_default_exports: HashSet<declarations::Key>,
     globals: Vec<ir::Global>,
     functions: functions::FunctionGraph,
     return_type: Option<Type>,
@@ -225,6 +226,7 @@ impl<'a> Lowerer<'a> {
             locals: Vec::new(),
             bindings: HashMap::new(),
             module_bindings: HashMap::new(),
+            unobserved_default_exports: HashSet::new(),
             globals: Vec::new(),
             functions: functions::FunctionGraph::default(),
             return_type: None,
@@ -791,6 +793,19 @@ impl<'a> Lowerer<'a> {
         }
         let loc = self.loc(node);
         let stmt = match node.kind() {
+            SyntaxKind::ExportAssignment
+                if self
+                    .unobserved_default_exports
+                    .contains(&declarations::Key::of(node)) =>
+            {
+                let value = self.expression(node.expression())?;
+                let value = if matches!(value.ty(), Type::Null | Type::Undefined) {
+                    self.coerce(value, Type::Dyn, node)?
+                } else {
+                    value
+                };
+                Stmt::Expression { expr: value, loc }
+            }
             SyntaxKind::ClassDeclaration => return self.class_declaration(node),
             SyntaxKind::FunctionDeclaration
                 if self.return_type.is_none() && node.parent().kind() == SyntaxKind::SourceFile =>

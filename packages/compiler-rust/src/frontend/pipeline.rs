@@ -60,6 +60,8 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             lowerer.literal_choices = linked.literal_choices;
         }
         let plan = modules::ModulePlan::link(lowerer.checker, file)?;
+        lowerer.unobserved_default_exports =
+            modules::unobserved_defaults(lowerer.checker, &plan.modules);
         lowerer.inventory_commonjs(&plan)?;
         for binding in &plan.bindings {
             match binding {

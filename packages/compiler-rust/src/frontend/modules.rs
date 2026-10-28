@@ -8,6 +8,73 @@ pub(super) struct ModulePlan {
     pub requires: HashMap<declarations::Key, Node>,
 }
 
+/// An unobserved default expression still runs at its source position. Keep
+/// the snapshot binding refused whenever any reachable import or re-export can
+/// observe it, until default-export cells have their own module storage.
+pub(super) fn unobserved_defaults(
+    checker: &mut Checker,
+    files: &[Node],
+) -> HashSet<declarations::Key> {
+    let mut defaults = HashMap::new();
+    for file in files {
+        for node in file.statements() {
+            if node.kind() == SyntaxKind::ExportAssignment && !node.is_export_equals() {
+                defaults.insert(source_file_info(*file).file_name.to_string(), node);
+            }
+        }
+    }
+    let mut observed = HashSet::new();
+    for file in files {
+        for node in file.statements() {
+            let Some(specifier) = runtime_specifier(node) else {
+                continue;
+            };
+            let symbol = checker.get_symbol_at_location(specifier, false);
+            if symbol.0 == 0 {
+                continue;
+            }
+            let target = checker.sym(symbol).value_declaration;
+            if target.is_nil() || target.kind() != SyntaxKind::SourceFile {
+                continue;
+            }
+            let path = source_file_info(target).file_name.to_string();
+            if !defaults.contains_key(&path) {
+                continue;
+            }
+            let observes = if node.kind() == SyntaxKind::ImportDeclaration {
+                let clause = node.import_clause();
+                if clause.is_nil() {
+                    false
+                } else {
+                    let bindings = clause.named_bindings();
+                    !clause.name().is_nil()
+                        || (!bindings.is_nil()
+                            && (bindings.kind() == SyntaxKind::NamespaceImport
+                                || (bindings.kind() == SyntaxKind::NamedImports
+                                    && bindings.elements().into_iter().any(|item| {
+                                        !item.is_type_only()
+                                            && item.property_name_or_name().text() == "default"
+                                    }))))
+                }
+            } else {
+                let clause = node.export_clause();
+                !clause.is_nil()
+                    && (clause.kind() != SyntaxKind::NamedExports
+                        || clause.elements().into_iter().any(|item| {
+                            !item.is_type_only() && item.property_name_or_name().text() == "default"
+                        }))
+            };
+            if observes {
+                observed.insert(path);
+            }
+        }
+    }
+    defaults
+        .into_iter()
+        .filter_map(|(path, node)| (!observed.contains(&path)).then(|| declarations::Key::of(node)))
+        .collect()
+}
+
 pub(super) enum ImportBinding {
     NativeRequire {
         name: Node,

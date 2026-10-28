@@ -108,6 +108,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-unobserved-default/main.ts",
+        "rust-native-unobserved-default/entry.ts",
         "rust-native-writable-abi/identity.ts",
         "rust-native-writable-abi/shadows.ts",
         "rust-native-writable-abi/public.mts",
@@ -3238,6 +3240,43 @@ fn accessor_boundaries_preserve_previous_artifacts() {
         ] {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
+    }
+}
+
+#[test]
+fn observed_default_expression_is_refused_without_publication() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.mts");
+    let entry = temp.path().join("entry.mts");
+    let output = temp.path().join("entry.ir.json");
+    fs::write(temp.path().join("tsconfig.json"), r#"{"compilerOptions":{"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","allowImportingTsExtensions":true,"strict":true}}"#).unwrap();
+    fs::write(
+        &source,
+        "export let value = 1; export default value; value = 2;",
+    )
+    .unwrap();
+    for text in [
+        "import value from './source.mts'; console.log(value);",
+        "import { default as value } from './source.mts'; console.log(value);",
+        "import * as source from './source.mts'; console.log(source.default);",
+        "export { default as value } from './source.mts';",
+        "export * as source from './source.mts';",
+    ] {
+        fs::write(&entry, text).unwrap();
+        fs::write(&output, "preserve").unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&entry)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(&output)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("ExportAssignment"),
+            "{text}: {stderr}"
+        );
+        assert_eq!(fs::read_to_string(&output).unwrap(), "preserve");
     }
 }
 
