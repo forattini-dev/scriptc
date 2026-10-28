@@ -143,6 +143,22 @@ impl Lowerer<'_> {
         });
     }
 
+    // A loop may execute zero times or repeatedly. Only facts about immutable
+    // bindings survive both the back edge and arbitrary calls in the body.
+    pub(super) fn immutable_var_facts(&self) -> HashSet<u32> {
+        self.var_defined
+            .iter()
+            .copied()
+            .filter(|symbol| {
+                self.bindings
+                    .get(symbol)
+                    .or_else(|| self.module_bindings.get(symbol))
+                    .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(symbol)))
+                    .is_some_and(|local| !local.mutable)
+            })
+            .collect()
+    }
+
     fn var_undefined(&self, ty: Type, node: Node) -> Result<Expr, String> {
         self.coerce(
             Expr::UnitLit {

@@ -104,7 +104,8 @@ impl Lowerer<'_> {
         ];
         let saved_bindings = self.bindings.clone();
         let saved_var_types = self.var_types.clone();
-        self.var_defined.clear();
+        let stable_facts = self.immutable_var_facts();
+        self.var_defined = stable_facts.clone();
         let mut step = number(1.0, &loc);
         let item = match source.r#type {
             Type::String => {
@@ -236,7 +237,7 @@ impl Lowerer<'_> {
         });
         self.bindings = saved_bindings;
         self.var_types = saved_var_types;
-        self.var_defined.clear();
+        self.var_defined = stable_facts;
         Ok(vec![Stmt::Block { body: outer, loc }])
     }
 
@@ -325,7 +326,8 @@ impl Lowerer<'_> {
         };
         let saved_bindings = self.bindings.clone();
         let saved_var_types = self.var_types.clone();
-        self.var_defined.clear();
+        let stable_facts = self.immutable_var_facts();
+        self.var_defined = stable_facts.clone();
         let mut body = if declaration.name().kind() == SyntaxKind::ArrayBindingPattern {
             self.bind_sequence_pattern(
                 declaration.name(),
@@ -373,7 +375,7 @@ impl Lowerer<'_> {
         });
         self.bindings = saved_bindings;
         self.var_types = saved_var_types;
-        self.var_defined.clear();
+        self.var_defined = stable_facts;
         Ok(vec![Stmt::Block { body: outer, loc }])
     }
 

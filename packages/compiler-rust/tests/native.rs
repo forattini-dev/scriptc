@@ -220,6 +220,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-optional-access/chains.ts",
         "rust-native-tuple-includes/contracts.ts",
         "rust-native-optional-dynamic-record/values.ts",
+        "rust-native-for-of-presence/values.ts",
         "rust-native-tuple-array-includes/values.ts",
         "rust-native-tuple-includes/order.ts",
         "rust-native-numeric-dictionaries/contracts.ts",
