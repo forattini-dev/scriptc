@@ -531,7 +531,32 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             });
         }
-        Err(self.refuse(node, "native representation coercion is not ported"))
+        let describe = |ty: &Type| {
+            if let Type::Record { shape_id } = ty
+                && let Some(shape) = self.records.get(*shape_id)
+            {
+                let fields = shape
+                    .fields
+                    .iter()
+                    .take(8)
+                    .map(|field| format!("{}: {:?}", field.name, field.r#type))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return format!(
+                    "record r{shape_id} {{{fields}{}}}",
+                    if shape.fields.len() > 8 { ", ..." } else { "" }
+                );
+            }
+            format!("{ty:?}")
+        };
+        Err(self.refuse(
+            node,
+            &format!(
+                "native representation coercion is not ported: {} -> {}",
+                describe(&value.ty()),
+                describe(&target)
+            ),
+        ))
     }
 
     pub(super) fn narrowed(&mut self, value: Expr, node: Node) -> Result<Expr, String> {

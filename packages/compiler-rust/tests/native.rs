@@ -4576,6 +4576,12 @@ fn numeric_dictionary_boundaries_preserve_existing_artifacts() {
                 && !stderr.contains("panicked"),
             "{source}: {stderr}"
         );
+        if expected == "native representation coercion is not ported" {
+            assert!(
+                stderr.contains(" -> "),
+                "missing coercion layouts: {stderr}"
+            );
+        }
         for artifact in [
             &target,
             &target.with_extension("ir.json"),
