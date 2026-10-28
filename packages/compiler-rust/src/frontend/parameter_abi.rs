@@ -9,7 +9,12 @@ pub(super) fn is_javascript(node: Node) -> bool {
         .any(|ext| file.file_name.ends_with(ext))
 }
 
-fn collect(node: Node, functions: &mut Vec<Node>, calls: &mut Vec<Node>) {
+fn collect(
+    node: Node,
+    functions: &mut Vec<Node>,
+    calls: &mut Vec<Node>,
+    assignments: &mut Vec<Node>,
+) {
     if matches!(
         node.kind(),
         SyntaxKind::FunctionDeclaration
@@ -22,8 +27,14 @@ fn collect(node: Node, functions: &mut Vec<Node>, calls: &mut Vec<Node>) {
     if node.kind() == SyntaxKind::CallExpression {
         calls.push(node);
     }
+    if node.kind() == SyntaxKind::BinaryExpression
+        && node.operator_token().kind() == SyntaxKind::EqualsToken
+        && node.left().kind() == SyntaxKind::Identifier
+    {
+        assignments.push(node);
+    }
     node.for_each_child(&mut |child| {
-        collect(child, functions, calls);
+        collect(child, functions, calls, assignments);
         false
     });
 }
@@ -128,8 +139,9 @@ impl Lowerer<'_> {
     pub(super) fn plan_parameter_abi(&mut self, files: &[Node]) {
         let mut functions = Vec::new();
         let mut calls = Vec::new();
+        let mut assignments = Vec::new();
         for file in files {
-            collect(*file, &mut functions, &mut calls);
+            collect(*file, &mut functions, &mut calls, &mut assignments);
         }
         let mut targets = HashMap::new();
         let mut return_edges = Vec::new();
@@ -182,9 +194,6 @@ impl Lowerer<'_> {
                 }
             }
         }
-        if targets.is_empty() {
-            return;
-        }
         let mut edges = Vec::new();
         for call in calls {
             let target = self.call_target(call.expression(), &mut HashSet::new());
@@ -219,6 +228,19 @@ impl Lowerer<'_> {
                         .is_none_or(|arg| self.argument_may_be_absent(arg, &mut HashSet::new()))
                 {
                     changed |= self.js_absence_parameters.insert(*symbol);
+                }
+            }
+            for assignment in &assignments {
+                let symbol = self.symbol(assignment.left());
+                if symbol == 0 || self.absence_assignments.contains(&symbol) {
+                    continue;
+                }
+                let declaration = self.checker.sym(SymbolId(symbol)).value_declaration;
+                if !declaration.is_nil()
+                    && declaration.kind() == SyntaxKind::VariableDeclaration
+                    && self.argument_may_be_absent(assignment.right(), &mut HashSet::new())
+                {
+                    changed |= self.absence_assignments.insert(symbol);
                 }
             }
             for (symbol, value) in &return_edges {
@@ -323,7 +345,9 @@ impl Lowerer<'_> {
             }
             SyntaxKind::Identifier => {
                 let symbol = self.symbol(node);
-                if self.js_absence_parameters.contains(&symbol) {
+                if self.js_absence_parameters.contains(&symbol)
+                    || self.absence_assignments.contains(&symbol)
+                {
                     return true;
                 }
                 if symbol == 0 || !seen.insert(symbol) {

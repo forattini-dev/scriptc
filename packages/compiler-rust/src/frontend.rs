@@ -211,6 +211,7 @@ struct Lowerer<'a> {
     var_defined: HashSet<u32>,
     js_absence_parameters: HashSet<u32>,
     absence_returns: HashSet<u32>,
+    absence_assignments: HashSet<u32>,
     js_absent_fields: HashSet<(TypeId, String)>,
     enums: enums::EnumGraph,
     callables: HashMap<usize, Type>,
@@ -263,6 +264,7 @@ impl<'a> Lowerer<'a> {
             var_defined: HashSet::new(),
             js_absence_parameters: HashSet::new(),
             absence_returns: HashSet::new(),
+            absence_assignments: HashSet::new(),
             js_absent_fields: HashSet::new(),
             enums: enums::EnumGraph::default(),
             callables: HashMap::new(),
@@ -1103,11 +1105,11 @@ impl<'a> Lowerer<'a> {
                     return Err(self.refuse(expression, "catch binding reassignment is not ported"));
                 }
                 let symbol = self.symbol(expression.left());
-                let target = self
-                    .var_types
-                    .get(&symbol)
-                    .cloned()
-                    .unwrap_or_else(|| local.r#type.clone());
+                let target = if self.absence_assignments.contains(&symbol) {
+                    local.r#type.clone()
+                } else {
+                    self.var_types.get(&symbol).cloned().unwrap_or_else(|| local.r#type.clone())
+                };
                 let value = self.expected_expression(expression.right(), target)?;
                 let value = self.coerce(value, local.r#type.clone(), expression)?;
                 if self.var_types.contains_key(&symbol) {

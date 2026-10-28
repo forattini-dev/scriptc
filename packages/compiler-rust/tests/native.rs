@@ -226,6 +226,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-conditional-absence/values.ts",
         "rust-native-parameter-absence/values.ts",
         "rust-native-return-absence/values.ts",
+        "rust-native-absence-assignment/values.ts",
         "rust-native-bytes-conditional/values.ts",
         "rust-native-bytes-undefined-key/values.ts",
         "rust-native-zlib/values.ts",

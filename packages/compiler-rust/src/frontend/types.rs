@@ -273,6 +273,16 @@ impl Lowerer<'_> {
             return Ok(ty);
         }
         let symbol = self.symbol(node);
+        if self.absence_assignments.contains(&symbol)
+            && node.parent().kind() == SyntaxKind::VariableDeclaration
+            && self.declared(node.parent()).is_none()
+            && !self.data_bindings.contains(&symbol)
+        {
+            let ty = self.ty(node)?;
+            if matches!(ty, Type::F64 | Type::String | Type::Bool) {
+                return self.undefined_storage_type(ty, node);
+            }
+        }
         if let Some(ty) = self.contextual_record_storage.get(&symbol) {
             return Ok(ty.clone());
         }
