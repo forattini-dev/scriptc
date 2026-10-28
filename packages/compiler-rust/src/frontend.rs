@@ -1123,7 +1123,21 @@ impl<'a> Lowerer<'a> {
     }
     fn expression(&mut self, node: Node) -> Result<Expr, String> {
         let value = self.expression_inner(node).and_then(|value| {
+            // A discarded value needs no checker projection: inserting a
+            // dynamic type check here can throw after a successful JS call.
+            let mut consumer = node.parent();
+            while matches!(
+                consumer.kind(),
+                SyntaxKind::ParenthesizedExpression
+                    | SyntaxKind::AsExpression
+                    | SyntaxKind::TypeAssertionExpression
+                    | SyntaxKind::SatisfiesExpression
+                    | SyntaxKind::NonNullExpression
+            ) {
+                consumer = consumer.parent();
+            }
             if value.ty() == Type::Dyn
+                && consumer.kind() != SyntaxKind::ExpressionStatement
                 && !function_properties::owning_read(&value)
                 && matches!(
                     node.kind(),

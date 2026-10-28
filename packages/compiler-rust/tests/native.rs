@@ -184,6 +184,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-record-abi/effects.js",
         "rust-native-record-abi/pop.ts",
         "rust-native-js-parameter-abi/contracts.js",
+        "rust-native-js-parameter-abi/discard.js",
         "rust-native-js-parameter-abi/aliases.js",
         "rust-native-js-parameter-abi/order.js",
         "rust-native-array-length/contracts.ts",
