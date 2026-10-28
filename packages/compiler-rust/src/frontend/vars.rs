@@ -25,6 +25,58 @@ fn declarations(node: Node, out: &mut Vec<Node>) {
 }
 
 impl Lowerer<'_> {
+    /// A direct truthy return has no intervening operation that could retag
+    /// the local. This also works for JS bodies whose checker view is `any`.
+    pub(super) fn guarded_truthy_return(&mut self, node: Node, value: &Expr) -> Option<Expr> {
+        if node.kind() != SyntaxKind::Identifier
+            || node.parent().kind() != SyntaxKind::ReturnStatement
+        {
+            return None;
+        }
+        let ret = node.parent();
+        let branch = if ret.parent().kind() == SyntaxKind::Block {
+            let block = ret.parent();
+            let statements = block.statements().into_iter().collect::<Vec<_>>();
+            if statements.as_slice() != [ret] {
+                return None;
+            }
+            block
+        } else {
+            ret
+        };
+        let guard = branch.parent();
+        if guard.kind() != SyntaxKind::IfStatement || guard.then_statement() != branch {
+            return None;
+        }
+        let condition = primitives::primitive_source(guard.expression());
+        let symbol = self.symbol(node);
+        if symbol == 0
+            || condition.kind() != SyntaxKind::Identifier
+            || self.symbol(condition) != symbol
+        {
+            return None;
+        }
+        let Type::Union { union_id } = value.ty() else {
+            return None;
+        };
+        let present = self.unions[union_id]
+            .arms
+            .iter()
+            .enumerate()
+            .filter(|(_, arm)| !matches!(arm, Type::Null | Type::Undefined | Type::Void))
+            .collect::<Vec<_>>();
+        let [(tag, target)] = present.as_slice() else {
+            return None;
+        };
+        Some(Expr::UnionNarrow {
+            union_id: format!("u{union_id}"),
+            tag: *tag,
+            value: Box::new(value.clone()),
+            r#type: (*target).clone(),
+            loc: self.loc(node),
+        })
+    }
+
     pub(super) fn optional_storage(&self, ty: &Type) -> bool {
         matches!(ty, Type::Union { union_id } if self.unions[*union_id].arms.contains(&Type::Undefined))
     }

@@ -1,0 +1,15 @@
+export {};
+const values = new Map<symbol, unknown>();
+const first = Symbol('same');
+const alias = first;
+const other = Symbol('same');
+const registered = Symbol.for('shared');
+values.set(first, 1);
+values.set(other, undefined);
+values.set(registered, 'registry');
+console.log('identity', values.get(alias) === 1, values.has(other), values.get(other) === undefined);
+console.log('missing', values.has(Symbol('same')), values.get(Symbol('same')) === undefined);
+console.log('registry', values.get(Symbol.for('shared')) === 'registry', values.size);
+console.log('delete', values.delete(alias), values.has(first), values.has(other));
+values.clear();
+console.log('clear', values.size, values.has(registered));

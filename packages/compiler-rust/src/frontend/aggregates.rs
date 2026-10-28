@@ -633,6 +633,9 @@ impl Lowerer<'_> {
         // A lowered value already carries a verified native representation.
         // Untyped JS doesn't supply additional control-flow evidence.
         if self.checker_any(node) {
+            if let Some(narrowed) = self.guarded_truthy_return(node, &value) {
+                return Ok(narrowed);
+            }
             return Ok(value);
         }
         if let Type::Object { class_name: parent } = value.ty() {
@@ -1294,6 +1297,27 @@ impl Lowerer<'_> {
             };
             !ir::contains_set(&ty, &self.records, &self.unions) && arms.iter().all(|ty| matches!(ty, Type::Record { shape_id } if !self.records[*shape_id].tuple && self.records[*shape_id].index_value.is_none() && !self.records[*shape_id].fields.iter().any(|f| f.name == callables::CALL_FIELD)))
         };
+        if matches!(op, "===" | "!==")
+            && left.ty() == right.ty()
+            && matches!(left.ty(), Type::Record { .. })
+            && data_records(left.ty())
+        {
+            // Compare the owning record handles directly. Dynamic boxing can
+            // copy records in a backend and would change object identity.
+            let union = self.intern_union(vec![left.ty(), Type::Undefined]).unwrap();
+            let Type::Union { union_id } = union else {
+                unreachable!()
+            };
+            return Ok(Expr::UnionEq {
+                union_id: format!("u{union_id}"),
+                negated: op == "!==",
+                same_value: false,
+                left: Box::new(self.coerce(left, union.clone(), node.left())?),
+                right: Box::new(self.coerce(right, union, node.right())?),
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            });
+        }
         if matches!(op, "===" | "!==") && data_records(left.ty()) && data_records(right.ty()) {
             return Ok(Expr::DynScalarEq {
                 left: Box::new(self.coerce(left, Type::Dyn, node.left())?),

@@ -108,6 +108,11 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-symbol-maps/values.ts",
+        "rust-native-symbol-maps/record.ts",
+        "rust-native-symbol-maps/seed.ts",
+        "rust-native-symbol-maps/public.mts",
+        "rust-native-symbol-maps/reassign.mts",
         "rust-native-static-methods/values.ts",
         "rust-native-static-methods/inheritance.ts",
         "rust-native-static-methods/order.ts",

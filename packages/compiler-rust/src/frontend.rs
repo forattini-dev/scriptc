@@ -1477,8 +1477,33 @@ impl<'a> Lowerer<'a> {
                         loc: self.loc(node),
                     });
                 }
-                if self.var_types.contains_key(&symbol) && !self.var_defined.contains(&symbol) {
-                    return Ok(value);
+                if self.var_types.contains_key(&symbol) {
+                    if !self.var_defined.contains(&symbol) {
+                        return Ok(value);
+                    }
+                    // JavaScript implementation inference can be `any` even
+                    // when its public ABI owns an optional typed slot. A live
+                    // presence fact proves the single non-undefined arm, but
+                    // not a particular arm of a wider or nullable union.
+                    if self.checker_any(node)
+                        && let Type::Union { union_id } = value.ty()
+                    {
+                        let arms = &self.unions[union_id].arms;
+                        if arms.len() == 2
+                            && arms.contains(&Type::Undefined)
+                            && let Some((tag, target)) = arms.iter().enumerate().find(|(_, arm)| {
+                                !matches!(arm, Type::Undefined | Type::Null | Type::Void)
+                            })
+                        {
+                            return Ok(Expr::UnionNarrow {
+                                union_id: format!("u{union_id}"),
+                                tag,
+                                value: Box::new(value),
+                                r#type: target.clone(),
+                                loc: self.loc(node),
+                            });
+                        }
+                    }
                 }
                 self.narrowed(value, node)
             }
