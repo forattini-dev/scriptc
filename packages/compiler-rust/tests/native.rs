@@ -219,6 +219,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-optional-access/effects.ts",
         "rust-native-optional-access/chains.ts",
         "rust-native-tuple-includes/contracts.ts",
+        "rust-native-optional-dynamic-record/values.ts",
+        "rust-native-tuple-array-includes/values.ts",
         "rust-native-tuple-includes/order.ts",
         "rust-native-numeric-dictionaries/contracts.ts",
         "rust-native-numeric-dictionaries/coalesce.ts",
@@ -4864,6 +4866,8 @@ fn tuple_includes_boundaries_preserve_existing_artifacts() {
         "const a=[{value:1}] as const; console.log(a.includes(a[0]));",
         "const a=[1] as const; console.log(a.includes(1, {valueOf(){return 0}}));",
         "const a=[1] as const; console.log(a.includes(...[1]));",
+        "const a=['a'] as const; const alias = a as readonly string[]; console.log(alias.includes('a'));",
+        "function f(a: readonly ['a'] | undefined) { return (a! as readonly string[]).includes('a'); } console.log(f(undefined));",
         "const a=['a'] as const as ['a'] & {includes(value:string):boolean}; console.log(a[0]);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();

@@ -267,6 +267,14 @@ impl Lowerer<'_> {
 
     pub(super) fn tuple_includes(&mut self, node: Node) -> Result<Expr, String> {
         let receiver = self.expression(node.expression().expression())?;
+        self.tuple_includes_value(node, receiver)
+    }
+
+    pub(super) fn tuple_includes_value(
+        &mut self,
+        node: Node,
+        receiver: Expr,
+    ) -> Result<Expr, String> {
         let Type::Record { shape_id } = receiver.ty() else {
             unreachable!()
         };

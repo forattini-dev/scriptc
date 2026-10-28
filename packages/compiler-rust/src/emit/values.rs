@@ -299,7 +299,30 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
                     .map(|(tag, t)| format!("U{union_id}::V{tag}(v) => {},", boxed(t, "v", module)))
                     .collect::<String>();
                 let c = arms.iter().enumerate().map(|(tag,t)| format!("if let Some(v) = native_try_{}(value) {{ return Some(U{union_id}::V{tag}(v)); }}", id(t,module))).collect::<String>();
-                (format!("match value {{ {b} }}"), format!("{{ {c} None }}"))
+                // A single index-only dynamic record alongside unit arms has
+                // an unambiguous owning view of any represented plain object.
+                // Preserve exact record tags for every other union so an
+                // untagged object cannot select an arbitrary structural arm.
+                let record = arms.iter().enumerate().find_map(|(tag, arm)| {
+                    let Type::Record { shape_id } = arm else {
+                        return None;
+                    };
+                    let shape = &module.records[*shape_id];
+                    (shape.fields.is_empty()
+                        && shape.index_value == Some(Type::Dyn)
+                        && record_storage::shared(shape)
+                        && arms.iter().enumerate().all(|(i, other)| {
+                            i == tag || matches!(other, Type::Null | Type::Undefined)
+                        }))
+                    .then_some(tag)
+                });
+                let view = record.map_or(String::new(), |tag| format!(
+                    "if let NativeValue::Object(object) | NativeValue::Record(_, object) = value {{ return Some(U{union_id}::V{tag}(object.clone())); }}"
+                ));
+                (
+                    format!("match value {{ {b} }}"),
+                    format!("{{ {c} {view} None }}"),
+                )
             }
             _ => (
                 format!("NativeValue::V{i}(value)"),

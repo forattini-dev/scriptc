@@ -51,6 +51,17 @@ impl Lowerer<'_> {
         {
             return Err(self.refuse(member, "array.includes requires its standard declaration"));
         }
+        let source = primitives::primitive_source(member.expression());
+        if source != member.expression()
+            && matches!(self.ty(source), Ok(Type::Record { shape_id }) if self.records[shape_id].tuple)
+        {
+            let receiver = self.expression(source)?;
+            let receiver = self.live_member_receiver(source, receiver);
+            if matches!(receiver.ty(), Type::Record { shape_id } if self.records[shape_id].tuple) {
+                return self.tuple_includes_value(node, receiver);
+            }
+            return Err(self.refuse(source, "tuple.includes requires a non-null native tuple"));
+        }
         let receiver = self.expression(member.expression())?;
         let receiver = self.live_member_receiver(member.expression(), receiver);
         if !matches!(receiver.ty(), Type::Array { .. }) {
