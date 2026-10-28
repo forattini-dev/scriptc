@@ -362,8 +362,13 @@ impl Lowerer<'_> {
                     SyntaxKind::Identifier
                         | SyntaxKind::PropertyAccessExpression
                         | SyntaxKind::ElementAccessExpression
+                        | SyntaxKind::ConditionalExpression
                 )
-                && parameter_abi::is_javascript(declaration)
+                && if initial.kind() == SyntaxKind::ConditionalExpression {
+                    !parameter_abi::is_javascript(declaration)
+                } else {
+                    parameter_abi::is_javascript(declaration)
+                }
                 && self.argument_may_be_absent(initial, &mut HashSet::new())
             {
                 let ty = self.ty(node)?;

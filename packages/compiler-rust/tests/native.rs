@@ -223,6 +223,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-optional-dynamic-record/values.ts",
         "rust-native-bytes-tuple-set/values.ts",
         "rust-native-array-reduce/values.ts",
+        "rust-native-conditional-absence/values.ts",
         "rust-native-zlib/values.ts",
         "rust-native-for-of-presence/values.ts",
         "rust-native-tuple-array-includes/values.ts",
@@ -8347,7 +8348,7 @@ fn numeric_union_refusal_reports_the_runtime_arms() {
     metadata_project(temp.path());
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "numeric-union-boundary");
-    fs::write(&input, "const data = new Uint8Array(0); const x = true ? data[1]! : 0; console.log(x);\n").unwrap();
+    fs::write(&input, "function use(x: number) { console.log(x); } const data = new Uint8Array(0); const x = true ? data[1]! : 0; use(x);\n").unwrap();
     let output = Command::new(compiler()).arg("build").arg(&input)
         .args(["--no-engine", "--out"]).arg(&target).output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);

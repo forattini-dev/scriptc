@@ -704,6 +704,21 @@ impl Lowerer<'_> {
         {
             return Ok(value);
         }
+        if node.kind() == SyntaxKind::Identifier {
+            let symbol = self.symbol(node);
+            if symbol != 0 {
+                let declared = self
+                    .checker
+                    .get_type_of_symbol(source_frontend::prelude::SymbolId(symbol));
+                if !self.source_has_undefined(declared)
+                    && self.argument_may_be_absent(node, &mut HashSet::new())
+                {
+                    // The checker can omit absent indexed values or erase a
+                    // non-null assertion. It has not proven the runtime tag.
+                    return Ok(value);
+                }
+            }
+        }
         if let Type::Union { union_id } = value.ty()
             && let Some(tag) = self.unions[union_id].arms.iter().position(|a| *a == target)
         {
