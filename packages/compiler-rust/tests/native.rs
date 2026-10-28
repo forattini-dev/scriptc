@@ -297,6 +297,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-delete/records.ts",
         "rust-native-delete/order.ts",
         "rust-native-delete/arrays.ts",
+        "rust-native-delete/typed-alias.ts",
         "rust-native-delete/keys.ts",
         "rust-native-delete/errors.ts",
         "rust-native-delete/sloppy.cjs",

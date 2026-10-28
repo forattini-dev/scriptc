@@ -24,6 +24,13 @@ impl runtime::NativeDeleteValue for NativeValue {
             Self::RawJson(_) => if *key == "rawJSON" { D::NonConfigurable("[object Object]") } else { D::Deleted },
 "#);
     for (index, ty) in values::types(module).iter().enumerate() {
+        if matches!(ty, Type::Array { elem } if **elem != Type::Dyn) {
+            writeln!(
+                out,
+                "Self::V{index}(array) => runtime::native_array_delete(array, key),"
+            )
+            .unwrap();
+        }
         if let Type::Record { shape_id } = ty
             && module.records[*shape_id].index_value.is_some()
             && !record_storage::shared(&module.records[*shape_id])
