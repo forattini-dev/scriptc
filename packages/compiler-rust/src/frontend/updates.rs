@@ -32,6 +32,55 @@ pub(super) fn compound_operator(kind: SyntaxKind) -> Option<&'static str> {
 }
 
 impl Lowerer<'_> {
+    pub(super) fn local_assignment_expression(&mut self, node: Node) -> Result<Expr, String> {
+        let operand = primitives::primitive_source(node.left());
+        if operand.kind() != SyntaxKind::Identifier {
+            return Err(self.refuse(
+                node,
+                "assignment expression requires a mutable local binding",
+            ));
+        }
+        let symbol = self.symbol(operand);
+        if self.enum_type(operand).is_some() || self.native_namespaces.contains_key(&symbol) {
+            return Err(self.refuse(node, "namespace assignment expressions are not ported"));
+        }
+        let local = self.binding(operand)?;
+        if !local.mutable
+            || local.r#type == Type::Caught
+            || self.caught_aliases.contains_key(&symbol)
+        {
+            return Err(self.refuse(
+                node,
+                "assignment expression requires a mutable native binding",
+            ));
+        }
+        let target = self
+            .var_types
+            .get(&symbol)
+            .cloned()
+            .unwrap_or_else(|| local.r#type.clone());
+        let value = self.expected_expression(node.right(), target)?;
+        let result_type = value.ty();
+        let mut stmts = Vec::new();
+        let result = self.update_temp(value, &mut stmts, node);
+        let stored = self.coerce(result.clone(), local.r#type.clone(), node)?;
+        if self.var_types.contains_key(&symbol) {
+            self.var_assignment_fact(symbol, &stored);
+        }
+        stmts.push(Stmt::Assign {
+            local_id: local.id,
+            value: stored,
+            initializes_global: false,
+            loc: self.loc(node),
+        });
+        Ok(Expr::Sequence {
+            stmts,
+            result: Box::new(result),
+            r#type: result_type,
+            loc: self.loc(node),
+        })
+    }
+
     pub(super) fn compound_assignment(&mut self, node: Node, op: &str) -> Result<Expr, String> {
         if let Some(value) = self.bytes_assignment(node, Some(op))? {
             return Ok(value);

@@ -108,6 +108,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-assignment-expressions/values.ts",
+        "rust-native-assignment-expressions/errors.ts",
         "rust-native-record-index-values/values.ts",
         "rust-native-record-index-values/order.ts",
         "rust-native-asserted-index/values.ts",
@@ -3231,6 +3233,29 @@ fn accessor_boundaries_preserve_previous_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn ordinary_property_assignment_expression_is_refused_without_publication() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let output = temp.path().join("main.ir.json");
+    fs::write(&input, "function run(): void { const box = { value: 0 }; let x = 0; console.log(x = box.value = 2); } run();").unwrap();
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--emit", "ir", "--out"])
+        .arg(&output)
+        .arg("--no-engine")
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("binary operator is not ported"),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!output.exists());
 }
 
 #[test]

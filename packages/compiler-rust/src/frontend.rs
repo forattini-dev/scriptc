@@ -1527,6 +1527,11 @@ impl<'a> Lowerer<'a> {
                 {
                     return Ok(value);
                 }
+                if node.operator_token().kind() == SyntaxKind::EqualsToken
+                    && primitives::primitive_source(node.left()).kind() == SyntaxKind::Identifier
+                {
+                    return self.local_assignment_expression(node);
+                }
                 if node.operator_token().kind() == SyntaxKind::InstanceOfKeyword {
                     return self.class_instanceof(node);
                 }
