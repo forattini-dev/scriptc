@@ -1677,6 +1677,9 @@ impl<'a> Lowerer<'a> {
                 if let Some(value) = self.primitive_call(node)? {
                     return Ok(value);
                 }
+                if let Some(value) = self.object_prototype_has_own_call(node)? {
+                    return Ok(value);
+                }
                 if let Some(value) = self.function_receiver_call(node)? {
                     return Ok(value);
                 }

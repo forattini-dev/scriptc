@@ -3,6 +3,69 @@ use super::*;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
 impl Lowerer<'_> {
+    pub(super) fn object_prototype_has_own_call(
+        &mut self,
+        node: Node,
+    ) -> Result<Option<Expr>, String> {
+        let call = node.expression();
+        if call.kind() != SyntaxKind::PropertyAccessExpression || call.name().text() != "call" {
+            return Ok(None);
+        }
+        let method = call.expression();
+        if method.kind() != SyntaxKind::PropertyAccessExpression
+            || method.name().text() != "hasOwnProperty"
+        {
+            return Ok(None);
+        }
+        let prototype = method.expression();
+        if prototype.kind() != SyntaxKind::PropertyAccessExpression
+            || prototype.name().text() != "prototype"
+            || prototype.expression().kind() != SyntaxKind::Identifier
+        {
+            return Ok(None);
+        }
+        let object = self.symbol(prototype.expression());
+        let prototype_symbol = self.symbol(prototype.name());
+        let method_symbol = self.symbol(method.name());
+        let call_symbol = self.symbol(call.name());
+        if !self.primitive_symbol(object, "Object", None)
+            || !self.primitive_symbol(prototype_symbol, "prototype", Some("ObjectConstructor"))
+            || !self.primitive_symbol(method_symbol, "hasOwnProperty", Some("Object"))
+            || !(self.primitive_symbol(call_symbol, "call", Some("Function"))
+                || self.primitive_symbol(call_symbol, "call", Some("CallableFunction")))
+        {
+            return Ok(None);
+        }
+        let args = node.arguments().into_iter().collect::<Vec<_>>();
+        if args.len() != 2
+            || args
+                .iter()
+                .any(|arg| arg.kind() == SyntaxKind::SpreadElement)
+        {
+            return Err(self.refuse(
+                node,
+                "hasOwnProperty.call requires a represented receiver and string key",
+            ));
+        }
+        let value = self.expression(args[0])?;
+        let unit = matches!(value.ty(), Type::Null | Type::Undefined);
+        let value = self.primitive_capture(value, args[0])?;
+        if !self.reflected_record(&value.ty()) && !unit {
+            return Err(self.refuse(
+                args[0],
+                "hasOwnProperty.call requires a represented data record",
+            ));
+        }
+        let value = self.coerce(value, Type::Dyn, args[0])?;
+        let key = self.expected_expression(args[1], Type::String)?;
+        Ok(Some(Expr::LibCall {
+            r#fn: "dyn.hasOwn".into(),
+            args: vec![value, key],
+            r#type: Type::Bool,
+            loc: self.loc(node),
+        }))
+    }
+
     pub(super) fn object_reflection(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let member = node.expression();
         if member.kind() != SyntaxKind::PropertyAccessExpression
