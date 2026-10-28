@@ -363,8 +363,12 @@ impl Lowerer<'_> {
                         | SyntaxKind::PropertyAccessExpression
                         | SyntaxKind::ElementAccessExpression
                         | SyntaxKind::ConditionalExpression
+                        | SyntaxKind::CallExpression
                 )
-                && if initial.kind() == SyntaxKind::ConditionalExpression {
+                && if matches!(
+                    initial.kind(),
+                    SyntaxKind::ConditionalExpression | SyntaxKind::CallExpression
+                ) {
                     !parameter_abi::is_javascript(declaration)
                 } else {
                     parameter_abi::is_javascript(declaration)

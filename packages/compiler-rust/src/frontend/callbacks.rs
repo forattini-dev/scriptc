@@ -25,6 +25,7 @@ impl Lowerer<'_> {
         }
         let signature = signatures[0];
         let sig = self.checker.sig(signature);
+        let declaration = sig.declaration;
         let rest = sig.has_rest_parameter();
         let generic = !sig.type_parameters.is_empty();
         let symbols = sig.parameters.clone();
@@ -96,6 +97,18 @@ impl Lowerer<'_> {
             // Unit-valued source results still need a value when a callback is
             // invoked through the owning ABI (for example a deleting reviver).
             self.aggregate_slot_type(result)?
+        };
+        let symbol = if declaration.is_nil() || declaration.name().is_nil() {
+            0
+        } else {
+            self.symbol(declaration.name())
+        };
+        let ret = if self.absence_returns.contains(&symbol)
+            && matches!(ret, Type::F64 | Type::String | Type::Bool)
+        {
+            self.undefined_storage_type(ret, declaration).ok()?
+        } else {
+            ret
         };
         Some(Type::Func {
             rest: array_rest,

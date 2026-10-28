@@ -210,6 +210,7 @@ struct Lowerer<'a> {
     var_types: HashMap<u32, Type>,
     var_defined: HashSet<u32>,
     js_absence_parameters: HashSet<u32>,
+    absence_returns: HashSet<u32>,
     js_absent_fields: HashSet<(TypeId, String)>,
     enums: enums::EnumGraph,
     callables: HashMap<usize, Type>,
@@ -261,6 +262,7 @@ impl<'a> Lowerer<'a> {
             var_types: HashMap::new(),
             var_defined: HashSet::new(),
             js_absence_parameters: HashSet::new(),
+            absence_returns: HashSet::new(),
             js_absent_fields: HashSet::new(),
             enums: enums::EnumGraph::default(),
             callables: HashMap::new(),
@@ -683,6 +685,13 @@ impl<'a> Lowerer<'a> {
         if symbol == 0 {
             return Err(self.refuse(node, "function declaration has no resolved native symbol"));
         }
+        let return_type = if self.absence_returns.contains(&symbol)
+            && matches!(return_type, Type::F64 | Type::String | Type::Bool)
+        {
+            self.undefined_storage_type(return_type, node)?
+        } else {
+            return_type
+        };
         Ok(Signature {
             is_async: node.modifier_flags().intersects(ModifierFlags::ASYNC),
             rest: rest || unpack_rest,

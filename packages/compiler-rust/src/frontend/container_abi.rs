@@ -28,6 +28,7 @@ impl Lowerer<'_> {
             let before = (
                 self.js_absence_parameters.len(),
                 self.js_absent_fields.len(),
+                self.absence_returns.len(),
             );
             self.plan_parameter_abi(files);
             self.solve_container_abi(&owners);
@@ -35,6 +36,7 @@ impl Lowerer<'_> {
                 == (
                     self.js_absence_parameters.len(),
                     self.js_absent_fields.len(),
+                    self.absence_returns.len(),
                 )
             {
                 break;
