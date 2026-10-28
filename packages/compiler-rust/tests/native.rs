@@ -108,6 +108,9 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-recursive-closures/callbacks.ts",
+        "rust-native-recursive-closures/escaping.ts",
+        "rust-native-recursive-closures/defaults.ts",
         "rust-native-dataview/values.ts",
         "rust-native-dataview/order.ts",
         "rust-native-dataview/bounds.ts",
@@ -3223,6 +3226,29 @@ fn accessor_boundaries_preserve_previous_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn recursive_const_closures_reject_source_reassignment() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let output = temp.path().join("main.ir.json");
+    fs::write(&input, "function run(): void { const f = (n: number): number => n ? f(n - 1) : 0; f = (n: number): number => n; console.log(f(1)); } run();").unwrap();
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--emit", "ir", "--out"])
+        .arg(&output)
+        .arg("--no-engine")
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    let diagnostic = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        diagnostic.contains("immutable binding") || diagnostic.contains("TS2588"),
+        "{diagnostic}"
+    );
+    assert!(!output.exists());
 }
 
 #[test]

@@ -359,11 +359,22 @@ impl Lowerer<'_> {
             } else {
                 local
             };
-            return Ok(Expr::VarRef {
+            let value = Expr::VarRef {
                 local_id: local.id,
                 r#type: local.r#type,
                 loc: self.loc(node),
-            });
+            };
+            if value.ty() == Type::Dyn {
+                let symbol = self.symbol(node);
+                if let Some(signature) = self.recursive_functions.get(&symbol).cloned() {
+                    return Ok(Expr::DynCheck {
+                        value: Box::new(value),
+                        r#type: signature,
+                        loc: self.loc(node),
+                    });
+                }
+            }
+            return Ok(value);
         }
         let value = self.expression(node)?;
         if let Expr::DynCheck { value: source, .. } = &value

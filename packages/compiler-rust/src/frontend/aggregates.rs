@@ -351,7 +351,11 @@ impl Lowerer<'_> {
         {
             return Err(self.refuse(
                 node,
-                "DataView conversions require a native DataView brand contract",
+                &format!(
+                    "DataView conversions require a native DataView brand contract: {:?} -> {:?}",
+                    value.ty(),
+                    target
+                ),
             ));
         }
         // Unit payloads have no stored fields, but their producing expressions

@@ -74,6 +74,7 @@ mod property_access;
 mod property_keys;
 mod receivers;
 mod record_construction;
+mod recursive_closures;
 mod reflection;
 mod regex;
 mod regex_captures;
@@ -188,6 +189,7 @@ struct Lowerer<'a> {
     type_stack: Vec<TypeId>,
     outer: Vec<HashMap<u32, Local>>,
     captures: Vec<(u32, Param)>,
+    recursive_functions: HashMap<u32, Type>,
     caught_aliases: HashMap<u32, Local>,
     lifted: Vec<Function>,
     next_closure: usize,
@@ -237,6 +239,7 @@ impl<'a> Lowerer<'a> {
             type_stack: Vec::new(),
             outer: Vec::new(),
             captures: Vec::new(),
+            recursive_functions: HashMap::new(),
             caught_aliases: HashMap::new(),
             lifted: Vec::new(),
             next_closure: 0,
@@ -885,6 +888,14 @@ impl<'a> Lowerer<'a> {
                         return Err(self
                             .refuse(declaration, "identifier lexical declarations are required"));
                     }
+                    if let Some(recursive) = self.recursive_const_closure(
+                        declaration,
+                        flags,
+                        node.parent().kind() == SyntaxKind::SourceFile,
+                    )? {
+                        out.extend(recursive);
+                        continue;
+                    }
                     let storage = self.storage_type(name);
                     let (ty, init) = if declaration.initializer().is_nil() {
                         let value_type = storage?;
@@ -1040,6 +1051,12 @@ impl<'a> Lowerer<'a> {
                     ));
                 }
                 let local = self.binding(expression.left())?;
+                if !local.mutable {
+                    return Err(self.refuse(
+                        expression,
+                        "assignment to an immutable binding is not ported",
+                    ));
+                }
                 if local.r#type == Type::Caught || self.caught_aliases.contains_key(&symbol) {
                     return Err(self.refuse(expression, "catch binding reassignment is not ported"));
                 }
@@ -1423,6 +1440,15 @@ impl<'a> Lowerer<'a> {
                     r#type: local.r#type,
                     loc,
                 };
+                if value.ty() == Type::Dyn
+                    && let Some(signature) = self.recursive_functions.get(&symbol).cloned()
+                {
+                    return Ok(Expr::DynCheck {
+                        value: Box::new(value),
+                        r#type: signature,
+                        loc: self.loc(node),
+                    });
+                }
                 if self.var_types.contains_key(&symbol) && !self.var_defined.contains(&symbol) {
                     return Ok(value);
                 }
