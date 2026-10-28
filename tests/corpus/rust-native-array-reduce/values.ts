@@ -1,3 +1,4 @@
+// @ts-nocheck
 // @rust-only
 // @no-engine
 export {};
@@ -32,3 +33,10 @@ const alias = [2, 3];
 console.log("identity", alias.reduce((a, b, i, array) => a + (array === alias ? b : 100), 0));
 try { alias.reduce((a, b) => { throw new Error("stop"); return a + b; }, 0); }
 catch (error) { if (error instanceof Error) console.log("throw", error.message); }
+
+let ignoredOrder = "";
+function ignored(): number { ignoredOrder += "e"; return 42; }
+console.log("extra", [1, 2].reduce((a: number, b: number) => { ignoredOrder += "c"; return a + b; }, 0, ignored()), ignoredOrder);
+function failExtra(): number { throw new Error("extra failed"); }
+try { [1].reduce((a: number, b: number) => { console.log("wrong callback"); return a + b; }, 0, failExtra()); }
+catch (error) { if (error instanceof Error) console.log("extra-error", error.message); }

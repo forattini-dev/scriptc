@@ -4965,7 +4965,6 @@ fn array_reduce_unimplemented_overloads_preserve_existing_artifacts() {
     for source in [
         "[1,2].reduce((a,b) => a+b);",
         "[1,2].reduce((a,b) => a+String(b), '');",
-        "[1,2].reduce((a,b) => a+b, 0, side());",
         "[1,2].reduce(...[(a,b) => a+b, 0]);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();

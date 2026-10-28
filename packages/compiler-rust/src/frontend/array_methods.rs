@@ -215,10 +215,10 @@ impl Lowerer<'_> {
     // Snapshot the initial length, but find each next live own index after the
     // callback. This skips holes and observes deletion or filling of later slots.
     fn array_reduce_values(&mut self, node: Node, values: Vec<Expr>) -> Result<Expr, String> {
-        if values.len() != 3 || values[2].ty() != Type::F64 {
+        if values.len() < 3 || values[2].ty() != Type::F64 {
             return Err(self.refuse(
                 node,
-                "array.reduce requires a numeric initial value and one callback",
+                "array.reduce requires a callback and a numeric initial value",
             ));
         }
         let Type::Func { params, ret, rest } = values[1].ty() else {
