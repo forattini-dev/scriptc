@@ -923,6 +923,10 @@ impl Lowerer<'_> {
                 {
                     return Ok(narrowed);
                 }
+                if let Some(narrowed) = self.guarded_derived_argument(node, value.clone(), &target)
+                {
+                    return Ok(narrowed);
+                }
                 self.coerce(value, target, node)
             }
         }

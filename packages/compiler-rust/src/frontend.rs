@@ -29,6 +29,7 @@ mod codecs;
 mod collections;
 mod commonjs;
 mod comparisons;
+mod conditional_facts;
 mod console;
 mod container_abi;
 mod data_tables;

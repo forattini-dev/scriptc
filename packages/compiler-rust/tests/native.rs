@@ -114,6 +114,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-symbol-maps/public.mts",
         "rust-native-symbol-maps/reassign.mts",
         "rust-native-symbol-property-read/ordinary.ts",
+        "rust-native-derived-guards/values.ts",
         "rust-native-static-methods/values.ts",
         "rust-native-static-methods/inheritance.ts",
         "rust-native-static-methods/order.ts",
@@ -3610,6 +3611,49 @@ fn uncaught_exceptions_run_finalizers_and_release_native_storage() {
     }
     assert!(!String::from_utf8_lossy(&actual.stderr).contains("heap audit"));
     assert!(!String::from_utf8_lossy(&actual.stderr).contains("panicked"));
+}
+
+#[test]
+fn derived_guard_boundaries_preserve_previous_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "derived-guard-boundary");
+    for source in [
+        "function g(x:number){return x;} function f(input:number|null,n:number){let x=input; const d=x==null?0:n; return d===0?0:g(x!);} console.log(f(null,2));",
+        "function g(x:number){return x;} function f(input:number|null,n:number){const x=input; let d=x==null?0:n; d=1; return d===0?0:g(x!);} console.log(f(null,2));",
+        "function g(x:number){return x;} function f(input:number|null,n:number){const x=input; const d=x==null?1:n; return d===0?0:g(x!);} console.log(f(null,2));",
+        "function g(a:number,x:number){return a+x;} function f(input:number|null,n:number){const x=input; const d=x==null?0:n; return d===0?0:g(Math.random(),x!);} console.log(f(null,2));",
+        "function g(x:number){return x;} function f(input:number|null|undefined,n:number){const x=input; const d=x===null?0:n; return d===0?0:g(x!);} console.log(f(undefined,2));",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
 }
 
 #[test]
