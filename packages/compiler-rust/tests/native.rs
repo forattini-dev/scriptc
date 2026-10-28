@@ -227,6 +227,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-parameter-absence/values.ts",
         "rust-native-return-absence/values.ts",
         "rust-native-bytes-conditional/values.ts",
+        "rust-native-bytes-undefined-key/values.ts",
         "rust-native-zlib/values.ts",
         "rust-native-for-of-presence/values.ts",
         "rust-native-tuple-array-includes/values.ts",
@@ -8356,5 +8357,19 @@ fn numeric_union_refusal_reports_the_runtime_arms() {
         .args(["--no-engine", "--out"]).arg(&target).output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success() && stderr.contains("native representation coercion is not ported") && stderr.contains("F64") && stderr.contains("Undefined") && !stderr.contains("panicked"), "{stderr}");
+    assert!(!target.exists());
+}
+
+#[test]
+fn typed_array_named_key_refuses_unrepresentable_scalar_storage() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "bytes-named-key-boundary");
+    fs::write(&input, "const b = new Uint8Array([1]); const i = true ? b[9]! : 0; const x: number = b?.[i!] ?? 7; console.log(x);\n").unwrap();
+    let output = Command::new(compiler()).arg("build").arg(&input)
+        .args(["--no-engine", "--out"]).arg(&target).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("named-key value requires an owning dynamic contract") && !stderr.contains("panicked"), "{stderr}");
     assert!(!target.exists());
 }

@@ -668,6 +668,9 @@ impl Lowerer<'_> {
             return Ok(value);
         }
         if value.ty() == Type::Dyn {
+            if self.bytes_named_key_value(node, &mut HashSet::new()) {
+                return Ok(value);
+            }
             let target = self.ty(node)?;
             if matches!(
                 node.kind(),
@@ -749,6 +752,11 @@ impl Lowerer<'_> {
     }
 
     fn expected_expression_inner(&mut self, node: Node, target: Type) -> Result<Expr, String> {
+        if matches!(target, Type::F64 | Type::String | Type::Bool)
+            && self.bytes_named_key_value(node, &mut HashSet::new())
+        {
+            return Err(self.refuse(node, "typed array named-key value requires an owning dynamic contract"));
+        }
         if target == Type::Dyn && node.kind() == SyntaxKind::Identifier {
             // An unknown-typed consumer receives the live value, not a
             // checker-only projection that can lose object identity or tags.

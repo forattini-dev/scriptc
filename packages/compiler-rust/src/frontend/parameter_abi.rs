@@ -260,6 +260,48 @@ impl Lowerer<'_> {
         symbol
     }
 
+    pub(super) fn bytes_named_key_value(&mut self, node: Node, seen: &mut HashSet<u32>) -> bool {
+        let node = primitives::primitive_source(node);
+        if node.is_nil() {
+            return false;
+        }
+        match node.kind() {
+            SyntaxKind::ElementAccessExpression => {
+                self.argument_may_be_absent(node.argument_expression(), &mut HashSet::new())
+                    && self.ty(node.expression()).is_ok_and(|ty| {
+                        self.native_type_contains(&ty, |arm| matches!(arm, Type::Bytes { .. }))
+                    })
+            }
+            SyntaxKind::Identifier => {
+                let symbol = self.symbol(node);
+                if symbol == 0 || !seen.insert(symbol) {
+                    return false;
+                }
+                let declaration = self.checker.sym(SymbolId(symbol)).value_declaration;
+                !declaration.is_nil()
+                    && declaration.kind() == SyntaxKind::VariableDeclaration
+                    && !declaration.initializer().is_nil()
+                    && self.bytes_named_key_value(declaration.initializer(), seen)
+            }
+            SyntaxKind::ConditionalExpression => {
+                self.bytes_named_key_value(node.when_true(), &mut seen.clone())
+                    || self.bytes_named_key_value(node.when_false(), seen)
+            }
+            SyntaxKind::BinaryExpression
+                if matches!(
+                    node.operator_token().kind(),
+                    SyntaxKind::QuestionQuestionToken
+                        | SyntaxKind::BarBarToken
+                        | SyntaxKind::AmpersandAmpersandToken
+                ) =>
+            {
+                self.bytes_named_key_value(node.left(), &mut seen.clone())
+                    || self.bytes_named_key_value(node.right(), seen)
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn argument_may_be_absent(&mut self, node: Node, seen: &mut HashSet<u32>) -> bool {
         if node.is_nil() {
             return true;

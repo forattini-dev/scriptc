@@ -9,6 +9,10 @@ fn native_value_set(value: NativeValue, key: runtime::JsString, field: NativeVal
     if key == "__proto__" && !matches!(&value, NativeValue::RawJson(_)) {
         runtime::throw_type_error("scriptc: ordinary prototype writes are not ported".into());
     }
+    if key == "undefined" && let Some(owner) = native_bytes_property_key(&value) {
+        runtime::weak_map_set(&owner, &owner, field);
+        return;
+    }
     if let Some(properties) = native_function_properties(&value) {
         native_function_data_key(&key);
         native_record_set(&properties, key, field);

@@ -7,6 +7,10 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
 impl runtime::NativeDeleteValue for NativeValue {
     fn delete_own_property(&self, key: &runtime::JsString) -> runtime::NativeDeleteResult {
         use runtime::NativeDeleteResult as D;
+        if *key == "undefined" && let Some(owner) = native_bytes_property_key(self) {
+            runtime::weak_map_delete::<NativeValue>(&owner, &owner);
+            return D::Deleted;
+        }
         if let Some(properties) = native_function_properties(self) {
             native_function_data_key(key);
             properties.with_mut(|data| data.entries.retain(|(name, _)| name != key));

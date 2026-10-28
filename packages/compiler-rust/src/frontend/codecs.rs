@@ -393,6 +393,59 @@ impl Lowerer<'_> {
         receiver: Expr,
         index: Expr,
     ) -> Result<Expr, String> {
+        if let Type::Union { union_id } = index.ty() {
+            let arms = self.unions[union_id].arms.clone();
+            if arms.len() == 2 && arms.contains(&Type::F64) && arms.contains(&Type::Undefined) {
+                let number_tag = arms.iter().position(|arm| *arm == Type::F64).unwrap();
+                let mut helper = helpers::Helper::new(
+                    "bytes_nullable_key",
+                    vec![receiver.ty(), index.ty()],
+                    Type::Dyn,
+                    self.loc(node),
+                );
+                let bytes = helper.param(0);
+                let key = helper.param(1);
+                let number = Expr::UnionNarrow {
+                    union_id: format!("u{union_id}"),
+                    tag: number_tag,
+                    value: Box::new(helper.read(&key)),
+                    r#type: Type::F64,
+                    loc: helper.loc(),
+                };
+                let numeric = self.bytes_index_value(node, helper.read(&bytes), number)?;
+                let numeric = self.coerce(numeric, Type::Dyn, node)?;
+                let source = self.coerce(helper.read(&bytes), Type::Dyn, node)?;
+                let property = Expr::StrLit {
+                    value: "undefined".into(),
+                    r#type: Type::String,
+                    loc: helper.loc(),
+                };
+                let named = self.dynamic_get(node, source, property);
+                helper.function.body.push(Stmt::Return {
+                    value: Some(Expr::Ternary {
+                        cond: Box::new(Expr::UnionIsTag {
+                            union_id: format!("u{union_id}"),
+                            tag: number_tag,
+                            value: Box::new(helper.read(&key)),
+                            negated: false,
+                            r#type: Type::Bool,
+                            loc: helper.loc(),
+                        }),
+                        then: Box::new(numeric),
+                        else_: Box::new(named),
+                        r#type: Type::Dyn,
+                        loc: helper.loc(),
+                    }),
+                    loc: helper.loc(),
+                });
+                return Ok(Expr::Call {
+                    callee: self.install_helper(helper.function),
+                    args: vec![receiver, index],
+                    r#type: Type::Dyn,
+                    loc: self.loc(node),
+                });
+            }
+        }
         if index.ty() != Type::F64 {
             return Err(self.refuse(node, "byte indexing requires a represented numeric key"));
         }

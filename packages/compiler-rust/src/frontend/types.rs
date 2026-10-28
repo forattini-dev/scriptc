@@ -301,6 +301,15 @@ impl Lowerer<'_> {
             let declaration = node.parent();
             let initial = receivers::reference_node(declaration.initializer());
             if declaration.type_().is_nil()
+                && self.bytes_named_key_value(initial, &mut HashSet::new())
+            {
+                self.var_types.entry(symbol).or_insert(Type::Dyn);
+                if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                    self.module_vars.entry(symbol).or_insert(Type::Dyn);
+                }
+                return Ok(Type::Dyn);
+            }
+            if declaration.type_().is_nil()
                 && let Some(storage) = self.numeric_initializer_type(initial)
             {
                 self.var_types.entry(symbol).or_insert(storage.clone());
@@ -323,7 +332,10 @@ impl Lowerer<'_> {
                     .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&source)))
                     .map(|local| local.r#type.clone());
                 if let Some(storage) = storage
-                    && (self.optional_storage(&storage) || parameters::erased_rest(&storage))
+                    && (self.optional_storage(&storage)
+                        || parameters::erased_rest(&storage)
+                        || (storage == Type::Dyn
+                            && self.bytes_named_key_value(initial, &mut HashSet::new())))
                 {
                     // Inferred aliases snapshot the represented value, including
                     // lookup absence omitted by the checker's declared type.

@@ -44,6 +44,9 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn optional_result_type(&mut self, value: Type, node: Node) -> Result<Type, String> {
+        if self.bytes_named_key_value(node, &mut HashSet::new()) {
+            return Ok(Type::Dyn);
+        }
         if matches!(value, Type::Null | Type::Undefined) {
             // Unit tags never occupy standalone ABI slots.
             return self.undefined_storage_type(Type::F64, node);

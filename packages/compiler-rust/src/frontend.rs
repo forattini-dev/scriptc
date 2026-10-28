@@ -1145,7 +1145,9 @@ impl<'a> Lowerer<'a> {
             ) {
                 consumer = consumer.parent();
             }
+            let bytes_named_key = self.bytes_named_key_value(node, &mut HashSet::new());
             if value.ty() == Type::Dyn
+                && !bytes_named_key
                 && consumer.kind() != SyntaxKind::ExpressionStatement
                 && !function_properties::owning_read(&value)
                 && matches!(
