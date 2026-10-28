@@ -119,7 +119,15 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             }));
         }
-        if node.kind() != SyntaxKind::PropertyAccessExpression || node.name().text() != "isTTY" {
+        let is_tty = match node.kind() {
+            SyntaxKind::PropertyAccessExpression => node.name().text() == "isTTY",
+            SyntaxKind::ElementAccessExpression => {
+                node.argument_expression().kind() == SyntaxKind::StringLiteral
+                    && node.argument_expression().text() == "isTTY"
+            }
+            _ => false,
+        };
+        if !is_tty {
             return Ok(None);
         }
         for (stream, fd) in [("stdin", 0.0), ("stdout", 1.0), ("stderr", 2.0)] {
