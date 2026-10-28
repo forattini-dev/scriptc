@@ -1,4 +1,4 @@
-//! Plan local JavaScript input slots before caching callable/storage layouts.
+//! Plan input slots before caching callable and storage layouts.
 use super::*;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
@@ -111,7 +111,10 @@ impl Lowerer<'_> {
         }
         let mut targets = HashMap::new();
         for function in functions {
-            if !is_javascript(function) || self.declared(function).is_some() {
+            let javascript = is_javascript(function);
+            if (!javascript && function.kind() != SyntaxKind::FunctionDeclaration)
+                || self.declared(function).is_some()
+            {
                 continue;
             }
             if function.kind() == SyntaxKind::MethodDeclaration
@@ -124,8 +127,10 @@ impl Lowerer<'_> {
             {
                 continue;
             }
-            for param in receivers::parameters(function) {
-                self.plan_default_object_parameter(param);
+            if javascript {
+                for param in receivers::parameters(function) {
+                    self.plan_default_object_parameter(param);
+                }
             }
             let binding = if function.kind() == SyntaxKind::FunctionDeclaration {
                 function.name()
