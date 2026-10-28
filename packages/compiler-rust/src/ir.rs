@@ -1806,7 +1806,12 @@ fn validate_function(
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
                 }
-                let valid = if method == "split" {
+                let valid = if method == "match" {
+                    receiver.ty() == Type::String
+                        && args.len() == 1
+                        && args[0].ty() == Type::Regex
+                        && regex_captures::exec_layout(module, r#type).is_some()
+                } else if method == "split" {
                     receiver.ty() == Type::String
                         && args.len() == 2
                         && args[0].ty() == Type::Regex
@@ -4432,6 +4437,46 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn regex_match_contract_validates_operands_and_capture_layout() {
+        let mut module = callable_module();
+        module.unions = vec![
+            Union {
+                id: 0,
+                arms: vec![Type::String, Type::Undefined],
+            },
+            Union {
+                id: 1,
+                arms: vec![
+                    Type::Array { elem: Box::new(Type::Union { union_id: 0 }) },
+                    Type::Null,
+                ],
+            },
+        ];
+        let loc = module.functions[0].loc.clone();
+        let text = Expr::StrLit {
+            value: "x".into(), r#type: Type::String, loc: loc.clone(),
+        };
+        let regex = Expr::RegexLit {
+            pattern: "x".into(), flags: "".into(), r#type: Type::Regex, loc: loc.clone(),
+        };
+        for (receiver, args, result, valid) in [
+            (text.clone(), vec![regex.clone()], Type::Union { union_id: 1 }, true),
+            (regex.clone(), vec![text.clone()], Type::Union { union_id: 1 }, false),
+            (text.clone(), vec![], Type::Union { union_id: 1 }, false),
+            (text.clone(), vec![regex.clone()], Type::String, false),
+        ] {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::RegexIntrinsic {
+                    method: "match".into(), receiver: Box::new(receiver), args,
+                    r#type: result, loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid);
         }
     }
 

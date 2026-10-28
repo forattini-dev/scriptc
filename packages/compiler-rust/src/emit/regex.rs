@@ -46,7 +46,7 @@ pub(super) fn expression(
             let receiver = expr(receiver, function, module);
             let arg = args.first().map(|arg| expr(arg, function, module));
             match method.as_str() {
-                "exec" => {
+                "exec" | "match" => {
                     let layout = crate::ir::regex_captures::exec_layout(module, &value.ty())
                         .expect("validated captures");
                     let crate::ir::regex_captures::ExecLayout {
@@ -57,10 +57,19 @@ pub(super) fn expression(
                         string_tag,
                         undefined_tag,
                     } = layout;
-                    format!(
-                        "{{ let regex = {receiver}; let text = {}; match runtime::regex_exec(&regex, &text, |value| match value {{ Some(text) => U{capture}::V{string_tag}(text), None => U{capture}::V{undefined_tag}(()), }}) {{ Some(row) => U{result}::V{array_tag}(row), None => U{result}::V{null_tag}(()), }} }}",
-                        arg.unwrap()
-                    )
+                    let argument = arg.unwrap();
+                    let (bindings, call) = if method == "exec" {
+                        (
+                            format!("let regex = {receiver}; let text = {argument};"),
+                            "runtime::regex_exec(&regex, &text,",
+                        )
+                    } else {
+                        (
+                            format!("let text = {receiver}; let regex = {argument};"),
+                            "runtime::regex_match(&text, &regex,",
+                        )
+                    };
+                    format!("{{ {bindings} match {call} |value| match value {{ Some(text) => U{capture}::V{string_tag}(text), None => U{capture}::V{undefined_tag}(()), }}) {{ Some(row) => U{result}::V{array_tag}(row), None => U{result}::V{null_tag}(()), }} }}")
                 }
                 "test" => format!(
                     "{{ let regex = {receiver}; let text = {}; runtime::regex_test(&regex, &runtime::JsString::from(text)) }}",

@@ -127,7 +127,7 @@ impl Lowerer<'_> {
             return false;
         }
         let symbol = self.checker.sym(symbol);
-        symbol.name.as_ref() == "RegExpExecArray"
+        matches!(symbol.name.as_ref(), "RegExpExecArray" | "RegExpMatchArray")
             && !symbol.declarations.is_empty()
             && symbol.declarations.iter().all(|decl| {
                 decl.kind() == SyntaxKind::InterfaceDeclaration
@@ -180,7 +180,15 @@ impl Lowerer<'_> {
             }
             return Ok(None);
         };
+        let optional_metadata = self
+            .checker
+            .sym(self.checker.ty(source_type).symbol())
+            .name
+            .as_ref()
+            == "RegExpMatchArray";
         let result = match name.as_str() {
+            "index" if optional_metadata => self.undefined_storage_type(Type::F64, node)?,
+            "input" if optional_metadata => self.undefined_storage_type(Type::String, node)?,
             "index" => Type::F64,
             "input" => Type::String,
             "groups" | "indices" => {
