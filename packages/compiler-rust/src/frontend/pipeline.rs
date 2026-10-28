@@ -86,6 +86,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             }
         }
         lowerer.plan_value_layouts(&plan.modules);
+        lowerer.plan_contextual_record_storage(&plan.modules);
         lowerer.inventory(&plan.modules);
         lowerer.inventory_enums(&plan.modules)?;
         lowerer.inventory_classes(&plan.modules);

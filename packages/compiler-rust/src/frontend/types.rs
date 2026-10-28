@@ -273,6 +273,9 @@ impl Lowerer<'_> {
             return Ok(ty);
         }
         let symbol = self.symbol(node);
+        if let Some(ty) = self.contextual_record_storage.get(&symbol) {
+            return Ok(ty.clone());
+        }
         if self.data_bindings.contains(&symbol) {
             return Ok(Type::Dyn);
         }

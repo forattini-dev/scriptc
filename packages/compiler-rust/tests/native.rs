@@ -115,6 +115,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-symbol-maps/reassign.mts",
         "rust-native-symbol-property-read/ordinary.ts",
         "rust-native-derived-guards/values.ts",
+        "rust-native-contextual-record-storage/values.ts",
         "rust-native-static-methods/values.ts",
         "rust-native-static-methods/inheritance.ts",
         "rust-native-static-methods/order.ts",
@@ -3611,6 +3612,51 @@ fn uncaught_exceptions_run_finalizers_and_release_native_storage() {
     }
     assert!(!String::from_utf8_lossy(&actual.stderr).contains("heap audit"));
     assert!(!String::from_utf8_lossy(&actual.stderr).contains("panicked"));
+}
+
+#[test]
+fn contextual_record_storage_refuses_aliased_or_effectful_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "contextual-record-boundary");
+    for source in [
+        "const worker={warnings:[],budget:{memory:'2G'}}; use([worker]); console.log(worker.budget.memory);",
+        "const budget={memory:'2G'}; const worker={warnings:[],budget}; use([worker]);",
+        "const worker={warnings:[],budget:{memory:'2G'}}; use([worker,worker]);",
+        "export const worker={warnings:[],budget:{memory:'2G'}}; use([worker]);",
+        "const worker={warnings:[],budget:{memory:'2G'}}; export { worker }; use([worker]);",
+        "function make(){return {memory:'2G'};} const worker={warnings:[],budget:make()}; use([worker]);",
+    ] {
+        let prefix = "interface Budget { memory?: string; high?: string } interface Worker { warnings: string[]; budget?: Budget; extra?: number } function use(workers: Worker[]) { console.log(workers.length); } ";
+        fs::write(&input, format!("{prefix}{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success()
+                && stderr.contains("SCN1001")
+                && !stderr.contains("SCN9001")
+                && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
 }
 
 #[test]

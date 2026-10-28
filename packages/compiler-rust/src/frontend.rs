@@ -32,6 +32,7 @@ mod comparisons;
 mod conditional_facts;
 mod console;
 mod container_abi;
+mod contextual_record_storage;
 mod data_tables;
 mod declaration_abi;
 mod declarations;
@@ -200,6 +201,7 @@ struct Lowerer<'a> {
     declaration_abi: bool,
     projections: HashMap<declarations::Key, Type>,
     literal_choices: HashMap<declarations::Key, Type>,
+    contextual_record_storage: HashMap<u32, Type>,
     classes: classes::ClassGraph,
     instance_this: Option<Local>,
     module_vars: HashMap<u32, Type>,
@@ -251,6 +253,7 @@ impl<'a> Lowerer<'a> {
             declaration_abi: false,
             projections: HashMap::new(),
             literal_choices: HashMap::new(),
+            contextual_record_storage: HashMap::new(),
             classes: classes::ClassGraph::default(),
             instance_this: None,
             module_vars: HashMap::new(),
