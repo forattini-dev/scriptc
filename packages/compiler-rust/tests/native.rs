@@ -117,6 +117,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-derived-guards/values.ts",
         "rust-native-contextual-record-storage/values.ts",
         "rust-native-static-methods/values.ts",
+        "rust-native-class-property-constructor/values.ts",
         "rust-native-static-methods/inheritance.ts",
         "rust-native-static-methods/order.ts",
         "rust-native-static-methods/public.mts",
@@ -7540,6 +7541,28 @@ fn string_split_boundaries_preserve_existing_artifacts() {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
+}
+
+#[test]
+fn erased_constructor_refusal_preserves_existing_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "erased-constructor");
+    fs::write(&input, "function make(Bottleneck: any) { return new Bottleneck.Group({ id: 'global' }); }\nmake({});\n").unwrap();
+    let artifacts = [
+        &target,
+        &target.with_extension("rs"),
+        &target.with_extension("ir.json"),
+    ];
+    for artifact in artifacts { fs::write(artifact, "preserve").unwrap(); }
+    let output = Command::new(compiler()).arg("build").arg(&input)
+        .args(["--no-engine", "--out"]).arg(&target).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("SCN1001")
+        && stderr.contains("constructor identity is not represented")
+        && !stderr.contains("panicked"), "{stderr}");
+    for artifact in artifacts { assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve"); }
 }
 
 #[test]

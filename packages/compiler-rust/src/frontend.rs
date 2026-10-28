@@ -1231,10 +1231,14 @@ impl<'a> Lowerer<'a> {
                 if let Some(value) = self.class_new(node)? {
                     return Ok(value);
                 }
-                if matches!(self.ty(node), Ok(Type::Set { .. })) {
-                    return self.set_new(node, None);
+                match self.ty(node)? {
+                    Type::Set { .. } => self.set_new(node, None),
+                    Type::Map { .. } => self.map_new(node),
+                    _ => Err(self.refuse(
+                        node,
+                        "constructor identity is not represented; dynamic construction is not ported",
+                    )),
                 }
-                self.map_new(node)
             }
             SyntaxKind::ThisKeyword => self.this_expression(node),
             SyntaxKind::RegularExpressionLiteral => self.regex_literal(node),
