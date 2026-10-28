@@ -220,6 +220,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-optional-access/chains.ts",
         "rust-native-tuple-includes/contracts.ts",
         "rust-native-optional-dynamic-record/values.ts",
+        "rust-native-bytes-tuple-set/values.ts",
         "rust-native-array-reduce/values.ts",
         "rust-native-zlib/values.ts",
         "rust-native-for-of-presence/values.ts",
@@ -4966,6 +4967,31 @@ fn array_reduce_unimplemented_overloads_preserve_existing_artifacts() {
         "[1,2].reduce((a,b) => a+String(b), '');",
         "[1,2].reduce((a,b) => a+b, 0, side());",
         "[1,2].reduce(...[(a,b) => a+b, 0]);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler()).arg("build").arg(&input)
+            .args(["--no-engine", "--out"]).arg(&target).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"), "{source}: {stderr}");
+        for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn typed_array_tuple_set_rejects_unrepresented_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "tuple-set-boundary");
+    for source in [
+        "const source: [number?] = []; new Uint8Array(2).set(source);",
+        "const source: [number, string] = [1, 'x']; new Uint8Array(2).set(source);",
+        "const source: [number, number] = [1,2]; new Uint8Array(3).set(...[source, 0]);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
         for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] {

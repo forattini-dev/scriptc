@@ -529,6 +529,78 @@ impl Lowerer<'_> {
         let args = node.arguments().into_iter().collect::<Vec<_>>();
         if let Ok(ty @ Type::Bytes { .. }) = self.ty(member.expression()) {
             let receiver = self.expected_expression(member.expression(), ty.clone())?;
+            if method == "set"
+                && (args.len() == 1 || args.len() == 2)
+                && !args
+                    .iter()
+                    .any(|arg| arg.kind() == SyntaxKind::SpreadElement)
+                && let Ok(Type::Record { shape_id }) = self.ty(args[0])
+                && self.records[shape_id].tuple
+            {
+                let fields = self.records[shape_id].fields.clone();
+                if fields.iter().any(|field| field.r#type != Type::F64)
+                    || (0..fields.len())
+                        .any(|index| !fields.iter().any(|f| f.name == index.to_string()))
+                {
+                    return Err(
+                        self.refuse(args[0], "typed array set requires a dense numeric tuple")
+                    );
+                }
+                let tuple = self.expression(args[0])?;
+                if tuple.ty() != (Type::Record { shape_id }) {
+                    return Err(self.refuse(
+                        args[0],
+                        "typed array set requires a represented numeric tuple",
+                    ));
+                }
+                let offset = if args.len() == 2 {
+                    self.expected_expression(args[1], Type::F64)?
+                } else {
+                    Expr::NumLit {
+                        value: 0.0,
+                        spelling: None,
+                        r#type: Type::F64,
+                        loc: self.loc(node),
+                    }
+                };
+                let result = self.codec_helper(
+                    node,
+                    "typed_array_set_tuple",
+                    vec![receiver, tuple, offset],
+                    Type::Void,
+                    |h| {
+                        let elements = (0..fields.len())
+                            .map(|index| Expr::RecordGet {
+                                obj: Box::new(h.read(&h.param(1))),
+                                shape_id: format!("r{shape_id}"),
+                                field: index.to_string(),
+                                r#type: Type::F64,
+                                loc: h.loc(),
+                            })
+                            .collect();
+                        let array = Expr::ArrayLit {
+                            elems: elements,
+                            r#type: Type::Array {
+                                elem: Box::new(Type::F64),
+                            },
+                            loc: h.loc(),
+                        };
+                        let source = Expr::BytesNew {
+                            source: Some(Box::new(array)),
+                            r#type: ty,
+                            loc: h.loc(),
+                        };
+                        Expr::BytesIntrinsic {
+                            method: "setFrom".into(),
+                            receiver: Box::new(h.read(&h.param(0))),
+                            args: vec![source, h.read(&h.param(2))],
+                            r#type: Type::Void,
+                            loc: h.loc(),
+                        }
+                    },
+                );
+                return Ok(Some(result));
+            }
             if method == "toString" {
                 if ty == Type::bytes() {
                     return self.bytes_string_call(node, receiver).map(Some);
