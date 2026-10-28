@@ -1139,7 +1139,7 @@ impl Module {
                 !matches!(*elem, Type::Func { .. } | Type::Stats)
                     && self.valid_type_cached(*elem, active, proven)
             }
-            Type::Bytes { elem } => matches!(elem.as_str(), "u8" | "f32" | "f64"),
+            Type::Bytes { elem } => matches!(elem.as_str(), "u8" | "u32" | "i32" | "f32" | "f64"),
             Type::Promise { inner } => {
                 *inner == Type::Void || self.valid_type_cached(*inner, active, proven)
             }
@@ -7280,7 +7280,7 @@ mod tests {
         }]));
     }
     #[test]
-    fn floating_bytes_validate_storage_kind_writes_and_portable_abi() {
+    fn wide_bytes_validate_storage_kind_writes_and_portable_abi() {
         let mut module = callable_module();
         let loc = module.functions[0].loc.clone();
         let number = |value| Expr::NumLit {
@@ -7289,7 +7289,7 @@ mod tests {
             r#type: Type::F64,
             loc: loc.clone(),
         };
-        for elem in ["f32", "f64"] {
+        for elem in ["u32", "i32", "f32", "f64"] {
             let ty = Type::Bytes { elem: elem.into() };
             let owner = || Expr::BytesNew {
                 source: Some(Box::new(number(2.0))),
@@ -7761,6 +7761,6 @@ mod tests {
             loc,
         }];
         assert!(validate(&module).is_err());
-        assert!(!module.valid_type(Type::Bytes { elem: "u32".into() }, &mut vec![]));
+        assert!(!module.valid_type(Type::Bytes { elem: "u16".into() }, &mut vec![]));
     }
 }

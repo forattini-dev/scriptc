@@ -194,12 +194,20 @@ impl Lowerer<'_> {
         }
         self.standard_name(
             self.checker.ty(id).symbol().0,
-            &["Uint8Array", "Float32Array", "Float64Array"],
+            &[
+                "Uint8Array",
+                "Uint32Array",
+                "Int32Array",
+                "Float32Array",
+                "Float64Array",
+            ],
         )
         .map(|name| Type::Bytes {
             elem: match name.as_str() {
                 "Float32Array" => "f32",
                 "Float64Array" => "f64",
+                "Uint32Array" => "u32",
+                "Int32Array" => "i32",
                 _ => "u8",
             }
             .into(),
@@ -214,15 +222,24 @@ impl Lowerer<'_> {
     }
     pub(super) fn bytes_new(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let symbol = self.symbol(node.expression());
-        let Some(name) =
-            self.standard_name(symbol, &["Uint8Array", "Float32Array", "Float64Array"])
-        else {
+        let Some(name) = self.standard_name(
+            symbol,
+            &[
+                "Uint8Array",
+                "Uint32Array",
+                "Int32Array",
+                "Float32Array",
+                "Float64Array",
+            ],
+        ) else {
             return Ok(None);
         };
         let ty = Type::Bytes {
             elem: match name.as_str() {
                 "Float32Array" => "f32",
                 "Float64Array" => "f64",
+                "Uint32Array" => "u32",
+                "Int32Array" => "i32",
                 _ => "u8",
             }
             .into(),

@@ -108,6 +108,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
     paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
     let path = std::env::join_paths(paths).unwrap();
     for (index, name) in [
+        "rust-native-int32-arrays/values.ts",
+        "rust-native-int32-arrays/dataview.ts",
         "rust-native-recursive-closures/callbacks.ts",
         "rust-native-recursive-closures/escaping.ts",
         "rust-native-recursive-closures/defaults.ts",
@@ -3225,6 +3227,36 @@ fn accessor_boundaries_preserve_previous_artifacts() {
         ] {
             assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
+    }
+}
+
+#[test]
+fn int32_dynamic_boundary_is_refused_without_engine() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let output = temp.path().join("main.ir.json");
+    for source in [
+        "const value: unknown = new Int32Array([1]); console.log(value);",
+        "const value: unknown = new Uint32Array([1]); console.log(value);",
+        "const value: unknown = 1; console.log((value as Int32Array).length);",
+        "function run(): void { const f = (a: Int32Array): number => a.length ? f(a) : 0; console.log(f(new Int32Array(0))); } run();",
+    ] {
+        fs::write(&input, source).unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--emit", "ir", "--out"])
+            .arg(&output)
+            .arg("--no-engine")
+            .output()
+            .unwrap();
+        assert!(!result.status.success(), "{source} unexpectedly compiled");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("32-bit integer typed array"),
+            "{source}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(!output.exists());
     }
 }
 

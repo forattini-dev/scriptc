@@ -304,6 +304,14 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn dynamic_erasure_reason(&self, ty: &Type) -> Option<&'static str> {
+        if self.native_type_contains(
+            ty,
+            |ty| matches!(ty, Type::Bytes { elem } if matches!(elem.as_str(), "i32" | "u32")),
+        ) {
+            return Some(
+                "32-bit integer typed array erasure requires a shared native value contract",
+            );
+        }
         if self.native_type_contains(ty, |ty| self.is_data_view(ty)) {
             return Some("DataView erasure requires a native DataView brand contract");
         }
@@ -452,6 +460,15 @@ impl Lowerer<'_> {
             });
         }
         if value.ty() == Type::Dyn && !matches!(target, Type::Null | Type::Undefined | Type::Void) {
+            if self.native_type_contains(
+                &target,
+                |ty| matches!(ty, Type::Bytes { elem } if matches!(elem.as_str(), "i32" | "u32")),
+            ) {
+                return Err(self.refuse(
+                    node,
+                    "32-bit integer typed array extraction requires a shared native value contract",
+                ));
+            }
             if ir::contains_stats(&target, &self.records, &self.unions) {
                 return Err(self.refuse(
                     node,

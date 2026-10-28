@@ -44,6 +44,12 @@ impl Lowerer<'_> {
                 "recursive closure requires a native function signature",
             ));
         }
+        if self.native_type_contains(
+            &ty,
+            |ty| matches!(ty, Type::Bytes { elem } if matches!(elem.as_str(), "i32" | "u32")),
+        ) {
+            return Err(self.refuse(declaration, "recursive 32-bit integer typed array function ABI requires a shared native value contract"));
+        }
         self.recursive_functions.insert(symbol, ty.clone());
         // The synthetic assignment initializes the cell after the closure
         // captures it. Source const writes are rejected through the binding.
