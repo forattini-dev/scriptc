@@ -35,6 +35,7 @@ export function emitRustDynamicProxy(context: RustDynamicContext): void {
   line(`fn sc_dyn_get_key(value: &${dyn}, key: &${dyn}, receiver: &${dyn}) -> ${dyn} { match key {`);
   line(`${dyn}::String(key) => sc_dyn_get(value, key, receiver),`);
   line(`${dyn}::Symbol(symbol) => match value {`);
+  line(`${dyn}::Null | ${dyn}::Undefined => runtime::throw_type_error(format!("Cannot read properties of {} (reading '{}')", if matches!(value, ${dyn}::Null) { "null" } else { "undefined" }, runtime::symbol_to_string(symbol))),`);
   line(`${dyn}::Object(object) => runtime::map_symbol_get(object, symbol).or_else(|| runtime::map_prototype(object).map(|prototype| sc_dyn_get_key(&prototype, key, receiver))).unwrap_or(${dyn}::Undefined),`);
   for (const variant of functionVariants) line(`${dyn}::${variant}(_, _, properties) => runtime::map_symbol_get(properties, symbol).unwrap_or(${dyn}::Undefined),`);
   line(`${dyn}::Proxy(proxy) => sc_dyn_proxy_get(proxy, key, receiver),`);

@@ -1533,7 +1533,10 @@ fn validate_function(
             } => {
                 expr(value, locals, initialized, functions, module)?;
                 expr(key, locals, initialized, functions, module)?;
-                if value.ty() == Type::Dyn && key.ty() == Type::String && *r#type == Type::Dyn {
+                if value.ty() == Type::Dyn
+                    && matches!(key.ty(), Type::String | Type::Symbol)
+                    && *r#type == Type::Dyn
+                {
                     Ok(())
                 } else {
                     Err("invalid native value member read".into())
@@ -4504,6 +4507,20 @@ mod tests {
         assert!(validate(&m).is_ok());
         let wire = serde_json::to_value(&m).unwrap();
         assert_eq!(wire["functions"][0]["body"][0]["expr"]["kind"], "dynKeyGet");
+        let Stmt::Expression {
+            expr: Expr::DynKeyGet { key, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        else {
+            unreachable!()
+        };
+        **key = Expr::LibCall {
+            r#fn: "sym.iterator".into(),
+            args: vec![],
+            r#type: Type::Symbol,
+            loc: loc.clone(),
+        };
+        assert!(validate(&m).is_ok());
         let Stmt::Expression {
             expr: Expr::DynKeyGet { key, .. },
             ..

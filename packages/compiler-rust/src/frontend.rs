@@ -1271,7 +1271,7 @@ impl<'a> Lowerer<'a> {
                         self.function_member_key(node)?;
                     }
                     let obj = self.coerce(obj, Type::Dyn, node)?;
-                    let key = self.property_key_expression(node.argument_expression())?;
+                    let key = self.dynamic_property_key_expression(node.argument_expression())?;
                     return Ok(self.dynamic_get(node, obj, key));
                 }
                 if let Type::Array { elem } = obj.ty() {

@@ -39,6 +39,16 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn property_key_expression(&mut self, node: Node) -> Result<Expr, String> {
+        self.represented_property_key(node, false)
+    }
+
+    /// Dynamic member reads use the shared IR's symbol-key ABI. Other
+    /// property operations still require a string and retain their fences.
+    pub(super) fn dynamic_property_key_expression(&mut self, node: Node) -> Result<Expr, String> {
+        self.represented_property_key(node, true)
+    }
+
+    fn represented_property_key(&mut self, node: Node, allow_symbol: bool) -> Result<Expr, String> {
         if let Some(value) = self.literal_property_key(node) {
             Ok(Expr::StrLit {
                 value,
@@ -49,7 +59,9 @@ impl Lowerer<'_> {
             // Type-only assertions do not perform ToPropertyKey or erase
             // observable object conversion hooks.
             let value = self.primitive_operand(node)?;
-            if value.ty() == Type::F64 {
+            if allow_symbol && value.ty() == Type::Symbol {
+                Ok(value)
+            } else if value.ty() == Type::F64 {
                 // Object keys use NumberToString, not Map's numeric identity.
                 Ok(Expr::ToString {
                     operand: Box::new(value),

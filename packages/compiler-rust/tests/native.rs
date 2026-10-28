@@ -113,6 +113,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-symbol-maps/seed.ts",
         "rust-native-symbol-maps/public.mts",
         "rust-native-symbol-maps/reassign.mts",
+        "rust-native-symbol-property-read/ordinary.ts",
         "rust-native-static-methods/values.ts",
         "rust-native-static-methods/inheritance.ts",
         "rust-native-static-methods/order.ts",
@@ -3612,12 +3613,46 @@ fn uncaught_exceptions_run_finalizers_and_release_native_storage() {
 }
 
 #[test]
+fn symbol_reads_on_erased_exotic_receivers_fail_explicitly() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "symbol-exotic-boundary");
+    fs::write(&input, "const value: any = [1]; try { console.log(value[Symbol.iterator] === undefined); } catch (error) { console.log((error as Error).message); }\n").unwrap();
+    let result = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let output = Command::new(&target)
+        .env("SCRIPTC_RUST_HEAP_AUDIT", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "scriptc: symbol property access on this native value is not supported yet"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn symbol_boundaries_preserve_previous_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "symbol-boundary");
     for source in [
-        "const values = new Map<symbol, number>(); values.set(Symbol.iterator, 1);",
         "class C { *[Symbol.iterator]() { yield 1; } } new C()[Symbol.iterator]();",
         "class C { async *[Symbol.asyncIterator]() { yield 1; } } new C()[Symbol.asyncIterator]();",
         "class C { [Symbol.iterator]() { return 1; } } const method = new C()[Symbol.iterator]; console.log(method);",
