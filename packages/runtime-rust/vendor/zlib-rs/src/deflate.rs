@@ -810,7 +810,11 @@ fn lm_set_level(state: &mut State, level: i8) {
     state.nice_match = CONFIGURATION_TABLE[level as usize].nice_length;
     state.max_chain_length = CONFIGURATION_TABLE[level as usize].max_chain;
 
-    state.hash_calc_variant = HashCalcVariant::for_max_chain_length(state.max_chain_length);
+    state.hash_calc_variant = if cfg!(feature = "scriptc-node-level6") && level == 9 {
+        HashCalcVariant::Standard
+    } else {
+        HashCalcVariant::for_max_chain_length(state.max_chain_length)
+    };
     state.level = level;
 }
 

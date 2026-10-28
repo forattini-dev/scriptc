@@ -26,3 +26,6 @@ function badHeader(bytes: Uint8Array): void {
 badHeader(new Uint8Array([1, 1]));
 badHeader(new Uint8Array([136, 28]));
 badHeader(new Uint8Array([120, 156]));
+
+const scanlines = new Uint8Array([4,255,0,0,255,1,255,0,0,4,1,0,255,0,255,0,0,0]);
+console.log("png-level9", deflateSync(scanlines, { level: 9 }).toString("hex"));
