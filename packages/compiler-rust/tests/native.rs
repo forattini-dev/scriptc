@@ -298,6 +298,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-delete/order.ts",
         "rust-native-delete/arrays.ts",
         "rust-native-delete/typed-alias.ts",
+        "rust-native-buffer-byte-length/main.ts",
         "rust-native-delete/keys.ts",
         "rust-native-delete/errors.ts",
         "rust-native-delete/sloppy.cjs",
@@ -1531,6 +1532,46 @@ fn string_index_boundaries_preserve_artifacts() {
             &target.with_extension("rs"),
         ] {
             assert_eq!(fs::read_to_string(path).unwrap(), "preserve");
+        }
+    }
+}
+
+#[test]
+fn buffer_byte_length_boundaries_preserve_artifacts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    let target = binary(temp.path(), "buffer-byte-length-boundary");
+    for source in [
+        "Buffer.byteLength('x', 'utf16le');",
+        "Buffer.byteLength(new Uint8Array([1]));",
+        "Buffer.byteLength(42);",
+        "Buffer.byteLength();",
+        "Buffer.byteLength(...['x']);",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
+        let artifacts = [
+            &target,
+            &target.with_extension("rs"),
+            &target.with_extension("ir.json"),
+        ];
+        for artifact in artifacts {
+            fs::write(artifact, "preserve").unwrap();
+        }
+        let output = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--out"])
+            .arg(&target)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
+            "{source}: {stderr}"
+        );
+        for artifact in artifacts {
+            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
         }
     }
 }
@@ -4862,6 +4903,7 @@ fn builtin_manifest_reports_native_runtime_only_and_planned_contracts() {
         ("fs", "statSync", "native-partial"),
         ("fs", "lstatSync", "native-partial"),
         ("process", "env", "native-partial"),
+        ("Buffer", "byteLength", "native-partial"),
         ("crypto", "createHash", "runtime-only"),
         ("Bun", "file", "planned"),
     ] {

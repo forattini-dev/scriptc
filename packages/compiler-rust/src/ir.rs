@@ -2690,6 +2690,19 @@ fn validate_function(
                         Err("invalid native text codec operation".into())
                     };
                 }
+                if r#fn == "buffer.byteLenStr" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 2
+                        && args.iter().all(|arg| arg.ty() == Type::String)
+                        && *r#type == Type::F64
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native Buffer byte length".into())
+                    };
+                }
                 if r#fn == "regex.replaceCaptures" {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;

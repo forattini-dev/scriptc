@@ -72,6 +72,11 @@ pub(super) fn expression(
         Expr::LibCall { r#fn, args, .. } if r#fn == "buffer.isBuffer" => {
             format!("native_value_is_buffer(&({}))", emit(&args[0]))
         }
+        Expr::LibCall { r#fn, args, .. } if r#fn == "buffer.byteLenStr" => format!(
+            "{{ let value = {}; let encoding = {}; runtime::buffer_byte_length_string(&value, &encoding) }}",
+            emit(&args[0]),
+            emit(&args[1])
+        ),
         Expr::LibCall { r#fn, args, .. } if r#fn == "buffer.fromDyn" => format!(
             "{{ let source = {}; let encoding = {}; native_buffer_from(source, encoding, 0) }}",
             emit(&args[0]),

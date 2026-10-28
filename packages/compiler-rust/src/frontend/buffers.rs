@@ -30,7 +30,10 @@ impl Lowerer<'_> {
             return Ok(None);
         }
         let method = member.name().text();
-        if !matches!(method, "from" | "alloc" | "allocUnsafe" | "isBuffer") {
+        if !matches!(
+            method,
+            "from" | "alloc" | "allocUnsafe" | "isBuffer" | "byteLength"
+        ) {
             return Err(self.refuse(node, "Buffer static is not ported"));
         }
         let method_symbol = self.symbol(member.name());
@@ -52,6 +55,28 @@ impl Lowerer<'_> {
         let args = node.arguments().into_iter().collect::<Vec<_>>();
         if method == "from" {
             return self.buffer_from_call(node).map(Some);
+        }
+        if method == "byteLength" {
+            if args.len() != 1 || args[0].kind() == SyntaxKind::SpreadElement {
+                return Err(self.refuse(node, "Buffer.byteLength requires one native string; encoding overloads are not ported"));
+            }
+            let value = self.expression(args[0])?;
+            if value.ty() != Type::String {
+                return Err(self.refuse(args[0], "Buffer.byteLength requires a native string"));
+            }
+            return Ok(Some(Expr::LibCall {
+                r#fn: "buffer.byteLenStr".into(),
+                args: vec![
+                    value,
+                    Expr::StrLit {
+                        value: "utf8".into(),
+                        r#type: Type::String,
+                        loc: self.loc(node),
+                    },
+                ],
+                r#type: Type::F64,
+                loc: self.loc(node),
+            }));
         }
         if args.len() != 1 || args[0].kind() == SyntaxKind::SpreadElement {
             return Err(self.refuse(node, "Buffer factory overload is not ported"));
