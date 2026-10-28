@@ -215,10 +215,14 @@ impl Lowerer<'_> {
     // Snapshot the initial length, but find each next live own index after the
     // callback. This skips holes and observes deletion or filling of later slots.
     fn array_reduce_values(&mut self, node: Node, values: Vec<Expr>) -> Result<Expr, String> {
-        if values.len() < 3 || values[2].ty() != Type::F64 {
+        if values.len() < 2
+            || (values.len() >= 3 && values[2].ty() != Type::F64)
+            || (values.len() == 2
+                && !matches!(values[0].ty(), Type::Array { elem } if *elem == Type::F64))
+        {
             return Err(self.refuse(
                 node,
-                "array.reduce requires a callback and a numeric initial value",
+                "array.reduce requires a numeric initial value or numeric array",
             ));
         }
         let Type::Func { params, ret, rest } = values[1].ty() else {
@@ -244,7 +248,60 @@ impl Lowerer<'_> {
         let accumulator = helper.local("accumulator", Type::F64, true);
         helper.declare(&length, helper.length(&array));
         helper.declare(&index, helper.number(0.0));
-        helper.declare(&accumulator, helper.read(&helper.param(2)));
+        if values.len() >= 3 {
+            helper.declare(&accumulator, helper.read(&helper.param(2)));
+        } else {
+            // Without an initial value, the first present element becomes the
+            // accumulator and is not passed to the callback.
+            helper.function.body.push(Stmt::Assign {
+                local_id: index.id.clone(),
+                value: Expr::ArrayIntrinsic {
+                    method: "nextPresent".into(),
+                    receiver: Box::new(helper.read(&array)),
+                    args: vec![helper.read(&index)],
+                    r#type: Type::F64,
+                    loc: helper.loc(),
+                },
+                initializes_global: false,
+                loc: helper.loc(),
+            });
+            helper.function.body.push(Stmt::If {
+                cond: Expr::Bin {
+                    op: ">=".into(),
+                    left: Box::new(helper.read(&index)),
+                    right: Box::new(helper.read(&length)),
+                    r#type: Type::Bool,
+                    loc: helper.loc(),
+                },
+                then: vec![Stmt::Throw {
+                    value: Expr::LibCall {
+                        r#fn: "error.new".into(),
+                        args: vec![Expr::StrLit {
+                            value: "Reduce of empty array with no initial value".into(),
+                            r#type: Type::String,
+                            loc: helper.loc(),
+                        }],
+                        r#type: Type::Object {
+                            class_name: "%TypeError".into(),
+                        },
+                        loc: helper.loc(),
+                    },
+                    loc: helper.loc(),
+                }],
+                else_: None,
+                loc: helper.loc(),
+            });
+            let first_key = Expr::ToString {
+                operand: Box::new(helper.read(&index)),
+                r#type: Type::String,
+                loc: helper.loc(),
+            };
+            let source = self.coerce(helper.read(&array), Type::Dyn, node)?;
+            let first = self.dynamic_get(node, source, first_key);
+            let first = self.coerce(first, Type::F64, node)?;
+            helper.declare(&accumulator, first);
+            helper.function.body.push(helper.advance(&index));
+        }
         let array_value = self.coerce(helper.read(&array), Type::Dyn, node)?;
         let key = Expr::ToString {
             operand: Box::new(helper.read(&index)),

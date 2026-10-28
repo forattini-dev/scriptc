@@ -40,3 +40,25 @@ console.log("extra", [1, 2].reduce((a: number, b: number) => { ignoredOrder += "
 function failExtra(): number { throw new Error("extra failed"); }
 try { [1].reduce((a: number, b: number) => { console.log("wrong callback"); return a + b; }, 0, failExtra()); }
 catch (error) { if (error instanceof Error) console.log("extra-error", error.message); }
+
+const noInitial = [2, 3, 4];
+let noInitialTrace = "";
+console.log("no-initial", noInitial.reduce((a, b, i) => { noInitialTrace += String(i); return a + b; }), noInitialTrace);
+const sparse: number[] = [];
+sparse.length = 4; sparse[1] = 2; sparse[3] = 4;
+console.log("no-initial-sparse", sparse.reduce((a, b, i) => a + b + i));
+const single = [9];
+console.log("no-initial-single", single.reduce((a, b) => { throw new Error("unexpected callback"); return a + b; }));
+const allHoles: number[] = [];
+allHoles.length = 2;
+try { allHoles.reduce((a, b) => a + b); }
+catch (error) { if (error instanceof TypeError) console.log("no-initial-empty", error.message); }
+const liveNoInitial = [1, 2, 3];
+let liveTrace = "";
+console.log("no-initial-live", liveNoInitial.reduce((a, b, i) => {
+  liveTrace += String(i);
+  if (i === 1) { liveNoInitial[2] = 8; liveNoInitial.push(100); }
+  return a + b;
+}), liveTrace);
+try { ([] as number[]).reduce((a, b) => a + b); }
+catch (error) { if (error instanceof TypeError) console.log("no-initial-zero", error.message); }

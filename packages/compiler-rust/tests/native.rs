@@ -4963,8 +4963,8 @@ fn array_reduce_unimplemented_overloads_preserve_existing_artifacts() {
     let input = temp.path().join("main.ts");
     let target = binary(temp.path(), "reduce-boundary");
     for source in [
-        "[1,2].reduce((a,b) => a+b);",
         "[1,2].reduce((a,b) => a+String(b), '');",
+        "['a','b'].reduce((a,b) => a+b);",
         "[1,2].reduce(...[(a,b) => a+b, 0]);",
     ] {
         fs::write(&input, format!("// @ts-nocheck\n{source}\n")).unwrap();
