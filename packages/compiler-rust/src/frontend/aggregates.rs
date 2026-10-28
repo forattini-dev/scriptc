@@ -574,6 +574,21 @@ impl Lowerer<'_> {
             });
         }
         let describe = |ty: &Type| {
+            if let Type::Union { union_id } = ty
+                && let Some(union) = self.unions.get(*union_id)
+            {
+                let arms = union
+                    .arms
+                    .iter()
+                    .take(8)
+                    .map(|arm| format!("{arm:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return format!(
+                    "union u{union_id} [{arms}{}]",
+                    if union.arms.len() > 8 { ", ..." } else { "" }
+                );
+            }
             if let Type::Record { shape_id } = ty
                 && let Some(shape) = self.records.get(*shape_id)
             {

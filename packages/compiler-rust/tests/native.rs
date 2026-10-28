@@ -8339,3 +8339,17 @@ fn floating_array_boundaries_preserve_previous_artifacts() {
         }
     }
 }
+
+#[test]
+fn numeric_union_refusal_reports_the_runtime_arms() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "numeric-union-boundary");
+    fs::write(&input, "const data = new Uint8Array(0); const x = true ? data[1]! : 0; console.log(x);\n").unwrap();
+    let output = Command::new(compiler()).arg("build").arg(&input)
+        .args(["--no-engine", "--out"]).arg(&target).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("native representation coercion is not ported") && stderr.contains("F64") && stderr.contains("Undefined") && !stderr.contains("panicked"), "{stderr}");
+    assert!(!target.exists());
+}
