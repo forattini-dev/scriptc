@@ -419,7 +419,24 @@ pub fn fs_copy_file(from: &JsString, to: &JsString) {
 }
 
 pub fn fs_rename(from: &JsString, to: &JsString) {
+    for (name, path) in [("oldPath", from), ("newPath", to)] {
+        if path.contains('\0') {
+            throw_invalid_arg_value(
+                &format!("The argument '{name}' must be a string, Uint8Array, or URL without null bytes. Received "),
+                path,
+            );
+        }
+        if !path.is_well_formed() {
+            throw_type_error("scriptc: lone UTF-16 filesystem paths are not ported".into());
+        }
+    }
     if let Err(error) = std::fs::rename(from.to_utf8_lossy(), to.to_utf8_lossy()) {
+        #[cfg(windows)]
+        let resolved_from = if from.is_empty() { from.clone() } else { path_win32_resolve(&array_new(vec![from.clone()])) };
+        #[cfg(windows)]
+        let resolved_to = if to.is_empty() { to.clone() } else { path_win32_resolve(&array_new(vec![to.clone()])) };
+        #[cfg(windows)]
+        let (from, to) = (&resolved_from, &resolved_to);
         throw_fs_error2("rename", from, to, error);
     }
 }
