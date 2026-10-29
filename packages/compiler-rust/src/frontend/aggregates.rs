@@ -1088,17 +1088,25 @@ impl Lowerer<'_> {
     pub(super) fn record_get(&mut self, node: Node) -> Result<Expr, String> {
         let obj = self.expression(node.expression())?;
         let obj = self.live_member_receiver(node.expression(), obj);
-        if obj.ty() == Type::Dyn || matches!(obj.ty(), Type::Func { .. }) {
-            if matches!(obj.ty(), Type::Func { .. }) {
+        if obj.ty() == Type::Dyn || matches!(obj.ty(), Type::Func { .. } | Type::Classval { .. }) {
+            if matches!(obj.ty(), Type::Func { .. } | Type::Classval { .. }) {
                 self.function_data_key(node, node.name().text())?;
             }
+            let class = matches!(obj.ty(), Type::Classval { .. });
             let obj = self.coerce(obj, Type::Dyn, node)?;
             let key = Expr::StrLit {
                 value: node.name().text().into(),
                 r#type: Type::String,
                 loc: self.loc(node),
             };
-            return Ok(self.dynamic_get(node, obj, key));
+            let value = self.dynamic_get(node, obj, key);
+            return if class {
+                let ty = self.ty(node)?;
+                if self.native_type_contains(&ty, |part| matches!(part, Type::Classval { .. })) {
+                    return Err(self.refuse(node, "mutable class constructor properties require dynamic construction identity"));
+                }
+                self.coerce(value, ty, node)
+            } else { Ok(value) };
         }
         if self.array_view(&obj.ty()) && node.name().text() == "length" {
             return self.array_length(node, obj);
@@ -1193,9 +1201,10 @@ impl Lowerer<'_> {
         }
         if obj.ty() == Type::Dyn
             || matches!(obj.ty(), Type::Func { .. })
+            || matches!(obj.ty(), Type::Classval { .. })
             || matches!(obj.ty(), Type::Array { elem } if *elem == Type::Dyn)
         {
-            if matches!(obj.ty(), Type::Func { .. }) {
+            if matches!(obj.ty(), Type::Func { .. } | Type::Classval { .. }) {
                 self.function_data_key(member, member.name().text())?;
             }
             let obj = self.coerce(obj, Type::Dyn, node)?;

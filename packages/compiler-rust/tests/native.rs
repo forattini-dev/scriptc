@@ -120,6 +120,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-class-property-constructor/values.ts",
         "rust-native-class-union/values.ts",
         "rust-native-class-data/values.ts",
+        "rust-native-class-static-data/values.ts",
         "rust-native-static-methods/inheritance.ts",
         "rust-native-static-methods/order.ts",
         "rust-native-static-methods/public.mts",
@@ -8406,5 +8407,37 @@ fn unrelated_class_return_union_reports_identity_boundary() {
     assert!(!output.status.success() && stderr.contains("function return union of class instances needs a shared identity contract") && !stderr.contains("panicked"), "{stderr}");
     for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] {
         assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+    }
+}
+
+#[test]
+fn mutable_static_constructor_requires_dynamic_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "static-constructor-boundary");
+    fs::write(&input, "class Group { value = 1 } class Other { value = 2 } class Box { static Group = Group } Box.Group = Other; console.log(new Box.Group().value);\n").unwrap();
+    let output = Command::new(compiler()).arg("build").arg(&input).args(["--no-engine", "--out"]).arg(&target).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("mutable class constructor properties require dynamic construction identity") && !stderr.contains("panicked"), "{stderr}");
+    assert!(!target.exists());
+}
+
+#[test]
+fn unsupported_static_initialization_receivers_are_refused() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    for (index, (source, reason)) in [
+        ("class A { static value = A } console.log(A);", "static field self-reference needs a class initialization binding"),
+        ("class A { static value = this } console.log(A);", "class static/computed members"),
+        ("class A { static value = 1; static run() { return 1 } } console.log(A.run());", "static fields with static methods need shared class descriptors"),
+    ].into_iter().enumerate() {
+        let input = temp.path().join(format!("main{index}.ts"));
+        let target = binary(temp.path(), &format!("static-initializer-boundary-{index}"));
+        fs::write(&input, source).unwrap();
+        let output = Command::new(compiler()).arg("build").arg(&input).args(["--no-engine", "--out"]).arg(&target).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success() && stderr.contains(reason) && !stderr.contains("panicked"), "{stderr}");
+        assert!(!target.exists());
     }
 }

@@ -471,6 +471,15 @@ impl Lowerer<'_> {
                 )
                 && !receivers::reads_this(member)
                 && !static_methods::reads_super(member);
+            let static_field = member.modifier_flags().intersects(ModifierFlags::STATIC)
+                && member.kind() == SyntaxKind::PropertyDeclaration
+                && node.kind() == SyntaxKind::ClassDeclaration
+                && matches!(
+                    member.name().kind(),
+                    SyntaxKind::Identifier | SyntaxKind::StringLiteral
+                )
+                && !receivers::reads_this(member)
+                && !static_methods::reads_super(member);
             let symbol_method = if member.kind() == SyntaxKind::MethodDeclaration
                 && member.name().kind() == SyntaxKind::ComputedPropertyName
             {
@@ -478,7 +487,8 @@ impl Lowerer<'_> {
             } else {
                 None
             };
-            if (member.modifier_flags().intersects(ModifierFlags::STATIC) && !static_method)
+            if (member.modifier_flags().intersects(ModifierFlags::STATIC)
+                && !static_method && !static_field)
                 || member
                     .modifiers()
                     .nodes()
@@ -611,6 +621,7 @@ impl Lowerer<'_> {
             });
         }
         body.extend(self.initialize_private_storage(index, node)?);
+        body.extend(self.initialize_static_fields(index, node)?);
         let token = self.classes.definitions[index].token.as_ref().unwrap();
         body.push(Stmt::Assign {
             local_id: token.id.clone(),
@@ -623,6 +634,63 @@ impl Lowerer<'_> {
             },
             loc: self.loc(node),
         });
+        Ok(body)
+    }
+
+    fn initialize_static_fields(&mut self, index: usize, node: Node) -> Result<Vec<Stmt>, String> {
+        let fields = node.members().into_iter().filter(|member| {
+            member.kind() == SyntaxKind::PropertyDeclaration
+                && member.modifier_flags().intersects(ModifierFlags::STATIC)
+                && !member.modifier_flags().intersects(ModifierFlags::AMBIENT)
+        }).collect::<Vec<_>>();
+        if fields.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.layout_class(index)?;
+        let class_name = self.classes.definitions[index].name.clone();
+        if self.classes.has_static_methods(&class_name) {
+            return Err(self.refuse(node, "static fields with static methods need shared class descriptors"));
+        }
+        let mut body = Vec::new();
+        for field in fields {
+            self.function_data_key(field, field.name().text())?;
+            fn references_name(node: Node, name: &str) -> bool {
+                if node.kind() == SyntaxKind::Identifier && node.text() == name {
+                    return true;
+                }
+                let mut found = false;
+                node.for_each_child(&mut |child| {
+                    found |= references_name(child, name);
+                    found
+                });
+                found
+            }
+            let init = field.initializer();
+            if !init.is_nil() && references_name(init, node.name().text()) {
+                return Err(self.refuse(field, "static field self-reference needs a class initialization binding"));
+            }
+            let value = if init.is_nil() {
+                self.coerce(
+                    Expr::UnitLit { unit: "undefined", r#type: Type::Undefined, loc: self.loc(field) },
+                    Type::Dyn,
+                    field,
+                )?
+            } else {
+                self.expected_expression(init, Type::Dyn)?
+            };
+            let class = Expr::ClassRef {
+                class_name: class_name.clone(),
+                r#type: Type::Classval { class_name: class_name.clone() },
+                loc: self.loc(field),
+            };
+            let obj = self.coerce(class, Type::Dyn, field)?;
+            let key = Expr::StrLit {
+                value: field.name().text().into(),
+                r#type: Type::String,
+                loc: self.loc(field),
+            };
+            body.push(self.checked_dynamic_property_set(field, obj, key, value)?);
+        }
         Ok(body)
     }
 
@@ -680,6 +748,7 @@ impl Lowerer<'_> {
             .filter(|n| {
                 n.kind() == SyntaxKind::PropertyDeclaration
                     && n.name().kind() != SyntaxKind::PrivateIdentifier
+                    && !n.modifier_flags().intersects(ModifierFlags::STATIC)
             })
             .map(|n| (n.name().text().to_string(), n))
             .collect::<Vec<_>>();

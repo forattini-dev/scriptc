@@ -153,7 +153,9 @@ impl Lowerer<'_> {
     fn initialize_fields(&mut self, index: usize) -> Result<Vec<Stmt>, String> {
         let mut body = self.initialize_private_methods(index)?;
         for field in self.classes.definitions[index].node.members() {
-            if field.kind() != SyntaxKind::PropertyDeclaration {
+            if field.kind() != SyntaxKind::PropertyDeclaration
+                || field.modifier_flags().intersects(ModifierFlags::STATIC)
+            {
                 continue;
             }
             if field.modifier_flags().intersects(ModifierFlags::AMBIENT) {
