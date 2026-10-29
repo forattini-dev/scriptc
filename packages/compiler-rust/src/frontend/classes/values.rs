@@ -145,7 +145,7 @@ impl Lowerer<'_> {
 
     pub(in crate::frontend) fn class_new(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let Some(index) = self.class_symbol(node.expression()) else {
-            return Ok(None);
+            return self.union_class_new(node);
         };
         if let Some(name) = boxed::kind(&self.classes.definitions[index].name) {
             return self.boxed_new(node, index, name).map(Some);
@@ -226,6 +226,120 @@ impl Lowerer<'_> {
         let result = self.classes.object(index);
         Ok(Some(Expr::NewValue {
             callee: Box::new(callee),
+            args,
+            r#type: result,
+            loc: self.loc(node),
+        }))
+    }
+
+    fn union_class_new(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let checked = self.checker.get_type_at_location(node.expression());
+        if !self.checker.ty(checked).flags.intersects(TypeFlags::UNION) {
+            return Ok(None);
+        }
+        let callee = self.expression(node.expression())?;
+        let Type::Union { union_id } = callee.ty() else {
+            return Ok(None);
+        };
+        let arms = self.unions[union_id].arms.clone();
+        if arms.len() < 2 || !arms.iter().all(|arm| matches!(arm, Type::Classval { .. })) {
+            return Ok(None);
+        }
+        let result = self.ty(node)?;
+        let Type::Object { class_name: parent } = &result else {
+            return Err(self.refuse(
+                node,
+                "constructor union requires a common native instance type",
+            ));
+        };
+        let mut classes = Vec::new();
+        let mut common = None;
+        for arm in &arms {
+            let Type::Classval { class_name } = arm else {
+                unreachable!()
+            };
+            let index = self
+                .classes
+                .definitions
+                .iter()
+                .position(|d| d.name == *class_name)
+                .ok_or_else(|| {
+                    self.refuse(node, "constructor union has no native class identity")
+                })?;
+            self.resolve_class(index)?;
+            if !self.classes.subclass(class_name, parent) {
+                return Err(self.refuse(
+                    node,
+                    "constructor union instances need a shared native class hierarchy",
+                ));
+            }
+            let params = self
+                .request_constructor(index)?
+                .into_iter()
+                .skip(1)
+                .map(|param| param.r#type)
+                .collect::<Vec<_>>();
+            if common.as_ref().is_some_and(|expected| *expected != params) {
+                return Err(self.refuse(node, "constructor union argument contracts differ"));
+            }
+            common = Some(params);
+            classes.push(index);
+        }
+        let params = common.unwrap();
+        let arguments = self.method_arguments(node, &params)?;
+        let mut helper_types = vec![callee.ty()];
+        helper_types.extend(params);
+        let mut helper = helpers::Helper::new(
+            "class_union_new",
+            helper_types,
+            result.clone(),
+            self.loc(node),
+        );
+        let constructor = helper.param(0);
+        for (tag, (arm, index)) in arms.iter().zip(classes).enumerate() {
+            let selected = Expr::UnionNarrow {
+                union_id: format!("u{union_id}"),
+                tag,
+                value: Box::new(helper.read(&constructor)),
+                r#type: arm.clone(),
+                loc: helper.loc(),
+            };
+            let values = (1..helper.function.params.len())
+                .map(|i| helper.read(&helper.param(i)))
+                .collect();
+            let instance = Expr::NewValue {
+                callee: Box::new(selected),
+                args: values,
+                r#type: self.classes.object(index),
+                loc: helper.loc(),
+            };
+            let instance = self.coerce(instance, result.clone(), node)?;
+            let ret = Stmt::Return {
+                value: Some(instance),
+                loc: helper.loc(),
+            };
+            if tag + 1 == arms.len() {
+                helper.function.body.push(ret);
+            } else {
+                helper.function.body.push(Stmt::If {
+                    cond: Expr::UnionIsTag {
+                        union_id: format!("u{union_id}"),
+                        tag,
+                        value: Box::new(helper.read(&constructor)),
+                        negated: false,
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    },
+                    then: vec![ret],
+                    else_: None,
+                    loc: helper.loc(),
+                });
+            }
+        }
+        let mut args = vec![callee];
+        args.extend(arguments);
+        Ok(Some(Expr::Call {
+            callee: self.install_helper(helper.function),
             args,
             r#type: result,
             loc: self.loc(node),

@@ -118,6 +118,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-contextual-record-storage/values.ts",
         "rust-native-static-methods/values.ts",
         "rust-native-class-property-constructor/values.ts",
+        "rust-native-class-union/values.ts",
         "rust-native-static-methods/inheritance.ts",
         "rust-native-static-methods/order.ts",
         "rust-native-static-methods/public.mts",
@@ -8373,4 +8374,18 @@ fn typed_array_named_key_refuses_unrepresentable_scalar_storage() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success() && stderr.contains("named-key value requires an owning dynamic contract") && !stderr.contains("panicked"), "{stderr}");
     assert!(!target.exists());
+}
+
+#[test]
+fn constructor_union_rejects_incompatible_argument_contracts() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "constructor-union-boundary");
+    fs::write(&input, "// @ts-nocheck\nclass A { constructor(x: number) {} } class B extends A { constructor(x: string) { super(1); } } function use(C: typeof A | typeof B) { return new C(1); } use(A);\n").unwrap();
+    for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] { fs::write(artifact, "preserve").unwrap(); }
+    let output = Command::new(compiler()).arg("build").arg(&input).args(["--no-engine", "--out"]).arg(&target).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("constructor union argument contracts differ") && !stderr.contains("panicked"), "{stderr}");
+    for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] { assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve"); }
 }
