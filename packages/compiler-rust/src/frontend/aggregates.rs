@@ -617,6 +617,9 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn narrowed(&mut self, value: Expr, node: Node) -> Result<Expr, String> {
+        if let Some(value) = self.guarded_truthy_assignment(node, &value) {
+            return Ok(value);
+        }
         if value.ty() == Type::Caught {
             let target = self.ty(node)?;
             if target == Type::Symbol {

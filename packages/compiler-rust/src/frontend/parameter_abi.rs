@@ -240,6 +240,7 @@ impl Lowerer<'_> {
                 let declaration = self.checker.sym(SymbolId(symbol)).value_declaration;
                 if !declaration.is_nil()
                     && declaration.kind() == SyntaxKind::VariableDeclaration
+                    && !self.guarded_truthy_assignment_site(assignment.right())
                     && self.argument_may_be_absent(assignment.right(), &mut HashSet::new())
                 {
                     changed |= self.absence_assignments.insert(symbol);

@@ -25,6 +25,85 @@ fn declarations(node: Node, out: &mut Vec<Node>) {
 }
 
 impl Lowerer<'_> {
+    /// `if (!value) throw/return; destination = value` has no intervening
+    /// operation that can change the observed binding before assignment.
+    pub(super) fn guarded_truthy_assignment_site(&mut self, node: Node) -> bool {
+        if node.kind() != SyntaxKind::Identifier {
+            return false;
+        }
+        let assignment = node.parent();
+        if assignment.kind() != SyntaxKind::BinaryExpression
+            || assignment.operator_token().kind() != SyntaxKind::EqualsToken
+            || assignment.left().kind() != SyntaxKind::Identifier
+            || assignment.right() != node
+        {
+            return false;
+        }
+        let statement = assignment.parent();
+        let block = statement.parent();
+        if statement.kind() != SyntaxKind::ExpressionStatement || block.kind() != SyntaxKind::Block
+        {
+            return false;
+        }
+        let statements = block.statements().into_iter().collect::<Vec<_>>();
+        let Some(previous) = statements
+            .iter()
+            .position(|item| *item == statement)
+            .and_then(|i| i.checked_sub(1))
+        else {
+            return false;
+        };
+        let guard = statements[previous];
+        if guard.kind() != SyntaxKind::IfStatement || !guard.else_statement().is_nil() {
+            return false;
+        }
+        let condition = primitives::primitive_source(guard.expression());
+        if condition.kind() != SyntaxKind::PrefixUnaryExpression
+            || condition.operator() != SyntaxKind::ExclamationToken
+        {
+            return false;
+        }
+        let source = primitives::primitive_source(condition.operand());
+        let symbol = self.symbol(node);
+        if symbol == 0 || source.kind() != SyntaxKind::Identifier || self.symbol(source) != symbol
+        {
+            return false;
+        }
+        let body = guard.then_statement();
+        if body.kind() == SyntaxKind::Block {
+            let statements = body.statements().into_iter().collect::<Vec<_>>();
+            statements.len() == 1
+                && matches!(statements[0].kind(), SyntaxKind::ThrowStatement | SyntaxKind::ReturnStatement)
+        } else {
+            matches!(body.kind(), SyntaxKind::ThrowStatement | SyntaxKind::ReturnStatement)
+        }
+    }
+
+    pub(super) fn guarded_truthy_assignment(&mut self, node: Node, value: &Expr) -> Option<Expr> {
+        if !self.guarded_truthy_assignment_site(node) {
+            return None;
+        }
+        let Type::Union { union_id } = value.ty() else {
+            return None;
+        };
+        let present = self.unions[union_id]
+            .arms
+            .iter()
+            .enumerate()
+            .filter(|(_, arm)| !matches!(arm, Type::Null | Type::Undefined | Type::Void))
+            .collect::<Vec<_>>();
+        let [(tag, target)] = present.as_slice() else {
+            return None;
+        };
+        Some(Expr::UnionNarrow {
+            union_id: format!("u{union_id}"),
+            tag: *tag,
+            value: Box::new(value.clone()),
+            r#type: (*target).clone(),
+            loc: self.loc(node),
+        })
+    }
+
     /// A direct truthy return has no intervening operation that could retag
     /// the local. This also works for JS bodies whose checker view is `any`.
     pub(super) fn guarded_truthy_return(&mut self, node: Node, value: &Expr) -> Option<Expr> {

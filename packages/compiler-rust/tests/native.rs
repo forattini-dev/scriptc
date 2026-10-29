@@ -555,6 +555,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-optional-split/values.ts",
         "rust-native-regex-guard/direct.ts",
         "rust-native-regex-guard/recursive.ts",
+        "rust-native-truthy-assignment/values.ts",
         "rust-native-set-spread/main.ts",
         "rust-native-set-spread/identity.ts",
         "rust-native-set-immediate-first/values.ts",
