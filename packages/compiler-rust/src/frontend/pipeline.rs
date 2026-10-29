@@ -180,6 +180,7 @@ fn lower_internal(
             lowerer.inventory_classes(&plan.modules);
             lowerer.inventory_data_tables(&plan.modules);
             lowerer.inventory_storage(&plan.modules);
+            lowerer.inventory_default_exports(&plan.modules)?;
             Ok(())
         })?;
         let mut body = lowerer.commonjs_prelude();

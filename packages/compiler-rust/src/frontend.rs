@@ -178,6 +178,8 @@ struct Lowerer<'a> {
     locals: Vec<Local>,
     bindings: HashMap<u32, Local>,
     module_bindings: HashMap<u32, Local>,
+    default_exports: HashMap<declarations::Key, Local>,
+    default_aliases: HashMap<u32, u32>,
     unobserved_default_exports: HashSet<declarations::Key>,
     globals: Vec<ir::Global>,
     functions: functions::FunctionGraph,
@@ -239,6 +241,8 @@ impl<'a> Lowerer<'a> {
             locals,
             bindings,
             module_bindings,
+            default_exports,
+            default_aliases,
             unobserved_default_exports,
             globals,
             functions,
@@ -293,6 +297,8 @@ impl<'a> Lowerer<'a> {
             locals: Vec::new(),
             bindings: HashMap::new(),
             module_bindings: HashMap::new(),
+            default_exports: HashMap::new(),
+            default_aliases: HashMap::new(),
             unobserved_default_exports: HashSet::new(),
             globals: Vec::new(),
             functions: functions::FunctionGraph::default(),
@@ -577,6 +583,9 @@ impl<'a> Lowerer<'a> {
         } else {
             self.checker.get_symbol_at_location(node, false)
         };
+        if let Some(target) = self.default_aliases.get(&symbol.0) {
+            return *target;
+        }
         if self.commonjs.local_symbols.contains(&symbol.0)
             && node.kind() == SyntaxKind::Identifier
             && let Some(local) = self.commonjs_lexical_symbol(node)
@@ -897,6 +906,13 @@ impl<'a> Lowerer<'a> {
         }
         let loc = self.loc(node);
         let stmt = match node.kind() {
+            SyntaxKind::ExportAssignment
+                if self.default_exports.contains_key(&declarations::Key::of(node)) =>
+            {
+                let binding = self.default_exports[&declarations::Key::of(node)].clone();
+                let value = self.expected_expression(node.expression(), binding.r#type)?;
+                Stmt::Assign { local_id: binding.id, value, initializes_global: true, loc }
+            }
             SyntaxKind::ExportAssignment
                 if self
                     .unobserved_default_exports

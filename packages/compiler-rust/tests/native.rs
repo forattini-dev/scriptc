@@ -126,6 +126,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-dynamic-constructors/values.ts",
         "rust-native-dynamic-object-spread/values.ts",
         "rust-native-dynamic-bind/values.ts",
+        "rust-native-default-export/values.mts",
         "rust-native-class-static-super/values.ts",
         "rust-native-class-static-mixed/values.ts",
         "rust-native-static-methods/inheritance.ts",
@@ -3322,7 +3323,7 @@ fn static_method_boundaries_are_refused_without_publication() {
 }
 
 #[test]
-fn observed_default_expression_is_refused_without_publication() {
+fn default_expression_reexports_are_refused_without_publication() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("source.mts");
     let entry = temp.path().join("entry.mts");
@@ -3333,13 +3334,8 @@ fn observed_default_expression_is_refused_without_publication() {
         "export let value = 1; export default value; value = 2;",
     )
     .unwrap();
-    for text in [
-        "import value from './source.mts'; console.log(value);",
-        "import { default as value } from './source.mts'; console.log(value);",
-        "import * as source from './source.mts'; console.log(source.default);",
-        "export { default as value } from './source.mts';",
-        "export * as source from './source.mts';",
-    ] {
+    {
+        let text = "export * as source from './source.mts';";
         fs::write(&entry, text).unwrap();
         fs::write(&output, "preserve").unwrap();
         let result = Command::new(compiler())
@@ -3351,7 +3347,7 @@ fn observed_default_expression_is_refused_without_publication() {
             .unwrap();
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(
-            !result.status.success() && stderr.contains("ExportAssignment"),
+            !result.status.success() && stderr.contains("re-export of a default expression"),
             "{text}: {stderr}"
         );
         assert_eq!(fs::read_to_string(&output).unwrap(), "preserve");

@@ -1,0 +1,15 @@
+import value from "./source.mts";
+import { default as alias } from "./source.mts";
+import * as ns from "./source.mts";
+import original from "./object.mts";
+import { current } from "./object.mts";
+console.log("snapshot", value, alias, ns.default, ns.value);
+console.log("identity", original.value, current.value, original === current);
+import "./cycle-a.mts";
+import chained, { renamed } from "./barrel-two.mts";
+import * as barrel from "./barrel.mts";
+console.log("reexport", chained, renamed, barrel.forwarded);
+import { forwarded as starred } from "./star.mts";
+console.log("star", starred);
+import { value as live } from "./source.mts";
+console.log("live", live);

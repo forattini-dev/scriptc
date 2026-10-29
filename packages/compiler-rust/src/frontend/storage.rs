@@ -2,6 +2,233 @@
 use super::*;
 
 impl Lowerer<'_> {
+    fn module_export_symbol(&mut self, file: Node, name: &str) -> Option<u32> {
+        if file.symbol().0 == 0 {
+            return None;
+        }
+        self.checker
+            .get_exports_of_module_as_array(file.symbol())
+            .into_iter()
+            .find(|symbol| self.checker.sym(*symbol).name.as_ref() == name)
+            .map(|symbol| symbol.0)
+    }
+
+    fn default_alias_target(&mut self, file: Node, name: &str) -> Option<u32> {
+        let symbol = self.module_export_symbol(file, name)?;
+        self.default_aliases.get(&symbol).copied()
+    }
+
+    fn add_default_alias(&mut self, symbol: u32, target: u32, site: Node) -> Result<bool, String> {
+        if symbol == 0 {
+            return Err(self.refuse(site, "default alias has no native binding"));
+        }
+        if let Some(previous) = self.default_aliases.get(&symbol) {
+            if *previous != target {
+                return Err(self.refuse(site, "ambiguous default export alias"));
+            }
+            return Ok(false);
+        }
+        self.default_aliases.insert(symbol, target);
+        Ok(true)
+    }
+
+    fn local_import_default(&mut self, file: Node, name: &str) -> Option<u32> {
+        for node in file.statements() {
+            if node.kind() != SyntaxKind::ImportDeclaration {
+                continue;
+            }
+            let clause = node.import_clause();
+            if clause.is_nil() {
+                continue;
+            }
+            let local = clause.name();
+            if !local.is_nil() && local.text() == name {
+                let symbol = self.checker.get_symbol_at_location(local, false).0;
+                if let Some(target) = self.default_aliases.get(&symbol) {
+                    return Some(*target);
+                }
+            }
+            let named = clause.named_bindings();
+            if !named.is_nil() && named.kind() == SyntaxKind::NamedImports {
+                for item in named.elements() {
+                    if !item.is_type_only() && item.name().text() == name {
+                        let symbol = self.checker.get_symbol_at_location(item.name(), false).0;
+                        if let Some(target) = self.default_aliases.get(&symbol) {
+                            return Some(*target);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub(super) fn inventory_default_exports(&mut self, files: &[Node]) -> Result<(), String> {
+        for file in files {
+            self.file = source_file_info(*file).file_name.to_string();
+            for node in file.statements() {
+                if node.kind() != SyntaxKind::ExportAssignment
+                    || node.is_export_equals()
+                    || self
+                        .unobserved_default_exports
+                        .contains(&declarations::Key::of(node))
+                {
+                    continue;
+                }
+                let symbol = self.module_export_symbol(*file, "default").ok_or_else(|| {
+                    self.refuse(node, "default export has no native module binding")
+                })?;
+                let ty = self.ty(node.expression())?;
+                let local = Local {
+                    id: format!("%g.{}", self.globals.len()),
+                    name: "default".into(),
+                    r#type: ty,
+                    mutable: false,
+                    boxed: false,
+                };
+                self.globals.push(ir::Global {
+                    id: local.id.clone(),
+                    name: local.name.clone(),
+                    r#type: local.r#type.clone(),
+                    mutable: false,
+                });
+                self.module_bindings.insert(symbol, local.clone());
+                self.add_default_alias(symbol, symbol, node)?;
+                self.default_exports
+                    .insert(declarations::Key::of(node), local);
+            }
+        }
+        if self.default_exports.is_empty() {
+            return Ok(());
+        }
+        // Preserve the snapshot through import and named re-export aliases,
+        // including cycles and chains spanning several modules.
+        loop {
+            let mut changed = false;
+            for file in files {
+                self.file = source_file_info(*file).file_name.to_string();
+                for node in file.statements() {
+                    if node.is_type_only()
+                        || !matches!(
+                            node.kind(),
+                            SyntaxKind::ImportDeclaration | SyntaxKind::ExportDeclaration
+                        )
+                    {
+                        continue;
+                    }
+                    let specifier = node.module_specifier();
+                    let target = if specifier.is_nil() {
+                        None
+                    } else {
+                        let symbol = self.checker.get_symbol_at_location(specifier, false);
+                        if symbol.0 == 0 {
+                            None
+                        } else {
+                            let target = self.checker.sym(symbol).value_declaration;
+                            (!target.is_nil() && target.kind() == SyntaxKind::SourceFile)
+                                .then_some(target)
+                        }
+                    };
+                    if node.kind() == SyntaxKind::ImportDeclaration {
+                        let Some(target) = target else { continue };
+                        let clause = node.import_clause();
+                        if clause.is_nil() || clause.is_type_only() {
+                            continue;
+                        }
+                        if !clause.name().is_nil()
+                            && let Some(default) = self.default_alias_target(target, "default")
+                        {
+                            let symbol =
+                                self.checker.get_symbol_at_location(clause.name(), false).0;
+                            changed |= self.add_default_alias(symbol, default, clause.name())?;
+                        }
+                        let named = clause.named_bindings();
+                        if !named.is_nil() && named.kind() == SyntaxKind::NamedImports {
+                            for item in named.elements() {
+                                if item.is_type_only() {
+                                    continue;
+                                }
+                                if let Some(default) = self.default_alias_target(
+                                    target,
+                                    item.property_name_or_name().text(),
+                                ) {
+                                    let symbol =
+                                        self.checker.get_symbol_at_location(item.name(), false).0;
+                                    changed |=
+                                        self.add_default_alias(symbol, default, item.name())?;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    let clause = node.export_clause();
+                    if clause.is_nil() || clause.kind() != SyntaxKind::NamedExports {
+                        continue;
+                    }
+                    for item in clause.elements() {
+                        if item.is_type_only() {
+                            continue;
+                        }
+                        let source = item.property_name_or_name();
+                        let default = if let Some(target) = target {
+                            self.default_alias_target(target, source.text())
+                        } else {
+                            let symbol = self.checker.get_symbol_at_location(source, false).0;
+                            self.default_aliases
+                                .get(&symbol)
+                                .copied()
+                                .or_else(|| self.local_import_default(*file, source.text()))
+                        };
+                        if let Some(default) = default {
+                            let exported = self
+                                .module_export_symbol(*file, item.name().text())
+                                .ok_or_else(|| {
+                                    self.refuse(item, "default re-export has no native binding")
+                                })?;
+                            changed |= self.add_default_alias(exported, default, item)?;
+                        }
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        // Namespace re-exports need an owning namespace value in the export
+        // table; do not silently turn its default snapshot into a live binding.
+        for file in files {
+            self.file = source_file_info(*file).file_name.to_string();
+            for node in file.statements() {
+                if node.kind() != SyntaxKind::ExportDeclaration || node.is_type_only() {
+                    continue;
+                }
+                let clause = node.export_clause();
+                if clause.is_nil() || clause.kind() == SyntaxKind::NamedExports {
+                    continue;
+                }
+                let specifier = node.module_specifier();
+                if specifier.is_nil() {
+                    continue;
+                }
+                let symbol = self.checker.get_symbol_at_location(specifier, false);
+                if symbol.0 == 0 {
+                    continue;
+                }
+                let target = self.checker.sym(symbol).value_declaration;
+                if !target.is_nil()
+                    && target.kind() == SyntaxKind::SourceFile
+                    && self.default_alias_target(target, "default").is_some()
+                {
+                    return Err(self.refuse(
+                        node,
+                        "namespace re-export of a default expression is not ported",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn inventory_storage(&mut self, files: &[Node]) {
         for file in files {
             self.file = source_file_info(*file).file_name.to_string();
