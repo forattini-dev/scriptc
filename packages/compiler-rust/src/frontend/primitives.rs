@@ -81,7 +81,7 @@ impl Lowerer<'_> {
         source.kind() == SyntaxKind::Identifier
             && self
                 .binding(source)
-                .is_ok_and(|local| local.r#type == Type::String)
+                .is_ok_and(|local| self.string_view(&local.r#type))
     }
     pub(super) fn primitive_symbol(&self, id: u32, name: &str, owner: Option<&str>) -> bool {
         if id == 0 {
