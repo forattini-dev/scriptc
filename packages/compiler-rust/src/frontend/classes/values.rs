@@ -2,6 +2,197 @@
 use super::*;
 
 impl Lowerer<'_> {
+    pub(in crate::frontend) fn dynamic_class_new(
+        &mut self,
+        node: Node,
+    ) -> Result<Option<Expr>, String> {
+        if self.ty(node)? != Type::Dyn || !self.checker_any(node.expression()) {
+            return Ok(None);
+        }
+        let callee = self.expression(node.expression())?;
+        if callee.ty() != Type::Dyn {
+            return Ok(None);
+        }
+        let arity = node.arguments().len();
+        let arguments = self.method_arguments(node, &vec![Type::Dyn; arity])?;
+        self.ensure_exception_classes(node)?;
+        let mut types = vec![Type::Dyn, Type::String];
+        types.extend(vec![Type::Dyn; arity]);
+        let helper = helpers::Helper::new("dynamic_construct", types, Type::Dyn, self.loc(node));
+        let name = self.install_helper(helper.function);
+        if !self
+            .dynamic_constructors
+            .iter()
+            .any(|(existing, _, _)| *existing == name)
+        {
+            self.dynamic_constructors.push((name.clone(), arity, node));
+        }
+        fn constructor_name(node: Node) -> String {
+            match node.kind() {
+                SyntaxKind::Identifier => node.text().into(),
+                SyntaxKind::PropertyAccessExpression => format!(
+                    "{}.{}",
+                    constructor_name(node.expression()),
+                    node.name().text()
+                ),
+                _ => "value".into(),
+            }
+        }
+        let mut args = vec![
+            callee,
+            Expr::StrLit {
+                value: format!(
+                    "{} is not a constructor",
+                    constructor_name(node.expression())
+                ),
+                r#type: Type::String,
+                loc: self.loc(node),
+            },
+        ];
+        args.extend(arguments);
+        Ok(Some(Expr::Call {
+            callee: name,
+            args,
+            r#type: Type::Dyn,
+            loc: self.loc(node),
+        }))
+    }
+
+    pub(in crate::frontend) fn populate_dynamic_constructors(&mut self) -> Result<(), String> {
+        let requests = self.dynamic_constructors.clone();
+        for (name, arity, site) in requests {
+            let mut types = vec![Type::Dyn, Type::String];
+            types.extend(vec![Type::Dyn; arity]);
+            let mut helper =
+                helpers::Helper::new("dynamic_construct", types, Type::Dyn, self.loc(site));
+            helper.function.name = name.clone();
+            let constructor = helper.param(0);
+            let candidates = self
+                .classes
+                .definitions
+                .iter()
+                .enumerate()
+                .filter_map(|(index, class)| {
+                    (!class.node.is_nil())
+                        .then(|| {
+                            class
+                                .signature
+                                .as_ref()
+                                .map(|signature| (index, signature.clone()))
+                        })
+                        .flatten()
+                })
+                .collect::<Vec<_>>();
+            for (index, params) in candidates {
+                let class_name = self.classes.definitions[index].name.clone();
+                let class_type = Type::Classval {
+                    class_name: class_name.clone(),
+                };
+                let class = Expr::ClassRef {
+                    class_name: class_name.clone(),
+                    r#type: class_type.clone(),
+                    loc: helper.loc(),
+                };
+                let Ok(identity) = self.coerce(class, Type::Dyn, site) else {
+                    continue;
+                };
+                let result = self.classes.object(index);
+                if self.dynamic_erasure_reason(&result).is_some() {
+                    continue;
+                }
+                let mut arguments = Vec::new();
+                let mut compatible = true;
+                for (position, param) in params.iter().skip(1).enumerate() {
+                    let source = if position < arity {
+                        helper.read(&helper.param(position + 2))
+                    } else {
+                        Expr::UnitLit {
+                            unit: "undefined",
+                            r#type: Type::Undefined,
+                            loc: helper.loc(),
+                        }
+                    };
+                    match self.coerce(source, param.r#type.clone(), site) {
+                        Ok(value) => arguments.push(value),
+                        Err(_) => {
+                            compatible = false;
+                            break;
+                        }
+                    }
+                }
+                if !compatible {
+                    continue;
+                }
+                let callee = Expr::DynCheck {
+                    value: Box::new(helper.read(&constructor)),
+                    r#type: class_type,
+                    loc: helper.loc(),
+                };
+                let value = Expr::NewValue {
+                    callee: Box::new(callee),
+                    args: arguments,
+                    r#type: result,
+                    loc: helper.loc(),
+                };
+                let value = self.coerce(value, Type::Dyn, site)?;
+                helper.function.body.push(Stmt::If {
+                    cond: Expr::DynScalarEq {
+                        left: Box::new(helper.read(&constructor)),
+                        right: Box::new(identity),
+                        negated: false,
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    },
+                    then: vec![Stmt::Return {
+                        value: Some(value),
+                        loc: helper.loc(),
+                    }],
+                    else_: None,
+                    loc: helper.loc(),
+                });
+            }
+            let loc = helper.loc();
+            let error = |message: Expr| Stmt::Throw {
+                value: Expr::LibCall {
+                    r#fn: "error.new".into(),
+                    args: vec![message],
+                    r#type: Type::Object {
+                        class_name: "%TypeError".into(),
+                    },
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            };
+            helper.function.body.push(Stmt::If {
+                cond: Expr::DynTest {
+                    value: Box::new(helper.read(&constructor)),
+                    test: "function".into(),
+                    negated: false,
+                    r#type: Type::Bool,
+                    loc: helper.loc(),
+                },
+                then: vec![error(Expr::StrLit {
+                    value: "scriptc: dynamic constructor has no represented native ABI".into(),
+                    r#type: Type::String,
+                    loc: helper.loc(),
+                })],
+                else_: None,
+                loc: helper.loc(),
+            });
+            helper
+                .function
+                .body
+                .push(error(helper.read(&helper.param(1))));
+            let target = self
+                .lifted
+                .iter_mut()
+                .find(|function| function.name == name)
+                .expect("registered dynamic constructor helper");
+            *target = helper.function;
+        }
+        Ok(())
+    }
+
     fn class_ref(
         &mut self,
         index: usize,

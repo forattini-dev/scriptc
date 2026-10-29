@@ -708,6 +708,10 @@ impl Lowerer<'_> {
             return Ok(Vec::new());
         }
         self.layout_class(index)?;
+        // Static storage operations materialize the class value in IR, whose
+        // contract requires its constructor to be present even if the source
+        // never reads the declaration's outer binding.
+        self.request_constructor(index)?;
         let class_name = self.classes.definitions[index].name.clone();
         let mut body = Vec::new();
         for field in fields {
@@ -863,6 +867,7 @@ impl Lowerer<'_> {
         if !represented {
             return Err(self.refuse(member, "static super property needs a represented base data field"));
         }
+        self.request_constructor(base)?;
         let name = self.classes.definitions[base].name.clone();
         Ok(Expr::ClassRef {
             class_name: name.clone(),

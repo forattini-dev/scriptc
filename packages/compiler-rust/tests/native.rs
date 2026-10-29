@@ -123,6 +123,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-class-static-data/values.ts",
         "rust-native-class-static-union/values.ts",
         "rust-native-class-unrelated-constructors/values.ts",
+        "rust-native-dynamic-constructors/values.ts",
+        "rust-native-dynamic-object-spread/values.ts",
         "rust-native-class-static-super/values.ts",
         "rust-native-class-static-mixed/values.ts",
         "rust-native-static-methods/inheritance.ts",
@@ -7739,25 +7741,18 @@ fn string_split_boundaries_preserve_existing_artifacts() {
 }
 
 #[test]
-fn erased_constructor_refusal_preserves_existing_artifacts() {
+fn erased_non_constructor_throws_type_error_at_runtime() {
     let temp = tempfile::tempdir().unwrap();
     metadata_project(temp.path());
     let input = temp.path().join("main.mts");
     let target = binary(temp.path(), "erased-constructor");
-    fs::write(&input, "function make(Bottleneck: any) { return new Bottleneck.Group({ id: 'global' }); }\nmake({});\n").unwrap();
-    let artifacts = [
-        &target,
-        &target.with_extension("rs"),
-        &target.with_extension("ir.json"),
-    ];
-    for artifact in artifacts { fs::write(artifact, "preserve").unwrap(); }
+    fs::write(&input, "function make(Bottleneck: any) { return new Bottleneck.Group({ id: 'global' }); }\ntry { make({}); } catch (e: any) { console.log(e instanceof TypeError, String(e.message)); }\n").unwrap();
     let output = Command::new(compiler()).arg("build").arg(&input)
         .args(["--no-engine", "--out"]).arg(&target).output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success() && stderr.contains("SCN1001")
-        && stderr.contains("constructor identity is not represented")
-        && !stderr.contains("panicked"), "{stderr}");
-    for artifact in artifacts { assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve"); }
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let actual = Command::new(&target).output().unwrap();
+    assert!(actual.status.success(), "{}", String::from_utf8_lossy(&actual.stderr));
+    assert_eq!(String::from_utf8_lossy(&actual.stdout).trim(), "true Bottleneck.Group is not a constructor");
 }
 
 #[test]

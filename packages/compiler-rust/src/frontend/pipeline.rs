@@ -167,6 +167,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
             lowerer.functions.finish(symbol);
             functions.push(function);
         }
+        lowerer.populate_dynamic_constructors()?;
         functions[0].body.splice(0..0, lowerer.namespace_prelude());
         let boxed_prelude = lowerer.boxed_prelude();
         functions[0].body.splice(0..0, boxed_prelude);

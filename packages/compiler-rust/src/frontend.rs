@@ -198,6 +198,7 @@ struct Lowerer<'a> {
     lifted: Vec<Function>,
     next_closure: usize,
     helpers: HashMap<(String, Vec<Type>, Type), String>,
+    dynamic_constructors: Vec<(String, usize, Node)>,
     declarations: HashMap<declarations::Key, declarations::Hint>,
     declaration_abi: bool,
     projections: HashMap<declarations::Key, Type>,
@@ -252,6 +253,7 @@ impl<'a> Lowerer<'a> {
             lifted: Vec::new(),
             next_closure: 0,
             helpers: HashMap::new(),
+            dynamic_constructors: Vec::new(),
             declarations: HashMap::new(),
             declaration_abi: false,
             projections: HashMap::new(),
@@ -1277,6 +1279,9 @@ impl<'a> Lowerer<'a> {
                     return Ok(value);
                 }
                 if let Some(value) = self.class_new(node)? {
+                    return Ok(value);
+                }
+                if let Some(value) = self.dynamic_class_new(node)? {
                     return Ok(value);
                 }
                 match self.ty(node)? {
