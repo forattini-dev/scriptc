@@ -156,13 +156,39 @@ impl Lowerer<'_> {
     pub(super) fn closure(&mut self, node: Node, expected: Option<Type>) -> Result<Expr, String> {
         let object_method = node.kind() == SyntaxKind::MethodDeclaration
             && node.parent().kind() == SyntaxKind::ObjectLiteralExpression;
-        if (!node.name().is_nil() && !object_method)
-            || !node.asterisk_token().is_nil()
-            || !node.type_parameters().is_empty()
-        {
+        if !node.name().is_nil() && !object_method {
+            // The inner name is a lexical self binding, including in defaults
+            // and nested closures. Keep it refused whenever the body can read it.
+            let symbol = self.symbol(node.name());
+            fn references(lowerer: &mut Lowerer<'_>, node: Node, symbol: u32) -> bool {
+                if node.kind() == SyntaxKind::Identifier && lowerer.symbol(node) == symbol {
+                    return true;
+                }
+                let mut found = false;
+                node.for_each_child(&mut |child| {
+                    found |= references(lowerer, child, symbol);
+                    found
+                });
+                found
+            }
+            if symbol == 0
+                || node.body().is_nil()
+                || references(self, node.body(), symbol)
+                || node
+                    .parameters()
+                    .into_iter()
+                    .any(|param| references(self, param, symbol))
+            {
+                return Err(self.refuse(
+                    node,
+                    "named function expressions with a self binding are not ported",
+                ));
+            }
+        }
+        if !node.asterisk_token().is_nil() || !node.type_parameters().is_empty() {
             return Err(self.refuse(
                 node,
-                "only anonymous non-generator non-generic function expressions are ported",
+                "generator and generic function expressions are not ported",
             ));
         }
         let ty = match expected {

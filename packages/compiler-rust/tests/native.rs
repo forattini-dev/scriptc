@@ -127,6 +127,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-dynamic-object-spread/values.ts",
         "rust-native-dynamic-bind/values.ts",
         "rust-native-default-export/values.mts",
+        "rust-native-named-function-expression/values.ts",
         "rust-native-class-static-super/values.ts",
         "rust-native-class-static-mixed/values.ts",
         "rust-native-static-methods/inheritance.ts",
@@ -3316,6 +3317,34 @@ fn static_method_boundaries_are_refused_without_publication() {
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(
             !result.status.success() && stderr.contains("SCN1001"),
+            "{source}: {stderr}"
+        );
+        assert_eq!(fs::read_to_string(&output).unwrap(), "preserve");
+    }
+}
+
+#[test]
+fn named_function_expression_self_binding_is_refused_without_publication() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("main.ts");
+    let output = temp.path().join("main.ir.json");
+    for source in [
+        "const f = function inner(n: number): number { return n ? inner(n - 1) : 0; }; console.log(f(2));",
+        "const f = function inner(n = inner): number { return 1; }; console.log(f());",
+        "const f = function inner() { return () => inner; }; console.log(f());",
+    ] {
+        fs::write(&input, format!("// @ts-nocheck\n{source}")).unwrap();
+        fs::write(&output, "preserve").unwrap();
+        let result = Command::new(compiler())
+            .arg("build")
+            .arg(&input)
+            .args(["--no-engine", "--emit", "ir", "--out"])
+            .arg(&output)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            !result.status.success() && stderr.contains("self binding"),
             "{source}: {stderr}"
         );
         assert_eq!(fs::read_to_string(&output).unwrap(), "preserve");
