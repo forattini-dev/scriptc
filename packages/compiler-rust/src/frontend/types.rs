@@ -311,6 +311,15 @@ impl Lowerer<'_> {
             let declaration = node.parent();
             let initial = receivers::reference_node(declaration.initializer());
             if declaration.type_().is_nil()
+                && self.bind_intrinsic_value(initial, &mut HashSet::new())
+            {
+                self.var_types.entry(symbol).or_insert(Type::Dyn);
+                if declaration.parent().parent().parent().kind() == SyntaxKind::SourceFile {
+                    self.module_vars.entry(symbol).or_insert(Type::Dyn);
+                }
+                return Ok(Type::Dyn);
+            }
+            if declaration.type_().is_nil()
                 && self.bytes_named_key_value(initial, &mut HashSet::new())
             {
                 self.var_types.entry(symbol).or_insert(Type::Dyn);

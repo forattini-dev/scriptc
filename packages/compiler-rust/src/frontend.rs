@@ -1172,6 +1172,7 @@ impl<'a> Lowerer<'a> {
             let bytes_named_key = self.bytes_named_key_value(node, &mut HashSet::new());
             if value.ty() == Type::Dyn
                 && !bytes_named_key
+                && !self.bind_intrinsic_value(node, &mut HashSet::new())
                 && consumer.kind() != SyntaxKind::ExpressionStatement
                 && !function_properties::owning_read(&value)
                 && matches!(
@@ -1544,6 +1545,11 @@ impl<'a> Lowerer<'a> {
                     r#type: local.r#type,
                     loc,
                 };
+                if value.ty() == Type::Dyn
+                    && self.bind_intrinsic_value(node, &mut HashSet::new())
+                {
+                    return Ok(value);
+                }
                 if value.ty() == Type::Dyn
                     && let Some(signature) = self.recursive_functions.get(&symbol).cloned()
                 {

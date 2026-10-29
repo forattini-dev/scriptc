@@ -9,10 +9,18 @@ fn native_map_key(key: NativeValue) -> NativeValue {
         key => key,
     }
 }
+fn native_bind(target: NativeValue, args: Vec<NativeValue>) -> NativeValue {
+    if !native_value_is_function(&target) {
+        runtime::throw_type_error("Bind must be called on a function".into());
+    }
+    let mut values = vec![target, args.first().cloned().unwrap_or(NativeValue::Undefined)];
+    values.extend(args.into_iter().skip(1));
+    NativeValue::Bound(runtime::array_new(values))
+}
 fn native_value_method(recv: NativeValue, method: &str) -> NativeValue {
     if native_value_is_array(&recv) && method == "sort" { return recv; }
     if matches!(&recv, NativeValue::BigInt(_)) && matches!(method, "toString" | "valueOf") { return recv; }
-    if native_value_is_function(&recv) && matches!(method, "call" | "apply") { return recv; }
+    if native_value_is_function(&recv) && matches!(method, "call" | "apply" | "bind") { return recv; }
     if matches!(&recv, NativeValue::Promise(_)) && method == "then" {
         return recv;
     }
@@ -49,6 +57,9 @@ fn native_value_invoke(
             }
             _ => runtime::throw_type_error(format!("{} is not a function", name)),
         };
+    }
+    if native_value_is_function(&holder) && method == "bind" {
+        return native_bind(holder, args);
     }
     if native_value_is_function(&holder) && matches!(method, "call" | "apply") {
         let receiver = args.first().cloned().unwrap_or(NativeValue::Undefined);

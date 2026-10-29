@@ -13,6 +13,45 @@ fn string_callable() -> Type {
 }
 
 impl Lowerer<'_> {
+    // Bound functions in this chain can have signatures the checker cannot
+    // describe. Preserve their owning dynamic value across inferred aliases.
+    pub(super) fn bind_intrinsic_value(&mut self, node: Node, seen: &mut HashSet<u32>) -> bool {
+        let node = receivers::reference_node(node);
+        if node.kind() == SyntaxKind::Identifier {
+            let symbol = self.symbol(node);
+            if symbol == 0 || !seen.insert(symbol) {
+                return false;
+            }
+            let declaration = self
+                .checker
+                .sym(source_frontend::prelude::SymbolId(symbol))
+                .value_declaration;
+            return !declaration.is_nil()
+                && declaration.kind() == SyntaxKind::VariableDeclaration
+                && declaration.type_().is_nil()
+                && !declaration.initializer().is_nil()
+                && self.bind_intrinsic_value(declaration.initializer(), seen);
+        }
+        if node.kind() == SyntaxKind::CallExpression {
+            let member = node.expression();
+            if member.kind() == SyntaxKind::PropertyAccessExpression
+                && matches!(member.name().text(), "bind" | "call" | "apply")
+            {
+                return self.bind_intrinsic_value(member.expression(), seen);
+            }
+            return self.bind_intrinsic_value(member, seen);
+        }
+        if node.kind() != SyntaxKind::PropertyAccessExpression || node.name().text() != "bind" {
+            return false;
+        }
+        let receiver = node.expression();
+        if receiver.kind() != SyntaxKind::Identifier {
+            return false;
+        }
+        let symbol = self.symbol(receiver);
+        self.primitive_symbol(symbol, "Function", None)
+    }
+
     pub(super) fn standard_callable_type(&self, id: TypeId) -> Option<Type> {
         let id = self.checker.ty(id).symbol();
         if id.0 == 0 {
@@ -52,6 +91,46 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn standard_function_value(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        if node.kind() == SyntaxKind::PropertyAccessExpression
+            && node.name().text() == "bind"
+            && node.expression().kind() == SyntaxKind::Identifier
+            && {
+                let symbol = self.symbol(node.expression());
+                self.primitive_symbol(symbol, "Function", None)
+            }
+        {
+            // Function.bind is inherited from Function.prototype. Reading the
+            // same intrinsic from a represented function keeps this within the
+            // existing dynamic-property IR contract.
+            let mut helper =
+                Helper::new("function_bind_anchor", vec![], Type::Void, self.loc(node));
+            helper.function.body.push(Stmt::Return {
+                value: None,
+                loc: helper.loc(),
+            });
+            let name = self.install_helper(helper.function);
+            let anchor = Expr::Closure {
+                fn_name: name,
+                captures: vec![],
+                r#type: Type::Func {
+                    params: vec![],
+                    ret: Box::new(Type::Void),
+                    rest: false,
+                },
+                loc: self.loc(node),
+            };
+            let anchor = self.coerce(anchor, Type::Dyn, node)?;
+            return Ok(Some(Expr::DynKeyGet {
+                value: Box::new(anchor),
+                key: Box::new(Expr::StrLit {
+                    value: "bind".into(),
+                    r#type: Type::String,
+                    loc: self.loc(node),
+                }),
+                r#type: Type::Dyn,
+                loc: self.loc(node),
+            }));
+        }
         if self.standard_number(node) {
             return self.number_constructor_value(node).map(Some);
         }

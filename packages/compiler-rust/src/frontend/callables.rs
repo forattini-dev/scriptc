@@ -487,6 +487,20 @@ impl Lowerer<'_> {
             self.expression(member.expression())?
         };
         let target = self.callable_body(value, node)?;
+        if target.ty() == Type::Dyn {
+            let args = arguments
+                .iter()
+                .map(|argument| self.expected_expression(*argument, Type::Dyn))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Some(Expr::DynInvoke {
+                recv: Box::new(target),
+                method: "bind".into(),
+                callee_name: "bind".into(),
+                args,
+                r#type: Type::Dyn,
+                loc: self.loc(node),
+            }));
+        }
         let Type::Func { params, ret, rest } = target.ty() else {
             return Err(self.refuse(member, "bind requires a native function"));
         };
