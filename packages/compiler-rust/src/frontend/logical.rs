@@ -26,6 +26,23 @@ impl Lowerer<'_> {
         self.var_defined = before.intersection(&self.var_defined).copied().collect();
         let right = right?;
         if op == "&&" && right.ty() == Type::Bool {
+            if let Type::Union { union_id } = left.ty()
+                && self.unions[union_id].arms.contains(&Type::Stats)
+                && self.unions[union_id]
+                    .arms
+                    .iter()
+                    .all(|arm| matches!(arm, Type::Stats | Type::Null | Type::Undefined))
+                && matches!(node.parent().kind(), SyntaxKind::IfStatement | SyntaxKind::WhileStatement)
+            {
+                let condition = self.condition(left, node.left())?;
+                return Ok(Expr::Logical {
+                    op: "&&".into(),
+                    left: Box::new(condition),
+                    right: Box::new(right),
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                });
+            }
             if matches!(left.ty(), Type::Set { .. }) {
                 return Ok(Expr::Sequence {
                     stmts: vec![Stmt::Expression {

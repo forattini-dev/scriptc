@@ -31,6 +31,12 @@ function regular(path: string): ReturnType<typeof lstatSync> | null {
   }
 }
 console.log("overload", regular(path) !== null, regular(path + ".missing-test") === null);
+const current = regular(path);
+if (current && Number(current.size) > 0) console.log("guarded", true);
+if (current && current.isFile()) console.log("guarded-method", true);
+const none = regular(path + ".missing-test");
+if (none && Number(none.size) > 0) console.log("unexpected");
+else console.log("guarded-empty", true);
 let later!: Stats;
 console.log("uninitialized", later === undefined);
 later = statSync(path);
