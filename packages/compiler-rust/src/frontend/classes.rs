@@ -12,6 +12,37 @@ pub(super) fn parameter_property(node: Node) -> bool {
     )
 }
 
+fn direct_static_super(node: Node) -> bool {
+    node.kind() == SyntaxKind::PropertyAccessExpression
+        && node.expression().kind() == SyntaxKind::SuperKeyword
+}
+
+fn static_super_initializer(node: Node) -> bool {
+    if direct_static_super(node) {
+        return true;
+    }
+    if node.kind() != SyntaxKind::BinaryExpression
+        || !matches!(
+            node.operator_token().kind(),
+            SyntaxKind::PlusToken | SyntaxKind::MinusToken | SyntaxKind::AsteriskToken
+                | SyntaxKind::SlashToken | SyntaxKind::PercentToken | SyntaxKind::AsteriskAsteriskToken
+                | SyntaxKind::AmpersandToken | SyntaxKind::BarToken | SyntaxKind::CaretToken
+                | SyntaxKind::LessThanLessThanToken | SyntaxKind::GreaterThanGreaterThanToken
+                | SyntaxKind::GreaterThanGreaterThanGreaterThanToken | SyntaxKind::LessThanToken
+                | SyntaxKind::LessThanEqualsToken | SyntaxKind::GreaterThanToken
+                | SyntaxKind::GreaterThanEqualsToken | SyntaxKind::EqualsEqualsEqualsToken
+                | SyntaxKind::ExclamationEqualsEqualsToken | SyntaxKind::EqualsEqualsToken
+                | SyntaxKind::ExclamationEqualsToken | SyntaxKind::AmpersandAmpersandToken
+                | SyntaxKind::BarBarToken | SyntaxKind::QuestionQuestionToken
+        )
+    {
+        return false;
+    }
+    [node.left(), node.right()].iter().all(|operand| {
+        direct_static_super(*operand) || !static_methods::reads_super(*operand)
+    })
+}
+
 #[derive(Clone)]
 struct Definition {
     node: Node,
@@ -509,8 +540,7 @@ impl Lowerer<'_> {
                     SyntaxKind::Identifier | SyntaxKind::StringLiteral
                 )
                 && (!static_methods::reads_super(member)
-                    || (member.initializer().kind() == SyntaxKind::PropertyAccessExpression
-                        && member.initializer().expression().kind() == SyntaxKind::SuperKeyword));
+                    || static_super_initializer(member.initializer()));
             let symbol_method = if member.kind() == SyntaxKind::MethodDeclaration
                 && member.name().kind() == SyntaxKind::ComputedPropertyName
             {
@@ -794,10 +824,17 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn static_super_receiver(&mut self, member: Node) -> Result<Expr, String> {
-        let field = member.parent();
+        let parent = member.parent();
+        let field = if parent.kind() == SyntaxKind::BinaryExpression
+            && static_super_initializer(parent)
+        {
+            parent.parent()
+        } else {
+            parent
+        };
         if field.kind() != SyntaxKind::PropertyDeclaration
             || !field.modifier_flags().intersects(ModifierFlags::STATIC)
-            || field.initializer() != member
+            || (field.initializer() != member && field.initializer() != parent)
         {
             return Err(self.refuse(member, "static super access requires a direct field initializer"));
         }
