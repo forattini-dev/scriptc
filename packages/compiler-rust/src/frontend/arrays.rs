@@ -475,7 +475,7 @@ impl Lowerer<'_> {
                 self.closure(callback_node, Some(Type::Func {
                     rest: false,
                     params,
-                    ret: Box::new(Type::F64),
+                    ret: Box::new(Type::Dyn),
                 }))?
             } else {
                 self.expression(callback_node)?
@@ -486,12 +486,12 @@ impl Lowerer<'_> {
                     "array.sort comparator requires a native function",
                 ));
             };
-            if rest || params.len() > 2 || *ret != Type::F64
+            if rest || params.len() > 2 || !self.numeric_operand_domain(&ret)
                 || params.iter().any(|p| p != elem.as_ref())
             {
                 return Err(self.refuse(
                     callback_node,
-                    "array.sort comparator requires matching element parameters and a numeric result",
+                    "array.sort comparator requires matching element parameters and a primitive result",
                 ));
             }
             let value = self.coerce(receiver, Type::Dyn, node)?;
