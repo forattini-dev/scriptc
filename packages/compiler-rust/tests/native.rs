@@ -119,6 +119,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-static-methods/values.ts",
         "rust-native-class-property-constructor/values.ts",
         "rust-native-class-union/values.ts",
+        "rust-native-class-data/values.ts",
         "rust-native-static-methods/inheritance.ts",
         "rust-native-static-methods/order.ts",
         "rust-native-static-methods/public.mts",

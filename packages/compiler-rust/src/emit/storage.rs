@@ -17,6 +17,9 @@ pub(super) fn definitions(module: &Emission<'_>, output: &mut String) {
         output.push_str(&format!("thread_local! {{ static {}: std::cell::RefCell<Option<{}>> = const {{ std::cell::RefCell::new(None) }}; }}\n", name(module, global), rust_type(global.r#type.clone(), module)));
     }
     output.push_str("fn clear_module_storage() {\n");
+    if !module.classes.is_empty() {
+        output.push_str("clear_class_storage();\n");
+    }
     for global in module.globals.iter().rev() {
         output.push_str(&format!(
             "{}.with(|slot| {{ slot.borrow_mut().take(); }});\n",

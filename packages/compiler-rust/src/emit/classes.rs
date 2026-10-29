@@ -21,9 +21,18 @@ pub(super) fn definitions(module: &Emission<'_>, output: &mut String) {
     if module.classes.is_empty() {
         return;
     }
-    // Each supported definition executes once at module scope. Constructor
-    // values cannot be widened across class identities in this ABI.
+    // Supported definitions execute once at module scope; aliases retain the
+    // same index and therefore the same owning data properties.
     output.push_str("#[derive(Clone, Copy, PartialEq)]\nstruct NativeClass(usize);\nimpl NativeTrace for NativeClass { fn trace_native(&self, _: &mut runtime::Tracer<'_>) {} }\nimpl runtime::ArrayElement for NativeClass {}\n");
+    output.push_str("thread_local! { static CLASS_PROPERTIES: std::cell::RefCell<Vec<Option<runtime::Gc<NativeRecordData>>>> = const { std::cell::RefCell::new(Vec::new()) }; }\nfn native_class_properties(class: NativeClass) -> runtime::Gc<NativeRecordData> { CLASS_PROPERTIES.with(|slots| { let mut slots = slots.borrow_mut(); if slots.len() <= class.0 { slots.resize_with(class.0 + 1, || None); } slots[class.0].get_or_insert_with(|| runtime::Gc::new(NativeRecordData { null_prototype: false, entries: Vec::new() })).clone() }) }\nfn clear_class_storage() { CLASS_PROPERTIES.with(|slots| slots.borrow_mut().clear()); }\nfn native_class_parent(class: NativeClass) -> Option<NativeClass> { match class.0 {\n");
+    for (index, class) in module.classes.iter().enumerate() {
+        if let Some(base) = &class.base
+            && let Some(parent) = module.classes.iter().position(|candidate| &candidate.name == base)
+        {
+            writeln!(output, "{index} => Some(NativeClass({parent})),").unwrap();
+        }
+    }
+    output.push_str("_ => None } }\nfn native_class_get(class: NativeClass, key: &runtime::JsString) -> Option<NativeValue> { let mut current = Some(class); while let Some(class) = current { let properties = native_class_properties(class); if let Some(value) = properties.with(|data| data.entries.iter().find(|(name, _)| name == key).map(|(_, value)| value.clone())) { return Some(value); } current = native_class_parent(class); } None }\n");
     output.push_str("struct NativeErrorData { name: runtime::JsString, message: runtime::JsString, own: Vec<(runtime::JsString, NativeValue)> }\nstruct NativeInstance { kind: usize, error: Option<NativeErrorData>, fields: NativeInstanceFields }\nenum NativeInstanceFields {\n");
     for (index, class) in module.classes.iter().enumerate() {
         writeln!(output, "C{index} {{").unwrap();

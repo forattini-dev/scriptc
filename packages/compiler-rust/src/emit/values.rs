@@ -451,7 +451,7 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
         } else if matches!(t, Type::Classval { .. }) {
             writeln!(
                 out,
-                "NativeValue::V{i}(_) => native_value_missing_kind(&key, \"function\"),"
+                "NativeValue::V{i}(class) => {{ native_function_data_key(&key); native_class_get(class, &key).unwrap_or(NativeValue::Undefined) }},"
             )
             .unwrap();
         }
@@ -599,6 +599,9 @@ fn own_key_definitions(types: &[Type], module: &Emission<'_>, out: &mut String) 
             )
             .unwrap();
         }
+        if matches!(ty, Type::Classval { .. }) {
+            writeln!(out, "NativeValue::V{i}(class) => Some(native_class_properties(*class)),").unwrap();
+        }
     }
     out.push_str("_ => None, } }\n");
     out.push_str("fn native_value_own_keys(value: &NativeValue) -> Vec<runtime::JsString> { match value { NativeValue::RawJson(_) => vec![runtime::string(\"rawJSON\")], NativeValue::Promise(promise) => runtime::promise_own_keys(promise).into_iter().map(runtime::JsString::from).collect(), NativeValue::Record(_,object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()), NativeValue::Object(object) => object.with(|o| o.entries.iter().map(|(k,_)| k.clone()).collect()), NativeValue::Array(array) => native_array_index_keys(array),\n");
@@ -606,6 +609,9 @@ fn own_key_definitions(types: &[Type], module: &Emission<'_>, out: &mut String) 
         if matches!(ty, Type::Func { .. }) {
             let name = functions::type_name(ty, module);
             writeln!(out, "NativeValue::V{i}(function) => properties_{name}(function).with(|data| data.entries.iter().map(|(key,_)| key.clone()).collect()),").unwrap();
+        }
+        if matches!(ty, Type::Classval { .. }) {
+            writeln!(out, "NativeValue::V{i}(class) => native_class_properties(*class).with(|data| data.entries.iter().map(|(key,_)| key.clone()).collect()),").unwrap();
         }
         if matches!(ty, Type::Bytes { .. }) {
             writeln!(out, "NativeValue::V{i}(bytes) => {{ let mut keys = native_index_keys(runtime::bytes_len(bytes) as usize); let owner = runtime::WeakKey::new(bytes); if runtime::weak_map_has::<NativeValue>(&owner, &owner) {{ keys.push(runtime::string(\"undefined\")); }} keys }},").unwrap();
@@ -630,6 +636,9 @@ fn own_key_definitions(types: &[Type], module: &Emission<'_>, out: &mut String) 
     // live overflow keys without narrowing or reading a possibly absent value.
     out.push_str("fn native_value_has_key(value: NativeValue, key: runtime::JsString) -> bool { match &value { NativeValue::Object(object) | NativeValue::Record(_, object) => native_value_has_own(value.clone(), key.clone()) || (!object.with(|data| data.null_prototype) && native_object_prototype_has_key(&key)), NativeValue::RawJson(_) => key == \"rawJSON\",\n");
     for (i, ty) in types.iter().enumerate() {
+        if matches!(ty, Type::Classval { .. }) {
+            writeln!(out, "NativeValue::V{i}(class) => {{ native_function_data_key(&key); native_class_get(*class, &key).is_some() }},").unwrap();
+        }
         if let Type::Record { shape_id } = ty
             && !module.records[*shape_id].tuple
             && !record_storage::shared(&module.records[*shape_id])
