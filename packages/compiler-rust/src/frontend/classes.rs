@@ -43,6 +43,36 @@ pub(super) struct ClassGraph {
 }
 
 impl ClassGraph {
+    fn has_static_data_field(&self, mut owner: usize, name: &str) -> bool {
+        for _ in 0..=self.definitions.len() {
+            let definition = &self.definitions[owner];
+            if !definition.node.is_nil() {
+                let mut field = false;
+                for member in definition.node.members() {
+                    if !member.modifier_flags().intersects(ModifierFlags::STATIC)
+                        || member.name().text() != name
+                    {
+                        continue;
+                    }
+                    if member.kind() == SyntaxKind::MethodDeclaration {
+                        return false;
+                    }
+                    if member.kind() == SyntaxKind::PropertyDeclaration
+                        && !member.modifier_flags().intersects(ModifierFlags::AMBIENT)
+                    {
+                        field = true;
+                    }
+                }
+                if field {
+                    return true;
+                }
+            }
+            let Some(base) = definition.base else { return false };
+            owner = base;
+        }
+        false
+    }
+
     pub(super) fn has_static_methods(&self, name: &str) -> bool {
         let mut current = self
             .definitions
@@ -649,12 +679,21 @@ impl Lowerer<'_> {
         }
         self.layout_class(index)?;
         let class_name = self.classes.definitions[index].name.clone();
-        if self.classes.has_static_methods(&class_name) {
-            return Err(self.refuse(node, "static fields with static methods need shared class descriptors"));
-        }
         let mut body = Vec::new();
         for field in fields {
             self.function_data_key(field, field.name().text())?;
+            let mut current = Some(index);
+            while let Some(owner) = current {
+                let definition = &self.classes.definitions[owner];
+                if !definition.node.is_nil() && definition.node.members().into_iter().any(|member| {
+                    member.kind() == SyntaxKind::MethodDeclaration
+                        && member.modifier_flags().intersects(ModifierFlags::STATIC)
+                        && member.name().text() == field.name().text()
+                }) {
+                    return Err(self.refuse(field, "static field and method shadowing requires shared class descriptors"));
+                }
+                current = definition.base;
+            }
             let init = field.initializer();
             let value = if init.is_nil() {
                 self.coerce(
@@ -670,7 +709,13 @@ impl Lowerer<'_> {
                 r#type: Type::Classval { class_name: class_name.clone() },
                 loc: self.loc(field),
             };
-            let obj = self.coerce(class, Type::Dyn, field)?;
+            // The value is confined to a data-slot operation; class erasure
+            // remains fenced when methods cannot be represented dynamically.
+            let obj = Expr::DynFrom {
+                value: Box::new(class),
+                r#type: Type::Dyn,
+                loc: self.loc(field),
+            };
             let key = Expr::StrLit {
                 value: field.name().text().into(),
                 r#type: Type::String,
@@ -679,6 +724,34 @@ impl Lowerer<'_> {
             body.push(self.checked_dynamic_property_set(field, obj, key, value)?);
         }
         Ok(body)
+    }
+
+    pub(super) fn class_data_receiver(
+        &mut self,
+        value: Expr,
+        name: &str,
+        site: Node,
+    ) -> Result<Expr, String> {
+        if let Type::Classval { class_name } = value.ty()
+            && self.classes.has_static_methods(&class_name)
+        {
+            let index = self.classes.definitions.iter().position(|definition| definition.name == class_name)
+                .ok_or_else(|| self.refuse(site, "class data receiver has no source identity"))?;
+            if !self.classes.has_static_data_field(index, name) {
+                return Err(self.refuse(site, "class static method values require a native descriptor contract"));
+            }
+            let member = if site.kind() == SyntaxKind::BinaryExpression { site.left() } else { site };
+            let ty = self.ty(member)?;
+            if self.native_type_contains(&ty, |part| matches!(part, Type::Dyn | Type::Func { .. })) {
+                return Err(self.refuse(site, "callable or unknown static fields need shared class descriptors"));
+            }
+            return Ok(Expr::DynFrom {
+                value: Box::new(value),
+                r#type: Type::Dyn,
+                loc: self.loc(site),
+            });
+        }
+        self.coerce(value, Type::Dyn, site)
     }
 
     pub(super) fn static_forward_read(&mut self, node: Node) -> bool {

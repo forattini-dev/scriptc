@@ -1097,7 +1097,7 @@ impl Lowerer<'_> {
                 self.function_data_key(node, node.name().text())?;
             }
             let class = matches!(obj.ty(), Type::Classval { .. });
-            let obj = self.coerce(obj, Type::Dyn, node)?;
+            let obj = self.class_data_receiver(obj, node.name().text(), node)?;
             let key = Expr::StrLit {
                 value: node.name().text().into(),
                 r#type: Type::String,
@@ -1219,7 +1219,7 @@ impl Lowerer<'_> {
             if matches!(obj.ty(), Type::Func { .. } | Type::Classval { .. }) {
                 self.function_data_key(member, member.name().text())?;
             }
-            let obj = self.coerce(obj, Type::Dyn, node)?;
+            let obj = self.class_data_receiver(obj, member.name().text(), node)?;
             let key = Expr::StrLit {
                 value: member.name().text().into(),
                 r#type: Type::String,
