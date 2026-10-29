@@ -546,6 +546,15 @@ impl Lowerer<'_> {
         if value.ty() == Type::Bool {
             return Ok(value);
         }
+        if let Type::Union { union_id } = value.ty()
+            && let Some(tag) = self.unions[union_id].arms.iter().position(|arm| *arm == Type::Stats)
+            && self.unions[union_id].arms.iter().all(|arm| matches!(arm, Type::Stats | Type::Null | Type::Undefined))
+        {
+            return Ok(Expr::UnionIsTag {
+                union_id: format!("u{union_id}"), tag, negated: false,
+                value: Box::new(value), r#type: Type::Bool, loc: self.loc(node),
+            });
+        }
         if value.ty() == Type::Void {
             return Err(self.refuse(node, "void-valued conditions are not ported"));
         }

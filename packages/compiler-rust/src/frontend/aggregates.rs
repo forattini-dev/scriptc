@@ -74,7 +74,7 @@ impl Lowerer<'_> {
             if matches!(
                 elem,
                 Type::Void | Type::Null | Type::Undefined | Type::Func { .. } | Type::Stats
-            ) {
+            ) || matches!(&elem, Type::Union { union_id } if self.unions[*union_id].arms.contains(&Type::Stats)) {
                 return None;
             }
             return Some(Type::Array {
@@ -175,7 +175,7 @@ impl Lowerer<'_> {
                     | Type::Func { .. }
                     | Type::Map { .. }
                     | Type::Stats
-            ) {
+            ) || matches!(&ty, Type::Union { union_id } if self.unions[*union_id].arms.contains(&Type::Stats)) {
                 return None;
             }
             Some(ty)
@@ -281,9 +281,11 @@ impl Lowerer<'_> {
             // Different static Error views can alias the same object. Keep a
             // single object arm until cross-arm identity is part of the IR ABI.
             || arms.iter().filter(|a| matches!(a, Type::Object { .. })).count() > 1
+            || (arms.contains(&Type::Stats)
+                && arms.iter().any(|a| !matches!(a, Type::Stats | Type::Null | Type::Undefined)))
             || arms
                 .iter()
-                .any(|a| matches!(a, Type::Void | Type::Map { .. } | Type::Stats))
+                .any(|a| matches!(a, Type::Void | Type::Map { .. }))
         {
             return None;
         }

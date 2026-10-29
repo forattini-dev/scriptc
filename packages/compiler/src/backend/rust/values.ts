@@ -533,6 +533,7 @@ export class RustValueEmitter {
       case "func":
       case "promise":
       case "child":
+      case "stats":
       case "effect": case "genericFunc":
       case "sqliteDb": case "sqliteStmt":
       case "childStream":

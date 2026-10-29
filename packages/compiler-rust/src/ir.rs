@@ -1137,6 +1137,7 @@ impl Module {
             Type::Void | Type::Null | Type::Undefined | Type::Caught => false,
             Type::Array { elem } => {
                 !matches!(*elem, Type::Func { .. } | Type::Stats)
+                    && !matches!(&*elem, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|union| union.arms.contains(&Type::Stats)))
                     && self.valid_type_cached(*elem, active, proven)
             }
             Type::Bytes { elem } => matches!(elem.as_str(), "u8" | "u32" | "i32" | "f32" | "f64"),
@@ -1149,6 +1150,7 @@ impl Module {
             Type::Map { key, value } => {
                 matches!(*key, Type::F64 | Type::String | Type::Dyn)
                     && !matches!(*value, Type::Func { .. } | Type::Map { .. } | Type::Stats)
+                    && !matches!(&*value, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|union| union.arms.contains(&Type::Stats)))
                     && !matches!(*value, Type::Bytes { .. })
                     && self.valid_type_cached(*value, active, proven)
             }
@@ -1157,6 +1159,7 @@ impl Module {
                     && r.index_value.as_ref().is_none_or(|v| {
                         r.fields.is_empty()
                             && !matches!(v, Type::Func { .. } | Type::Map { .. } | Type::Stats)
+                            && !matches!(v, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|union| union.arms.contains(&Type::Stats)) )
                             && self.valid_type_cached(v.clone(), active, proven)
                     })
                     && r.fields
@@ -1181,9 +1184,11 @@ impl Module {
                         .filter(|a| matches!(a, Type::Object { .. }))
                         .count()
                         <= 1
+                    && (!u.arms.contains(&Type::Stats)
+                        || u.arms.iter().all(|a| matches!(a, Type::Stats | Type::Null | Type::Undefined)))
                     && u.arms.iter().all(|arm| {
                         matches!(arm, Type::Null | Type::Undefined)
-                            || (!matches!(arm, Type::Union { .. } | Type::Map { .. } | Type::Stats)
+                            || (!matches!(arm, Type::Union { .. } | Type::Map { .. })
                                 && self.valid_type_cached(arm.clone(), active, proven))
                     })
             }),
@@ -3339,6 +3344,18 @@ pub fn falls_through(stmts: &[Stmt]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nullable_stats_preserve_nominal_container_boundaries() {
+        let mut module = callable_module();
+        module.unions.push(Union { id: 0, arms: vec![Type::Stats, Type::Null, Type::Undefined] });
+        let optional = Type::Union { union_id: 0 };
+        assert!(module.valid_type(optional.clone(), &mut vec![]));
+        assert!(!module.valid_type(Type::Array { elem: Box::new(optional.clone()) }, &mut vec![]));
+        assert!(!module.valid_type(Type::Map { key: Box::new(Type::String), value: Box::new(optional) }, &mut vec![]));
+        module.unions.push(Union { id: 1, arms: vec![Type::Stats, Type::String] });
+        assert!(!module.valid_type(Type::Union { union_id: 1 }, &mut vec![]));
+    }
 
     #[test]
     fn stats_library_calls_keep_nominal_layouts_and_fence_erasure() {

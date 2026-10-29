@@ -3,6 +3,109 @@ use super::*;
 use source_frontend::prelude::get_source_file_of_node;
 
 impl Lowerer<'_> {
+    /// A broad declaration such as ReturnType<typeof lstatSync> includes
+    /// overloads not called by the body. Narrow only when every normal return
+    /// is null or an immutable result of the one-argument native stat call.
+    pub(super) fn precise_stats_return(&mut self, node: Node) -> Option<Type> {
+        fn abrupt(node: Node) -> bool {
+            match node.kind() {
+                SyntaxKind::ReturnStatement | SyntaxKind::ThrowStatement => true,
+                SyntaxKind::Block => node.statements().into_iter().last().is_some_and(abrupt),
+                SyntaxKind::IfStatement => {
+                    !node.else_statement().is_nil()
+                        && abrupt(node.then_statement())
+                        && abrupt(node.else_statement())
+                }
+                SyntaxKind::TryStatement => {
+                    let finally = node.finally_block();
+                    (!finally.is_nil() && abrupt(finally))
+                        || (abrupt(node.try_block())
+                            && !node.catch_clause().is_nil()
+                            && abrupt(node.catch_clause().block()))
+                }
+                _ => false,
+            }
+        }
+        fn returns(node: Node, out: &mut Vec<Node>) {
+            if matches!(
+                node.kind(),
+                SyntaxKind::FunctionDeclaration
+                    | SyntaxKind::FunctionExpression
+                    | SyntaxKind::ArrowFunction
+                    | SyntaxKind::ClassDeclaration
+                    | SyntaxKind::ClassExpression
+                    | SyntaxKind::MethodDeclaration
+            ) {
+                return;
+            }
+            if node.kind() == SyntaxKind::ReturnStatement {
+                out.push(node.expression());
+                return;
+            }
+            node.for_each_child(&mut |child| {
+                returns(child, out);
+                false
+            });
+        }
+        let body = node.body();
+        if body.is_nil() || !abrupt(body) {
+            return None;
+        }
+        let mut result = Vec::new();
+        returns(body, &mut result);
+        let mut has_stats = false;
+        let mut has_null = false;
+        for value in result {
+            let value = receivers::reference_node(value);
+            if value.kind() == SyntaxKind::NullKeyword {
+                has_null = true;
+                continue;
+            }
+            let value = if value.kind() == SyntaxKind::Identifier {
+                let symbol = self.symbol(value);
+                if symbol == 0 {
+                    return None;
+                }
+                let declaration = self
+                    .checker
+                    .sym(source_frontend::prelude::SymbolId(symbol))
+                    .value_declaration;
+                if declaration.is_nil()
+                    || declaration.kind() != SyntaxKind::VariableDeclaration
+                    || !declaration.parent().flags().intersects(NodeFlags::CONST)
+                {
+                    return None;
+                }
+                receivers::reference_node(declaration.initializer())
+            } else {
+                value
+            };
+            if value.kind() != SyntaxKind::CallExpression || value.arguments().len() != 1 {
+                return None;
+            }
+            let callee = receivers::reference_node(value.expression());
+            let native = if callee.kind() == SyntaxKind::Identifier {
+                let symbol = self.native_symbol(callee);
+                self.native_functions.get(&symbol).cloned()
+            } else if callee.kind() == SyntaxKind::PropertyAccessExpression {
+                self.native_namespace(callee.expression())
+                    .map(|module| (module, callee.name().text().to_string()))
+            } else {
+                None
+            };
+            if !matches!(native, Some(("fs", ref name)) if name == "statSync" || name == "lstatSync")
+            {
+                return None;
+            }
+            has_stats = true;
+        }
+        if has_stats && has_null {
+            self.intern_union(vec![Type::Stats, Type::Null])
+        } else {
+            None
+        }
+    }
+
     pub(super) fn standard_stats_type(&self, id: TypeId) -> bool {
         let symbol = self.checker.ty(id).symbol();
         symbol.0 != 0

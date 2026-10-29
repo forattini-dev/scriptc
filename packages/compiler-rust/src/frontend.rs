@@ -747,6 +747,7 @@ impl<'a> Lowerer<'a> {
             let flags = self.checker.ty(ret).flags;
             self.type_id(ret)
                 .filter(|ty| !matches!(ty, Type::Null | Type::Undefined))
+                .or_else(|| self.precise_stats_return(node))
                 .or_else(|| {
                     flags
                         .intersects(TypeFlags::VOID | TypeFlags::NEVER)

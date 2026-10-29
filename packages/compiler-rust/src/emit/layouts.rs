@@ -82,6 +82,7 @@ pub(super) fn definitions(module: &Emission<'_>, output: &mut String) {
                     | Type::Set { .. }
                     | Type::Object { .. }
                     | Type::Func { .. }
+                    | Type::Stats
                     | Type::Bytes { .. } => "left.ptr_eq(&right)",
                     Type::Null | Type::Undefined => "true",
                     Type::F64 | Type::Bigint | Type::String | Type::Bool | Type::Classval { .. } => {

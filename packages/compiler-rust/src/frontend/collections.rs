@@ -50,6 +50,7 @@ impl Lowerer<'_> {
                     | Type::Map { .. }
                     | Type::Stats
             )
+            || matches!(&value, Type::Union { union_id } if self.unions[*union_id].arms.contains(&Type::Stats))
         {
             return None;
         }
