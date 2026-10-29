@@ -1102,7 +1102,12 @@ impl Lowerer<'_> {
             let value = self.dynamic_get(node, obj, key);
             return if class {
                 let ty = self.ty(node)?;
-                if self.native_type_contains(&ty, |part| matches!(part, Type::Classval { .. })) {
+                let finite_constructors = matches!(ty, Type::Union { union_id }
+                    if self.unions[union_id].arms.len() >= 2
+                        && self.unions[union_id].arms.iter().all(|arm| matches!(arm, Type::Classval { .. })));
+                if !finite_constructors
+                    && self.native_type_contains(&ty, |part| matches!(part, Type::Classval { .. }))
+                {
                     return Err(self.refuse(node, "mutable class constructor properties require dynamic construction identity"));
                 }
                 self.coerce(value, ty, node)

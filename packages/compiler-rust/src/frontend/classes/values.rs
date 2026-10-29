@@ -287,6 +287,13 @@ impl Lowerer<'_> {
         }
         let params = common.unwrap();
         let arguments = self.method_arguments(node, &params)?;
+        // Keep a dynamic property value intact until after argument evaluation:
+        // JavaScript evaluates arguments before checking constructibility.
+        let (callee, dynamic) = match callee {
+            Expr::DynCheck { value, r#type, .. }
+                if r#type == (Type::Union { union_id }) => (*value, true),
+            value => (value, false),
+        };
         let mut helper_types = vec![callee.ty()];
         helper_types.extend(params);
         let mut helper = helpers::Helper::new(
@@ -296,11 +303,20 @@ impl Lowerer<'_> {
             self.loc(node),
         );
         let constructor = helper.param(0);
+        let selected_value = if dynamic {
+            Expr::DynCheck {
+                value: Box::new(helper.read(&constructor)),
+                r#type: Type::Union { union_id },
+                loc: helper.loc(),
+            }
+        } else {
+            helper.read(&constructor)
+        };
         for (tag, (arm, index)) in arms.iter().zip(classes).enumerate() {
             let selected = Expr::UnionNarrow {
                 union_id: format!("u{union_id}"),
                 tag,
-                value: Box::new(helper.read(&constructor)),
+                value: Box::new(selected_value.clone()),
                 r#type: arm.clone(),
                 loc: helper.loc(),
             };
@@ -325,7 +341,7 @@ impl Lowerer<'_> {
                     cond: Expr::UnionIsTag {
                         union_id: format!("u{union_id}"),
                         tag,
-                        value: Box::new(helper.read(&constructor)),
+                        value: Box::new(selected_value.clone()),
                         negated: false,
                         r#type: Type::Bool,
                         loc: helper.loc(),
