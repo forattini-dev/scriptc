@@ -132,6 +132,8 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-void-expression/values.ts",
         "rust-native-js-nullable-string/values.mts",
         "rust-native-array-sort-comparator/values.ts",
+        "rust-native-object-entries/values.ts",
+        "rust-native-object-entries/edges.ts",
         "rust-native-class-static-super/values.ts",
         "rust-native-class-static-mixed/values.ts",
         "rust-native-static-methods/inheritance.ts",

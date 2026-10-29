@@ -74,7 +74,7 @@ impl Lowerer<'_> {
             return Ok(None);
         }
         let name = member.name().text();
-        if !matches!(name, "keys" | "hasOwn") {
+        if !matches!(name, "keys" | "entries" | "hasOwn") {
             return Ok(None);
         }
         let symbol = self.symbol(member.expression());
@@ -115,7 +115,7 @@ impl Lowerer<'_> {
             }
         };
         let value = self.primitive_capture(value, node)?;
-        if !(if name == "keys" {
+        if !(if matches!(name, "keys" | "entries") {
             self.reflected_keys(&value.ty())
         } else {
             self.reflected_record(&value.ty())
@@ -132,10 +132,33 @@ impl Lowerer<'_> {
                 loc: self.loc(node),
             }));
         }
-        // The retained reflection operation returns an erased array. Copy its
-        // known string elements through checked reads into the typed array ABI.
+        // Reflection returns erased keys. Read them into the typed array ABI;
+        // entries additionally capture each current value in a fresh pair.
+        let element = if name == "entries" {
+            let inferred = self.ty(node).ok().and_then(|ty| match ty {
+                Type::Array { elem } => match *elem {
+                    Type::Record { shape_id }
+                        if self.records[shape_id].tuple
+                            && self.records[shape_id].fields.len() == 2
+                            && self.records[shape_id]
+                                .fields
+                                .iter()
+                                .any(|f| f.name == "0" && f.r#type == Type::String) =>
+                    {
+                        Some(Type::Record { shape_id })
+                    }
+                    _ => None,
+                },
+                _ => None,
+            });
+            inferred.unwrap_or_else(|| {
+                self.intern_tuple(vec![Type::String, Type::Dyn]).expect("entry tuple")
+            })
+        } else {
+            Type::String
+        };
         let array = Type::Array {
-            elem: Box::new(Type::String),
+            elem: Box::new(element.clone()),
         };
         // A call evaluates every argument before ToObject. Keep ignored extras
         // as ordinary typed parameters, including their exceptions and effects.
@@ -190,6 +213,31 @@ impl Lowerer<'_> {
         };
         let item = self.dynamic_get(node, helper.read(&keys), key);
         let item = self.coerce(item, Type::String, node)?;
+        let item = if let Type::Record { shape_id } = element {
+            let value_type = self.records[shape_id]
+                .fields
+                .iter()
+                .find(|f| f.name == "1")
+                .expect("entry value")
+                .r#type
+                .clone();
+            let value = self.dynamic_get(node, helper.read(&helper.param(0)), item.clone());
+            let value = self.coerce(value, value_type, node)?;
+            Expr::RecordLit {
+                fields: vec![
+                    ir::FieldInit {
+                        name: "0".into(), value: item, absent: false, overflow: false,
+                    },
+                    ir::FieldInit {
+                        name: "1".into(), value, absent: false, overflow: false,
+                    },
+                ],
+                r#type: Type::Record { shape_id },
+                loc: helper.loc(),
+            }
+        } else {
+            item
+        };
         helper.function.body.push(Stmt::While {
             cond: helper.less(&index, helper.read(&length)),
             body: vec![
