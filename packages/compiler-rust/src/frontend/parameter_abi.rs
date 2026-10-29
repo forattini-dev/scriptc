@@ -224,8 +224,10 @@ impl Lowerer<'_> {
             let mut changed = false;
             for (symbol, argument) in &edges {
                 if !self.js_absence_parameters.contains(symbol)
-                    && argument
-                        .is_none_or(|arg| self.argument_may_be_absent(arg, &mut HashSet::new()))
+                    && argument.is_none_or(|arg| {
+                        !self.guarded_capture_site(receivers::reference_node(arg))
+                            && self.argument_may_be_absent(arg, &mut HashSet::new())
+                    })
                 {
                     changed |= self.js_absence_parameters.insert(*symbol);
                 }

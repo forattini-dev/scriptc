@@ -11,10 +11,7 @@ impl Lowerer<'_> {
         value: Expr,
         target: &Type,
     ) -> Option<Expr> {
-        if *target != Type::String
-            || node.kind() != SyntaxKind::ElementAccessExpression
-            || node.expression().kind() != SyntaxKind::Identifier
-        {
+        if *target != Type::String || !self.guarded_capture_site(node) {
             return None;
         }
         let Type::Union { union_id } = value.ty() else {
@@ -25,6 +22,27 @@ impl Lowerer<'_> {
             return None;
         }
         let tag = arms.iter().position(|arm| *arm == Type::String)?;
+        Some(Expr::UnionNarrow {
+            union_id: format!("u{union_id}"),
+            tag,
+            value: Box::new(value),
+            r#type: Type::String,
+            loc: self.loc(node),
+        })
+    }
+
+    // This proof is also needed while planning parameter ABIs, before the
+    // capture expression has been lowered or its native union exists.
+    pub(super) fn guarded_capture_site(&mut self, node: Node) -> bool {
+        self.guarded_capture_site_inner(node).is_some()
+    }
+
+    fn guarded_capture_site_inner(&mut self, node: Node) -> Option<()> {
+        if node.kind() != SyntaxKind::ElementAccessExpression
+            || node.expression().kind() != SyntaxKind::Identifier
+        {
+            return None;
+        }
         let source_type = self.checker.get_type_at_location(node.expression());
         if !self.is_regex_capture_type(source_type) {
             return None;
@@ -112,13 +130,7 @@ impl Lowerer<'_> {
         {
             return None;
         }
-        Some(Expr::UnionNarrow {
-            union_id: format!("u{union_id}"),
-            tag,
-            value: Box::new(value),
-            r#type: Type::String,
-            loc: self.loc(node),
-        })
+        Some(())
     }
 
     pub(super) fn is_regex_capture_type(&self, id: TypeId) -> bool {

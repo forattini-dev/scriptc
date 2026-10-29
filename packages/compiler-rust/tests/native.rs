@@ -554,6 +554,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-regex-match/values.ts",
         "rust-native-optional-split/values.ts",
         "rust-native-regex-guard/direct.ts",
+        "rust-native-regex-guard/recursive.ts",
         "rust-native-set-spread/main.ts",
         "rust-native-set-spread/identity.ts",
         "rust-native-set-immediate-first/values.ts",
@@ -7849,17 +7850,22 @@ fn regex_capture_guard_boundaries_preserve_existing_artifacts() {
             .output()
             .unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            !output.status.success() && stderr.contains("SCN1001") && !stderr.contains("panicked"),
-            "{tail}: {stderr}"
-        );
-        assert!(
-            stderr.contains(&format!(":{guarded_read}..{}:", guarded_read + 8))
-                || stderr.contains(&format!(":{}..{}:", guarded_read - 1, guarded_read + 8)),
-            "{tail}: {stderr}"
-        );
-        for artifact in artifacts {
-            assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+        if output.status.success() {
+            let expected = Command::new(oracle()).arg(&input).output().unwrap();
+            let actual = Command::new(&target).output().unwrap();
+            assert_eq!(actual.status.code(), expected.status.code(), "{tail}");
+            assert_eq!(actual.stdout, expected.stdout, "{tail}");
+            assert_eq!(actual.stderr, expected.stderr, "{tail}");
+        } else {
+            assert!(stderr.contains("SCN1001") && !stderr.contains("panicked"), "{tail}: {stderr}");
+            assert!(
+                stderr.contains(&format!(":{guarded_read}..{}:", guarded_read + 8))
+                    || stderr.contains(&format!(":{}..{}:", guarded_read - 1, guarded_read + 8)),
+                "{tail}: {stderr}"
+            );
+            for artifact in artifacts {
+                assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+            }
         }
     }
 }
