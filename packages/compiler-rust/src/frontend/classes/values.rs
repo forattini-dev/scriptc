@@ -45,6 +45,18 @@ impl Lowerer<'_> {
         let Some(index) = self.classes.symbols.get(&symbol).copied() else {
             return Ok(None);
         };
+        // A class declaration's inner name is initialized while its static
+        // fields run, even though the surrounding lexical binding is in TDZ.
+        let mut ancestor = node.parent();
+        while !ancestor.is_nil() && ancestor.kind() != SyntaxKind::SourceFile {
+            if ancestor.kind() == SyntaxKind::PropertyDeclaration
+                && ancestor.modifier_flags().intersects(ModifierFlags::STATIC)
+                && ancestor.parent() == self.classes.definitions[index].node
+            {
+                return self.class_ref(index, node, None).map(Some);
+            }
+            ancestor = ancestor.parent();
+        }
         let Some(token) = self.classes.definitions[index].token.clone() else {
             return Ok(None);
         };

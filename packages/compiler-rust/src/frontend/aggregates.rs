@@ -1101,6 +1101,9 @@ impl Lowerer<'_> {
             };
             let value = self.dynamic_get(node, obj, key);
             return if class {
+                if self.static_forward_read(node) {
+                    return Err(self.refuse(node, "static field read before initialization needs an undefined-aware contract"));
+                }
                 let ty = self.ty(node)?;
                 let finite_constructors = matches!(ty, Type::Union { union_id }
                     if self.unions[union_id].arms.len() >= 2

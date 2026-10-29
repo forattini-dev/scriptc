@@ -654,21 +654,7 @@ impl Lowerer<'_> {
         let mut body = Vec::new();
         for field in fields {
             self.function_data_key(field, field.name().text())?;
-            fn references_name(node: Node, name: &str) -> bool {
-                if node.kind() == SyntaxKind::Identifier && node.text() == name {
-                    return true;
-                }
-                let mut found = false;
-                node.for_each_child(&mut |child| {
-                    found |= references_name(child, name);
-                    found
-                });
-                found
-            }
             let init = field.initializer();
-            if !init.is_nil() && references_name(init, node.name().text()) {
-                return Err(self.refuse(field, "static field self-reference needs a class initialization binding"));
-            }
             let value = if init.is_nil() {
                 self.coerce(
                     Expr::UnitLit { unit: "undefined", r#type: Type::Undefined, loc: self.loc(field) },
@@ -692,6 +678,29 @@ impl Lowerer<'_> {
             body.push(self.checked_dynamic_property_set(field, obj, key, value)?);
         }
         Ok(body)
+    }
+
+    pub(super) fn static_forward_read(&mut self, node: Node) -> bool {
+        let Some(index) = self.class_symbol(node.expression()) else { return false };
+        let class = self.classes.definitions[index].node;
+        let mut field = node.parent();
+        while !field.is_nil() && field.kind() != SyntaxKind::SourceFile {
+            if field.kind() == SyntaxKind::PropertyDeclaration
+                && field.modifier_flags().intersects(ModifierFlags::STATIC)
+                && field.parent() == class
+            {
+                let declarations = class.members().into_iter().filter(|member| {
+                    member.kind() == SyntaxKind::PropertyDeclaration
+                        && member.modifier_flags().intersects(ModifierFlags::STATIC)
+                        && !member.modifier_flags().intersects(ModifierFlags::AMBIENT)
+                        && member.name().text() == node.name().text()
+                }).collect::<Vec<_>>();
+                return declarations.iter().any(|member| member.pos() >= field.pos())
+                    && !declarations.iter().any(|member| member.pos() < field.pos());
+            }
+            field = field.parent();
+        }
+        false
     }
 
     fn layout_class(&mut self, index: usize) -> Result<(), String> {

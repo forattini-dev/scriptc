@@ -22,3 +22,16 @@ function beforeBinding(): string {
 }
 class Guard { static observation = beforeBinding(); }
 console.log('binding', Guard.observation);
+class SelfRef {
+  static first = 11;
+  static next = SelfRef.first + 1;
+  static self = SelfRef;
+  static getSelf = () => SelfRef;
+}
+console.log('self', SelfRef.next, (SelfRef as any).self === SelfRef);
+console.log('closure', (SelfRef as any).getSelf() === SelfRef);
+class Forward {
+  static missing = (Forward as any).later === undefined;
+  static later = 5;
+}
+console.log('forward', Forward.missing, Forward.later);
