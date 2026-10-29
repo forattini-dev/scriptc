@@ -8389,3 +8389,21 @@ fn constructor_union_rejects_incompatible_argument_contracts() {
     assert!(!output.status.success() && stderr.contains("constructor union argument contracts differ") && !stderr.contains("panicked"), "{stderr}");
     for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] { assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve"); }
 }
+
+#[test]
+fn unrelated_class_return_union_reports_identity_boundary() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.ts");
+    let target = binary(temp.path(), "class-return-union-boundary");
+    fs::write(&input, "class Circle { radius = 1 } class Square { side = 2 } function create(c: typeof Circle | typeof Square): Circle | Square { return new c(); } create(Circle);\n").unwrap();
+    for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] {
+        fs::write(artifact, "preserve").unwrap();
+    }
+    let output = Command::new(compiler()).arg("build").arg(&input).args(["--no-engine", "--out"]).arg(&target).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("function return union of class instances needs a shared identity contract") && !stderr.contains("panicked"), "{stderr}");
+    for artifact in [&target, &target.with_extension("ir.json"), &target.with_extension("rs")] {
+        assert_eq!(fs::read_to_string(artifact).unwrap(), "preserve");
+    }
+}

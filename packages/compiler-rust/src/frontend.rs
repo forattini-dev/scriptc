@@ -681,7 +681,27 @@ impl<'a> Lowerer<'a> {
                         .intersects(TypeFlags::VOID | TypeFlags::NEVER)
                         .then_some(Type::Void)
                 })
-                .ok_or_else(|| self.refuse(node, "function return type is not ported"))?
+                .ok_or_else(|| {
+                    let class_arms = flags.intersects(TypeFlags::UNION)
+                        && self
+                            .checker
+                            .ty(ret)
+                            .types()
+                            .iter()
+                            .filter(|arm| {
+                                let symbol = self.checker.ty(**arm).symbol();
+                                symbol.0 != 0
+                                    && self.checker.sym(symbol).flags.intersects(SymbolFlags::CLASS)
+                            })
+                            .count()
+                            > 1;
+                    let reason = if class_arms {
+                        "function return union of class instances needs a shared identity contract"
+                    } else {
+                        "function return type is not ported"
+                    };
+                    self.refuse(node, reason)
+                })?
         };
         let symbol = self.symbol(node.name());
         if symbol == 0 {
