@@ -125,7 +125,7 @@ pub(super) struct Instance {
     json: Option<json_modules::DataValue>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Graph {
     instances: Vec<Instance>,
     files: HashMap<String, usize>,

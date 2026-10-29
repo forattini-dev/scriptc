@@ -3,7 +3,7 @@
 //! rather than cloning the complete program's type graph for every query.
 use super::*;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(in crate::frontend) struct TypeCache {
     states: HashMap<TypeId, Resolution>,
     journal: Vec<TypeId>,

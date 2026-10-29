@@ -1,6 +1,68 @@
 use super::*;
+use serde::Serialize;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticUnit {
+    file: String,
+    start: i32,
+    end: i32,
+    kind: String,
+    diagnostic: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Diagnostics {
+    kind: &'static str,
+    schema_version: u32,
+    compiler: &'static str,
+    engine: &'static str,
+    frontend_revision: &'static str,
+    entry: String,
+    project: Option<String>,
+    scope: &'static str,
+    analyzed_units: usize,
+    available_units: usize,
+    start_unit: usize,
+    skipped_commonjs_modules: usize,
+    truncated: bool,
+    diagnostic_groups: std::collections::BTreeMap<String, Vec<usize>>,
+    units: Vec<DiagnosticUnit>,
+}
+
+enum Outcome {
+    Module(Module),
+    Diagnostics(Diagnostics),
+}
 
 pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module, String> {
+    match lower_internal(input, work, project, None)? {
+        Outcome::Module(module) => Ok(module),
+        Outcome::Diagnostics(_) => unreachable!("ordinary lowering produces a module"),
+    }
+}
+
+pub fn diagnose(
+    input: &Path,
+    work: &Path,
+    project: Option<&Path>,
+    max_units: usize,
+    linked: bool,
+    start_unit: usize,
+) -> Result<Diagnostics, String> {
+    match lower_internal(input, work, project, Some((max_units, linked, start_unit)))? {
+        Outcome::Diagnostics(report) => Ok(report),
+        Outcome::Module(_) => unreachable!("diagnostic lowering never produces a module"),
+    }
+}
+
+fn lower_internal(
+    input: &Path,
+    work: &Path,
+    project: Option<&Path>,
+    diagnostic: Option<(usize, bool, usize)>,
+) -> Result<Outcome, String> {
     if input.to_str().is_none() {
         return Err("SCN0001: non-Unicode input paths are not ported".into());
     }
@@ -70,6 +132,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         .into_iter()
         .find(|node| source_file_info(*node).file_name == source)
         .ok_or_else(|| "SCN0002: frontend did not return the input source file".to_string())?;
+    let project_label = project.map(path_for_frontend);
     program::with_type_checker_for_file(file, move |checker| {
         let linked = catalog.map(|catalog| catalog.link(checker));
         let mut lowerer = Lowerer::new(checker, source.clone(), console_prelude);
@@ -121,6 +184,104 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         })?;
         let mut body = lowerer.commonjs_prelude();
         body.extend(lowerer.hoist_module_vars(&plan.modules)?);
+        if let Some((max_units, linked, start_unit)) = diagnostic {
+            let mut candidates = Vec::new();
+            let mut skipped_commonjs_modules = 0;
+            for module in &plan.execution_order {
+                if !linked && *module != file {
+                    continue;
+                }
+                if lowerer.commonjs_index(*module).is_some() {
+                    skipped_commonjs_modules += 1;
+                    continue;
+                }
+                for node in module.statements() {
+                    if matches!(
+                        node.kind(),
+                        SyntaxKind::ImportDeclaration | SyntaxKind::ExportDeclaration
+                    ) {
+                        continue;
+                    }
+                    candidates.push((*module, node));
+                }
+            }
+            let available_units = candidates.len();
+            if start_unit > available_units {
+                return Err(format!(
+                    "SCN0001: --start-unit {start_unit} exceeds {available_units} available units"
+                ));
+            }
+            let mut units = Vec::new();
+            for (module, node) in candidates.into_iter().skip(start_unit).take(max_units) {
+                let path = source_file_info(module).file_name.to_string();
+                let mut probe = lowerer.diagnostic_fork();
+                probe.file = path.clone();
+                let result = (|| -> Result<(), String> {
+                    if node.kind() == SyntaxKind::FunctionDeclaration {
+                        let symbol = if node.name().is_nil() {
+                            node.symbol().0
+                        } else {
+                            probe.symbol(node.name())
+                        };
+                        probe.request_function(symbol, node, functions::UseKind::Value)?;
+                    } else {
+                        probe.statement(node)?;
+                    }
+                    loop {
+                        if let Some(index) = probe.classes.next() {
+                            probe.lower_constructor(index)?;
+                        } else if let Some(signature) = probe.classes.next_method() {
+                            probe.lower_function(signature)?;
+                        } else if let Some((symbol, signature)) = probe.functions.next() {
+                            probe
+                                .lower_function(signature)
+                                .map_err(|error| probe.functions.explain(symbol, error))?;
+                            probe.functions.finish(symbol);
+                        } else {
+                            break;
+                        }
+                    }
+                    Ok(())
+                })();
+                units.push(DiagnosticUnit {
+                    file: path,
+                    start: node.pos(),
+                    end: node.end(),
+                    kind: format!("{:?}", node.kind()),
+                    diagnostic: result.err(),
+                });
+            }
+            let mut diagnostic_groups = std::collections::BTreeMap::<String, Vec<usize>>::new();
+            for (index, unit) in units.iter().enumerate() {
+                if let Some(first) = unit
+                    .diagnostic
+                    .as_deref()
+                    .and_then(|error| error.lines().next())
+                {
+                    diagnostic_groups
+                        .entry(first.into())
+                        .or_default()
+                        .push(start_unit + index);
+                }
+            }
+            return Ok(Outcome::Diagnostics(Diagnostics {
+                kind: "isolated-lowering-diagnostics",
+                schema_version: 1,
+                compiler: "rust",
+                engine: "none",
+                frontend_revision: super::REVISION,
+                entry: source.clone(),
+                project: project_label,
+                scope: "Independent statement and function probes share the checked project but not lowering state; prior initializers are not executed. Uncalled functions are included. Failures may reflect missing prerequisites or generic ABI inference; success is not a valid IR, Rust, or executable certificate. CommonJS modules are skipped. Normal build remains authoritative.",
+                analyzed_units: units.len(),
+                available_units,
+                start_unit,
+                skipped_commonjs_modules,
+                truncated: start_unit.saturating_add(units.len()) < available_units,
+                diagnostic_groups,
+                units,
+            }));
+        }
         for file in &plan.execution_order {
             lowerer.file = source_file_info(*file).file_name.to_string();
             if let Some(index) = lowerer.commonjs_index(*file) {
@@ -174,7 +335,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
         functions.extend(std::mem::take(&mut lowerer.lifted));
         lowerer.validate_call_receivers(&functions)?;
         lowerer.link_runtime_types(&functions, file)?;
-        Ok(Module {
+        Ok(Outcome::Module(Module {
             ir_version: ir::VERSION,
             source_file: source.clone(),
             entry: "__main".into(),
@@ -189,7 +350,7 @@ pub fn lower(input: &Path, work: &Path, project: Option<&Path>) -> Result<Module
                 .flatten()
                 .chain(lowerer.namespace_values.layouts)
                 .collect(),
-        })
+        }))
     })
 }
 

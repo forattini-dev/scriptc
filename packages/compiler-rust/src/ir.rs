@@ -277,7 +277,7 @@ pub struct Global {
     pub mutable: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Function {
     #[serde(rename = "async", skip_serializing_if = "std::ops::Not::not")]

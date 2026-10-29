@@ -117,7 +117,7 @@ pub(crate) fn path_for_frontend(path: &Path) -> String {
     }
 }
 
-pub use pipeline::lower;
+pub use pipeline::{diagnose, lower};
 
 fn needs_execution_view() -> bool {
     program::source_files().into_iter().any(|file| {
@@ -225,6 +225,66 @@ struct Lowerer<'a> {
 }
 
 impl<'a> Lowerer<'a> {
+    // Diagnostic probes share the checker, but every mutable lowering graph is
+    // copied so a failed probe cannot contaminate another one or a real build.
+    fn diagnostic_fork(&mut self) -> Lowerer<'_> {
+        macro_rules! fork {
+            ($($field:ident),* $(,)?) => {
+                Lowerer { checker: &mut *self.checker, $($field: self.$field.clone()),* }
+            };
+        }
+        fork!(
+            console_prelude,
+            file,
+            locals,
+            bindings,
+            module_bindings,
+            unobserved_default_exports,
+            globals,
+            functions,
+            return_type,
+            native_functions,
+            native_namespaces,
+            native_local_symbols,
+            ambiguous_native_targets,
+            json_imports,
+            records,
+            unions,
+            types,
+            type_stack,
+            outer,
+            captures,
+            recursive_functions,
+            caught_aliases,
+            lifted,
+            next_closure,
+            helpers,
+            dynamic_constructors,
+            declarations,
+            declaration_abi,
+            projections,
+            literal_choices,
+            contextual_record_storage,
+            classes,
+            instance_this,
+            module_vars,
+            var_types,
+            var_defined,
+            js_absence_parameters,
+            absence_returns,
+            absence_assignments,
+            js_absent_fields,
+            enums,
+            callables,
+            polymorphic_callables,
+            data_bindings,
+            data_types,
+            commonjs,
+            namespace_values,
+            receiver_calls,
+        )
+    }
+
     fn new(checker: &'a mut Checker, file: String, console_prelude: Option<String>) -> Self {
         Self {
             checker,

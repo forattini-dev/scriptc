@@ -40,7 +40,7 @@ struct Definition {
     shape: usize,
     entries: Vec<Entry>,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct EnumGraph {
     statements: HashMap<declarations::Key, Definition>,
     bindings: HashMap<u32, usize>,

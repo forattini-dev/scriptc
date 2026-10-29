@@ -7121,6 +7121,139 @@ fn regexp_method_boundaries_preserve_artifacts() {
 }
 
 #[test]
+fn diagnose_isolates_multiple_lowering_failures_without_publishing_ir() {
+    let temp = tempfile::tempdir().unwrap();
+    metadata_project(temp.path());
+    let input = temp.path().join("main.mts");
+    fs::write(&input, "function* first() { yield 1; }\nclass Broken { [Symbol('custom')]() { return 2; } }\nfunction good() { return 3; }\nconsole.log(good());\n").unwrap();
+    let report = temp.path().join("diagnostics.json");
+    let result = Command::new(compiler())
+        .arg("diagnose")
+        .arg(&input)
+        .args(["--no-engine", "--out"])
+        .arg(&report)
+        .output()
+        .unwrap();
+    success(&result);
+    let json: serde_json::Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
+    assert_eq!(json["kind"], "isolated-lowering-diagnostics");
+    assert_eq!(json["schemaVersion"], 1);
+    assert_eq!(json["engine"], "none");
+    assert_eq!(json["analyzedUnits"], 4);
+    assert_eq!(json["truncated"], false);
+    let units = json["units"].as_array().unwrap();
+    assert_eq!(json["diagnosticGroups"].as_object().unwrap().len(), 2);
+    assert!(
+        units[0]["diagnostic"]
+            .as_str()
+            .unwrap()
+            .contains("generator")
+    );
+    assert!(
+        units[1]["diagnostic"]
+            .as_str()
+            .unwrap()
+            .contains("computed members")
+    );
+    assert!(units[2]["diagnostic"].is_null());
+    assert!(units[3]["diagnostic"].is_null());
+    let ir = temp.path().join("program.ir.json");
+    let build = Command::new(compiler())
+        .arg("build")
+        .arg(&input)
+        .args(["--no-engine", "--emit", "ir", "--out"])
+        .arg(&ir)
+        .output()
+        .unwrap();
+    assert!(!build.status.success());
+    assert!(
+        !ir.exists(),
+        "a diagnostic run must not publish recovery IR"
+    );
+    let limited = temp.path().join("limited.json");
+    let result = Command::new(compiler())
+        .arg("diagnose")
+        .arg(&input)
+        .args(["--no-engine", "--max-units", "1", "--out"])
+        .arg(&limited)
+        .output()
+        .unwrap();
+    success(&result);
+    let json: serde_json::Value = serde_json::from_slice(&fs::read(limited).unwrap()).unwrap();
+    assert_eq!(json["analyzedUnits"], 1);
+    assert_eq!(json["availableUnits"], 4);
+    assert_eq!(json["truncated"], true);
+    let page = temp.path().join("page.json");
+    let result = Command::new(compiler())
+        .arg("diagnose")
+        .arg(&input)
+        .args([
+            "--no-engine",
+            "--start-unit",
+            "1",
+            "--max-units",
+            "2",
+            "--out",
+        ])
+        .arg(&page)
+        .output()
+        .unwrap();
+    success(&result);
+    let json: serde_json::Value = serde_json::from_slice(&fs::read(page).unwrap()).unwrap();
+    assert_eq!(json["startUnit"], 1);
+    assert_eq!(json["analyzedUnits"], 2);
+    assert!(
+        json["units"][0]["diagnostic"]
+            .as_str()
+            .unwrap()
+            .contains("computed members")
+    );
+    assert!(json["units"][1]["diagnostic"].is_null());
+    let protected = temp.path().join("protected.json");
+    fs::write(&protected, "{\"important\":true}").unwrap();
+    let result = Command::new(compiler())
+        .arg("diagnose")
+        .arg(&input)
+        .arg("--out")
+        .arg(&protected)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert_eq!(
+        fs::read_to_string(protected).unwrap(),
+        "{\"important\":true}"
+    );
+    fs::write(
+        temp.path().join("dependency.mts"),
+        "export function* other() { yield 4; }\n",
+    )
+    .unwrap();
+    fs::write(
+        &input,
+        "import './dependency.mjs';\nfunction* first() { yield 1; }\n",
+    )
+    .unwrap();
+    let linked = temp.path().join("linked.json");
+    let result = Command::new(compiler())
+        .arg("diagnose")
+        .arg(&input)
+        .args(["--linked", "--no-engine", "--out"])
+        .arg(&linked)
+        .output()
+        .unwrap();
+    success(&result);
+    let json: serde_json::Value = serde_json::from_slice(&fs::read(linked).unwrap()).unwrap();
+    assert_eq!(json["analyzedUnits"], 2);
+    assert!(
+        json["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|unit| unit["diagnostic"].as_str().unwrap().contains("generator"))
+    );
+}
+
+#[test]
 fn survey_collects_independent_failures_without_external_tools() {
     let temp = tempfile::tempdir().unwrap();
     let fixtures = root().join("tests/fixtures/native-survey");

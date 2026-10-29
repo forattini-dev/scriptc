@@ -15,6 +15,7 @@ impl Boundary {
         }
     }
 }
+#[derive(Clone)]
 pub(super) struct PendingCall {
     pub ty: Type,
     pub loc: Loc,

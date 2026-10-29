@@ -29,7 +29,7 @@ fn execute() -> Result<(), String> {
     let mut args = std::env::args_os().skip(1);
     let command = args
         .next()
-        .ok_or("usage: scriptc build|inspect <file.ts|file.js> [--project <tsconfig>] [--emit bin|ir|rust] --out <path>; scriptc survey <manifest.json> --out <report.json>; scriptc builtins")?;
+        .ok_or("usage: scriptc build|inspect|diagnose <file.ts|file.js> [--project <tsconfig>] --out <path>; scriptc survey <manifest.json> --out <report.json>; scriptc builtins")?;
     if command == "survey" {
         return survey::run(args);
     }
@@ -51,8 +51,8 @@ fn execute() -> Result<(), String> {
         );
         return Ok(());
     }
-    if command != "build" && command != "inspect" {
-        return Err("SCN0001: expected build, inspect, survey or builtins".into());
+    if command != "build" && command != "inspect" && command != "diagnose" {
+        return Err("SCN0001: expected build, inspect, diagnose, survey or builtins".into());
     }
     let input = fs::canonicalize(PathBuf::from(
         args.next().ok_or("SCN0001: missing input file")?,
@@ -67,9 +67,12 @@ fn execute() -> Result<(), String> {
     let mut kind = String::from("bin");
     let mut out = None;
     let mut project_path = None;
+    let mut max_units = 100usize;
+    let mut start_unit = 0usize;
+    let mut linked = false;
     while let Some(arg) = args.next() {
         if arg == "--emit" {
-            if command == "inspect" {
+            if command != "build" {
                 return Err("SCN0001: --emit is only for build".into());
             }
             kind = args
@@ -85,6 +88,19 @@ fn execute() -> Result<(), String> {
             out = Some(PathBuf::from(
                 args.next().ok_or("SCN0001: missing --out value")?,
             ));
+        } else if arg == "--max-units" && command == "diagnose" {
+            max_units = args
+                .next()
+                .and_then(|arg| arg.to_str().and_then(|s| s.parse().ok()))
+                .filter(|n| (1..=10000).contains(n))
+                .ok_or("SCN0001: --max-units expects an integer from 1 to 10000")?;
+        } else if arg == "--linked" && command == "diagnose" {
+            linked = true;
+        } else if arg == "--start-unit" && command == "diagnose" {
+            start_unit = args
+                .next()
+                .and_then(|arg| arg.to_str().and_then(|s| s.parse().ok()))
+                .ok_or("SCN0001: --start-unit expects a nonnegative integer")?;
         } else if arg != "--no-engine" {
             return Err(format!("SCN0001: unsupported option {arg:?}"));
         }
@@ -125,6 +141,38 @@ fn execute() -> Result<(), String> {
         .tempdir()
         .map_err(|e| e.to_string())?;
     let project = project::discover(&input, project_path.as_deref())?;
+    if command == "diagnose" {
+        if out.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            return Err("SCN0001: diagnose output must be a .json report".into());
+        }
+        if out.exists() {
+            let old = fs::read(&out)
+                .ok()
+                .and_then(|data| serde_json::from_slice::<serde_json::Value>(&data).ok());
+            if !old.is_some_and(|value| {
+                value["kind"] == "isolated-lowering-diagnostics" && value["schemaVersion"] == 1
+            }) {
+                return Err("SCN0001: diagnose only replaces an existing diagnostic report".into());
+            }
+        }
+        let report = frontend::diagnose(
+            &input,
+            work.path(),
+            project.as_deref(),
+            max_units,
+            linked,
+            start_unit,
+        )?;
+        atomic_write(
+            &out,
+            &serde_json::to_vec_pretty(&report).map_err(|e| e.to_string())?,
+        )?;
+        println!(
+            "{}",
+            serde_json::json!({"diagnostics": out, "compiler": "rust", "engine": "none"})
+        );
+        return Ok(());
+    }
     if command == "inspect" {
         if kind != "bin" {
             return Err(

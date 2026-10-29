@@ -16,6 +16,7 @@ pub(super) enum UseKind {
     Value,
 }
 
+#[derive(Clone)]
 struct Demand {
     caller: Option<u32>,
     target: u32,
@@ -23,6 +24,7 @@ struct Demand {
     kind: UseKind,
 }
 
+#[derive(Clone)]
 enum State {
     Discovered,
     Queued(Signature),
@@ -30,7 +32,7 @@ enum State {
     Lowered(Signature),
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct FunctionGraph {
     definitions: HashMap<u32, Definition>,
     states: HashMap<u32, State>,
