@@ -79,6 +79,15 @@ impl Lowerer<'_> {
         let member = self.symbol(node.name());
         self.standard_console_symbol(member, false)
     }
+    pub(super) fn ignored_console_bind_receiver(&mut self, member: Node, receiver: Node) -> bool {
+        if self.ambient_console_member(member).is_none()
+            || receiver.kind() != SyntaxKind::Identifier
+        {
+            return false;
+        }
+        let symbol = self.symbol(receiver);
+        self.standard_console_symbol(symbol, true).is_some()
+    }
     pub(super) fn console_value(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let Some(name) = self.ambient_console_member(node) else {
             return Ok(None);

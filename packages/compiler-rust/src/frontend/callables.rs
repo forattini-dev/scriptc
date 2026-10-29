@@ -515,7 +515,21 @@ impl Lowerer<'_> {
                 "bind needs a this argument and a fixed prefix before the rest array",
             ));
         }
-        let this = self.expected_expression(arguments[0], Type::Dyn)?;
+        let this = if self.ignored_console_bind_receiver(member.expression(), arguments[0]) {
+            // The native console sink never reads its receiver. The ambient
+            // global is an effect-free binding, not an exposed object value.
+            self.coerce(
+                Expr::UnitLit {
+                    unit: "undefined",
+                    r#type: Type::Undefined,
+                    loc: self.loc(arguments[0]),
+                },
+                Type::Dyn,
+                arguments[0],
+            )?
+        } else {
+            self.expected_expression(arguments[0], Type::Dyn)?
+        };
         let mut values = vec![target, this];
         let prefix_start = values.len();
         for (index, argument) in arguments.iter().skip(1).enumerate() {
