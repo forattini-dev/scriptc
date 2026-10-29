@@ -52,3 +52,14 @@ console.log('arrow', readArrow(), (ArrowChild as any).who() === ArrowSelf);
 const who: any = (ArrowSelf as any).who;
 console.log('arrow-call', who.call(ArrowChild) === ArrowSelf);
 console.log('arrow-child', (ArrowChild as any).own() === ArrowChild);
+class NormalSelf {
+  static receiver = function(this: any): any { return this; };
+  static capture = function(this: any): () => any { return () => this; };
+}
+class NormalChild extends NormalSelf {}
+const normal: any = (NormalSelf as any).receiver;
+console.log('function', normal() === undefined, (NormalSelf as any).receiver() === NormalSelf,
+  normal.call(ArrowChild) === ArrowChild, (NormalChild as any).receiver() === NormalChild);
+const capture: any = (NormalSelf as any).capture;
+const captured: any = capture.call(ArrowChild);
+console.log('function-arrow', captured() === ArrowChild);

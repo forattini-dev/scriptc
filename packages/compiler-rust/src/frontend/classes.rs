@@ -12,23 +12,6 @@ pub(super) fn parameter_property(node: Node) -> bool {
     )
 }
 
-fn nested_static_this(node: Node) -> bool {
-    if matches!(
-        node.kind(),
-        SyntaxKind::FunctionExpression | SyntaxKind::FunctionDeclaration
-    )
-        && receivers::reads_this(node)
-    {
-        return true;
-    }
-    let mut found = false;
-    node.for_each_child(&mut |child| {
-        found |= nested_static_this(child);
-        found
-    });
-    found
-}
-
 #[derive(Clone)]
 struct Definition {
     node: Node,
@@ -495,7 +478,6 @@ impl Lowerer<'_> {
                     member.name().kind(),
                     SyntaxKind::Identifier | SyntaxKind::StringLiteral
                 )
-                && !nested_static_this(member)
                 && (!static_methods::reads_super(member)
                     || (member.initializer().kind() == SyntaxKind::PropertyAccessExpression
                         && member.initializer().expression().kind() == SyntaxKind::SuperKeyword));
