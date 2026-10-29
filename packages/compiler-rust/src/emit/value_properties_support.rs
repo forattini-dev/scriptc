@@ -13,6 +13,9 @@ fn native_value_set(value: NativeValue, key: runtime::JsString, field: NativeVal
         runtime::weak_map_set(&owner, &owner, field);
         return;
     }
+    if native_instance_property_set(&value, &key, &field) {
+        return;
+    }
     if let Some(properties) = native_function_properties(&value) {
         native_function_data_key(&key);
         native_record_set(&properties, key, field);

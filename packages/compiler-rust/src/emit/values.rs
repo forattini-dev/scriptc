@@ -582,6 +582,24 @@ fn native_value_missing_kind<K: runtime::JsStringSource + ?Sized>(key: &K, kind:
 }
 
 fn own_key_definitions(types: &[Type], module: &Emission<'_>, out: &mut String) {
+    out.push_str("fn native_instance_property_set(value: &NativeValue, key: &runtime::JsString, field: &NativeValue) -> bool {\n");
+    if !module.classes.is_empty() {
+        out.push_str("let NativeValue::Instance(object) = value else { return false }; if !key.is_well_formed() { runtime::throw_type_error(\"scriptc: unrepresented instance property write\".into()); } let kind = object.with(|instance| instance.kind); match kind {\n");
+        for (index, class) in module.classes.iter().enumerate() {
+            writeln!(out, "{index} => match key.well_formed_utf8().unwrap_or_else(|| unreachable!(\"checked property key\")) {{").unwrap();
+            if module.class_header_len(class) == 0 {
+                for field in class.fields.iter().filter(|field| !field.name.starts_with('%')) {
+                    let value = checked(&field.r#type, "field.clone()", module);
+                    writeln!(out, "{:?} => {{ instance_set_{index}_{}(object.clone(), {value}); true }},", field.name, field_name(&field.name)).unwrap();
+                }
+            }
+            out.push_str("_ => runtime::throw_type_error(\"scriptc: unrepresented instance property write\".into()), },\n");
+        }
+        out.push_str("_ => unreachable!(\"validated native instance kind\") }\n");
+    } else {
+        out.push_str("let _ = (value, key, field); false\n");
+    }
+    out.push_str("}\n");
     out.push_str("fn native_bytes_property_key(value: &NativeValue) -> Option<runtime::WeakKey> { match value {\n");
     for (i, ty) in types.iter().enumerate() {
         if matches!(ty, Type::Bytes { .. }) {

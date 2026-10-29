@@ -257,15 +257,29 @@ impl Lowerer<'_> {
         if arms.len() < 2 || !arms.iter().all(|arm| matches!(arm, Type::Classval { .. })) {
             return Ok(None);
         }
-        let result = self.ty(node)?;
-        let Type::Object { class_name: parent } = &result else {
-            return Err(self.refuse(
-                node,
-                "constructor union requires a common native instance type",
-            ));
+        let checked_result = self.checker.get_type_at_location(node);
+        let result = match self.ty(node) {
+            Ok(result @ Type::Object { .. }) => result,
+            Err(error) if self.checker.ty(checked_result).flags.intersects(TypeFlags::UNION) => {
+                let result_arms = self.checker.ty(checked_result).types().to_vec();
+                let mut instances = Vec::new();
+                for source in result_arms {
+                    let Some(Type::Object { class_name }) = self.type_id(source) else {
+                        return Err(error);
+                    };
+                    instances.push(class_name);
+                }
+                if instances.len() != arms.len() || !arms.iter().all(|arm| {
+                    matches!(arm, Type::Classval { class_name } if instances.contains(class_name))
+                }) {
+                    return Err(error);
+                }
+                Type::Dyn
+            }
+            _ => return Err(self.refuse(node, "constructor union requires represented native instances")),
         };
         let mut classes = Vec::new();
-        let mut common = None;
+        let mut common: Option<Vec<Type>> = None;
         for arm in &arms {
             let Type::Classval { class_name } = arm else {
                 unreachable!()
@@ -279,7 +293,9 @@ impl Lowerer<'_> {
                     self.refuse(node, "constructor union has no native class identity")
                 })?;
             self.resolve_class(index)?;
-            if !self.classes.subclass(class_name, parent) {
+            if let Type::Object { class_name: parent } = &result
+                && !self.classes.subclass(class_name, parent)
+            {
                 return Err(self.refuse(
                     node,
                     "constructor union instances need a shared native class hierarchy",
@@ -291,11 +307,24 @@ impl Lowerer<'_> {
                 .skip(1)
                 .map(|param| param.r#type)
                 .collect::<Vec<_>>();
-            if common.as_ref().is_some_and(|expected| *expected != params) {
-                return Err(self.refuse(node, "constructor union argument contracts differ"));
+            if let Some(expected) = &common {
+                let (shorter, longer) = if params.len() < expected.len() {
+                    (&params, expected)
+                } else {
+                    (expected, &params)
+                };
+                if shorter.iter().ne(longer.iter().take(shorter.len()))
+                    || longer.iter().skip(shorter.len()).any(|ty| {
+                        *ty != Type::Dyn && !matches!(ty, Type::Union { union_id } if self.unions[*union_id].arms.contains(&Type::Undefined))
+                    })
+                {
+                    return Err(self.refuse(node, "constructor union argument contracts differ"));
+                }
             }
-            common = Some(params);
-            classes.push(index);
+            if common.as_ref().is_none_or(|expected| params.len() > expected.len()) {
+                common = Some(params.clone());
+            }
+            classes.push((index, params.len()));
         }
         let params = common.unwrap();
         let arguments = self.method_arguments(node, &params)?;
@@ -324,7 +353,7 @@ impl Lowerer<'_> {
         } else {
             helper.read(&constructor)
         };
-        for (tag, (arm, index)) in arms.iter().zip(classes).enumerate() {
+        for (tag, (arm, (index, arity))) in arms.iter().zip(classes).enumerate() {
             let selected = Expr::UnionNarrow {
                 union_id: format!("u{union_id}"),
                 tag,
@@ -332,7 +361,7 @@ impl Lowerer<'_> {
                 r#type: arm.clone(),
                 loc: helper.loc(),
             };
-            let values = (1..helper.function.params.len())
+            let values = (1..=arity)
                 .map(|i| helper.read(&helper.param(i)))
                 .collect();
             let instance = Expr::NewValue {
