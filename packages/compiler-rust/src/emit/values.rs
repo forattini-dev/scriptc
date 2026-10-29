@@ -151,6 +151,17 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
         }
     }
     out.push_str("_ => runtime::throw_type_error(\"scriptc: default native array.sort requires a string array\".into()), } }\n");
+    out.push_str("fn native_value_sort_with(value: NativeValue, comparator: NativeValue) -> NativeValue { match value {\n");
+    out.push_str("NativeValue::Array(array) => { runtime::array_sort_by_snapshot(&array, |left, right| native_sort_compare(&comparator, left.clone(), right.clone())); NativeValue::Array(array) },\n");
+    for (index, ty) in types.iter().enumerate() {
+        if let Type::Array { elem } = ty && **elem != Type::Dyn {
+            let left = boxed(elem, "left.clone()", module);
+            let right = boxed(elem, "right.clone()", module);
+            writeln!(out, "NativeValue::V{index}(array) => {{ runtime::array_sort_by_snapshot(&array, |left, right| native_sort_compare(&comparator, {left}, {right})); NativeValue::V{index}(array) }},").unwrap();
+        }
+    }
+    out.push_str("_ => runtime::throw_type_error(\"scriptc: array.sort receiver is not a native array\".into()), } }\n");
+    out.push_str("fn native_sort_compare(comparator: &NativeValue, left: NativeValue, right: NativeValue) -> std::cmp::Ordering { let result = native_value_call(comparator.clone(), vec![left, right], \"Array.sort comparator\"); let number = native_compare_number(&result); if number < 0.0 { std::cmp::Ordering::Less } else if number > 0.0 { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal } }\n");
     out.push_str("fn native_value_collection_brand(value: &NativeValue, kind: &str) -> bool { match (kind,value) { (\"map\", NativeValue::Map(_)) => true,\n");
     for (index, ty) in types.iter().enumerate() {
         let kind = match ty {

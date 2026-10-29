@@ -443,12 +443,69 @@ impl Lowerer<'_> {
         if !self.primitive_symbol(symbol, "sort", Some("Array")) {
             return Err(self.refuse(member, "array.sort requires its standard declaration"));
         }
-        if !node.arguments().is_empty() {
-            return Err(self.refuse(node, "array.sort comparators are not ported"));
-        }
         let receiver = self.expression(member.expression())?;
         let receiver = self.live_member_receiver(member.expression(), receiver);
         let ty = receiver.ty();
+        let arguments = node.arguments().into_iter().collect::<Vec<_>>();
+        if !arguments.is_empty() {
+            let Type::Array { elem } = &ty else {
+                return Err(self.refuse(node, "array.sort requires a native array"));
+            };
+            if arguments.len() != 1 || arguments[0].kind() == SyntaxKind::SpreadElement {
+                return Err(self.refuse(node, "array.sort requires one comparator"));
+            }
+            let callback_node = receivers::reference_node(arguments[0]);
+            let callback = if matches!(
+                callback_node.kind(),
+                SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression
+            ) {
+                if callback_node.parameters().len() > 2
+                    || callback_node.parameters().iter().any(|p| !p.dot_dot_dot_token().is_nil())
+                {
+                    return Err(self.refuse(
+                        callback_node,
+                        "array.sort comparator accepts at most two fixed parameters",
+                    ));
+                }
+                let params = callback_node
+                    .parameters()
+                    .into_iter()
+                    .map(|p| self.parameter_type(p, (**elem).clone()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.closure(callback_node, Some(Type::Func {
+                    rest: false,
+                    params,
+                    ret: Box::new(Type::F64),
+                }))?
+            } else {
+                self.expression(callback_node)?
+            };
+            let Type::Func { params, ret, rest } = callback.ty() else {
+                return Err(self.refuse(
+                    callback_node,
+                    "array.sort comparator requires a native function",
+                ));
+            };
+            if rest || params.len() > 2 || *ret != Type::F64
+                || params.iter().any(|p| p != elem.as_ref())
+            {
+                return Err(self.refuse(
+                    callback_node,
+                    "array.sort comparator requires matching element parameters and a numeric result",
+                ));
+            }
+            let value = self.coerce(receiver, Type::Dyn, node)?;
+            let callback = self.coerce(callback, Type::Dyn, callback_node)?;
+            let sorted = Expr::DynInvoke {
+                recv: Box::new(value),
+                method: "sort".into(),
+                callee_name: "Array.sort".into(),
+                args: vec![callback],
+                r#type: Type::Dyn,
+                loc: self.loc(node),
+            };
+            return self.coerce(sorted, ty, node);
+        }
         if !matches!(&ty, Type::Array { elem } if **elem == Type::String) {
             return Err(self.refuse(node, "default array.sort requires a native string array"));
         }

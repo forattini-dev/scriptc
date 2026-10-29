@@ -40,10 +40,11 @@ fn native_value_invoke(
     name: &str,
 ) -> NativeValue {
     if method == "sort" && native_value_is_array(&holder) {
-        if !args.is_empty() {
-            runtime::throw_type_error("scriptc: native array.sort comparators are not ported".into());
-        }
-        return native_value_sort_strings(holder);
+        return match args.first() {
+            None | Some(NativeValue::Undefined) => native_value_sort_strings(holder),
+            Some(comparator) if native_value_is_function(comparator) => native_value_sort_with(holder, comparator.clone()),
+            _ => runtime::throw_type_error("The comparison function must be either a function or undefined".into()),
+        };
     }
     if let NativeValue::BigInt(value) = &recv {
         return match method {
