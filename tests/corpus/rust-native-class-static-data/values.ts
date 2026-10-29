@@ -40,3 +40,15 @@ class Forward {
 console.log('forward', Forward.missing, Forward.later);
 class DerivedSelf extends SelfRef { static receiver = this; }
 console.log('derived-this', (DerivedSelf as any).receiver === DerivedSelf, (SelfRef as any).receiver === SelfRef);
+class ArrowSelf {
+  static value = 9;
+  static read = () => this.value;
+  static who = () => this;
+}
+const readArrow = ArrowSelf.read;
+ArrowSelf.value = 12;
+class ArrowChild extends ArrowSelf { static own = () => this; }
+console.log('arrow', readArrow(), (ArrowChild as any).who() === ArrowSelf);
+const who: any = (ArrowSelf as any).who;
+console.log('arrow-call', who.call(ArrowChild) === ArrowSelf);
+console.log('arrow-child', (ArrowChild as any).own() === ArrowChild);

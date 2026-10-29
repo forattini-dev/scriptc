@@ -266,6 +266,8 @@ impl Lowerer<'_> {
                             r#type: local.r#type,
                         },
                     ))
+                } else if self.static_initializer_this(node).is_some() {
+                    None
                 } else {
                     body.extend(self.initialize_module_arrow_receiver(node)?);
                     None

@@ -455,30 +455,37 @@ impl Lowerer<'_> {
         }
     }
 
-    pub(in crate::frontend) fn this_expression(&self, node: Node) -> Result<Expr, String> {
-        if self.instance_this.is_none() {
-            let mut ancestor = node.parent();
-            while !ancestor.is_nil() && ancestor.kind() != SyntaxKind::SourceFile {
-                if matches!(
-                    ancestor.kind(),
-                    SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression
-                        | SyntaxKind::FunctionDeclaration | SyntaxKind::MethodDeclaration
-                ) {
-                    break;
-                }
-                if ancestor.kind() == SyntaxKind::PropertyDeclaration
-                    && ancestor.modifier_flags().intersects(ModifierFlags::STATIC)
-                    && let Some(definition) = self.classes.definitions.iter()
-                        .find(|definition| definition.node == ancestor.parent())
-                {
-                    return Ok(Expr::ClassRef {
-                        class_name: definition.name.clone(),
-                        r#type: Type::Classval { class_name: definition.name.clone() },
-                        loc: self.loc(node),
-                    });
-                }
-                ancestor = ancestor.parent();
+    pub(in crate::frontend) fn static_initializer_this(&self, node: Node) -> Option<Expr> {
+        let mut ancestor = node.parent();
+        while !ancestor.is_nil() && ancestor.kind() != SyntaxKind::SourceFile {
+            if matches!(
+                ancestor.kind(),
+                SyntaxKind::FunctionExpression | SyntaxKind::FunctionDeclaration
+                    | SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor | SyntaxKind::SetAccessor
+            ) {
+                return None;
             }
+            if ancestor.kind() == SyntaxKind::PropertyDeclaration
+                && ancestor.modifier_flags().intersects(ModifierFlags::STATIC)
+                && let Some(definition) = self.classes.definitions.iter()
+                    .find(|definition| definition.node == ancestor.parent())
+            {
+                return Some(Expr::ClassRef {
+                    class_name: definition.name.clone(),
+                    r#type: Type::Classval { class_name: definition.name.clone() },
+                    loc: self.loc(node),
+                });
+            }
+            ancestor = ancestor.parent();
+        }
+        None
+    }
+
+    pub(in crate::frontend) fn this_expression(&self, node: Node) -> Result<Expr, String> {
+        if self.instance_this.is_none()
+            && let Some(value) = self.static_initializer_this(node)
+        {
+            return Ok(value);
         }
         let local = self.instance_this.as_ref().ok_or_else(|| {
             self.refuse(

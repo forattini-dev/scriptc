@@ -15,7 +15,7 @@ pub(super) fn parameter_property(node: Node) -> bool {
 fn nested_static_this(node: Node) -> bool {
     if matches!(
         node.kind(),
-        SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression | SyntaxKind::FunctionDeclaration
+        SyntaxKind::FunctionExpression | SyntaxKind::FunctionDeclaration
     )
         && receivers::reads_this(node)
     {
