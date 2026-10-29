@@ -26,12 +26,17 @@ class SelfRef {
   static first = 11;
   static next = SelfRef.first + 1;
   static self = SelfRef;
+  static receiver = this;
+  static fromReceiver = this.next + 1;
   static getSelf = () => SelfRef;
 }
 console.log('self', SelfRef.next, (SelfRef as any).self === SelfRef);
+console.log('receiver', (SelfRef as any).receiver === SelfRef, SelfRef.fromReceiver);
 console.log('closure', (SelfRef as any).getSelf() === SelfRef);
 class Forward {
   static missing = (Forward as any).later === undefined;
   static later = 5;
 }
 console.log('forward', Forward.missing, Forward.later);
+class DerivedSelf extends SelfRef { static receiver = this; }
+console.log('derived-this', (DerivedSelf as any).receiver === DerivedSelf, (SelfRef as any).receiver === SelfRef);

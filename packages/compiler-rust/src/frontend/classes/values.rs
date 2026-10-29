@@ -456,6 +456,30 @@ impl Lowerer<'_> {
     }
 
     pub(in crate::frontend) fn this_expression(&self, node: Node) -> Result<Expr, String> {
+        if self.instance_this.is_none() {
+            let mut ancestor = node.parent();
+            while !ancestor.is_nil() && ancestor.kind() != SyntaxKind::SourceFile {
+                if matches!(
+                    ancestor.kind(),
+                    SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression
+                        | SyntaxKind::FunctionDeclaration | SyntaxKind::MethodDeclaration
+                ) {
+                    break;
+                }
+                if ancestor.kind() == SyntaxKind::PropertyDeclaration
+                    && ancestor.modifier_flags().intersects(ModifierFlags::STATIC)
+                    && let Some(definition) = self.classes.definitions.iter()
+                        .find(|definition| definition.node == ancestor.parent())
+                {
+                    return Ok(Expr::ClassRef {
+                        class_name: definition.name.clone(),
+                        r#type: Type::Classval { class_name: definition.name.clone() },
+                        loc: self.loc(node),
+                    });
+                }
+                ancestor = ancestor.parent();
+            }
+        }
         let local = self.instance_this.as_ref().ok_or_else(|| {
             self.refuse(
                 node,

@@ -12,6 +12,23 @@ pub(super) fn parameter_property(node: Node) -> bool {
     )
 }
 
+fn nested_static_this(node: Node) -> bool {
+    if matches!(
+        node.kind(),
+        SyntaxKind::ArrowFunction | SyntaxKind::FunctionExpression | SyntaxKind::FunctionDeclaration
+    )
+        && receivers::reads_this(node)
+    {
+        return true;
+    }
+    let mut found = false;
+    node.for_each_child(&mut |child| {
+        found |= nested_static_this(child);
+        found
+    });
+    found
+}
+
 #[derive(Clone)]
 struct Definition {
     node: Node,
@@ -478,7 +495,7 @@ impl Lowerer<'_> {
                     member.name().kind(),
                     SyntaxKind::Identifier | SyntaxKind::StringLiteral
                 )
-                && !receivers::reads_this(member)
+                && !nested_static_this(member)
                 && !static_methods::reads_super(member);
             let symbol_method = if member.kind() == SyntaxKind::MethodDeclaration
                 && member.name().kind() == SyntaxKind::ComputedPropertyName
@@ -681,7 +698,23 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn static_forward_read(&mut self, node: Node) -> bool {
-        let Some(index) = self.class_symbol(node.expression()) else { return false };
+        let index = if node.expression().kind() == SyntaxKind::ThisKeyword {
+            let mut ancestor = node.parent();
+            while !ancestor.is_nil() && ancestor.kind() != SyntaxKind::SourceFile
+                && ancestor.kind() != SyntaxKind::PropertyDeclaration
+            {
+                ancestor = ancestor.parent();
+            }
+            if ancestor.is_nil() || ancestor.kind() != SyntaxKind::PropertyDeclaration {
+                return false;
+            }
+            let Some(index) = self.classes.definitions.iter()
+                .position(|definition| definition.node == ancestor.parent()) else { return false };
+            index
+        } else {
+            let Some(index) = self.class_symbol(node.expression()) else { return false };
+            index
+        };
         let class = self.classes.definitions[index].node;
         let mut field = node.parent();
         while !field.is_nil() && field.kind() != SyntaxKind::SourceFile {

@@ -8430,7 +8430,8 @@ fn unsupported_static_initialization_receivers_are_refused() {
     metadata_project(temp.path());
     for (index, (source, reason)) in [
         ("// @ts-nocheck\nclass A { static first = A.later; static later = 1 } console.log(A.first);", "static field read before initialization needs an undefined-aware contract"),
-        ("class A { static value = this } console.log(A);", "class static/computed members"),
+        ("// @ts-nocheck\nclass A { static first = this.later; static later = 1 } console.log(A.first);", "static field read before initialization needs an undefined-aware contract"),
+        ("class A { static value = () => this } console.log(A);", "class static/computed members"),
         ("class A { static value = 1; static run() { return 1 } } console.log(A.run());", "static fields with static methods need shared class descriptors"),
     ].into_iter().enumerate() {
         let input = temp.path().join(format!("main{index}.ts"));
