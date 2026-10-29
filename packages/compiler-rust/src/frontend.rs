@@ -1768,6 +1768,29 @@ impl<'a> Lowerer<'a> {
                 };
                 self.binary(node, op)
             }
+            SyntaxKind::VoidExpression => {
+                let mut value = self.expression(node.expression())?;
+                if matches!(value.ty(), Type::Null | Type::Undefined) {
+                    value = self.coerce(value, Type::Dyn, node.expression())?;
+                }
+                Ok(Expr::Sequence {
+                    stmts: vec![Stmt::Expression {
+                        expr: value,
+                        loc: loc.clone(),
+                    }],
+                    result: Box::new(Expr::DynFrom {
+                        value: Box::new(Expr::UnitLit {
+                            unit: "undefined",
+                            r#type: Type::Undefined,
+                            loc: loc.clone(),
+                        }),
+                        r#type: Type::Dyn,
+                        loc: loc.clone(),
+                    }),
+                    r#type: Type::Dyn,
+                    loc,
+                })
+            }
             SyntaxKind::TypeOfExpression => {
                 let value = self.condition_value(node.expression())?;
                 if async_context::instance(&value.ty())
