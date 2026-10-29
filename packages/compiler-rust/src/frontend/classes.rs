@@ -496,7 +496,9 @@ impl Lowerer<'_> {
                     SyntaxKind::Identifier | SyntaxKind::StringLiteral
                 )
                 && !nested_static_this(member)
-                && !static_methods::reads_super(member);
+                && (!static_methods::reads_super(member)
+                    || (member.initializer().kind() == SyntaxKind::PropertyAccessExpression
+                        && member.initializer().expression().kind() == SyntaxKind::SuperKeyword));
             let symbol_method = if member.kind() == SyntaxKind::MethodDeclaration
                 && member.name().kind() == SyntaxKind::ComputedPropertyName
             {
@@ -734,6 +736,47 @@ impl Lowerer<'_> {
             field = field.parent();
         }
         false
+    }
+
+    pub(super) fn static_super_receiver(&mut self, member: Node) -> Result<Expr, String> {
+        let field = member.parent();
+        if field.kind() != SyntaxKind::PropertyDeclaration
+            || !field.modifier_flags().intersects(ModifierFlags::STATIC)
+            || field.initializer() != member
+        {
+            return Err(self.refuse(member, "static super access requires a direct field initializer"));
+        }
+        let index = self.classes.definitions.iter()
+            .position(|definition| definition.node == field.parent())
+            .ok_or_else(|| self.refuse(member, "static super receiver has no class identity"))?;
+        let base = self.classes.definitions[index].base
+            .ok_or_else(|| self.refuse(member, "static super properties require a represented base class"))?;
+        let mut current = Some(base);
+        let mut represented = false;
+        while let Some(owner) = current {
+            let definition = &self.classes.definitions[owner];
+            if !definition.node.is_nil()
+                && definition.node.members().into_iter().any(|candidate| {
+                    candidate.kind() == SyntaxKind::PropertyDeclaration
+                        && candidate.modifier_flags().intersects(ModifierFlags::STATIC)
+                        && !candidate.modifier_flags().intersects(ModifierFlags::AMBIENT)
+                        && candidate.name().text() == member.name().text()
+                })
+            {
+                represented = true;
+                break;
+            }
+            current = definition.base;
+        }
+        if !represented {
+            return Err(self.refuse(member, "static super property needs a represented base data field"));
+        }
+        let name = self.classes.definitions[base].name.clone();
+        Ok(Expr::ClassRef {
+            class_name: name.clone(),
+            r#type: Type::Classval { class_name: name },
+            loc: self.loc(member.expression()),
+        })
     }
 
     fn layout_class(&mut self, index: usize) -> Result<(), String> {

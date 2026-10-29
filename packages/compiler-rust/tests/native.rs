@@ -122,6 +122,7 @@ fn ts_and_js_execute_like_node_without_a_javascript_compiler() {
         "rust-native-class-data/values.ts",
         "rust-native-class-static-data/values.ts",
         "rust-native-class-static-union/values.ts",
+        "rust-native-class-static-super/values.ts",
         "rust-native-static-methods/inheritance.ts",
         "rust-native-static-methods/order.ts",
         "rust-native-static-methods/public.mts",
@@ -8433,6 +8434,8 @@ fn unsupported_static_initialization_receivers_are_refused() {
         ("// @ts-nocheck\nclass A { static first = this.later; static later = 1 } console.log(A.first);", "static field read before initialization needs an undefined-aware contract"),
         ("class A { static value = () => this } console.log(A);", "class static/computed members"),
         ("class A { static value = 1; static run() { return 1 } } console.log(A.run());", "static fields with static methods need shared class descriptors"),
+        ("// @ts-nocheck\nclass B { static n = 1 } class A extends B { static value = (super.n = 2) } console.log(A.value);", "class static/computed members"),
+        ("// @ts-nocheck\nclass B {} class A extends B { static value = super.missing } console.log(A.value);", "static super property needs a represented base data field"),
     ].into_iter().enumerate() {
         let input = temp.path().join(format!("main{index}.ts"));
         let target = binary(temp.path(), &format!("static-initializer-boundary-{index}"));

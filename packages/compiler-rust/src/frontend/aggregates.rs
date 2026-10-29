@@ -1086,7 +1086,11 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn record_get(&mut self, node: Node) -> Result<Expr, String> {
-        let obj = self.expression(node.expression())?;
+        let obj = if node.expression().kind() == SyntaxKind::SuperKeyword {
+            self.static_super_receiver(node)?
+        } else {
+            self.expression(node.expression())?
+        };
         let obj = self.live_member_receiver(node.expression(), obj);
         if obj.ty() == Type::Dyn || matches!(obj.ty(), Type::Func { .. } | Type::Classval { .. }) {
             if matches!(obj.ty(), Type::Func { .. } | Type::Classval { .. }) {
