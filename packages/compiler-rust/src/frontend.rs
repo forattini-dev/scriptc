@@ -516,7 +516,7 @@ impl<'a> Lowerer<'a> {
         if api.lowering == builtins::Lowering::Zlib {
             return self.zlib_call(node, member);
         }
-        if module == "fs" && matches!(member, "statSync" | "lstatSync") {
+        if module == "fs" && matches!(member, "statSync" | "lstatSync" | "unlinkSync") {
             self.ensure_exception_classes(node)?;
         }
         let builtin = api.operations.first().expect("registered callable ABI");

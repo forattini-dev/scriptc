@@ -394,7 +394,20 @@ pub fn fs_rm_options(path: &JsString, recursive: bool, force: bool) {
 }
 
 pub fn fs_unlink(path: &JsString) {
+    if path.contains('\0') {
+        throw_invalid_arg_value(
+            "The argument 'path' must be a string, Uint8Array, or URL without null bytes. Received ",
+            path,
+        );
+    }
+    if !path.is_well_formed() {
+        throw_type_error("scriptc: lone UTF-16 filesystem paths are not ported".into());
+    }
     if let Err(error) = std::fs::remove_file(path.to_utf8_lossy()) {
+        #[cfg(windows)]
+        let resolved = if path.is_empty() { path.clone() } else { path_win32_resolve(&array_new(vec![path.clone()])) };
+        #[cfg(windows)]
+        let path = &resolved;
         throw_fs_error("unlink", path, error);
     }
 }

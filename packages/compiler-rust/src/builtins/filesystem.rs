@@ -88,6 +88,14 @@ pub(super) fn apis() -> Vec<Api> {
         stat_api("lstatSync", "fs.lstatSync", "fs_lstat_sync"),
         Api::native(
             "fs",
+            "unlinkSync",
+            Lowering::Direct,
+            vec![call!("fs.unlinkSync", [String], Type::Void, "fs_unlink")],
+            "One represented string path; file removal and error name/message/code represented. Buffer/URL paths, extra arguments and lone UTF-16 paths refused; path/syscall/errno pending",
+            &["tests/corpus/rust-native-platform/unlink.ts"],
+        ),
+        Api::native(
+            "fs",
             "openSync",
             Lowering::Descriptor,
             vec![call!("fs.openSync", [String, String], Type::F64, "fs_open")],
