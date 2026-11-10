@@ -18,8 +18,8 @@ importers:
         specifier: ^24.0.0
         version: 24.13.3
       effect:
-        specifier: 4.0.0-beta.83
-        version: 4.0.0-beta.83
+        specifier: 4.0.0-beta.103
+        version: 4.0.0-beta.103
       eslint:
         specifier: ^9.20.0
         version: 9.39.5(supports-color@7.2.0)
@@ -1645,8 +1645,8 @@ packages:
     engines: {node: '>=16'}
     hasBin: true
 
-  effect@4.0.0-beta.83:
-    resolution: {integrity: sha512-0wsak8RtgGAr9UWSbVDgJHZcUqMSvicHcvaZv1MbMM7MCGgW4Rn/137J1MHQbwYPcwYGxT/IqehFd+UbYuj78w==}
+  effect@4.0.0-beta.103:
+    resolution: {integrity: sha512-pE8TxF4m2tQzVI+77dIlm3s+81TACV1AiX1JEkvY+zVuxgQQ8aGSkqXNJF6b/ST+coCSk5cUdbULpQ7sm4oHyw==}
 
   end-of-stream@1.1.0:
     resolution: {integrity: sha512-EoulkdKF/1xa92q25PbjuDcgJ9RDHYU2Rs3SCIvs2/dSQ3BpmxneNHmA/M7fe60M3PrV7nNGTTNbkK62l6vXiQ==}
@@ -4008,7 +4008,7 @@ snapshots:
       signal-exit: 4.0.2
       time-span: 4.0.0
 
-  effect@4.0.0-beta.83:
+  effect@4.0.0-beta.103:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0
