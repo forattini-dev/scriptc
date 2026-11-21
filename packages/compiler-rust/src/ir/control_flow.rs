@@ -13,13 +13,15 @@ pub(super) fn validate_targets(body: &[Stmt], depth: usize) -> Result<(), String
 fn targets(body: &[Stmt], breaks: usize, continues: usize) -> Result<(), String> {
     for stmt in body {
         match stmt {
-            Stmt::Break { .. } if breaks == 0 => {
+            Stmt::Break { target_depth, .. } if breaks <= *target_depth => {
                 return Err("loop jump has no enclosing loop".into());
             }
-            Stmt::Continue { .. } if continues == 0 => {
+            Stmt::Continue { target_depth, .. } if continues <= *target_depth => {
                 return Err("loop jump has no enclosing loop".into());
             }
-            Stmt::While { body, .. } => targets(body, breaks + 1, continues + 1)?,
+            Stmt::While { body, .. } | Stmt::GeneratorForOf { body, .. } => {
+                targets(body, breaks + 1, continues + 1)?
+            }
             Stmt::Switch { cases, .. } => {
                 for case in cases {
                     targets(&case.body, breaks + 1, continues)?;
@@ -62,6 +64,10 @@ fn completions(body: &[Stmt]) -> u8 {
 
 fn completion(stmt: &Stmt) -> u8 {
     match stmt {
+        Stmt::Expression {
+            expr: Expr::LibCall { r#fn, .. },
+            ..
+        } if matches!(r#fn.as_str(), "process.exit" | "process.exitDefault") => RETURN | THROW,
         Stmt::Return { .. } => RETURN | THROW,
         Stmt::Throw { .. } => THROW,
         Stmt::Break { .. } => BREAK,
@@ -94,6 +100,10 @@ fn completion(stmt: &Stmt) -> u8 {
                 } else {
                     NORMAL | THROW
                 }
+        }
+        Stmt::GeneratorForOf { body, .. } => {
+            let body = completions(body);
+            (body & (RETURN | THROW)) | NORMAL | THROW
         }
         Stmt::TryCatch {
             try_body,
@@ -165,7 +175,10 @@ mod tests {
             },
         );
         assert!(function_exits(&[make(cases.clone())]));
-        cases[0].body = vec![Stmt::Break { loc: loc.clone() }];
+        cases[0].body = vec![Stmt::Break {
+            target_depth: 0,
+            loc: loc.clone(),
+        }];
         assert!(!function_exits(&[make(cases.clone())]));
         cases.remove(1);
         cases[0].body = vec![Stmt::Return {
@@ -183,7 +196,16 @@ mod tests {
     }
     #[test]
     fn block_fallthrough_distinguishes_loop_jumps_from_function_exits() {
-        for jump in [Stmt::Break { loc: loc() }, Stmt::Continue { loc: loc() }] {
+        for jump in [
+            Stmt::Break {
+                target_depth: 0,
+                loc: loc(),
+            },
+            Stmt::Continue {
+                target_depth: 0,
+                loc: loc(),
+            },
+        ] {
             assert!(!falls_through(std::slice::from_ref(&jump)));
             assert!(!function_exits(std::slice::from_ref(&jump)));
         }
@@ -196,7 +218,10 @@ mod tests {
             },
             cases: vec![SwitchCase {
                 test: None,
-                body: vec![Stmt::Break { loc: loc() }]
+                body: vec![Stmt::Break {
+                    target_depth: 0,
+                    loc: loc(),
+                }]
             }],
             loc: loc(),
         }]));
@@ -207,7 +232,10 @@ mod tests {
             }],
             catch_body: None,
             catch_local_id: None,
-            finally_body: Some(vec![Stmt::Continue { loc: loc() }]),
+            finally_body: Some(vec![Stmt::Continue {
+                target_depth: 0,
+                loc: loc(),
+            }]),
             loc: loc(),
         }]));
         assert!(falls_through(&[Stmt::If {
@@ -216,7 +244,10 @@ mod tests {
                 r#type: Type::Bool,
                 loc: loc()
             },
-            then: vec![Stmt::Continue { loc: loc() }],
+            then: vec![Stmt::Continue {
+                target_depth: 0,
+                loc: loc(),
+            }],
             else_: None,
             loc: loc(),
         }]));
@@ -234,9 +265,36 @@ mod tests {
     }
     #[test]
     fn targets_cannot_escape_their_function() {
-        assert!(validate_targets(&[Stmt::Break { loc: loc() }], 0).is_err());
-        assert!(validate_targets(&[Stmt::Continue { loc: loc() }], 0).is_err());
-        assert!(validate_targets(&[forever(vec![Stmt::Continue { loc: loc() }])], 0).is_ok());
+        assert!(
+            validate_targets(
+                &[Stmt::Break {
+                    target_depth: 0,
+                    loc: loc(),
+                }],
+                0
+            )
+            .is_err()
+        );
+        assert!(
+            validate_targets(
+                &[Stmt::Continue {
+                    target_depth: 0,
+                    loc: loc(),
+                }],
+                0
+            )
+            .is_err()
+        );
+        assert!(
+            validate_targets(
+                &[forever(vec![Stmt::Continue {
+                    target_depth: 0,
+                    loc: loc(),
+                }])],
+                0
+            )
+            .is_ok()
+        );
     }
     #[test]
     fn finally_jump_replaces_a_pending_return() {
@@ -247,7 +305,10 @@ mod tests {
             }],
             catch_body: None,
             catch_local_id: None,
-            finally_body: Some(vec![Stmt::Break { loc: loc() }]),
+            finally_body: Some(vec![Stmt::Break {
+                target_depth: 0,
+                loc: loc(),
+            }]),
             loc: loc(),
         };
         assert!(!function_exits(&[forever(vec![stmt])]));
@@ -255,10 +316,14 @@ mod tests {
     #[test]
     fn inner_break_does_not_exit_an_outer_loop() {
         assert!(function_exits(&[forever(vec![forever(vec![
-            Stmt::Break { loc: loc() }
+            Stmt::Break {
+                target_depth: 0,
+                loc: loc(),
+            }
         ])])]));
         assert!(!function_exits(&[forever(vec![Stmt::Break {
-            loc: loc()
+            target_depth: 0,
+            loc: loc(),
         }])]));
     }
 }

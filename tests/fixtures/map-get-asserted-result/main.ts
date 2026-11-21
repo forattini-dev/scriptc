@@ -1,0 +1,12 @@
+const labels = new Map<string, string>([['a', 'A'], ['empty', '']]);
+const names = ['a', 'missing', 'empty'];
+const values = names.map(name => labels.get(name)!);
+console.log(JSON.stringify(values), values.join('|'), values.length);
+console.log(typeof values[0], typeof values[1], typeof values[2]);
+console.log(JSON.stringify(values.slice(0)), JSON.stringify([...values]));
+console.log(values[1] ?? 'fallback', String(values[1]), values[1] + ':suffix');
+const objects = names.map(name => ({ value: labels.get(name)! }));
+console.log(JSON.stringify(objects), typeof objects[1].value, Object.keys(objects[1]).join(','));
+const alias = labels;
+alias.delete('a');
+console.log(JSON.stringify(['a'].map(name => labels.get(name)!)));

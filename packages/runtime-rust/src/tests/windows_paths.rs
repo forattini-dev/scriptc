@@ -95,11 +95,14 @@ fn windows_path_family_matches_the_committed_node_oracle() {
             } else {
                 "false"
             }),
-            "toNamespacedPath" => windows_namespaced_path(&args[0], b"\\"),
-            "relative" => relative_windows_path(&args[0], &args[1], b"\\"),
+            "toNamespacedPath" => windows_namespaced_path(&args[0], b"\\", false),
+            "relative" => relative_windows_path(&args[0], &args[1], b"\\", false),
             name if name.starts_with("join") => path_win32_join(&array_new(args.clone())),
             name if name.starts_with("resolve") => {
-                resolve_windows_path(&array_new(args.clone()), b"\\")
+                // The oracle was generated with a synthetic root cwd. Do not
+                // let Windows' hidden per-drive cwd variables leak the test
+                // runner's checkout path into those deterministic cases.
+                resolve_windows_path(&array_new(args.clone()), b"\\", false)
             }
             _ => panic!("scriptc: unknown path oracle operation {op}"),
         };

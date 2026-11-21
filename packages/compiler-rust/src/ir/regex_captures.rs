@@ -9,6 +9,33 @@ pub(crate) struct ExecLayout {
     pub undefined_tag: usize,
 }
 
+pub(crate) struct MatchAllLayout {
+    pub capture: usize,
+    pub string_tag: usize,
+    pub undefined_tag: usize,
+}
+
+pub(crate) fn match_all_layout(module: &Module, ty: &Type) -> Option<MatchAllLayout> {
+    let Type::Array { elem: row } = ty else {
+        return None;
+    };
+    let Type::Array { elem: capture } = row.as_ref() else {
+        return None;
+    };
+    let Type::Union { union_id: capture } = capture.as_ref() else {
+        return None;
+    };
+    let slots = &module.unions.get(*capture)?.arms;
+    if slots.len() != 2 {
+        return None;
+    }
+    Some(MatchAllLayout {
+        capture: *capture,
+        string_tag: slots.iter().position(|t| *t == Type::String)?,
+        undefined_tag: slots.iter().position(|t| *t == Type::Undefined)?,
+    })
+}
+
 pub(crate) fn exec_layout(module: &Module, ty: &Type) -> Option<ExecLayout> {
     let Type::Union { union_id: result } = ty else {
         return None;
@@ -47,6 +74,7 @@ mod tests {
         let mut module = Module {
             ir_version: VERSION,
             source_file: "test.ts".into(),
+            source_modules: vec![],
             entry: "__main".into(),
             functions: vec![],
             globals: vec![],

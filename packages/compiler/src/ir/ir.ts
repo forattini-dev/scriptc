@@ -784,10 +784,23 @@ export function isRefCounted(t: IrType): boolean {
 }
 
 /* ── module ────────────────────────────────────────────────────────────── */ export interface IrFamily { id: string; impls: { name: string; captures: IrParam[] }[]; instances: { key: string; params: IrType[]; ret: IrType; targets: string[] }[] }
+export interface IrSourceModule {
+  file: string;
+  staticDependencies?: string[];
+  dynamicDependencies?: string[];
+  sourceBytes: number;
+  eager: boolean;
+}
+
 export interface IrModule {
   /** Bumped on any breaking IR change; serialize.ts refuses mismatches. */
   irVersion: 13;
   sourceFile: string;
+  /** Executable source ownership retained for deterministic multi-crate
+   * emission. Static edges define initialization SCCs; dynamic edges are
+   * linked code whose evaluation remains lazy. Older v13 producers may omit
+   * this compatible planning metadata. */
+  sourceModules?: IrSourceModule[];
   /** The runtime target the program was lowered for (--target): the
    * backends configure the runtime's per-runtime semantic switches from
    * it. Absent means the matrix primary (serialized IR from before the
@@ -1149,7 +1162,7 @@ export interface IrClassDef {
   methodNames?: string[];
   /** Own iteration-symbol descriptors, separate from string property names.
    * A function identity is present only when its body has been demanded. */
-  symbolMethods?: { key: "iterator" | "asyncIterator"; function?: string }[];
+  symbolMethods?: { key: "iterator" | "asyncIterator" | `unique:${number}`; function?: string }[];
   /** Declared `abstract class` — never instantiated (tsc rejects `new` on
    * it, including through class values), so its own vtable entries for
    * abstract slots may stay empty. */
@@ -1324,6 +1337,9 @@ export interface IrGlobal {
   name: string;
   type: IrType;
   mutable: boolean;
+  /** Owning source module for chunked storage placement. Optional for older
+   * v13 producers and synthetic globals owned by the root ABI crate. */
+  loc?: SrcLoc;
 }
 
 export interface IrLocal {
@@ -1555,6 +1571,7 @@ export type IrArrIntrinsicMethod =
   | "nextPresent"
   | "join"
   | "slice"
+  | "fill"
   | "shift"
   | "splice"
   /** One dense copy pass, or one level of flattening into an empty typed
@@ -1598,6 +1615,7 @@ export type IrMapIntrinsicMethod =
   | "delete"
   | "size"
   | "clear"
+  | "keysToArray"
   | "iterCount"
   | "iterLive"
   | "iterKey"
@@ -1913,7 +1931,7 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
-  | "bun.spawn" | "bun.exited" | "bun.pid" | "bun.exitCode" | "bun.stdout" | "bun.stderr"
+  | "bun.spawn" | "bun.exited" | "bun.pid" | "bun.exitCode" | "bun.stdout" | "bun.stderr" | "bun.responseText"
   | "bun.which"
   | "bun.filePath"
   | "bun.fileText"
@@ -2070,6 +2088,8 @@ export type IrLibFn =
   | "fs.readFileSyncDyn"
   | "fs.writeFileSync"
   | "fs.appendFileSync" | "fs.appendFileModeSync"
+  | "fs.appendFileFdSync"
+  | "fs.writeFileFdSync"
   | "fs.existsSync"
   | "fs.mkdirSync"
   | "fs.rmSync"
@@ -3855,6 +3875,7 @@ export type IrLibFn =
    * unique own-key plan. Omitted optional slots read undefined; required keys
    * must be included. No source getter or prototype operation is performed. */
   | "record.view"
+  | "callable.view"
   | "record.fromOwn"
   | "record.setOwn"
   | "record.cloneOwn"
@@ -3864,6 +3885,14 @@ export type IrLibFn =
   | "dyn.objectRestCheck"
   /** Guard the ordinary data-object source slice of class Object.assign. */
   | "dyn.objectAssignSourceCheck"
+  /** Copy own enumerable symbol data properties to a fresh native object. */
+  | "dyn.copyEnumerableSymbols"
+  /** Test symbol identity in an ordinary object's property store. */
+  | "dyn.hasSymbolKey"
+  | "dyn.defineOrdinaryData"
+  | "dyn.defineOrdinaryGetter"
+  | "dyn.keyDeleteComputed"
+  | "dyn.mapKeysImmediate"
   | "dyn.hasOwn"
   | "dyn.assign"
   /** Variadic Object.assign over CHECKED-DYNAMIC targets (`Object.assign(
@@ -4628,6 +4657,11 @@ export type IrLibFn =
    * closeSync EBADF). */
   | "fs.openSync"
   | "fs.openNumericSync"
+  | "fs.openModeSync"
+  | "fs.openFlagConstant"
+  | "fs.closeNullish"
+  | "bytes.indexOfNumeric"
+  | "fs.ftruncateSync"
   | "fs.readSync"
   | "fs.writeSync"
   | "fs.writeStrSync"
@@ -6324,7 +6358,7 @@ export function canDynCheckTo(
   if (t.kind === "promise") return t.inner.kind === "void" || t.inner.kind === "dyn" || canDynCheckTo(t.inner, getRecord, getUnion);
   if ((t.kind === "map" && t.key.kind === "dyn" && t.value.kind === "dyn") ||
       (t.kind === "set" && t.elem.kind === "dyn") || t.kind === "searchParams") return true;
-  if (t.kind === "effect" || t.kind === "date" || t.kind === "regex" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
+  if (t.kind === "effect" || t.kind === "date" || t.kind === "regex" || t.kind === "url" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
   if (t.kind === "object" && t.className === "%Error") return true;
   if (isDynTypedRefType(t)) return true;
   if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);
@@ -7630,6 +7664,7 @@ export const LIB_NONDETERMINISTIC_PREFIXES: readonly [string, string][] = [
   ["bun.exitCode", "process exit status"],
   ["bun.stdout", "process pipe output"],
   ["bun.stderr", "process pipe output"],
+  ["bun.responseText", "process pipe output"],
   ["bun.which", "executable search (filesystem and environment)"],
   ["bun.fileText", "file contents"],
   ["bun.write", "file writes"],
@@ -7705,6 +7740,7 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "weakmap.get", "weakmap.set", "weakmap.has", "weakmap.delete",
   "bun.spawn",
+  "bun.responseText",
   "bun.which",
   "bun.filePath",
   "bun.writeText",
@@ -7996,11 +8032,18 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.cloneTransferFail",
   "dyn.objKeys",
   "record.view",
+  "callable.view",
   "record.fromOwn",
   "record.setOwn",
   "record.cloneOwn",
   "dyn.objectRestCheck",
   "dyn.objectAssignSourceCheck",
+  "dyn.copyEnumerableSymbols",
+  "dyn.hasSymbolKey",
+  "dyn.defineOrdinaryData",
+  "dyn.defineOrdinaryGetter",
+  "dyn.keyDeleteComputed",
+  "dyn.mapKeysImmediate",
   "dyn.hasOwn",
   "dyn.hasKey", // Engine proxy traps can throw during membership tests.
   "dyn.getPrototypeOf",
@@ -8030,6 +8073,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.readFileSync",
   "fs.writeFileSync",
   "fs.appendFileSync", "fs.appendFileModeSync",
+  "fs.appendFileFdSync",
+  "fs.writeFileFdSync",
   "fs.mkdirSync",
   "fs.rmSync",
   "fs.rmdirSync",
@@ -8177,6 +8222,11 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.mkdirRecursiveModeSync",
   "fs.openSync",
   "fs.openNumericSync",
+  "fs.openModeSync",
+  "fs.openFlagConstant",
+  "fs.closeNullish",
+  "bytes.indexOfNumeric",
+  "fs.ftruncateSync",
   "fs.readSync",
   "fs.writeSync",
   "fs.writeStrSync",

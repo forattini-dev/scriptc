@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "strict": false,
+    "types": ["node"],
+    "typeRoots": ["../../../../../node_modules/@types"]
+  },
+  "include": ["main.js"]
+}

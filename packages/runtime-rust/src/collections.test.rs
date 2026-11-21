@@ -1,4 +1,33 @@
 #[test]
+fn immediately_consumed_map_keys_follow_live_insertion_order() {
+    let map: JsMap<JsString, f64> = map_new();
+    map_set_by(&map, string("first"), 1.0, |a, b| a == b);
+    map_set_by(&map, string("second"), 2.0, |a, b| a == b);
+    map_iter_enter(&map);
+    map_delete_by(&map, &string("first"), |a, b| a == b);
+    map_set_by(&map, string("first"), 3.0, |a, b| a == b);
+    let keys = map_keys_to_array(&map);
+    assert_eq!(array_len(&keys), 2.0);
+    assert_eq!(array_get(&keys, 0.0), string("second"));
+    assert_eq!(array_get(&keys, 1.0), string("first"));
+    map_iter_exit(&map);
+}
+
+#[test]
+fn deleting_symbol_keys_uses_identity_and_preserves_other_entries() {
+    let object: JsMap<JsString, f64> = map_new();
+    let first = symbol_new(&string("same"));
+    let second = symbol_new(&string("same"));
+    map_symbol_set(&object, first.clone(), 1.0);
+    map_symbol_set(&object, second.clone(), 2.0);
+    map_symbol_delete(&object, &first);
+    assert!(!map_symbol_has(&object, &first));
+    assert_eq!(map_symbol_get(&object, &second), Some(2.0));
+    map_symbol_delete(&object, &first);
+    assert_eq!(map_symbol_entries(&object).len(), 1);
+}
+
+#[test]
 fn module_namespace_matches_node24_index_and_utf16_order_and_has_no_prototype() {
     let namespace = map_new();
     for key in ["2", "10", "z", "\u{e000}", "\u{10000}", "01", "4294967295", "4294967294", "0"] {

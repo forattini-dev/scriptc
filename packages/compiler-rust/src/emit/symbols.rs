@@ -49,6 +49,13 @@ pub(super) fn expression(
             "{{ let value = {}; runtime::JsString::from(if native_value_test(&value, \"undefined\") {{ \"undefined\" }} else if native_value_test(&value, \"boolean\") {{ \"boolean\" }} else if native_value_test(&value, \"number\") {{ \"number\" }} else if native_value_test(&value, \"string\") {{ \"string\" }} else if native_value_test(&value, \"bigint\") {{ \"bigint\" }} else if native_value_test(&value, \"symbol\") {{ \"symbol\" }} else if native_value_test(&value, \"function\") {{ \"function\" }} else {{ \"object\" }}) }}",
             arg()
         ),
+        "dyn.objectValue" => format!(
+            "{{ let value = {}; match value {{ NativeValue::Undefined | NativeValue::Null => NativeValue::Object(runtime::Gc::new(NativeMap {{ null_prototype: false, symbol_properties: None, entries: Vec::new(), hash_index: NativeHashIndex::default() }})), other => other }} }}",
+            arg()
+        ),
+        "dyn.objectPrototype" => "native_object_prototype_value()".into(),
+        "dyn.getPrototypeOf" => format!("native_value_get_prototype({})", arg()),
+        "dyn.asyncIterator" => format!("native_value_async_iterator({})", arg()),
         _ => return None,
     })
 }

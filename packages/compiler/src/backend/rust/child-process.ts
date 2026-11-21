@@ -310,6 +310,7 @@ export function emitRustChildProcessCall(
     return `runtime::bun_spawn(&(${args[0]}), ${args[1]}, ${args[2]}, ${args[3]}, ${args[4]}, &(${args[5]}), &(${args[6]}))`;
   }
   if (expr.fn === "bun.exited") return `runtime::bun_subprocess_exited(&(${context.emitExpr(expr.args[0]!)}))`;
+  if (expr.fn === "bun.responseText") return `runtime::bun_subprocess_response_text(&(${context.emitExpr(expr.args[0]!)}), ${context.emitExpr(expr.args[1]!)})`;
   if (expr.fn === "bun.pid") return `runtime::child_pid(&(${context.emitExpr(expr.args[0]!)})).expect("Bun.spawn returned a running process")`;
   if (expr.fn === "bun.stdout" || expr.fn === "bun.stderr") {
     const dyn = context.dynTypeName();

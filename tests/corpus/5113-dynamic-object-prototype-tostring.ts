@@ -1,0 +1,13 @@
+const prototype: any = Object.getPrototypeOf({});
+const tag: any = prototype["toString"];
+console.log(Object.keys(prototype).includes("toString"));
+console.log(typeof tag);
+console.log(tag === prototype["toString"]);
+console.log(String(tag.call({})));
+console.log(String(tag.call([])));
+console.log(String(tag.call(null)));
+console.log(String(tag.call(undefined)));
+console.log(String(tag.call("text")));
+const custom: any = {};
+custom[Symbol.toStringTag] = "Custom";
+console.log(String(tag.call(custom)));

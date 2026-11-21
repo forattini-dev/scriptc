@@ -4,7 +4,7 @@ fn bun_subprocess_exit_identity_signal_and_heap() {
     let _guard = loop_deadline(DEADLINE_MS);
     for (script, expected) in [("exit 7", 7.0), ("kill -TERM $$", 143.0)] {
         let argv = array_new(vec![string("/bin/sh"), string("-c"), string(script)]);
-        let child = bun_spawn(&argv, 0.0, 0.0, 0.0, false, &array_new(vec![]), &string(""));
+        let child = bun_spawn(&argv, 0.0, 0.0, 0.0, false, false, &array_new(vec![]), &string(""));
         let promise = bun_subprocess_exited(&child);
         assert!(Gc::ptr_eq(&promise, &bun_subprocess_exited(&child)));
         child.with_mut(|child| child.process.as_mut().unwrap().wait().unwrap());
@@ -25,7 +25,7 @@ fn bun_subprocess_exit_identity_signal_and_heap() {
 #[test]
 fn bun_subprocess_missing_command_throws_without_registering_a_child() {
     let argv = array_new(vec![string("scriptc-missing-subprocess-fixture")]);
-    let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bun_spawn(&argv, 0.0, 0.0, 0.0, false, &array_new(vec![]), &string(""))));
+        let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bun_spawn(&argv, 0.0, 0.0, 0.0, false, false, &array_new(vec![]), &string(""))));
     let reason = caught_from_panic(error.err().expect("spawn must throw"));
     assert_eq!(caught_error_code(&reason), Some(string("ENOENT")));
     assert!(!children_referenced_pending());
@@ -38,7 +38,7 @@ fn bun_subprocess_missing_command_throws_without_registering_a_child() {
 fn bun_subprocess_explicit_empty_env_uses_posix_default_search_path() {
     let _guard = loop_deadline(DEADLINE_MS);
     let argv = array_new(vec![string("sh"), string("-c"), string("exit 7")]);
-    let child = bun_spawn(&argv, 0.0, 0.0, 0.0, true, &array_new(vec![]), &string(""));
+    let child = bun_spawn(&argv, 0.0, 0.0, 0.0, false, true, &array_new(vec![]), &string(""));
     let promise = bun_subprocess_exited(&child);
     run_event_loop();
     assert!(matches!(promise_poll(&promise), Some(Ok(7.0))));

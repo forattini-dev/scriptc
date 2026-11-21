@@ -1,5 +1,12 @@
 /* Whole-file primitives shared by native lowering and the node:fs shim. */
 
+/// A supplied descriptor keeps its existing open flags and current position.
+pub fn fs_append_file_fd(fd: f64, data: &JsString) {
+    use std::io::Write;
+    validate_write_fd(fd);
+    with_open_file(fd, "write", |file| file.write_all(data.as_bytes()));
+}
+
 /// Append UTF-8 bytes with a creation-only mode and optional atomic exclusion.
 /// OpenOptions applies the host umask and never chmods an existing file.
 pub fn fs_append_file_mode(path: &JsString, data: &JsString, mode: f64, exclusive: bool) {
@@ -38,6 +45,17 @@ pub fn fs_append_file_mode(path: &JsString, data: &JsString, mode: f64, exclusiv
     if let Err(error) = file.write_all(data.as_bytes()) {
         throw_fs_error("write", path, error);
     }
+}
+
+pub fn fs_append_file_promise(
+    path: &JsString,
+    data: &JsString,
+    mode: f64,
+    exclusive: bool,
+) -> JsPromise<()> {
+    let path = path.clone();
+    let data = data.clone();
+    promise_from_sync(move || fs_append_file_mode(&path, &data, mode, exclusive))
 }
 
 fn throw_fs_append_open_error(path: &JsString, error: std::io::Error) -> ! {
@@ -86,5 +104,19 @@ pub fn fs_readlink(path: &JsString) -> JsString {
     match std::fs::read_link(path.to_utf8_lossy()) {
         Ok(target) => JsString::from(target.to_string_lossy().as_ref()),
         Err(error) => throw_fs_error("readlink", path, error),
+    }
+}
+
+pub fn fs_symlink(target: &JsString, path: &JsString, kind: &JsString) {
+    #[cfg(unix)]
+    let result = std::os::unix::fs::symlink(target.to_utf8_lossy(), path.to_utf8_lossy());
+    #[cfg(windows)]
+    let result = if matches!(kind.to_utf8_lossy(), "dir" | "junction") {
+        std::os::windows::fs::symlink_dir(target.to_utf8_lossy(), path.to_utf8_lossy())
+    } else {
+        std::os::windows::fs::symlink_file(target.to_utf8_lossy(), path.to_utf8_lossy())
+    };
+    if let Err(error) = result {
+        throw_fs_error("symlink", path, error);
     }
 }

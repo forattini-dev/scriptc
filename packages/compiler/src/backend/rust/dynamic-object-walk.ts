@@ -10,7 +10,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
     })
     .filter((variant, index, variants) => variants.indexOf(variant) === index);
   const errorRoots = context.errorClassRoots();
-  const classTypes = [...new Set((moduleHasLibCall(context.module(), "dyn.objectRestCheck") || moduleHasLibCall(context.module(), "dyn.objectAssignSourceCheck") ? context.module().classes ?? [] : [])
+  const classTypes = [...new Set((moduleHasLibCall(context.module(), "dyn.objectRestCheck") || moduleHasLibCall(context.module(), "dyn.objectAssignSourceCheck") || moduleHasLibCall(context.module(), "dyn.copyEnumerableSymbols") || moduleHasLibCall(context.module(), "dyn.hasSymbolKey") || moduleHasLibCall(context.module(), "dyn.defineOrdinaryData") || moduleHasLibCall(context.module(), "dyn.keyDeleteComputed") ? context.module().classes ?? [] : [])
     .filter(cls => cls.runtime !== true)
     .map(cls => context.classMetaOf(cls.name).root)
     .filter(root => !errorRoots.includes(root))
@@ -29,6 +29,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.popIndent();
   context.line("}");
   context.line(`fn sc_dyn_object_rest_check(value: &${name}) { sc_dyn_object_data_check(value, "object rest"); }`);
+  context.line(`fn sc_dyn_map_keys_immediate(value: ${name}) -> runtime::JsArray<${name}> { match value { ${name}::Map(map) => runtime::map_keys_to_array(&map), ${name}::Undefined => runtime::throw_type_error("Cannot read properties of undefined (reading 'keys')".into()), ${name}::Null => runtime::throw_type_error("Cannot read properties of null (reading 'keys')".into()), _ => runtime::throw_error_code("scriptc SC1031: immediate dynamic keys require a native Map".into(), "SC1031") } }`);
   context.line(`fn sc_dyn_object_assign_source_check(value: &${name}) { sc_dyn_object_data_check(value, "Object.assign source"); }`);
   context.line(`fn sc_dyn_obj_walk_push(output: &runtime::JsArray<${name}>, mode: u8, key: runtime::JsString, value: ${name}) {`);
   context.pushIndent();
@@ -90,6 +91,42 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line(`fn sc_dyn_obj_keys(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 0) }`);
   context.line(`fn sc_dyn_obj_values(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 1) }`);
   context.line(`fn sc_dyn_obj_entries(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 2) }`);
+  context.line(`fn sc_dyn_has_symbol_key(value: &${name}, key: &${name}) -> bool {`);
+  context.line(`let ${name}::Symbol(key) = key else { runtime::throw_type_error("scriptc: expected a symbol key".into()) };`);
+  context.line(`match value { ${name}::Object(object) => { sc_dyn_object_data_check(value, "symbol presence"); runtime::map_symbol_has(object, key) }, _ => runtime::throw_error_code("scriptc SC1031: symbol presence requires an ordinary object".into(), "SC1031") }`);
+  context.line("}");
+  context.line(`fn sc_dyn_define_ordinary_data(target: ${name}, key: ${name}, descriptor: ${name}) -> ${name} {`);
+  context.line('sc_dyn_object_data_check(&target, "dynamic property descriptor target");');
+  context.line(`if !matches!(&key, ${name}::String(_) | ${name}::Symbol(_)) { runtime::throw_error_code("scriptc SC1031: dynamic property descriptor keys require a string or symbol".into(), "SC1031"); }`);
+  context.line('sc_dyn_object_data_check(&descriptor, "dynamic property descriptor");');
+  context.line(`for attribute in ["get", "set"] { if sc_dyn_has_own(&descriptor, &runtime::string(attribute)) { runtime::throw_error_code("scriptc SC1031: dynamic property descriptor requires writable, enumerable and configurable data".into(), "SC1031"); } }`);
+  context.line(`for attribute in ["writable", "enumerable", "configurable"] { let attribute = runtime::string(attribute); if !sc_dyn_has_own(&descriptor, &attribute) || !matches!(sc_dyn_key_get(&descriptor, &attribute, false), ${name}::Boolean(true)) { runtime::throw_error_code("scriptc SC1031: dynamic property descriptor requires writable, enumerable and configurable data".into(), "SC1031"); } }`);
+  context.line('let value_key = runtime::string("value");');
+  context.line('if !sc_dyn_has_own(&descriptor, &value_key) { runtime::throw_error_code("scriptc SC1031: dynamic property descriptor requires an explicit value".into(), "SC1031"); }');
+  context.line('let value = sc_dyn_key_get(&descriptor, &value_key, false);');
+  context.line(`match key { ${name}::String(key) => { if key == "__proto__" { runtime::throw_type_error("scriptc: ordinary prototype writes are not ported".into()); } sc_dyn_key_set(&target, key, value); }, ${name}::Symbol(key) => sc_dyn_symbol_set(&target, key, value), _ => unreachable!() }`);
+  context.line("target");
+  context.line("}");
+  context.line(`fn sc_dyn_delete_computed(target: &${name}, key: &${name}, strict: bool) -> bool {`);
+  context.line(`match key { ${name}::Symbol(key) => match target {`);
+  context.line(`${name}::Object(object) => { sc_dyn_object_data_check(target, "symbol deletion"); runtime::map_symbol_delete(object, key); true },`);
+  context.line(`${name}::Null | ${name}::Undefined => runtime::throw_type_error("Cannot convert undefined or null to object".into()),`);
+  context.line(`${name}::Number(_) | ${name}::Boolean(_) | ${name}::String(_) | ${name}::BigInt(_) | ${name}::Symbol(_) => true,`);
+  context.line('_ => runtime::throw_error_code("scriptc SC1031: deleting symbol properties requires an ordinary object".into(), "SC1031"),');
+  context.line('},');
+  context.line(`${name}::String(_) | ${name}::Number(_) | ${name}::Boolean(_) | ${name}::BigInt(_) | ${name}::Null | ${name}::Undefined => runtime::native_delete_property(target, &sc_dyn_to_string(key), strict),`);
+  context.line('_ => runtime::throw_type_error("scriptc: object string conversion requires native ToPrimitive support".into()),');
+  context.line("} }");
+  context.line(`fn sc_dyn_copy_enumerable_symbols(target: &${name}, source: &${name}) {`);
+  context.line(`if matches!(source, ${name}::Object(..)) { sc_dyn_object_data_check(source, "symbol copy"); }`);
+  context.line("let source = match source {");
+  context.line(`${name}::Object(source) => source,`);
+  for (const variant of functionVariants) context.line(`${name}::${variant}(_, _, properties) => properties,`);
+  context.line(`${name}::Proxy(..) => return sc_dyn_proxy_unsupported("symbol copy"),`);
+  context.line(`${name}::Effect(..) => return sc_dyn_effect_reflection("symbol copy"),`);
+  context.line("_ => return, };");
+  context.line("for (key, value) in runtime::map_symbol_entries(source) { sc_dyn_symbol_set(target, key, value); }");
+  context.line("}");
   context.line(`fn sc_dyn_assign_property(target: &runtime::JsMap<runtime::JsString, ${name}>, key: runtime::JsString, value: ${name}) { if runtime::map_is_module_namespace(target) { sc_dyn_key_set(&${name}::Object(target.clone()), key, value); } else { runtime::map_set_by(target, key, value, |left, right| left.as_ref() == right.as_ref()); } }`);
   context.line(`fn sc_dyn_assign_map(target: &runtime::JsMap<runtime::JsString, ${name}>, source: &runtime::JsMap<runtime::JsString, ${name}>) {`);
   context.pushIndent();

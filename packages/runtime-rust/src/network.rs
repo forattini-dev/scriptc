@@ -2,6 +2,24 @@ thread_local! {
     static NET_AUTO_SELECT_FAMILY_ATTEMPT_TIMEOUT: Cell<f64> = const { Cell::new(250.0) };
 }
 
+pub fn net_is_ipv4(value: &JsString) -> bool {
+    value.as_ref().parse::<std::net::Ipv4Addr>().is_ok()
+}
+
+pub fn net_is_ipv6(value: &JsString) -> bool {
+    value.as_ref().parse::<std::net::Ipv6Addr>().is_ok()
+}
+
+pub fn net_is_ip(value: &JsString) -> f64 {
+    if net_is_ipv4(value) {
+        4.0
+    } else if net_is_ipv6(value) {
+        6.0
+    } else {
+        0.0
+    }
+}
+
 pub fn net_get_auto_select_family_attempt_timeout() -> f64 {
     NET_AUTO_SELECT_FAMILY_ATTEMPT_TIMEOUT.with(Cell::get)
 }
@@ -67,10 +85,270 @@ struct NetWrite {
     callback: Option<NetVoidListener>,
 }
 
+enum LocalStreamEvent {
+    Data(Vec<u8>),
+    End,
+    Error(String),
+}
+
+#[cfg(unix)]
+type LocalStreamWriter = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+enum LocalStreamWriter {
+    File(std::fs::File),
+    Pipe(WindowsPipe),
+}
+
+#[cfg(windows)]
+#[derive(Clone)]
+struct WindowsPipe(std::sync::Arc<miow::pipe::NamedPipe>);
+
+#[cfg(windows)]
+impl std::io::Read for WindowsPipe {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        std::io::Read::read(&mut &*self.0, output)
+    }
+}
+
+#[cfg(windows)]
+impl std::io::Write for WindowsPipe {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        std::io::Write::write(&mut &*self.0, bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::Write::flush(&mut &*self.0)
+    }
+}
+
+#[cfg(windows)]
+impl std::io::Write for LocalStreamWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::File(file) => std::io::Write::write(file, bytes),
+            Self::Pipe(pipe) => std::io::Write::write(pipe, bytes),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::File(file) => std::io::Write::flush(file),
+            Self::Pipe(pipe) => std::io::Write::flush(pipe),
+        }
+    }
+}
+
+struct LocalStream {
+    writer: LocalStreamWriter,
+    events: std::sync::mpsc::Receiver<LocalStreamEvent>,
+    buffered: VecDeque<u8>,
+    ended: bool,
+    error: Option<String>,
+}
+
+impl LocalStream {
+    fn receive(&mut self) {
+        if self.ended || self.error.is_some() || !self.buffered.is_empty() {
+            return;
+        }
+        match self.events.try_recv() {
+            Ok(LocalStreamEvent::Data(bytes)) => self.buffered.extend(bytes),
+            Ok(LocalStreamEvent::End) => self.ended = true,
+            Ok(LocalStreamEvent::Error(error)) => self.error = Some(error),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.ended = true,
+        }
+    }
+
+    fn peek(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        self.receive();
+        if let Some(error) = &self.error {
+            return Err(std::io::Error::other(error.clone()));
+        }
+        if self.buffered.is_empty() {
+            return if self.ended {
+                Ok(0)
+            } else {
+                Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+            };
+        }
+        let length = output.len().min(self.buffered.len());
+        for (slot, value) in output.iter_mut().zip(self.buffered.iter()).take(length) {
+            *slot = *value;
+        }
+        Ok(length)
+    }
+
+    fn shutdown(&mut self, direction: std::net::Shutdown) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            self.writer.shutdown(direction)
+        }
+        #[cfg(windows)]
+        {
+            let _ = direction;
+            std::io::Write::flush(&mut self.writer)
+        }
+    }
+}
+
+impl std::io::Read for LocalStream {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        self.receive();
+        if let Some(error) = self.error.take() {
+            return Err(std::io::Error::other(error));
+        }
+        if self.buffered.is_empty() {
+            return if self.ended {
+                Ok(0)
+            } else {
+                Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+            };
+        }
+        let length = output.len().min(self.buffered.len());
+        for slot in output.iter_mut().take(length) {
+            *slot = self
+                .buffered
+                .pop_front()
+                .expect("checked local socket buffer");
+        }
+        Ok(length)
+    }
+}
+
+impl std::io::Write for LocalStream {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        std::io::Write::write(&mut self.writer, bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::Write::flush(&mut self.writer)
+    }
+}
+
+enum NetStream {
+    Tcp(std::net::TcpStream),
+    Local(LocalStream),
+}
+
+struct LocalListener {
+    accepted: std::sync::mpsc::Receiver<std::io::Result<NetStream>>,
+    closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    path: String,
+}
+
+impl LocalListener {
+    fn accept(&self) -> std::io::Result<NetStream> {
+        match self.accepted.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "local listener stopped",
+            )),
+        }
+    }
+}
+
+impl Drop for LocalListener {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        self.closed.store(true, Ordering::Release);
+        #[cfg(unix)]
+        let _ = std::os::unix::net::UnixStream::connect(&self.path);
+        #[cfg(windows)]
+        let _ = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.path);
+    }
+}
+
+enum NetListener {
+    Tcp(std::net::TcpListener),
+    Local(LocalListener),
+}
+
+impl NetStream {
+    fn set_nonblocking(&self, enabled: bool) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.set_nonblocking(enabled),
+            Self::Local(_) => Ok(()),
+        }
+    }
+
+    fn shutdown(&mut self, direction: std::net::Shutdown) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.shutdown(direction),
+            Self::Local(stream) => stream.shutdown(direction),
+        }
+    }
+
+    fn peek(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Tcp(stream) => stream.peek(output),
+            Self::Local(stream) => stream.peek(output),
+        }
+    }
+
+    fn peer_address(&self) -> Option<JsString> {
+        match self {
+            Self::Tcp(stream) => stream
+                .peer_addr()
+                .ok()
+                .map(|address| string(&address.ip().to_string())),
+            Self::Local(_) => None,
+        }
+    }
+
+    fn set_no_delay(&self, enabled: bool) {
+        if let Self::Tcp(stream) = self {
+            let _ = stream.set_nodelay(enabled);
+        }
+    }
+}
+
+impl std::io::Read for NetStream {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Tcp(stream) => std::io::Read::read(stream, output),
+            Self::Local(stream) => std::io::Read::read(stream, output),
+        }
+    }
+}
+
+impl std::io::Write for NetStream {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Tcp(stream) => std::io::Write::write(stream, bytes),
+            Self::Local(stream) => std::io::Write::write(stream, bytes),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(stream) => std::io::Write::flush(stream),
+            Self::Local(stream) => std::io::Write::flush(stream),
+        }
+    }
+}
+
+enum NetEndpoint {
+    Tcp(String, u16),
+    Local(String),
+}
+
+struct NetConnectError {
+    code: &'static str,
+    message: String,
+}
+
 pub struct NetSocketData {
-    stream: Option<std::net::TcpStream>,
-    pending_connect: Option<(String, u16)>,
-    connect_rx: Option<std::sync::mpsc::Receiver<Result<std::net::TcpStream, String>>>,
+    stream: Option<NetStream>,
+    pending_connect: Option<NetEndpoint>,
+    connect_rx: Option<std::sync::mpsc::Receiver<Result<NetStream, NetConnectError>>>,
     tls: Option<TlsSocketState>,
     server: Option<JsNetServer>,
     destroyed: bool,
@@ -80,6 +358,9 @@ pub struct NetSocketData {
     read_ended: bool,
     end_requested: bool,
     close_emitted: bool,
+    had_error: bool,
+    timeout_ms: Option<f64>,
+    timeout_timer: Option<f64>,
     bytes_written: usize,
     write_queue: VecDeque<NetWrite>,
     write_offset: usize,
@@ -88,6 +369,8 @@ pub struct NetSocketData {
     end_listeners: Vec<NetVoidListener>,
     close_listeners: Vec<NetVoidListener>,
     connect_listeners: Vec<NetVoidListener>,
+    secure_connect_listeners: Vec<NetVoidListener>,
+    timeout_listeners: Vec<NetVoidListener>,
     error_listeners: Vec<NetErrorListener>,
 }
 
@@ -108,6 +391,12 @@ impl Trace for NetSocketData {
         for listener in &self.connect_listeners {
             (listener.trace)(tracer);
         }
+        for listener in &self.secure_connect_listeners {
+            (listener.trace)(tracer);
+        }
+        for listener in &self.timeout_listeners {
+            (listener.trace)(tracer);
+        }
         for listener in &self.error_listeners {
             (listener.trace)(tracer);
         }
@@ -124,6 +413,9 @@ impl Trace for NetSocketData {
 
 impl ClearEdges for NetSocketData {
     fn clear_edges(&mut self) {
+        if let Some(timer) = self.timeout_timer.take() {
+            timer_clear(timer);
+        }
         self.stream = None;
         self.pending_connect = None;
         self.connect_rx = None;
@@ -135,6 +427,7 @@ impl ClearEdges for NetSocketData {
         self.encoding_utf8 = false;
         self.read_ended = true;
         self.end_requested = true;
+        self.had_error = false;
         self.write_queue.clear();
         self.write_offset = 0;
         self.bytes_written = 0;
@@ -143,6 +436,8 @@ impl ClearEdges for NetSocketData {
         self.end_listeners.clear();
         self.close_listeners.clear();
         self.connect_listeners.clear();
+        self.secure_connect_listeners.clear();
+        self.timeout_listeners.clear();
         self.error_listeners.clear();
     }
 }
@@ -150,13 +445,14 @@ impl ClearEdges for NetSocketData {
 pub type JsNetSocket = Gc<NetSocketData>;
 
 pub struct NetServerData {
-    listener: Option<std::net::TcpListener>,
+    listener: Option<NetListener>,
     port: u16,
     closing: bool,
     connections: usize,
     listening_listeners: Vec<NetVoidListener>,
     close_listeners: Vec<NetVoidListener>,
     connection_listeners: Vec<NetConnectionListener>,
+    error_listeners: Vec<NetErrorListener>,
     close_override: Option<(Rc<dyn Fn()>, NetTrace)>,
     http: Option<HttpServerState>,
     tls_config: Option<Arc<rustls::ServerConfig>>,
@@ -171,6 +467,9 @@ impl Trace for NetServerData {
             (listener.trace)(tracer);
         }
         for listener in &self.connection_listeners {
+            (listener.trace)(tracer);
+        }
+        for listener in &self.error_listeners {
             (listener.trace)(tracer);
         }
         if let Some((_, trace)) = &self.close_override {
@@ -190,6 +489,7 @@ impl ClearEdges for NetServerData {
         self.listening_listeners.clear();
         self.close_listeners.clear();
         self.connection_listeners.clear();
+        self.error_listeners.clear();
         self.close_override = None;
         self.http = None;
         self.tls_config = None;
@@ -201,7 +501,9 @@ pub type JsNetServer = Gc<NetServerData>;
 enum NetTask {
     Listening(JsNetServer),
     Close(JsNetServer),
+    ServerError(JsNetServer, JsError),
     SocketConnect(JsNetSocket),
+    SocketSecureConnect(JsNetSocket),
     SocketError(JsNetSocket, JsError),
     SocketEnd(JsNetSocket),
     SocketClose(JsNetSocket),
@@ -225,7 +527,7 @@ fn net_port(value: f64) -> u16 {
     }
 }
 
-fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> JsNetSocket {
+fn net_socket_new_stream(stream: NetStream, server: Option<JsNetServer>) -> JsNetSocket {
     net_register_loop_hooks();
     stream
         .set_nonblocking(true)
@@ -243,6 +545,9 @@ fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> J
         read_ended: false,
         end_requested: false,
         close_emitted: false,
+        had_error: false,
+        timeout_ms: None,
+        timeout_timer: None,
         bytes_written: 0,
         write_queue: VecDeque::new(),
         write_offset: 0,
@@ -251,6 +556,8 @@ fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> J
         end_listeners: Vec::new(),
         close_listeners: Vec::new(),
         connect_listeners: Vec::new(),
+        secure_connect_listeners: Vec::new(),
+        timeout_listeners: Vec::new(),
         error_listeners: Vec::new(),
     });
     NET_SOCKETS.with(|sockets| sockets.borrow_mut().push(socket.clone()));
@@ -267,16 +574,14 @@ pub fn net_server_new() -> JsNetServer {
         listening_listeners: Vec::new(),
         close_listeners: Vec::new(),
         connection_listeners: Vec::new(),
+        error_listeners: Vec::new(),
         close_override: None,
         http: None,
         tls_config: None,
     })
 }
 
-pub fn net_server_new_callback(
-    callback: Rc<dyn Fn(JsNetSocket)>,
-    trace: NetTrace,
-) -> JsNetServer {
+pub fn net_server_new_callback(callback: Rc<dyn Fn(JsNetSocket)>, trace: NetTrace) -> JsNetServer {
     let server = net_server_new();
     net_server_on_connection(&server, callback, trace, false);
     server
@@ -327,6 +632,25 @@ pub fn net_server_on_close(
     });
 }
 
+pub fn net_server_on_error(
+    server: &JsNetServer,
+    callback: Rc<dyn Fn(JsError)>,
+    trace: NetTrace,
+    once: bool,
+) {
+    server.with_mut(|server| {
+        server.error_listeners.push(NetErrorListener {
+            invoke: callback,
+            trace,
+            once,
+        });
+    });
+}
+
+pub fn net_server_off_error(server: &JsNetServer) {
+    server.with_mut(|server| server.error_listeners.clear());
+}
+
 fn net_server_register(server: &JsNetServer) {
     net_register_loop_hooks();
     NET_SERVERS.with(|servers| {
@@ -360,12 +684,152 @@ fn net_server_listen_host(
         .expect("scriptc: bound TCP listener without an address")
         .port();
     server.with_mut(|server| {
-        server.listener = Some(listener);
+        server.listener = Some(NetListener::Tcp(listener));
         server.port = actual_port;
         server.closing = false;
     });
     net_server_register(server);
-    NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(NetTask::Listening(server.clone())));
+    NET_TASKS.with(|tasks| {
+        tasks
+            .borrow_mut()
+            .push_back(NetTask::Listening(server.clone()))
+    });
+}
+
+#[cfg(unix)]
+fn local_server_listener(path: &str) -> std::io::Result<LocalListener> {
+    use std::sync::atomic::Ordering;
+    let listener = std::os::unix::net::UnixListener::bind(path)?;
+    let path = path.to_owned();
+    let thread_path = path.clone();
+    let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let thread_closed = closed.clone();
+    let (sender, accepted) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        while !thread_closed.load(Ordering::Acquire) {
+            let result = listener.accept().and_then(|(writer, _)| {
+                if thread_closed.load(Ordering::Acquire) {
+                    return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                }
+                let reader = writer.try_clone()?;
+                let (events_sender, events) = std::sync::mpsc::channel();
+                local_stream_reader(reader, events_sender);
+                Ok(NetStream::Local(LocalStream {
+                    writer,
+                    events,
+                    buffered: VecDeque::new(),
+                    ended: false,
+                    error: None,
+                }))
+            });
+            if sender.send(result).is_err() {
+                break;
+            }
+        }
+        let _ = std::fs::remove_file(thread_path);
+    });
+    Ok(LocalListener {
+        accepted,
+        closed,
+        path,
+    })
+}
+
+#[cfg(windows)]
+fn local_server_listener(path: &str) -> std::io::Result<LocalListener> {
+    use std::sync::atomic::Ordering;
+    let mut builder = miow::pipe::NamedPipeBuilder::new(path);
+    let first = builder.first(true).create()?;
+    let path = path.to_owned();
+    let thread_path = path.clone();
+    let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let thread_closed = closed.clone();
+    let (sender, accepted) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut next = Some(first);
+        while !thread_closed.load(Ordering::Acquire) {
+            let pipe = match next.take() {
+                Some(pipe) => pipe,
+                None => {
+                    let mut builder = miow::pipe::NamedPipeBuilder::new(&thread_path);
+                    match builder.first(false).create() {
+                        Ok(pipe) => pipe,
+                        Err(error) => {
+                            let _ = sender.send(Err(error));
+                            break;
+                        }
+                    }
+                }
+            };
+            let result = pipe.connect().and_then(|()| {
+                if thread_closed.load(Ordering::Acquire) {
+                    return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                }
+                let pipe = WindowsPipe(std::sync::Arc::new(pipe));
+                let reader = pipe.clone();
+                let (events_sender, events) = std::sync::mpsc::channel();
+                local_stream_reader(reader, events_sender);
+                Ok(NetStream::Local(LocalStream {
+                    writer: LocalStreamWriter::Pipe(pipe),
+                    events,
+                    buffered: VecDeque::new(),
+                    ended: false,
+                    error: None,
+                }))
+            });
+            if sender.send(result).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(LocalListener {
+        accepted,
+        closed,
+        path,
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn local_server_listener(_path: &str) -> std::io::Result<LocalListener> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "local socket servers are not supported on this target",
+    ))
+}
+
+pub fn net_server_listen_path(server: &JsNetServer, path: &JsString) {
+    match local_server_listener(path.to_utf8_lossy()) {
+        Ok(listener) => {
+            server.with_mut(|server| {
+                server.listener = Some(NetListener::Local(listener));
+                server.port = 0;
+                server.closing = false;
+            });
+            net_server_register(server);
+            NET_TASKS.with(|tasks| {
+                tasks
+                    .borrow_mut()
+                    .push_back(NetTask::Listening(server.clone()));
+            });
+        }
+        Err(error) => {
+            let code = fs_error_code(&error);
+            let text = fs_error_text(&error);
+            let error = JsError {
+                identity: Rc::new(()),
+                name: "Error".to_owned(),
+                message: format!("{code}: {text}, listen '{}'", path),
+                code: Some(code.to_owned()),
+                cause: None,
+                dom: None,
+            };
+            NET_TASKS.with(|tasks| {
+                tasks
+                    .borrow_mut()
+                    .push_back(NetTask::ServerError(server.clone(), error));
+            });
+        }
+    }
 }
 
 pub fn net_server_listen(server: &JsNetServer, port: f64) {
@@ -435,16 +899,33 @@ fn net_server_local_address(server: &JsNetServer) -> Option<std::net::SocketAddr
         server
             .listener
             .as_ref()
-            .and_then(|listener| listener.local_addr().ok())
+            .and_then(|listener| match listener {
+                NetListener::Tcp(listener) => listener.local_addr().ok(),
+                NetListener::Local(_) => None,
+            })
     })
 }
 
+/// The bound TCP port, or 0 before `listen` completes.
+pub fn net_server_address_port(server: &JsNetServer) -> f64 {
+    net_server_local_address(server).map_or(0.0, |address| f64::from(address.port()))
+}
+
 pub fn net_server_address_ip(server: &JsNetServer) -> JsString {
-    string(&net_server_local_address(server).map_or_else(|| "0.0.0.0".to_owned(), |address| address.ip().to_string()))
+    string(
+        &net_server_local_address(server)
+            .map_or_else(|| "0.0.0.0".to_owned(), |address| address.ip().to_string()),
+    )
 }
 
 pub fn net_server_address_family(server: &JsNetServer) -> JsString {
-    string(if net_server_local_address(server).is_some_and(|address| address.is_ipv6()) { "IPv6" } else { "IPv4" })
+    string(
+        if net_server_local_address(server).is_some_and(|address| address.is_ipv6()) {
+            "IPv6"
+        } else {
+            "IPv4"
+        },
+    )
 }
 
 pub fn net_server_set_close_override(
@@ -478,7 +959,8 @@ pub fn net_server_close_direct_callback(
 }
 
 pub fn net_server_close(server: &JsNetServer) {
-    let override_ = server.with(|server| server.close_override.as_ref().map(|value| value.0.clone()));
+    let override_ =
+        server.with(|server| server.close_override.as_ref().map(|value| value.0.clone()));
     if let Some(override_) = override_ {
         override_();
     } else {
@@ -486,13 +968,13 @@ pub fn net_server_close(server: &JsNetServer) {
     }
 }
 
-pub fn net_socket_connect_deferred(port: f64, host: &JsString) -> JsNetSocket {
+/// Allocate a disconnected socket. It is not a referenced event-loop handle
+/// until a connection is started, but listeners can already be installed.
+pub fn net_socket_new() -> JsNetSocket {
     net_register_loop_hooks();
-    let port = net_port(port);
-    let host = host.to_string();
-    let socket = Gc::new(NetSocketData {
+    Gc::new(NetSocketData {
         stream: None,
-        pending_connect: Some((host, port)),
+        pending_connect: None,
         connect_rx: None,
         tls: None,
         server: None,
@@ -503,6 +985,9 @@ pub fn net_socket_connect_deferred(port: f64, host: &JsString) -> JsNetSocket {
         read_ended: false,
         end_requested: false,
         close_emitted: false,
+        had_error: false,
+        timeout_ms: None,
+        timeout_timer: None,
         bytes_written: 0,
         write_queue: VecDeque::new(),
         write_offset: 0,
@@ -511,9 +996,172 @@ pub fn net_socket_connect_deferred(port: f64, host: &JsString) -> JsNetSocket {
         end_listeners: Vec::new(),
         close_listeners: Vec::new(),
         connect_listeners: Vec::new(),
+        secure_connect_listeners: Vec::new(),
+        timeout_listeners: Vec::new(),
+        error_listeners: Vec::new(),
+    })
+}
+
+fn net_register_socket(socket: &JsNetSocket) {
+    NET_SOCKETS.with(|sockets| {
+        let mut sockets = sockets.borrow_mut();
+        if !sockets.iter().any(|candidate| candidate.ptr_eq(socket)) {
+            sockets.push(socket.clone());
+        }
+    });
+}
+
+pub fn net_socket_connect_deferred(port: f64, host: &JsString) -> JsNetSocket {
+    let port = net_port(port);
+    let socket = net_socket_new();
+    socket.with_mut(|state| {
+        state.pending_connect = Some(NetEndpoint::Tcp(host.to_string(), port));
+    });
+    net_register_socket(&socket);
+    socket
+}
+
+/// Start a first TCP connection on the same previously disconnected socket.
+pub fn net_socket_connect_existing(socket: &JsNetSocket, port: f64, host: &JsString) -> JsNetSocket {
+    let port = net_port(port);
+    let available = socket.with_mut(|state| {
+        if state.destroyed
+            || state.pending_connect.is_some()
+            || state.connect_rx.is_some()
+            || state.stream.is_some()
+        {
+            return false;
+        }
+        state.pending_connect = Some(NetEndpoint::Tcp(host.to_string(), port));
+        true
+    });
+    if !available {
+        throw_error_code(
+            "scriptc: reconnecting or connecting an active socket is not supported yet".into(),
+            "SC1031",
+        );
+    }
+    net_register_socket(socket);
+    net_socket_start_connect(socket);
+    socket.clone()
+}
+
+fn local_stream_reader(
+    mut reader: impl std::io::Read + Send + 'static,
+    sender: std::sync::mpsc::Sender<LocalStreamEvent>,
+) {
+    std::thread::spawn(move || {
+        loop {
+            let mut buffer = vec![0_u8; 65_536];
+            match std::io::Read::read(&mut reader, &mut buffer) {
+                Ok(0) => {
+                    let _ = sender.send(LocalStreamEvent::End);
+                    break;
+                }
+                Ok(length) => {
+                    buffer.truncate(length);
+                    if sender.send(LocalStreamEvent::Data(buffer)).is_err() {
+                        break;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::BrokenPipe
+                            | std::io::ErrorKind::ConnectionAborted
+                            | std::io::ErrorKind::ConnectionReset
+                            | std::io::ErrorKind::UnexpectedEof
+                    ) =>
+                {
+                    let _ = sender.send(LocalStreamEvent::End);
+                    break;
+                }
+                Err(error) => {
+                    let _ = sender.send(LocalStreamEvent::Error(format!(
+                        "read {}",
+                        fs_error_code(&error)
+                    )));
+                    break;
+                }
+            }
+        }
+    });
+}
+
+#[cfg(unix)]
+fn local_stream_connect(path: &str) -> std::io::Result<NetStream> {
+    let writer = std::os::unix::net::UnixStream::connect(path)?;
+    let reader = writer.try_clone()?;
+    let (sender, events) = std::sync::mpsc::channel();
+    local_stream_reader(reader, sender);
+    Ok(NetStream::Local(LocalStream {
+        writer,
+        events,
+        buffered: VecDeque::new(),
+        ended: false,
+        error: None,
+    }))
+}
+
+#[cfg(windows)]
+fn local_stream_connect(path: &str) -> std::io::Result<NetStream> {
+    let writer = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?;
+    let reader = writer.try_clone()?;
+    let (sender, events) = std::sync::mpsc::channel();
+    local_stream_reader(reader, sender);
+    Ok(NetStream::Local(LocalStream {
+        writer: LocalStreamWriter::File(writer),
+        events,
+        buffered: VecDeque::new(),
+        ended: false,
+        error: None,
+    }))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn local_stream_connect(_path: &str) -> std::io::Result<NetStream> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "local sockets are not supported on this target",
+    ))
+}
+
+pub fn net_socket_connect_path(path: &JsString) -> JsNetSocket {
+    net_register_loop_hooks();
+    let socket = Gc::new(NetSocketData {
+        stream: None,
+        pending_connect: Some(NetEndpoint::Local(path.to_string())),
+        connect_rx: None,
+        tls: None,
+        server: None,
+        destroyed: false,
+        writable: true,
+        flowing: false,
+        encoding_utf8: false,
+        read_ended: false,
+        end_requested: false,
+        close_emitted: false,
+        had_error: false,
+        timeout_ms: None,
+        timeout_timer: None,
+        bytes_written: 0,
+        write_queue: VecDeque::new(),
+        write_offset: 0,
+        finish_listeners: Vec::new(),
+        data_listeners: Vec::new(),
+        end_listeners: Vec::new(),
+        close_listeners: Vec::new(),
+        connect_listeners: Vec::new(),
+        secure_connect_listeners: Vec::new(),
+        timeout_listeners: Vec::new(),
         error_listeners: Vec::new(),
     });
     NET_SOCKETS.with(|sockets| sockets.borrow_mut().push(socket.clone()));
+    net_socket_start_connect(&socket);
     socket
 }
 
@@ -525,13 +1173,23 @@ pub fn net_socket_start_connect(socket: &JsNetSocket) {
             socket.pending_connect.take()
         }
     });
-    let Some((host, port)) = endpoint else {
+    let Some(endpoint) = endpoint else {
         return;
     };
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let result = std::net::TcpStream::connect((host.as_str(), port))
-            .map_err(|error| format!("connect {} {host}:{port}", fs_error_code(&error)));
+        let result = match endpoint {
+            NetEndpoint::Tcp(host, port) => std::net::TcpStream::connect((host.as_str(), port))
+                .map(NetStream::Tcp)
+                .map_err(|error| {
+                    let code = fs_error_code(&error);
+                    NetConnectError { code, message: format!("connect {code} {host}:{port}") }
+                }),
+            NetEndpoint::Local(path) => local_stream_connect(&path).map_err(|error| {
+                let code = fs_error_code(&error);
+                NetConnectError { code, message: format!("connect {code} {path}") }
+            }),
+        };
         let _ = sender.send(result);
     });
     socket.with_mut(|socket| socket.connect_rx = Some(receiver));
@@ -575,11 +1233,14 @@ pub fn net_socket_on_data(
 pub fn net_socket_set_encoding(socket: &JsNetSocket, encoding: &JsString) {
     match encoding.to_utf8_lossy() {
         "utf8" | "utf-8" => socket.with_mut(|socket| socket.encoding_utf8 = true),
-        "ascii" | "latin1" | "binary" | "base64" | "base64url" | "hex" | "ucs2"
-        | "ucs-2" | "utf16le" | "utf-16le" => throw_error(format!(
+        "ascii" | "latin1" | "binary" | "base64" | "base64url" | "hex" | "ucs2" | "ucs-2"
+        | "utf16le" | "utf-16le" => throw_error(format!(
             "setEncoding('{encoding}') is not supported yet (only 'utf8' here)"
         )),
-        _ => throw_type_error_code(format!("Unknown encoding: {encoding}"), "ERR_UNKNOWN_ENCODING"),
+        _ => throw_type_error_code(
+            format!("Unknown encoding: {encoding}"),
+            "ERR_UNKNOWN_ENCODING",
+        ),
     }
 }
 
@@ -632,6 +1293,87 @@ pub fn net_socket_on_connect(
     net_socket_on_void(socket, callback, trace, once, |socket| {
         &mut socket.connect_listeners
     });
+}
+
+pub fn net_socket_on_timeout(
+    socket: &JsNetSocket,
+    callback: Rc<dyn Fn()>,
+    trace: NetTrace,
+    once: bool,
+) {
+    net_socket_on_void(socket, callback, trace, once, |socket| {
+        &mut socket.timeout_listeners
+    });
+}
+
+fn net_socket_arm_timeout(socket: &JsNetSocket) {
+    let delay = socket.with(|state| {
+        (!state.destroyed && state.timeout_timer.is_none())
+            .then_some(state.timeout_ms)
+            .flatten()
+            .filter(|delay| *delay > 0.0)
+    });
+    let Some(delay) = delay else { return };
+    let weak = socket.downgrade();
+    let timer = timer_set_timeout_handle(
+        Box::new(move || {
+            let Some(socket) = weak.upgrade() else { return };
+            let listeners = socket.with_mut(|state| {
+                state.timeout_timer = None;
+                if state.destroyed {
+                    Vec::new()
+                } else {
+                    net_dispatch_listeners(&mut state.timeout_listeners)
+                }
+            });
+            for listener in listeners {
+                (listener.invoke)();
+            }
+        }),
+        delay,
+    );
+    timer_set_ref(timer, false);
+    socket.with_mut(|state| state.timeout_timer = Some(timer));
+}
+
+fn net_socket_touch(socket: &JsNetSocket) {
+    if let Some(timer) = socket.with(|state| state.timeout_timer) {
+        timer_refresh(timer);
+    } else {
+        net_socket_arm_timeout(socket);
+    }
+}
+
+pub fn net_socket_validate_timeout(delay: f64) {
+    if !delay.is_finite() || delay < 0.0 {
+        throw_range_error_code(
+            format!("The value of \"msecs\" is out of range. Received {delay}"),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    if delay > f64::from(i32::MAX) {
+        throw_error_code(
+            "scriptc: socket timeouts above 2147483647 ms are not supported yet".into(),
+            "SC1031",
+        );
+    }
+}
+
+pub fn net_socket_set_timeout(socket: &JsNetSocket, delay: f64) -> JsNetSocket {
+    net_socket_validate_timeout(delay);
+    let previous = socket.with_mut(|state| {
+        state.timeout_ms = Some(delay);
+        state.timeout_timer.take()
+    });
+    if let Some(timer) = previous {
+        timer_clear(timer);
+    }
+    net_socket_arm_timeout(socket);
+    socket.clone()
+}
+
+pub fn net_socket_timeout(socket: &JsNetSocket) -> Option<f64> {
+    socket.with(|state| state.timeout_ms)
 }
 
 pub fn net_socket_on_error(
@@ -725,6 +1467,14 @@ pub fn net_socket_destroyed(socket: &JsNetSocket) -> bool {
     socket.with(|socket| socket.destroyed)
 }
 
+pub fn net_socket_connecting(socket: &JsNetSocket) -> bool {
+    socket.with(|socket| socket.pending_connect.is_some() || socket.connect_rx.is_some())
+}
+
+pub fn net_socket_had_error(socket: &JsNetSocket) -> bool {
+    socket.with(|socket| socket.had_error)
+}
+
 pub fn net_socket_writable(socket: &JsNetSocket) -> bool {
     socket.with(|socket| socket.writable && !socket.destroyed)
 }
@@ -738,13 +1488,7 @@ pub fn net_socket_bytes_written(socket: &JsNetSocket) -> f64 {
 }
 
 pub fn net_socket_remote_address(socket: &JsNetSocket) -> Option<JsString> {
-    socket.with(|socket| {
-        socket
-            .stream
-            .as_ref()
-            .and_then(|stream| stream.peer_addr().ok())
-            .map(|address| string(&address.ip().to_string()))
-    })
+    socket.with(|socket| socket.stream.as_ref().and_then(NetStream::peer_address))
 }
 
 pub fn net_socket_pause(socket: &JsNetSocket) -> JsNetSocket {
@@ -764,7 +1508,7 @@ pub fn net_socket_resume(socket: &JsNetSocket) -> JsNetSocket {
 pub fn net_socket_set_no_delay(socket: &JsNetSocket, enabled: bool) -> JsNetSocket {
     socket.with(|socket| {
         if let Some(stream) = &socket.stream {
-            let _ = stream.set_nodelay(enabled);
+            stream.set_no_delay(enabled);
         }
     });
     socket.clone()
@@ -775,11 +1519,11 @@ pub fn net_socket_destroy_soon(socket: &JsNetSocket) {
 }
 
 pub fn net_socket_destroy(socket: &JsNetSocket) {
-    let (schedule, server) = socket.with_mut(|socket| {
+    let (schedule, server, timer) = socket.with_mut(|socket| {
         if socket.destroyed {
-            return (false, None);
+            return (false, None, None);
         }
-        if let Some(stream) = socket.stream.take() {
+        if let Some(mut stream) = socket.stream.take() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
         socket.connect_rx = None;
@@ -789,9 +1533,20 @@ pub fn net_socket_destroy(socket: &JsNetSocket) {
         socket.writable = false;
         socket.write_queue.clear();
         socket.write_offset = 0;
-        (!socket.close_emitted, socket.server.take())
+        (
+            !socket.close_emitted,
+            socket.server.take(),
+            socket.timeout_timer.take(),
+        )
     });
-    NET_SOCKETS.with(|sockets| sockets.borrow_mut().retain(|candidate| !candidate.ptr_eq(socket)));
+    if let Some(timer) = timer {
+        timer_clear(timer);
+    }
+    NET_SOCKETS.with(|sockets| {
+        sockets
+            .borrow_mut()
+            .retain(|candidate| !candidate.ptr_eq(socket))
+    });
     if let Some(server) = server {
         net_server_connection_closed(&server);
     }
@@ -835,7 +1590,9 @@ fn net_dispatch_task(task: NetTask) {
         }
         NetTask::Close(server) => {
             NET_SERVERS.with(|servers| {
-                servers.borrow_mut().retain(|candidate| !candidate.ptr_eq(&server));
+                servers
+                    .borrow_mut()
+                    .retain(|candidate| !candidate.ptr_eq(&server));
             });
             let listeners = server.with_mut(|server| {
                 server.closing = false;
@@ -845,9 +1602,31 @@ fn net_dispatch_task(task: NetTask) {
                 (listener.invoke)();
             }
         }
+        NetTask::ServerError(server, error) => {
+            let listeners = server.with_mut(|server| {
+                let listeners = server.error_listeners.clone();
+                server.error_listeners.retain(|listener| !listener.once);
+                listeners
+            });
+            if listeners.is_empty() {
+                throw_value(error);
+            }
+            for listener in listeners {
+                (listener.invoke)(error.clone());
+            }
+        }
         NetTask::SocketConnect(socket) => {
+            net_socket_touch(&socket);
+            let listeners =
+                socket.with_mut(|socket| net_dispatch_listeners(&mut socket.connect_listeners));
+            for listener in listeners {
+                (listener.invoke)();
+            }
+        }
+        NetTask::SocketSecureConnect(socket) => {
+            net_socket_touch(&socket);
             let listeners = socket.with_mut(|socket| {
-                net_dispatch_listeners(&mut socket.connect_listeners)
+                net_dispatch_listeners(&mut socket.secure_connect_listeners)
             });
             for listener in listeners {
                 (listener.invoke)();
@@ -855,6 +1634,7 @@ fn net_dispatch_task(task: NetTask) {
         }
         NetTask::SocketError(socket, error) => {
             let listeners = socket.with_mut(|socket| {
+                socket.had_error = true;
                 let listeners = socket.error_listeners.clone();
                 socket.error_listeners.retain(|listener| !listener.once);
                 listeners
@@ -870,10 +1650,7 @@ fn net_dispatch_task(task: NetTask) {
         NetTask::SocketEnd(socket) => {
             let (listeners, should_close) = socket.with_mut(|socket| {
                 socket.data_listeners.clear();
-                (
-                    std::mem::take(&mut socket.end_listeners),
-                    !socket.writable,
-                )
+                (std::mem::take(&mut socket.end_listeners), !socket.writable)
             });
             for listener in listeners {
                 (listener.invoke)();
@@ -897,6 +1674,8 @@ fn net_dispatch_task(task: NetTask) {
                 socket.data_listeners.clear();
                 socket.end_listeners.clear();
                 socket.connect_listeners.clear();
+                socket.secure_connect_listeners.clear();
+                socket.timeout_listeners.clear();
                 socket.error_listeners.clear();
                 std::mem::take(&mut socket.close_listeners)
             });
@@ -913,8 +1692,14 @@ fn net_accept_one() -> bool {
         servers.borrow().iter().find_map(|candidate| {
             candidate.with(|server| {
                 let listener = server.listener.as_ref()?;
-                match listener.accept() {
-                    Ok((stream, _)) => Some((candidate.clone(), stream)),
+                let accepted = match listener {
+                    NetListener::Tcp(listener) => {
+                        listener.accept().map(|(stream, _)| NetStream::Tcp(stream))
+                    }
+                    NetListener::Local(listener) => listener.accept(),
+                };
+                match accepted {
+                    Ok(stream) => Some((candidate.clone(), stream)),
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => None,
                     Err(_) => None,
                 }
@@ -926,11 +1711,13 @@ fn net_accept_one() -> bool {
     };
     let listeners = server.with_mut(|server| {
         let snapshot = server.connection_listeners.clone();
-        server.connection_listeners.retain(|listener| !listener.once);
+        server
+            .connection_listeners
+            .retain(|listener| !listener.once);
         snapshot
     });
     server.with_mut(|server| server.connections += 1);
-    let socket = net_socket_new(stream, Some(server.clone()));
+    let socket = net_socket_new_stream(stream, Some(server.clone()));
     if tls_server_accept(&server, &socket) {
         return true;
     }
@@ -954,23 +1741,22 @@ fn net_socket_connect_one() -> bool {
                         match stream.set_nonblocking(true) {
                             Ok(()) => {
                                 socket.stream = Some(stream);
-                                if socket.tls.is_some() {
-                                    None
-                                } else {
-                                    Some(NetTask::SocketConnect(candidate.clone()))
-                                }
+                                Some(NetTask::SocketConnect(candidate.clone()))
                             }
-                            Err(error) => Some(NetTask::SocketError(
-                                candidate.clone(),
-                                error_new("Error", string(&format!("connect {}", fs_error_code(&error)))),
-                            )),
+                            Err(error) => {
+                                let code = fs_error_code(&error);
+                                Some(NetTask::SocketError(
+                                    candidate.clone(),
+                                    error_new_code("Error", string(&format!("connect {code}")), code),
+                                ))
+                            }
                         }
                     }
-                    Ok(Err(message)) => {
+                    Ok(Err(error)) => {
                         socket.connect_rx = None;
                         Some(NetTask::SocketError(
                             candidate.clone(),
-                            error_new("Error", string(&message)),
+                            error_new_code("Error", string(&error.message), error.code),
                         ))
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => None,
@@ -1001,7 +1787,7 @@ fn net_socket_connect_one() -> bool {
 fn net_socket_flush_one() -> bool {
     enum Flush {
         Idle,
-        Progress(Option<NetVoidListener>),
+        Progress(JsNetSocket, Option<NetVoidListener>, bool),
         Finish(Vec<NetVoidListener>),
         Close(JsNetSocket, Vec<NetVoidListener>),
     }
@@ -1028,20 +1814,23 @@ fn net_socket_flush_one() -> bool {
                             socket.write_offset += length;
                             let callback = if socket.write_offset == write.bytes.len() {
                                 socket.write_offset = 0;
-                                socket.write_queue.pop_front().and_then(|write| write.callback)
+                                socket
+                                    .write_queue
+                                    .pop_front()
+                                    .and_then(|write| write.callback)
                             } else {
                                 None
                             };
-                            Flush::Progress(callback)
+                            Flush::Progress(candidate.clone(), callback, true)
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Flush::Idle,
                         Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
-                            Flush::Progress(None)
+                            Flush::Progress(candidate.clone(), None, false)
                         }
                         Err(_) => Flush::Close(candidate.clone(), Vec::new()),
                     }
                 } else if socket.end_requested {
-                    if let Some(stream) = socket.stream.as_ref() {
+                    if let Some(stream) = socket.stream.as_mut() {
                         let _ = stream.shutdown(std::net::Shutdown::Write);
                     }
                     socket.writable = false;
@@ -1064,7 +1853,10 @@ fn net_socket_flush_one() -> bool {
         })
     });
     match outcome {
-        Some(Flush::Progress(callback)) => {
+        Some(Flush::Progress(socket, callback, wrote)) => {
+            if wrote {
+                net_socket_touch(&socket);
+            }
             if let Some(callback) = callback {
                 NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(NetTask::Callback(callback)));
             }
@@ -1149,12 +1941,14 @@ fn net_socket_read_one() -> bool {
     });
     match event {
         Some(ReadEvent::Data(socket, bytes)) => {
+            net_socket_touch(&socket);
             let (listeners, encoding_utf8) = socket.with_mut(|socket| {
                 let snapshot = socket.data_listeners.clone();
                 socket.data_listeners.retain(|listener| !listener.once);
                 (snapshot, socket.encoding_utf8)
             });
             let chunk = bytes_from_elements(bytes);
+            chunk.with_mut(|data| data.buffer = true);
             for listener in listeners {
                 (listener.invoke)(chunk.clone(), encoding_utf8);
             }

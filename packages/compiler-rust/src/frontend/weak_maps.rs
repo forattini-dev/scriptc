@@ -6,6 +6,24 @@ pub(super) const CLASS: &str = "native_builtin_WeakMap";
 pub(super) fn instance(ty: &Type) -> bool {
     matches!(ty, Type::Object { class_name } if class_name == CLASS)
 }
+
+fn key_type(ty: &Type, records: &[ir::Record], unions: &[ir::Union]) -> bool {
+    match ty {
+        Type::Dyn
+        | Type::F64
+        | Type::Bool
+        | Type::String
+        | Type::Undefined
+        | Type::Null
+        | Type::Object { .. } => true,
+        Type::Record { shape_id } => !records[*shape_id].tuple,
+        Type::Union { union_id } => unions[*union_id]
+            .arms
+            .iter()
+            .all(|arm| key_type(arm, records, unions)),
+        _ => false,
+    }
+}
 impl Lowerer<'_> {
     pub(super) fn standard_weak_map(&self, symbol: u32) -> bool {
         if symbol == 0 {
@@ -46,19 +64,27 @@ impl Lowerer<'_> {
             return Err(self.refuse(node, "WeakMap requires fixed native arguments"));
         }
         let key = self.expression(arguments[0])?;
-        let valid_key = match key.ty() {
-            Type::Dyn | Type::F64 | Type::Bool | Type::String | Type::Undefined | Type::Null => {
-                true
-            }
-            Type::Record { shape_id } => {
-                !self.records[shape_id].tuple && self.records[shape_id].index_value.is_none()
-            }
-            _ => false,
-        };
+        let key = self.narrowed(key, arguments[0])?;
+        let valid_key = key_type(&key.ty(), &self.records, &self.unions);
         if !valid_key {
-            return Err(self.refuse(arguments[0], "WeakMap keys require closed data records; other object and symbol keys are not ported"));
+            return Err(self.refuse(
+                arguments[0],
+                &format!(
+                    "WeakMap keys require identity-bearing native objects or represented primitive checks; got {:?}",
+                    key.ty()
+                ),
+            ));
         }
-        let mut values = vec![receiver, self.coerce(key, Type::Dyn, arguments[0])?];
+        let key = if matches!(key.ty(), Type::Object { .. }) {
+            // Class instances already own one stable GC identity. WeakMap only
+            // needs that identity, so do not erase the object through Dyn (and
+            // accidentally require a dynamic descriptor surface for Symbol
+            // methods that the map never observes).
+            key
+        } else {
+            self.coerce(key, Type::Dyn, arguments[0])?
+        };
+        let mut values = vec![receiver, key];
         if name == "set" {
             let value = self.expression(arguments[1])?;
             values.push(self.coerce(value, Type::Dyn, arguments[1])?);

@@ -5,6 +5,72 @@ use source_frontend::flags::ElementFlags;
 use source_frontend::prelude::SignatureKind;
 
 impl Lowerer<'_> {
+    pub(super) fn array_to_tuple_projection(
+        &mut self,
+        value: Expr,
+        target: &Type,
+        site: Node,
+    ) -> Result<Option<Expr>, String> {
+        let Type::Array { elem } = value.ty() else {
+            return Ok(None);
+        };
+        let Type::Record { shape_id } = target else {
+            return Ok(None);
+        };
+        let record = self.records[*shape_id].clone();
+        if !record.tuple {
+            return Ok(None);
+        }
+        let mut helper = Helper::new(
+            "array_to_tuple",
+            vec![Type::Array { elem: elem.clone() }],
+            target.clone(),
+            self.loc(site),
+        );
+        let array = helper.param(0);
+        let mut fields = Vec::with_capacity(record.declared_order.len());
+        for name in &record.declared_order {
+            let field = record
+                .fields
+                .iter()
+                .find(|field| &field.name == name)
+                .expect("tuple declaration order");
+            let index = name.parse::<usize>().expect("numeric tuple position");
+            let item = Expr::ArrayGet {
+                arr: Box::new(helper.read(&array)),
+                index: Box::new(Expr::NumLit {
+                    value: index as f64,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: helper.loc(),
+                }),
+                r#type: (*elem).clone(),
+                loc: helper.loc(),
+            };
+            fields.push(ir::FieldInit {
+                name: name.clone(),
+                value: self.coerce(item, field.r#type.clone(), site)?,
+                absent: false,
+                overflow: false,
+            });
+        }
+        helper.function.body.push(Stmt::Return {
+            value: Some(Expr::RecordLit {
+                fields,
+                null_prototype: false,
+                r#type: target.clone(),
+                loc: helper.loc(),
+            }),
+            loc: helper.loc(),
+        });
+        Ok(Some(Expr::Call {
+            callee: self.install_helper(helper.function),
+            args: vec![value],
+            r#type: target.clone(),
+            loc: self.loc(site),
+        }))
+    }
+
     /// A method declaration can widen a builtin's input contract without adding
     /// an own property. Keep the tuple's existing positional storage and aliases.
     /// Data properties, optional methods and other intersections need a separate
@@ -74,6 +140,26 @@ impl Lowerer<'_> {
 
     pub(super) fn tuple_type(&mut self, id: TypeId) -> Option<Type> {
         let target = self.checker.ty(id).target();
+        let source = self.checker.get_type_arguments(id).to_vec();
+        let elements = source
+            .into_iter()
+            .map(|element| self.type_id(element))
+            .collect::<Option<Vec<_>>>()?;
+        // JavaScript tuples are arrays at runtime. A fixed tuple whose slots
+        // all have one native ABI needs no positional record representation;
+        // keeping it as an Array preserves identity when it is widened to a
+        // readonly T[] field (the common `as const satisfies` pattern).
+        if let Some(first) = elements.first()
+            && elements.iter().all(|element| element == first)
+            && !matches!(
+                first,
+                Type::Void | Type::Null | Type::Undefined | Type::Stats | Type::Set { .. }
+            )
+        {
+            return Some(Type::Array {
+                elem: Box::new(first.clone()),
+            });
+        }
         if self
             .checker
             .ty(target)
@@ -83,11 +169,6 @@ impl Lowerer<'_> {
         {
             return None;
         }
-        let source = self.checker.get_type_arguments(id).to_vec();
-        let elements = source
-            .into_iter()
-            .map(|element| self.type_id(element))
-            .collect::<Option<Vec<_>>>()?;
         self.intern_tuple(elements)
     }
 
@@ -149,6 +230,7 @@ impl Lowerer<'_> {
             .collect::<Result<Vec<_>, String>>()?;
         Ok(Expr::RecordLit {
             fields,
+            null_prototype: false,
             r#type: target,
             loc: self.loc(node),
         })

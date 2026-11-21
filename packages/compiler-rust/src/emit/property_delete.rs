@@ -13,12 +13,26 @@ impl runtime::NativeDeleteValue for NativeValue {
         }
         if let Some(properties) = native_function_properties(self) {
             native_function_data_key(key);
+            if !native_getter_delete(self, key) { return D::Unsupported("non-configurable getter on a function"); }
             properties.with_mut(|data| data.entries.retain(|(name, _)| name != key));
             return D::Deleted;
         }
         match self {
             Self::Undefined | Self::Null => D::Nullish,
+"#);
+    if !module.classes.is_empty() {
+        out.push_str(
+            r#"            Self::Instance(_) => match native_instance_property_delete(self, key) {
+                Some(true) => D::Deleted,
+                Some(false) => D::NonConfigurable("\x23<Object>"),
+                None => unreachable!("instance deletion receiver"),
+            },
+"#,
+        );
+    }
+    out.push_str(r#"
             Self::Object(object) | Self::Record(_, object) => {
+                if !native_getter_delete(self, key) { return D::NonConfigurable("\x23<Object>"); }
                 object.with_mut(|data| data.entries.retain(|(name, _)| name != key));
                 D::Deleted
             }
@@ -38,7 +52,9 @@ impl runtime::NativeDeleteValue for NativeValue {
                         && arms.iter().all(|arm| matches!(arm, Type::Record { .. } | Type::Undefined | Type::Null))))
                 && arms.iter().all(|arm| match arm {
                     Type::F64 | Type::Bool | Type::String | Type::Undefined | Type::Null => true,
-                    Type::Record { shape_id } => record_storage::shared(&module.records[*shape_id]),
+                    Type::Record { shape_id } => {
+                        record_storage::shared(&module.records[*shape_id], module)
+                    }
                     _ => false,
                 })
         })) {
@@ -50,7 +66,7 @@ impl runtime::NativeDeleteValue for NativeValue {
         }
         if let Type::Record { shape_id } = ty
             && module.records[*shape_id].index_value.is_some()
-            && !record_storage::shared(&module.records[*shape_id])
+            && !record_storage::shared(&module.records[*shape_id], module)
         {
             writeln!(out, "Self::V{index}(object) => {{ object.with_mut(|data| data.overflow.retain(|(name, _)| name != key)); D::Deleted }},").unwrap();
         }

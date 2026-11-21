@@ -21,3 +21,5 @@ console.log("finite trig", decimal(Math.sin(0.5)), decimal(Math.cos(0.5)), decim
 console.log("inverse trig", decimal(Math.asin(0.5)), decimal(Math.acos(0.5)), decimal(Math.atan(2)), decimal(Math.atan2(-3, -4)));
 console.log("domains", Math.asin(2), Math.acos(-2), Math.sin(1 / 0), Math.tan(-1 / 0), Math.pow(-2, 0.5));
 console.log("atan2 signs", decimal(Math.atan2(-0, -0)), decimal(Math.atan2(0, -0)), decimal(Math.atan2(1 / 0, 1 / 0)));
+console.log("imul", Math.imul(0xffffffff, 5), Math.imul(0x7fffffff, 2), Math.imul(0x01000193, 0x811c9dc5));
+console.log("callbacks", JSON.stringify([-2, -0, 3].map(Math.abs)), JSON.stringify([4, 9].map(Math.sqrt)));

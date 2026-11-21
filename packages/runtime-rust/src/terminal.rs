@@ -3,6 +3,10 @@ thread_local! {
     static STDIN_COOKED: RefCell<Option<rustix::termios::Termios>> = const { RefCell::new(None) };
 }
 
+thread_local! {
+    static STDIN_RAW: Cell<bool> = const { Cell::new(false) };
+}
+
 pub fn process_stdin_set_raw_mode(raw: bool) {
     if !process_is_tty(0.0) {
         throw_type_error("process.stdin.setRawMode is not a function".to_owned());
@@ -11,6 +15,11 @@ pub fn process_stdin_set_raw_mode(raw: bool) {
     set_stdin_raw_mode(raw);
     #[cfg(any(windows, target_os = "wasi"))]
     let _ = raw;
+    STDIN_RAW.with(|value| value.set(raw));
+}
+
+pub fn process_stdin_is_raw() -> bool {
+    STDIN_RAW.with(Cell::get)
 }
 
 pub fn process_columns(fd: f64) -> Option<f64> {
@@ -76,6 +85,7 @@ fn set_stdin_raw_mode(raw: bool) {
 }
 
 fn terminal_finish() {
+    STDIN_RAW.with(|raw| raw.set(false));
     #[cfg(not(any(windows, target_os = "wasi")))]
     STDIN_COOKED.with(|saved| {
         if let Some(mode) = saved.borrow_mut().take() {

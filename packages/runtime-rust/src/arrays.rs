@@ -43,6 +43,7 @@ where
 
 enum ArrayAux<T: ArrayElement> {
     Raw(JsArray<T>),
+    FrozenTemplate { raw: Option<JsArray<T>> },
     RegexMatch { index: f64, input: JsString, groups: Vec<(JsString, usize)> },
 }
 
@@ -81,7 +82,9 @@ impl<T: ArrayElement> Trace for ArrayData<T> {
         }
         if let Some(sparse) = &self.sparse { for value in sparse.tail_values.values() { value.trace_element(tracer); } }
         if let Some(view) = &self.view { view.trace(tracer); }
-        if let Some(ArrayAux::Raw(raw)) = self.auxiliary.as_deref() { tracer.edge(raw); }
+        if let Some(ArrayAux::Raw(raw) | ArrayAux::FrozenTemplate { raw: Some(raw) }) = self.auxiliary.as_deref() {
+            tracer.edge(raw);
+        }
         if let Some(properties) = &self.properties {
             for (_, value) in properties.iter() { value.trace_element(tracer); }
         }
@@ -203,6 +206,8 @@ pub type JsArrayIterator<T> = Gc<ArrayIteratorData<T>>;
 
 thread_local! {
     static TEMPLATE_STRINGS: RefCell<HashMap<String, JsArray<JsString>>> = RefCell::new(HashMap::new());
+    static TEMPLATE_OBJECT_STORAGE: RefCell<HashMap<String, Box<dyn std::any::Any>>> = RefCell::new(HashMap::new());
+    static TEMPLATE_FROZEN_MAY_EXIST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 pub fn template_strings<S: JsStringSource>(key: &str, cooked: &[S]) -> JsArray<JsString> {
@@ -217,6 +222,67 @@ pub fn template_strings<S: JsStringSource>(key: &str, cooked: &[S]) -> JsArray<J
 
 pub fn template_strings_clear() {
     TEMPLATE_STRINGS.with(|instances| instances.borrow_mut().clear());
+    TEMPLATE_OBJECT_STORAGE.with(|instances| instances.borrow_mut().clear());
+}
+
+/// Retain the cooked and raw arrays for one syntactic template site.
+///
+/// This is storage infrastructure, not a complete JavaScript template object:
+/// callers must implement property descriptors and strict/sloppy assignment
+/// semantics before exposing these arrays to source code.
+pub fn template_object_storage<T: ArrayElement>(
+    key: &str,
+    cooked: Vec<T>,
+    raw: Vec<T>,
+) -> JsArray<T> {
+    assert_eq!(cooked.len(), raw.len(), "template raw/cooked length");
+    TEMPLATE_FROZEN_MAY_EXIST.with(|flag| flag.set(true));
+    TEMPLATE_OBJECT_STORAGE.with(|instances| {
+        let mut instances = instances.borrow_mut();
+        let stored = instances
+            .entry(key.to_owned())
+            .or_insert_with(|| {
+                let raw = array_new(raw);
+                raw.with_mut(|data| {
+                    data.auxiliary = Some(Rc::new(ArrayAux::FrozenTemplate { raw: None }));
+                });
+                let cooked = array_new(cooked);
+                cooked.with_mut(|data| {
+                    data.auxiliary = Some(Rc::new(ArrayAux::FrozenTemplate { raw: Some(raw) }));
+                });
+                Box::new(cooked)
+            });
+        stored
+            .downcast_ref::<JsArray<T>>()
+            .expect("template site changed its native element type")
+            .clone()
+    })
+}
+
+/// `Object.freeze(array)`: every later mutation of this array (writes,
+/// length changes, push/pop/splice and the other mutating methods) throws a
+/// TypeError, exactly like the frozen template arrays sharing this
+/// integrity marker. A cooked template keeps its raw companion.
+pub fn array_freeze<T: ArrayElement>(array: &JsArray<T>) {
+    TEMPLATE_FROZEN_MAY_EXIST.with(|flag| flag.set(true));
+    if array.with(|data| data.view.is_some()) {
+        throw_error_code(
+            "scriptc SC1031: Object.freeze of a mapped array view requires native object integrity semantics".to_owned(),
+            "SC1031",
+        );
+    }
+    array.with_mut(|data| {
+        let raw = match data.auxiliary.as_deref() {
+            None => None,
+            Some(ArrayAux::Raw(raw)) => Some(raw.clone()),
+            Some(ArrayAux::FrozenTemplate { .. }) => return,
+            Some(ArrayAux::RegexMatch { .. }) => throw_error_code(
+                "scriptc SC1031: Object.freeze of a RegExp match array requires native object integrity semantics".to_owned(),
+                "SC1031",
+            ),
+        };
+        data.auxiliary = Some(Rc::new(ArrayAux::FrozenTemplate { raw }));
+    });
 }
 
 pub fn array_new<T: ArrayElement>(elements: Vec<T>) -> JsArray<T> {
@@ -244,24 +310,115 @@ pub fn array_new_with_raw<T: ArrayElement>(
 }
 
 pub fn array_raw<T: ArrayElement>(array: &JsArray<T>) -> Option<JsArray<T>> {
-    array.with(|data| match &data.view { Some(view) => view.raw(), None => match data.auxiliary.as_deref() { Some(ArrayAux::Raw(raw)) => Some(raw.clone()), _ => None } })
+    array.with(|data| match &data.view { Some(view) => view.raw(), None => match data.auxiliary.as_deref() { Some(ArrayAux::Raw(raw) | ArrayAux::FrozenTemplate { raw: Some(raw) }) => Some(raw.clone()), _ => None } })
+}
+
+/// Whether this is one of the immutable internal template arrays, including
+/// a mapped view of its original backing storage.
+pub fn array_is_template_frozen<T: ArrayElement>(array: &JsArray<T>) -> bool {
+    if !TEMPLATE_FROZEN_MAY_EXIST.with(|flag| flag.get()) { return false; }
+    array.with(|data| match &data.view {
+        Some(view) => view.is_template_frozen(),
+        None => matches!(data.auxiliary.as_deref(), Some(ArrayAux::FrozenTemplate { .. })),
+    })
+}
+
+/// A native array's own data-property value, including slots that are present
+/// but have no typed payload and the template object's separate raw array.
+pub enum ArrayOwnValue<T: ArrayElement> {
+    Element(T),
+    Undefined,
+    Length(f64),
+    Raw(JsArray<T>),
+}
+
+pub struct ArrayOwnDescriptor<T: ArrayElement> {
+    pub value: ArrayOwnValue<T>,
+    pub writable: bool,
+    pub enumerable: bool,
+    pub configurable: bool,
+}
+
+/// Inspect a represented own string key without invoking an element getter.
+pub fn array_own_descriptor<T: ArrayElement>(
+    array: &JsArray<T>,
+    key: &JsString,
+) -> Option<ArrayOwnDescriptor<T>> {
+    let frozen = array_is_template_frozen(array);
+    if key == "length" {
+        return Some(ArrayOwnDescriptor {
+            value: ArrayOwnValue::Length(array_len(array)),
+            writable: !frozen,
+            enumerable: false,
+            configurable: false,
+        });
+    }
+    if frozen && key == "raw" && let Some(raw) = array_raw(array) {
+        return Some(ArrayOwnDescriptor {
+            value: ArrayOwnValue::Raw(raw),
+            writable: false,
+            enumerable: false,
+            configurable: false,
+        });
+    }
+    if let Some(index) = key.well_formed_utf8().and_then(|key| {
+        key.parse::<u32>().ok().filter(|index| *index != u32::MAX && key == index.to_string())
+    }) {
+        let value = match array_state(array, f64::from(index)) {
+            1.0 => ArrayOwnValue::Element(array_get(array, f64::from(index))),
+            2.0 => ArrayOwnValue::Undefined,
+            _ => return None,
+        };
+        return Some(ArrayOwnDescriptor {
+            value,
+            writable: !frozen,
+            enumerable: true,
+            configurable: !frozen,
+        });
+    }
+    array_property_get(array, key).map(|value| ArrayOwnDescriptor {
+        value: ArrayOwnValue::Element(value),
+        writable: !frozen,
+        enumerable: true,
+        configurable: !frozen,
+    })
+}
+
+fn array_require_template_writable<T: ArrayElement>(array: &JsArray<T>) {
+    if array_is_template_frozen(array) {
+        throw_type_error("Cannot modify a frozen template array".to_owned());
+    }
 }
 
 pub fn array_set_raw<T: ArrayElement>(array: &JsArray<T>, raw: JsArray<T>) {
+    array_require_template_writable(array);
     array.with_mut(|data| data.auxiliary = Some(Rc::new(ArrayAux::Raw(raw))));
 }
 
 pub fn array_property_get<T: ArrayElement>(array: &JsArray<T>, key: &JsString) -> Option<T> {
+    if let Some(view) = array_view(array) { return view.property_get(key); }
     array.with(|data| data.properties.as_ref().and_then(|properties|
         properties.iter().find(|(name, _)| name == key).map(|(_, value)| value.clone())))
 }
 
 pub fn array_property_has<T: ArrayElement>(array: &JsArray<T>, key: &JsString) -> bool {
+    if let Some(view) = array_view(array) { return view.property_has(key); }
     array.with(|data| data.properties.as_ref().is_some_and(|properties|
         properties.iter().any(|(name, _)| name == key)))
 }
 
+pub fn array_property_keys<T: ArrayElement>(array: &JsArray<T>) -> Vec<JsString> {
+    if let Some(view) = array_view(array) { return view.property_keys(); }
+    array.with(|data| {
+        data.properties.as_ref().map_or_else(Vec::new, |properties| {
+            properties.iter().map(|(name, _)| name.clone()).collect()
+        })
+    })
+}
+
 pub fn array_property_set<T: ArrayElement>(array: &JsArray<T>, key: JsString, value: T) {
+    array_require_template_writable(array);
+    if let Some(view) = array_view(array) { view.property_set(key, value); return; }
     array.with_mut(|data| {
         let properties = data.properties.get_or_insert_with(|| Box::new(Vec::new()));
         if let Some((_, current)) = properties.iter_mut().find(|(name, _)| name == &key) {
@@ -302,6 +459,7 @@ pub fn array_state<T: ArrayElement>(array: &JsArray<T>, index: f64) -> f64 {
 
 /// `array.length = n`: truncation drops elements; growth leaves holes.
 pub fn array_set_length<T: ArrayElement>(array: &JsArray<T>, length: f64) {
+    array_require_template_writable(array);
     if length.is_nan() || length < 0.0 || length.fract() != 0.0 || length > 4_294_967_295.0 {
         throw_range_error("Invalid array length".to_owned());
     }
@@ -330,6 +488,7 @@ pub fn array_set_length<T: ArrayElement>(array: &JsArray<T>, length: f64) {
 
 /// Store an explicit present `undefined` without shrinking the length.
 pub fn array_set_undefined<T: ArrayElement>(array: &JsArray<T>, index: f64) {
+    array_require_template_writable(array);
     if let Some(view) = array_view(array) {
         view.set_undefined(index);
         return;
@@ -351,6 +510,7 @@ pub fn array_set_undefined<T: ArrayElement>(array: &JsArray<T>, index: f64) {
 /// `delete a[i]`: the slot becomes a hole; the length is unchanged.
 pub fn array_delete<T: ArrayElement>(array: &JsArray<T>, index: f64) {
     if !array_has(array, index) { return; }
+    array_require_template_writable(array);
     if let Some(view) = array_view(array) {
         view.delete(index);
         return;
@@ -437,9 +597,40 @@ pub fn array_iterator_next<T: ArrayElement>(
     })
 }
 
+/// Advance an array iterator while representing holes and explicit undefined
+/// with the caller's dynamic absence value. Typed iterators can continue to
+/// use `array_iterator_next` when every element has a represented payload.
+pub fn array_iterator_next_or<T: ArrayElement>(
+    iterator: &JsArrayIterator<T>,
+    absent: T,
+) -> Option<ArrayIteratorItem<T>> {
+    iterator.with_mut(|state| {
+        let array = state.array.as_ref()?;
+        if state.index >= array_len(array) as usize {
+            state.array = None;
+            return None;
+        }
+        let index = state.index as f64;
+        state.index += 1;
+        let value = || {
+            if array_state(array, index) == 1.0 {
+                array_get(array, index)
+            } else {
+                absent.clone()
+            }
+        };
+        Some(match state.kind {
+            ArrayIteratorKind::Entries => ArrayIteratorItem::Entry(index, value()),
+            ArrayIteratorKind::Keys => ArrayIteratorItem::Key(index),
+            ArrayIteratorKind::Values => ArrayIteratorItem::Value(value()),
+        })
+    })
+}
+
 
 
 pub fn array_push<T: ArrayElement>(array: &JsArray<T>, value: T) -> f64 {
+    array_require_template_writable(array);
     if let Some(view) = array_view(array) { return view.push(value); }
     if array.with(|data| data.sparse.is_some()) {
         let length = array_len(array);
@@ -453,6 +644,7 @@ pub fn array_push<T: ArrayElement>(array: &JsArray<T>, value: T) -> f64 {
 }
 
 pub fn array_extend<T: ArrayElement>(array: &JsArray<T>, source: &JsArray<T>) -> f64 {
+    array_require_template_writable(array);
     if let Some(view) = array_view(array) { for value in array_values(source) { view.push(value); } return view.len(); }
     let snapshot = source.with(|data| data.elements().into_owned());
     array.with_mut(|data| {
@@ -473,6 +665,7 @@ pub fn array_push_from<T: ArrayElement>(array: &JsArray<T>, source: &JsArray<T>)
     } else {
         source.with(array_slots)
     };
+    array_require_template_writable(array);
     if array_view(array).is_some() && slots.iter().any(Option::is_none) {
         throw_error_code("pushing undefined into an array view is not supported yet".to_owned(), "SC3001");
     }
@@ -486,6 +679,7 @@ pub fn array_push_from<T: ArrayElement>(array: &JsArray<T>, source: &JsArray<T>)
 }
 
 pub fn array_unshift<T: ArrayElement>(array: &JsArray<T>, mut values: Vec<T>) -> f64 {
+    array_require_template_writable(array);
     if let Some(view) = array_view(array) { view.splice(0.0, 0.0, values); return view.len(); }
     array.with_mut(|data| {
         data.require_dense("array.unshift");
@@ -501,6 +695,7 @@ pub fn array_unshift_from<T: ArrayElement>(array: &JsArray<T>, source: &JsArray<
 }
 
 pub fn array_reverse<T: ArrayElement>(array: &JsArray<T>) -> JsArray<T> {
+    if array_is_template_frozen(array) && array_len(array) > 1.0 { array_require_template_writable(array); }
     if let Some(view) = array_view(array) { view.reverse(); return array.clone(); }
     array.with_mut(|data| {
         data.require_dense("array.reverse");
@@ -515,12 +710,61 @@ pub fn array_fill<T: ArrayElement>(
     start: f64,
     end: f64,
 ) -> JsArray<T> {
+    if array_is_template_frozen(array) {
+        let length = array_len(array) as usize;
+        if array_relative_index(start, length) < array_relative_index(end, length) {
+            array_require_template_writable(array);
+        }
+    }
     if let Some(view) = array_view(array) { view.fill(value, start, end); return array.clone(); }
     array.with_mut(|data| {
-        data.require_dense("array.fill");
-        let start = array_relative_index(start, data.elements.len());
-        let end = array_relative_index(end, data.elements.len()).max(start);
-        data.elements[start..end].fill(value);
+        let length = data.logical_len();
+        let start = array_relative_index(start, length);
+        let end = array_relative_index(end, length).max(start);
+        if start == end {
+            return;
+        }
+        let stored = data.elements.len();
+        if data.sparse.is_none() {
+            data.elements[start..end].fill(value);
+            return;
+        }
+        let prefix_end = end.min(stored);
+        if start < prefix_end {
+            data.elements[start..prefix_end].fill(value.clone());
+            data.sparse.as_mut().expect("sparse array").states[start..prefix_end]
+                .fill(ARRAY_VALUE);
+        }
+        let tail_start = start.max(stored);
+        if tail_start < end {
+            let sparse = data.sparse.as_mut().expect("sparse array");
+            if tail_start - stored <= ARRAY_DENSE_LIMIT {
+                for index in stored..end {
+                    let filled = index >= tail_start;
+                    let previous = sparse.tail_values.remove(&index);
+                    let undefined = sparse.tail_undefined.remove(&index);
+                    let state = if filled || previous.is_some() {
+                        ARRAY_VALUE
+                    } else if undefined {
+                        ARRAY_UNDEFINED
+                    } else {
+                        ARRAY_HOLE
+                    };
+                    data.elements.push(if filled {
+                        value.clone()
+                    } else {
+                        previous.unwrap_or_else(|| value.clone())
+                    });
+                    sparse.states.push(state);
+                }
+            } else {
+                for index in tail_start..end {
+                    sparse.tail_undefined.remove(&index);
+                    sparse.tail_values.insert(index, value.clone());
+                }
+            }
+        }
+        data.normalize_sparse();
     });
     array.clone()
 }
@@ -531,6 +775,15 @@ pub fn array_copy_within<T: ArrayElement>(
     start: f64,
     end: f64,
 ) -> JsArray<T> {
+    if array_is_template_frozen(array) {
+        let length = array_len(array) as usize;
+        let target_index = array_relative_index(target, length);
+        let start_index = array_relative_index(start, length);
+        let end_index = array_relative_index(end, length).max(start_index);
+        if (end_index - start_index).min(length - target_index) > 0 {
+            array_require_template_writable(array);
+        }
+    }
     if let Some(view) = array_view(array) { view.copy_within(target, start, end); return array.clone(); }
     array.with_mut(|data| {
         data.require_dense("array.copyWithin");
@@ -559,6 +812,7 @@ where
     // original array. Undefined values are never passed to the comparator,
     // and holes remain absent after the defined values and undefined slots.
     let length = array_len(array);
+    if length <= 1.0 && array_is_template_frozen(array) { return array.clone(); }
     let mut elements = Vec::new();
     let mut undefined = 0usize;
     let mut index = array_next_present(array, 0.0);
@@ -629,6 +883,7 @@ pub fn array_splice_with_items<T: ArrayElement>(
     delete_count: f64,
     items: Vec<T>,
 ) -> JsArray<T> {
+    array_require_template_writable(array);
     if let Some(view) = array_view(array) { return array_new(view.splice(start, delete_count, items)); }
     let removed = array.with_mut(|data| {
         data.require_dense("array.splice");
@@ -642,7 +897,33 @@ pub fn array_splice_with_items<T: ArrayElement>(
     array_new(removed)
 }
 
+/// Remove the first slot while retaining holes and explicit undefined in the
+/// remaining indices. The returned None represents both an absent first slot
+/// and an explicit undefined; the mutation preserves their distinction.
+pub fn array_shift_optional<T: ArrayElement>(array: &JsArray<T>) -> Option<T> {
+    array_require_template_writable(array);
+    if let Some(view) = array_view(array) { return view.shift_optional(); }
+    array.with_mut(|data| {
+        if data.logical_len() == 0 { return None; }
+        let first = (data.slot_state(0) == ARRAY_VALUE)
+            .then(|| data.stored_value(0).expect("scriptc: present array payload").clone());
+        if !data.elements.is_empty() { data.elements.remove(0); }
+        if let Some(sparse) = data.sparse.as_mut() {
+            if !sparse.states.is_empty() { sparse.states.remove(0); }
+            sparse.tail_values = std::mem::take(&mut sparse.tail_values).into_iter()
+                .filter_map(|(index, value)| index.checked_sub(1).map(|index| (index, value)))
+                .collect();
+            sparse.tail_undefined = std::mem::take(&mut sparse.tail_undefined).into_iter()
+                .filter_map(|index| index.checked_sub(1)).collect();
+            sparse.length -= 1;
+        }
+        data.normalize_sparse();
+        first
+    })
+}
+
 pub fn array_shift<T: ArrayElement>(array: &JsArray<T>) -> T {
+    array_require_template_writable(array);
     if let Some(view) = array_view(array) { return view.splice(0.0, 1.0, Vec::new()).into_iter().next().expect("scriptc: array index out of bounds"); }
     array.with_mut(|data| {
         data.require_dense("array.shift");
@@ -873,6 +1154,7 @@ where
 }
 
 pub fn array_pop<T: ArrayElement>(array: &JsArray<T>) -> T {
+    array_require_template_writable(array);
     if let Some(view) = array_view(array) { return view.pop(); }
     if array.with(|data| data.sparse.is_some()) {
         let length = array_len(array);

@@ -9,12 +9,11 @@ impl Lowerer<'_> {
             return None;
         }
         let mut arity = 0;
+        let mut variadic = false;
         let mut results = Vec::new();
         for signature in signatures {
             let sig = self.checker.sig(signature);
-            if sig.has_rest_parameter() {
-                return None;
-            }
+            variadic |= sig.has_rest_parameter();
             arity = arity.max(sig.parameters.len());
             let ret = self.checker.get_return_type_of_signature(signature);
             let symbol = self.checker.ty(ret).symbol().0;
@@ -32,8 +31,14 @@ impl Lowerer<'_> {
             .cloned()
             .unwrap_or(Type::Dyn);
         Some(Type::Func {
-            rest: false,
-            params: vec![Type::Dyn; arity],
+            rest: variadic,
+            params: if variadic {
+                vec![Type::Array {
+                    elem: Box::new(Type::Dyn),
+                }]
+            } else {
+                vec![Type::Dyn; arity]
+            },
             ret: Box::new(result),
         })
     }
@@ -102,11 +107,29 @@ impl Lowerer<'_> {
         node: Node,
         target: &Type,
     ) -> Result<Option<Expr>, String> {
+        if let Type::Union { union_id } = target {
+            let callable = self.unions[*union_id]
+                .arms
+                .iter()
+                .filter(|arm| matches!(arm, Type::Func { .. }))
+                .cloned()
+                .collect::<Vec<_>>();
+            if let [callable] = callable.as_slice()
+                && self.unions[*union_id]
+                    .arms
+                    .iter()
+                    .all(|arm| matches!(arm, Type::Func { .. } | Type::Null | Type::Undefined))
+                && node.kind() == SyntaxKind::CallExpression
+                && let Some(value) = self.function_bind_expected(node, Some(callable.clone()))?
+            {
+                return self.coerce(value, target.clone(), node).map(Some);
+            }
+        }
         if let Type::Func { .. } = target {
             if node.kind() == SyntaxKind::CallExpression
                 && let Some(value) = self.function_bind_expected(node, Some(target.clone()))?
             {
-                return Ok(Some(value));
+                return self.coerce(value, target.clone(), node).map(Some);
             }
             if node.kind() == SyntaxKind::Identifier {
                 let symbol = self.symbol(node);
@@ -125,6 +148,48 @@ impl Lowerer<'_> {
                             params: signature.params.into_iter().map(|p| p.r#type).collect(),
                             ret: Box::new(signature.return_type),
                         },
+                        loc: self.loc(node),
+                    };
+                    return Ok(Some(self.coerce(value, target.clone(), node)?));
+                }
+            }
+            if node.kind() == SyntaxKind::CallExpression
+                && node.expression().kind() == SyntaxKind::Identifier
+            {
+                let symbol = self.symbol(node.expression());
+                // An existing erased result is checked at the use site. This
+                // preserves the original factory instead of recompiling it
+                // with a second, incompatible return ABI.
+                let existing_callable = self.functions.signature(symbol).is_some_and(|signature| {
+                    ir::callable_view_compatible(&signature.return_type, target)
+                });
+                let result = if self
+                    .functions
+                    .signature(symbol)
+                    .is_some_and(|signature| signature.return_type == Type::Dyn)
+                    || existing_callable
+                {
+                    None
+                } else {
+                    Some(target.clone())
+                };
+                if let Some(signature) = self.request_function_context(
+                    symbol,
+                    node,
+                    functions::UseKind::Call,
+                    None,
+                    result,
+                )? {
+                    let types = signature
+                        .params
+                        .iter()
+                        .map(|param| param.r#type.clone())
+                        .collect::<Vec<_>>();
+                    let args = self.rest_call_arguments(node, &types, signature.rest)?;
+                    let value = Expr::Call {
+                        callee: signature.name,
+                        args,
+                        r#type: signature.return_type,
                         loc: self.loc(node),
                     };
                     return Ok(Some(self.coerce(value, target.clone(), node)?));

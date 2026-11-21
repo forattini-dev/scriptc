@@ -6,6 +6,112 @@ fn dns_test_node26() {
     });
 }
 
+fn dns_test_response(record_type: u16, ttl: u32, rdata: &[u8]) -> Vec<u8> {
+    let mut packet = Vec::new();
+    packet.extend_from_slice(&0x1234u16.to_be_bytes());
+    packet.extend_from_slice(&0x8180u16.to_be_bytes());
+    packet.extend_from_slice(&1u16.to_be_bytes());
+    packet.extend_from_slice(&1u16.to_be_bytes());
+    packet.extend_from_slice(&0u16.to_be_bytes());
+    packet.extend_from_slice(&0u16.to_be_bytes());
+    dns_encode_name("example.com", &mut packet).expect("valid test name");
+    packet.extend_from_slice(&record_type.to_be_bytes());
+    packet.extend_from_slice(&1u16.to_be_bytes());
+    packet.extend_from_slice(&[0xc0, 0x0c]);
+    packet.extend_from_slice(&record_type.to_be_bytes());
+    packet.extend_from_slice(&1u16.to_be_bytes());
+    packet.extend_from_slice(&ttl.to_be_bytes());
+    packet.extend_from_slice(&(rdata.len() as u16).to_be_bytes());
+    packet.extend_from_slice(rdata);
+    packet
+}
+
+#[test]
+fn dns_record_parser_handles_addresses_ttl_and_compressed_names() {
+    init();
+
+    let address = dns_parse_response(
+        &dns_test_response(1, 300, &[192, 0, 2, 1]),
+        0x1234,
+        DnsRecordKind::A,
+    )
+    .expect("A response");
+    assert_eq!(
+        match address {
+            DnsRecords::Value(DnsValue::Array(values)) => values,
+            _ => panic!("expected address array"),
+        },
+        vec![DnsValue::Object(vec![
+            (
+                string("address"),
+                DnsValue::String(string("192.0.2.1")),
+            ),
+            (string("ttl"), DnsValue::Number(300.0)),
+        ])]
+    );
+
+    let mx = dns_parse_response(
+        &dns_test_response(
+            15,
+            60,
+            &[0, 10, 4, b'm', b'a', b'i', b'l', 0xc0, 0x0c],
+        ),
+        0x1234,
+        DnsRecordKind::Mx,
+    )
+    .expect("MX response");
+    assert_eq!(
+        match mx {
+            DnsRecords::Mx(records) => records,
+            _ => panic!("expected MX records"),
+        },
+        vec![DnsMxRecord {
+            priority: 10.0,
+            exchange: string("mail.example.com"),
+        }]
+    );
+
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}
+
+#[test]
+fn dns_record_parser_preserves_txt_chunks_and_rejects_bad_packets() {
+    init();
+
+    let txt = dns_parse_response(
+        &dns_test_response(16, 30, &[3, b'a', b'b', b'c', 2, b'd', b'e']),
+        0x1234,
+        DnsRecordKind::Txt,
+    )
+    .expect("TXT response");
+    let records = match txt {
+        DnsRecords::Txt(records) => records,
+        _ => panic!("expected TXT records"),
+    };
+    assert_eq!(array_get(&records[0], 0.0), string("abc"));
+    assert_eq!(array_get(&records[0], 1.0), string("de"));
+
+    let mut truncated = dns_test_response(1, 1, &[127, 0, 0, 1]);
+    truncated.pop();
+    assert!(matches!(
+        dns_parse_response(&truncated, 0x1234, DnsRecordKind::A),
+        Err("BADRESP")
+    ));
+    assert!(matches!(
+        dns_parse_response(
+            &dns_test_response(1, 1, &[127, 0, 0, 1]),
+            0xffff,
+            DnsRecordKind::A
+        ),
+        Err("BADRESP")
+    ));
+
+    drop(records);
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}
+
 #[test]
 fn dns_promises_preserve_literal_spelling_and_actual_family() {
     init();

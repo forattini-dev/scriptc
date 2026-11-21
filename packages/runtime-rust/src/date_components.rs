@@ -1,9 +1,3 @@
-/// UTC and local construction share MakeDay/MakeTime. Only the final UTC
-/// instant is TimeClip'd: a local time outside the range can still be valid.
-pub fn date_utc(y: f64, mo: f64, d: f64, h: f64, mi: f64, sec: f64, ms: f64) -> f64 {
-    date_new_ms(date_components_ms(y, mo, d, h, mi, sec, ms))
-}
-
 pub fn date_new_components(y: f64, mo: f64, d: f64, h: f64, mi: f64, sec: f64, ms: f64) -> f64 {
     let local = date_components_ms(y, mo, d, h, mi, sec, ms);
     // IANA zone changes include a skipped day (Apia). Probe both sides of a

@@ -12,12 +12,13 @@ struct TlsSocketState {
 
 enum TlsSocketAction {
     Progress,
+    Activity(JsNetSocket),
     Connect(JsNetSocket),
     Callback(NetVoidListener),
     Finish(Vec<NetVoidListener>),
     Data(JsNetSocket, Vec<u8>),
     End(JsNetSocket),
-    Error(JsNetSocket, String),
+    Error(JsNetSocket, String, Option<String>),
     Close(JsNetSocket),
 }
 
@@ -67,7 +68,7 @@ pub fn tls_socket_connect_callback(
     trace: NetTrace,
 ) -> JsNetSocket {
     let socket = tls_socket_connect(port, host, servername, reject_unauthorized, ca);
-    net_socket_on_connect(&socket, callback, trace, true);
+    tls_socket_on_secure_connect(&socket, callback, trace, true);
     socket
 }
 
@@ -89,6 +90,57 @@ pub fn tls_socket_encrypted(socket: &JsNetSocket) -> Option<bool> {
     socket.with(|socket| socket.tls.as_ref().map(|_| true))
 }
 
+pub struct TlsCipherInfo {
+    pub name: JsString,
+    pub standard_name: JsString,
+    pub version: JsString,
+}
+
+/// Node reports its maximum enabled protocol before a handshake, the
+/// negotiated protocol while open, and null after the socket is destroyed.
+pub fn tls_socket_protocol(socket: &JsNetSocket) -> Option<JsString> {
+    socket.with(|socket| {
+        let tls = socket.tls.as_ref()?;
+        match tls.connection.protocol_version() {
+            None | Some(rustls::ProtocolVersion::TLSv1_3) => Some(string("TLSv1.3")),
+            Some(rustls::ProtocolVersion::TLSv1_2) => Some(string("TLSv1.2")),
+            Some(version) => throw_error_code(
+                format!("scriptc: unsupported TLS protocol {version:?}"),
+                "SC1031",
+            ),
+        }
+    })
+}
+
+/// The outer option represents an open TLS object; the inner option is empty
+/// before a cipher has been negotiated.
+pub fn tls_socket_cipher(socket: &JsNetSocket) -> Option<Option<TlsCipherInfo>> {
+    socket.with(|socket| {
+        let tls = socket.tls.as_ref()?;
+        let Some(suite) = tls.connection.negotiated_cipher_suite() else {
+            return Some(None);
+        };
+        use rustls::CipherSuite;
+        let (name, standard, version) = match suite.suite() {
+            CipherSuite::TLS13_AES_256_GCM_SHA384 => ("TLS_AES_256_GCM_SHA384", "TLS_AES_256_GCM_SHA384", "TLSv1.3"),
+            CipherSuite::TLS13_AES_128_GCM_SHA256 => ("TLS_AES_128_GCM_SHA256", "TLS_AES_128_GCM_SHA256", "TLSv1.3"),
+            CipherSuite::TLS13_CHACHA20_POLY1305_SHA256 => ("TLS_CHACHA20_POLY1305_SHA256", "TLS_CHACHA20_POLY1305_SHA256", "TLSv1.3"),
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 => ("ECDHE-ECDSA-AES256-GCM-SHA384", "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "TLSv1.2"),
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 => ("ECDHE-ECDSA-AES128-GCM-SHA256", "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "TLSv1.2"),
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 => ("ECDHE-ECDSA-CHACHA20-POLY1305", "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "TLSv1.2"),
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 => ("ECDHE-RSA-AES256-GCM-SHA384", "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", "TLSv1.2"),
+            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 => ("ECDHE-RSA-AES128-GCM-SHA256", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", "TLSv1.2"),
+            CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 => ("ECDHE-RSA-CHACHA20-POLY1305", "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256", "TLSv1.2"),
+            unknown => throw_error_code(format!("scriptc: unsupported TLS cipher {unknown:?}"), "SC1031"),
+        };
+        Some(Some(TlsCipherInfo {
+            name: string(name),
+            standard_name: string(standard),
+            version: string(version),
+        }))
+    })
+}
+
 pub fn tls_socket_on_secure_connect(
     socket: &JsNetSocket,
     callback: Rc<dyn Fn()>,
@@ -96,7 +148,9 @@ pub fn tls_socket_on_secure_connect(
     once: bool,
 ) {
     if socket.with(|socket| socket.tls.is_some()) {
-        net_socket_on_connect(socket, callback, trace, once);
+        net_socket_on_void(socket, callback, trace, once, |socket| {
+            &mut socket.secure_connect_listeners
+        });
     }
 }
 
@@ -110,7 +164,13 @@ fn tls_socket_handshake(
         return None;
     }
     match tls.connection.complete_io(stream) {
-        Ok(_) if tls.connection.is_handshaking() => Some(TlsSocketAction::Progress),
+        Ok((read, written)) if tls.connection.is_handshaking() => {
+            if read > 0 || written > 0 {
+                Some(TlsSocketAction::Activity(handle.clone()))
+            } else {
+                None
+            }
+        }
         Ok(_) => {
             if !tls.server_side {
                 let verify = tls
@@ -150,6 +210,7 @@ fn tls_socket_handshake(
             Some(TlsSocketAction::Error(
                 handle.clone(),
                 tls_socket_error(&error, &verify),
+                verify.authorization_error.clone(),
             ))
         }
     }
@@ -171,7 +232,7 @@ fn tls_socket_plaintext(
             Some(TlsSocketAction::Data(handle.clone(), buffer))
         }
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => None,
-        Err(error) => Some(TlsSocketAction::Error(handle.clone(), error.to_string())),
+        Err(error) => Some(TlsSocketAction::Error(handle.clone(), error.to_string(), None)),
     }
 }
 
@@ -187,14 +248,14 @@ fn tls_socket_outgoing(
     if tls.connection.wants_write() {
         return match tls.connection.write_tls(stream) {
             Ok(0) => None,
-            Ok(_) => Some(TlsSocketAction::Progress),
+            Ok(_) => Some(TlsSocketAction::Activity(handle.clone())),
             Err(error)
                 if error.kind() == std::io::ErrorKind::WouldBlock
                     || error.kind() == std::io::ErrorKind::Interrupted =>
             {
                 None
             }
-            Err(error) => Some(TlsSocketAction::Error(handle.clone(), error.to_string())),
+            Err(error) => Some(TlsSocketAction::Error(handle.clone(), error.to_string(), None)),
         };
     }
     if tls.write_ready {
@@ -220,7 +281,7 @@ fn tls_socket_outgoing(
                 Some(TlsSocketAction::Progress)
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => None,
-            Err(error) => Some(TlsSocketAction::Error(handle.clone(), error.to_string())),
+            Err(error) => Some(TlsSocketAction::Error(handle.clone(), error.to_string(), None)),
         };
     }
     if !socket.end_requested {
@@ -266,9 +327,9 @@ fn tls_socket_incoming(
         Ok(_) => match tls.connection.process_new_packets() {
             Ok(state) => {
                 tls.peer_closed = state.peer_has_closed();
-                Some(TlsSocketAction::Progress)
+                Some(TlsSocketAction::Activity(handle.clone()))
             }
-            Err(error) => Some(TlsSocketAction::Error(handle.clone(), error.to_string())),
+            Err(error) => Some(TlsSocketAction::Error(handle.clone(), error.to_string(), None)),
         },
         Err(error)
             if error.kind() == std::io::ErrorKind::WouldBlock
@@ -276,7 +337,7 @@ fn tls_socket_incoming(
         {
             None
         }
-        Err(error) => Some(TlsSocketAction::Error(handle.clone(), error.to_string())),
+        Err(error) => Some(TlsSocketAction::Error(handle.clone(), error.to_string(), None)),
     }
 }
 
@@ -303,9 +364,13 @@ fn tls_socket_dispatch_one() -> bool {
     });
     match action {
         Some(TlsSocketAction::Progress) => true,
+        Some(TlsSocketAction::Activity(socket)) => {
+            net_socket_touch(&socket);
+            true
+        }
         Some(TlsSocketAction::Connect(socket)) => {
             if !tls_server_established(&socket) {
-                NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(NetTask::SocketConnect(socket)));
+                NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(NetTask::SocketSecureConnect(socket)));
             }
             true
         }
@@ -328,6 +393,7 @@ fn tls_socket_dispatch_one() -> bool {
                 (snapshot, socket.encoding_utf8)
             });
             let chunk = bytes_from_elements(bytes);
+            chunk.with_mut(|data| data.buffer = true);
             for listener in listeners {
                 (listener.invoke)(chunk.clone(), encoding_utf8);
             }
@@ -337,14 +403,17 @@ fn tls_socket_dispatch_one() -> bool {
             NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(NetTask::SocketEnd(socket)));
             true
         }
-        Some(TlsSocketAction::Error(socket, message)) => {
+        Some(TlsSocketAction::Error(socket, message, code)) => {
             if socket.with(|data| data.tls.as_ref().is_some_and(|tls| tls.server_side)) {
                 net_socket_destroy(&socket);
             } else {
                 NET_TASKS.with(|tasks| {
                     tasks.borrow_mut().push_back(NetTask::SocketError(
                         socket,
-                        error_new("Error", string(&message)),
+                        match code {
+                            Some(code) => error_new_code("Error", string(&message), &code),
+                            None => error_new("Error", string(&message)),
+                        },
                     ));
                 });
             }

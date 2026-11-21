@@ -80,6 +80,26 @@
     }
 
     #[test]
+    fn intl_pt_br_formats_shortest_decimal_with_default_grouping() {
+        for (value, expected) in [
+            (1.0005, "1,001"),
+            (7.995, "7,995"),
+            (999.9995, "1.000"),
+            (0.0005, "0,001"),
+            (-0.0005, "-0,001"),
+            (0.00049, "0"),
+            (1e23, "100.000.000.000.000.000.000.000"),
+            (9_007_199_254_740_993.0, "9.007.199.254.740.992"),
+            (-0.0, "-0"),
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "∞"),
+            (f64::NEG_INFINITY, "-∞"),
+        ] {
+            assert_eq!(intl_number_format_pt_br(value).as_ref(), expected);
+        }
+    }
+
+    #[test]
     fn exponential_number_formatting_reuses_shortest_ecmascript_digits() {
         for (value, expected) in [
             (1234.5678, "1.2345678e+3"),
@@ -212,6 +232,16 @@
         assert!(number_from_string(&string("1e")).is_nan());
         assert!(number_from_string(&string("12px")).is_nan());
         assert!(number_from_string(&string(&format!("0x{}", "f".repeat(300)))).is_infinite());
+    }
+
+    #[test]
+    fn legacy_unescape_decodes_utf16_units_without_utf8_or_error_recovery() {
+        assert_eq!(string_unescape(&string("%41%u0042%u00e9")), string("ABé"));
+        assert_eq!(string_unescape(&string("%E2%98%83")), string("â\u{98}\u{83}"));
+        assert_eq!(string_unescape(&string("%uZZZZ%2G%U0041%%41")), string("%uZZZZ%2G%U0041%A"));
+        let lone = string_unescape(&string("%uD800%u0041"));
+        assert_eq!(lone.encode_utf16().collect::<Vec<_>>(), vec![0xd800, 0x41]);
+        assert_eq!(string_unescape(&JsString::from_utf16(&[0xdfff])).encode_utf16().collect::<Vec<_>>(), vec![0xdfff]);
     }
 
     #[test]
@@ -442,6 +472,161 @@
         assert!(!array_ptr_eq(&first, &other));
         assert_eq!(array_get(&first, 0.0).as_ref(), "a");
         assert_eq!(array_get(&first, 1.0).as_ref(), "b");
+        template_strings_clear();
+    }
+
+    #[test]
+    fn template_object_storage_keeps_raw_and_cooked_identity_per_site() {
+        let first = template_object_storage(
+            "site-a",
+            vec![string("a\nb"), string("tail")],
+            vec![string("a\\nb"), string("tail")],
+        );
+        let same = template_object_storage(
+            "site-a",
+            vec![string("ignored")],
+            vec![string("ignored")],
+        );
+        let other = template_object_storage(
+            "site-b",
+            vec![string("a\nb"), string("tail")],
+            vec![string("a\\nb"), string("tail")],
+        );
+        let first_raw = array_raw(&first).expect("template raw storage");
+        let same_raw = array_raw(&same).expect("template raw storage");
+        assert!(array_ptr_eq(&first, &same));
+        assert!(array_ptr_eq(&first_raw, &same_raw));
+        assert!(!array_ptr_eq(&first, &other));
+        assert!(!array_ptr_eq(&first_raw, &array_raw(&other).unwrap()));
+        assert_eq!(array_get(&first, 0.0).as_ref(), "a\nb");
+        assert_eq!(array_get(&first_raw, 0.0).as_ref(), "a\\nb");
+        template_strings_clear();
+        let after_clear =
+            template_object_storage("site-a", vec![string("new")], vec![string("new")]);
+        assert!(!array_ptr_eq(&first, &after_clear));
+        template_strings_clear();
+    }
+
+    #[test]
+    fn template_object_storage_can_retain_an_invalid_cooked_element() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum Element {
+            Text(JsString),
+            Invalid,
+        }
+        impl ArrayElement for Element {}
+        let cooked = vec![Element::Invalid, Element::Text(string("tail"))];
+        let raw = vec![Element::Text(string("\\unicode")), Element::Text(string("tail"))];
+        let value = template_object_storage("invalid-site", cooked, raw);
+        assert_eq!(array_get(&value, 0.0), Element::Invalid);
+        assert_eq!(
+            array_get(&array_raw(&value).unwrap(), 0.0),
+            Element::Text(string("\\unicode"))
+        );
+        template_strings_clear();
+    }
+
+    #[test]
+    fn template_storage_rejects_strict_mutation_through_raw_and_mapped_views() {
+        let cooked = template_object_storage(
+            "frozen-site",
+            vec![string("one"), string("two")],
+            vec![string("raw-one"), string("raw-two")],
+        );
+        let raw = array_raw(&cooked).unwrap();
+        let mapped = array_mapped(cooked.clone(), |value| value, |value| value);
+        assert!(array_is_template_frozen(&cooked));
+        assert!(array_is_template_frozen(&raw));
+        assert!(array_is_template_frozen(&mapped));
+        assert!(!array_is_template_frozen(&array_new(vec![string("ordinary")])));
+
+        let writes: [fn(&JsArray<JsString>); 15] = [
+            |value| array_set(value, 0.0, string("changed")),
+            |value| array_set_undefined(value, 0.0),
+            |value| array_property_set(value, string("new"), string("changed")),
+            |value| array_set_length(value, 2.0),
+            |value| array_delete(value, 0.0),
+            |value| { array_push(value, string("changed")); },
+            |value| { array_pop(value); },
+            |value| { array_shift(value); },
+            |value| { array_unshift(value, Vec::new()); },
+            |value| { array_splice(value, 0.0, 0.0); },
+            |value| { array_reverse(value); },
+            |value| { array_fill(value, string("changed"), 0.0, 1.0); },
+            |value| { array_copy_within(value, 0.0, 1.0, 2.0); },
+            |value| { array_extend(value, &array_new(Vec::new())); },
+            |value| { array_set_raw(value, array_new(Vec::new())); },
+        ];
+        for array in [&cooked, &raw, &mapped] {
+            for write in writes {
+                let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| write(array)))
+                    .expect_err("template array write should throw");
+                let caught = caught_from_panic(payload);
+                assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
+            }
+            assert_eq!(array_len(array), 2.0);
+        }
+        assert_eq!(array_get(&cooked, 0.0).as_ref(), "one");
+        assert_eq!(array_get(&raw, 0.0).as_ref(), "raw-one");
+        // These operations have no writes on a dense frozen template array.
+        array_delete(&cooked, 10.0);
+        array_fill(&cooked, string("ignored"), 0.0, 0.0);
+        array_copy_within(&cooked, 0.0, 0.0, 0.0);
+        let empty = template_object_storage::<JsString>("empty-frozen", vec![], vec![]);
+        array_reverse(&empty);
+        assert!(array_is_template_frozen(&array_raw(&empty).unwrap()));
+        let single = template_object_storage("single-frozen", vec![string("x")], vec![string("x")]);
+        array_reverse(&single);
+        array_sort_by_snapshot(&single, |_, _| panic!("single-element comparator"));
+        let comparisons = std::cell::Cell::new(0);
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            array_sort_by_snapshot(&cooked, |_, _| {
+                comparisons.set(comparisons.get() + 1);
+                std::cmp::Ordering::Equal
+            });
+        })).expect_err("sorting two frozen elements should throw");
+        assert_eq!(caught_error_name(&caught_from_panic(payload)).as_ref(), "TypeError");
+        assert!(comparisons.get() > 0);
+        template_strings_clear();
+        // Clearing the cache does not unfreeze an already retained object.
+        assert!(array_is_template_frozen(&cooked));
+    }
+
+    #[test]
+    fn template_storage_reports_own_descriptors_for_raw_length_and_indices() {
+        let cooked = template_object_storage(
+            "descriptor-site",
+            vec![string("cooked"), string("tail")],
+            vec![string("raw"), string("tail")],
+        );
+        let mapped = array_mapped(cooked.clone(), |value| value, |value| value);
+        for array in [&cooked, &mapped] {
+            let raw = array_own_descriptor(array, &string("raw")).unwrap();
+            assert!(!raw.writable && !raw.enumerable && !raw.configurable);
+            let ArrayOwnValue::Raw(raw_array) = raw.value else { panic!("raw array") };
+            assert!(array_ptr_eq(&raw_array, &array_raw(array).unwrap()));
+            assert_eq!(array_get(&raw_array, 0.0).as_ref(), "raw");
+            assert!(array_own_descriptor(&raw_array, &string("raw")).is_none());
+
+            let length = array_own_descriptor(array, &string("length")).unwrap();
+            assert!(!length.writable && !length.enumerable && !length.configurable);
+            assert!(matches!(length.value, ArrayOwnValue::Length(2.0)));
+            let first = array_own_descriptor(array, &string("0")).unwrap();
+            assert!(!first.writable && first.enumerable && !first.configurable);
+            assert!(matches!(first.value, ArrayOwnValue::Element(value) if value == "cooked"));
+            assert!(array_own_descriptor(array, &string("01")).is_none());
+            assert!(array_own_descriptor(array, &string("2")).is_none());
+        }
+        let ordinary = array_new(vec![string("x")]);
+        let first = array_own_descriptor(&ordinary, &string("0")).unwrap();
+        assert!(first.writable && first.enumerable && first.configurable);
+        let length = array_own_descriptor(&ordinary, &string("length")).unwrap();
+        assert!(length.writable && !length.enumerable && !length.configurable);
+        array_set_undefined(&ordinary, 2.0);
+        assert!(array_own_descriptor(&ordinary, &string("1")).is_none());
+        let undefined = array_own_descriptor(&ordinary, &string("2")).unwrap();
+        assert!(matches!(undefined.value, ArrayOwnValue::Undefined));
+        assert!(undefined.writable && undefined.enumerable && undefined.configurable);
         template_strings_clear();
     }
 

@@ -5,7 +5,8 @@ use std::fmt::Write;
 pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     let mut used = false;
     module.visit_expressions(&mut |expr| {
-        used |= matches!(expr, Expr::LibCall { r#fn, .. } if r#fn == "buffer.fromDyn");
+        used |= matches!(expr, Expr::LibCall { r#fn, .. } if matches!(r#fn.as_str(), "buffer.fromDyn" | "buffer.byteLenDyn"));
+        used |= matches!(expr, Expr::BytesIntrinsic { method, .. } if method == "writeString");
     });
     if !used {
         return;
@@ -21,7 +22,9 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
                 )
                 .unwrap();
             }
-            Type::Record { shape_id } if module.records[*shape_id].tuple => {
+            Type::Record { shape_id }
+                if module.records[*shape_id].tuple && values::specialized(ty, module) =>
+            {
                 writeln!(
                     out,
                     "NativeValue::V{index}(_) => Some({}.0),",
@@ -51,7 +54,7 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
     for (index, ty) in values::types(module).iter().enumerate() {
         if let Type::Record { shape_id } = ty
             && !module.records[*shape_id].tuple
-            && !record_storage::shared(&module.records[*shape_id])
+            && !record_storage::shared(&module.records[*shape_id], module)
         {
             writeln!(out, "NativeValue::V{index}(_) => true,").unwrap();
         }

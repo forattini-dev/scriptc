@@ -531,6 +531,17 @@ pub fn search_params_to_string(value: &JsSearchParams) -> JsString {
     string(&search_params_serialize(value))
 }
 
+pub fn search_params_keys(value: &JsSearchParams) -> JsArray<JsString> {
+    array_new(
+        value
+            .pairs
+            .borrow()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect(),
+    )
+}
+
 fn search_params_at(value: &JsSearchParams, index: f64, pair_value: bool) -> JsString {
     if !index.is_finite() || index < 0.0 || index.fract() != 0.0 {
         return empty_string();

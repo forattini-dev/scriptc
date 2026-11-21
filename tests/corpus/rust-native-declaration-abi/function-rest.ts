@@ -1,0 +1,26 @@
+import { asDynamic, asTyped, compose, composePrivate, dynamicFunction, makeSuffix } from "function-rest";
+function brackets(value: string): string { return "[" + value + "]"; }
+const suffix = makeSuffix("!");
+const composed = compose(suffix, brackets);
+console.log("composed", composed("x"));
+console.log("empty", compose()("x"));
+console.log("private", composePrivate("x"));
+const original = dynamicFunction();
+original.tag = "shared";
+const adapted = asTyped(original);
+const second = asTyped(original);
+console.log("identity", original === adapted, adapted === second);
+console.log("distinct", adapted !== asTyped(dynamicFunction()));
+console.log("property", (adapted as any).tag === "shared");
+(adapted as any).tag = "changed";
+console.log("shared", original.tag === "changed");
+console.log("receiver", (adapted as any).call(original, "!") === "changed!");
+const functions = new Set<(text: string) => string>();
+functions.add(adapted);
+console.log("set", functions.has(second));
+original.self = adapted;
+const dynamicView = asDynamic(suffix);
+const dynamicViewAgain = asDynamic(suffix);
+console.log("dynamic-view", dynamicView("x") === "x!", dynamicView === dynamicViewAgain, (dynamicView as any) === (suffix as any));
+const partial: (value: any) => string = suffix;
+console.log("partial-view", partial("x") === "x!", (partial as any) === (suffix as any));

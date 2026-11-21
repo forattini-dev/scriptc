@@ -14,7 +14,7 @@ pub(super) fn apis() -> Vec<Api> {
             result: Type::String,
             implementation: Implementation::Runtime(runtime),
         }],
-        "Declaration-proven direct calls; evaluate all ordinary arguments before strict primitive ToNumber conversion; preserve UTF-16 units and per-code-point validation order; object coercion hooks, method-value aliases and iterable spreads are not admitted by this lowering",
+        "Declaration-proven direct calls and method-value aliases; evaluate all ordinary arguments before strict primitive ToNumber conversion; preserve UTF-16 units and per-code-point validation order; object coercion hooks and iterable spreads are not admitted by this lowering",
         &[
             "tests/corpus/rust-native-string-construction/values.ts",
             "tests/corpus/rust-native-string-construction/errors.ts",
@@ -23,4 +23,15 @@ pub(super) fn apis() -> Vec<Api> {
         ],
     ))
     .collect()
+}
+
+pub(super) fn internal() -> Vec<Builtin> {
+    vec![call!(
+        "string.iterArray",
+        [Type::String],
+        Type::Array {
+            elem: Box::new(Type::String)
+        },
+        "string_iteration_array"
+    )]
 }

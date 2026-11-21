@@ -5,7 +5,7 @@ import type { Lowerer } from "./lowerer.js";
 import { newFnCtx } from "./scope-env.js";
 import { nativeImportTargetOf } from "./lower-native-import-types.js";
 import { nativeModuleExports } from "./lower-native-import-exports.js";
-import { nativeArrayViewSupported, nativeRecordCheckSupported } from "../../ir/native-record.js";
+import { nativeReferenceSupported } from "../../ir/native-record.js";
 
 /** Local ESM imports own a cached evaluation and a live, singleton namespace.
  * JSVAL is the Rust runtime's safe handle here; no embedded engine is used. */
@@ -80,22 +80,7 @@ function nativeNamespaceBuilder(L: Lowerer, dep: ts.SourceFile, site: ts.CallExp
 }
 
 function identitySafe(L: Lowerer, type: IrType): boolean {
-  const record = (id: string) => L.shapes.get(id);
-  const union = (id: string) => L.unions.get(id);
-  if (nativeRecordCheckSupported(type, record, union) || nativeArrayViewSupported(type, record, union)) return true;
-  if (type.kind === "union") {
-    const arms = union(type.unionId)?.arms;
-    if (!arms) return false;
-    // Multiple array layouts share one dynamic tag. Admit only a single
-    // array beside nullish arms; record unions need a checked discriminant.
-    if (arms.some(arm => arm.kind === "array" || arm.kind === "record")) {
-      return arms.filter(arm => arm.kind === "array").length === 1 &&
-        arms.every(arm => arm.kind === "nullT" || arm.kind === "undefinedT" ||
-          arm.kind === "array" && nativeArrayViewSupported(arm, record, union));
-    }
-    return arms.every(arm => identitySafe(L, arm));
-  }
-  return ["f64", "bool", "string", "nullT", "undefinedT", "void", "jsval", "dyn"].includes(type.kind);
+  return nativeReferenceSupported(type, id => L.shapes.get(id), id => L.unions.get(id));
 }
 
 function callableHook(L: Lowerer, name: string, type: IrType): boolean {

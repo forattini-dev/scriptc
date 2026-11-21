@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "types": ["node"],
+    "typeRoots": ["../../../../../node_modules/@types"]
+  },
+  "include": ["main.ts"]
+}

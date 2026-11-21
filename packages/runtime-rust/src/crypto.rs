@@ -22,7 +22,10 @@ fn crypto_random_size(size: f64) -> usize {
 pub fn crypto_random_bytes(size: f64) -> JsBytes<u8> {
     let mut bytes = vec![0; crypto_random_size(size)];
     crypto_random_fill(&mut bytes);
-    bytes_from_vec(bytes)
+    let result = bytes_from_vec(bytes);
+    // Node returns a Buffer, so encoding-aware toString applies.
+    result.with_mut(|data| data.buffer = true);
+    result
 }
 
 pub fn crypto_random_string(size: f64, encoding: &JsString) -> JsString {
@@ -45,6 +48,68 @@ pub fn crypto_random_uuid() -> JsString {
         output.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
     string(&output)
+}
+
+fn crypto_der_length(length: usize) -> Vec<u8> {
+    if length < 128 {
+        return vec![length as u8];
+    }
+    let bytes = length.to_be_bytes();
+    let first = bytes
+        .iter()
+        .position(|byte| *byte != 0)
+        .unwrap_or(bytes.len() - 1);
+    let significant = &bytes[first..];
+    let mut encoded = Vec::with_capacity(significant.len() + 1);
+    encoded.push(0x80 | significant.len() as u8);
+    encoded.extend_from_slice(significant);
+    encoded
+}
+
+fn crypto_der_tlv(tag: u8, contents: &[u8]) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(contents.len() + 6);
+    encoded.push(tag);
+    encoded.extend(crypto_der_length(contents.len()));
+    encoded.extend_from_slice(contents);
+    encoded
+}
+
+pub fn crypto_private_key_pkcs8_pem(value: &JsString) -> JsString {
+    if !value.is_well_formed() {
+        throw_type_error("Private key must be a well-formed string".into());
+    }
+    let text = value.to_utf8_lossy();
+    let begin = "-----BEGIN RSA PRIVATE KEY-----";
+    let end = "-----END RSA PRIVATE KEY-----";
+    let Some(start) = text.find(begin).map(|index| index + begin.len()) else {
+        throw_type_error("native createPrivateKey currently requires PKCS1 PEM".into());
+    };
+    let Some(finish) = text[start..].find(end).map(|index| start + index) else {
+        throw_type_error("Invalid PKCS1 private key PEM".into());
+    };
+    let body = text[start..finish]
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    let pkcs1 = bytes_base64_decode(&body);
+    if pkcs1.is_empty() || ring::signature::RsaKeyPair::from_der(&pkcs1).is_err() {
+        throw_type_error("Invalid PKCS1 private key".into());
+    }
+    const RSA_ALGORITHM: &[u8] = &[
+        0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
+    ];
+    let mut private_key_info = vec![0x02, 0x01, 0x00];
+    private_key_info.extend_from_slice(RSA_ALGORITHM);
+    private_key_info.extend(crypto_der_tlv(0x04, &pkcs1));
+    let pkcs8 = crypto_der_tlv(0x30, &private_key_info);
+    let encoded = bytes_base64_encode(&pkcs8);
+    let mut pem = String::from("-----BEGIN PRIVATE KEY-----\n");
+    for line in encoded.as_bytes().chunks(64) {
+        pem.push_str(std::str::from_utf8(line).expect("base64 is ASCII"));
+        pem.push('\n');
+    }
+    pem.push_str("-----END PRIVATE KEY-----\n");
+    JsString::from(pem)
 }
 
 /// A digest this runtime carries, split by WHO computes it: `ring` for
@@ -85,11 +150,11 @@ fn crypto_digest_algorithm_opt(algorithm: &JsString) -> Option<CryptoDigest> {
     }
 }
 
-/// The five lowered digest algorithms. The frontend fences every other
-/// literal, so an unknown name here is a compiler invariant break.
+/// The five lowered digest algorithms. The frontend fences unsupported
+/// literals; a computed name is validated here with Node's error.
 fn crypto_digest_algorithm(algorithm: &JsString) -> CryptoDigest {
     crypto_digest_algorithm_opt(algorithm)
-        .unwrap_or_else(|| unreachable!("scriptc invariant: unsupported hash algorithm reached the runtime"))
+        .unwrap_or_else(|| throw_error("Digest method not supported".to_owned()))
 }
 
 /// `host.digest(alg, bytes)`: the raw digest, or `None` for an algorithm
@@ -143,9 +208,9 @@ impl CryptoHmac {
     fn sign(self, key: &[u8], data: &[u8]) -> Vec<u8> {
         match self {
             Self::Md5 => md5_hmac(key, data).to_vec(),
-            Self::Ring(algorithm) => {
-                ring::hmac::sign(&ring::hmac::Key::new(algorithm, key), data).as_ref().to_vec()
-            }
+            Self::Ring(algorithm) => ring::hmac::sign(&ring::hmac::Key::new(algorithm, key), data)
+                .as_ref()
+                .to_vec(),
         }
     }
 }
@@ -164,8 +229,7 @@ fn crypto_hmac_algorithm_opt(algorithm: &JsString) -> Option<CryptoHmac> {
 }
 
 fn crypto_hmac_algorithm(algorithm: &JsString) -> CryptoHmac {
-    crypto_hmac_algorithm_opt(algorithm)
-        .unwrap_or_else(|| unreachable!("scriptc invariant: unsupported HMAC algorithm reached the runtime"))
+    crypto_hmac_algorithm_opt(algorithm).unwrap_or_else(|| crypto_invalid_digest(algorithm))
 }
 
 fn crypto_hash_finalized() -> ! {
@@ -235,6 +299,226 @@ impl Drop for CryptoHmacData {
 }
 
 pub type JsCryptoHmac = Gc<CryptoHmacData>;
+
+pub struct CryptoSignData {
+    data: Vec<u8>,
+    finalized: bool,
+}
+
+impl Trace for CryptoSignData {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+impl ClearEdges for CryptoSignData {
+    fn clear_edges(&mut self) {
+        self.data.fill(0);
+        self.data.clear();
+    }
+}
+
+impl Drop for CryptoSignData {
+    fn drop(&mut self) {
+        self.data.fill(0);
+    }
+}
+
+pub type JsCryptoSign = Gc<CryptoSignData>;
+
+fn crypto_sign_invalid_state() -> ! {
+    throw_error_code("Not initialised".to_owned(), "ERR_CRYPTO_INVALID_STATE")
+}
+
+pub fn crypto_sign_new(algorithm: &JsString) -> JsCryptoSign {
+    if !matches!(
+        algorithm.to_utf8_lossy().to_ascii_lowercase().as_str(),
+        "rsa-sha256" | "sha256"
+    ) {
+        crypto_invalid_digest(algorithm);
+    }
+    Gc::new(CryptoSignData {
+        data: Vec::new(),
+        finalized: false,
+    })
+}
+
+pub fn crypto_sign_update_string(sign: &JsCryptoSign, value: &JsString) -> JsCryptoSign {
+    sign.with_mut(|state| {
+        if state.finalized {
+            crypto_sign_invalid_state();
+        }
+        state.data.extend_from_slice(value.as_bytes());
+    });
+    sign.clone()
+}
+
+pub fn crypto_sign_update_bytes(sign: &JsCryptoSign, value: &JsBytes<u8>) -> JsCryptoSign {
+    crypto_with_bytes(value, |bytes| {
+        sign.with_mut(|state| {
+            if state.finalized {
+                crypto_sign_invalid_state();
+            }
+            state.data.extend_from_slice(bytes);
+        })
+    });
+    sign.clone()
+}
+
+fn crypto_sign_invalid_key() -> ! {
+    throw_error_code("Unsupported private key".to_owned(), "ERR_OSSL_UNSUPPORTED")
+}
+
+fn crypto_sign_bad_password() -> ! {
+    throw_error_code(
+        "Unable to decrypt private key".into(),
+        "ERR_OSSL_BAD_DECRYPT",
+    )
+}
+
+fn crypto_sign_legacy_key(text: &str, password: Option<&JsString>) -> ring::signature::RsaKeyPair {
+    use cbc::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
+    let password = password.unwrap_or_else(|| crypto_sign_bad_password());
+    let text = text.replace('\r', "");
+    let begin = "-----BEGIN RSA PRIVATE KEY-----";
+    let end = "-----END RSA PRIVATE KEY-----";
+    let content = text
+        .split_once(begin)
+        .and_then(|(_, rest)| rest.split_once(end).map(|(content, _)| content))
+        .unwrap_or_else(|| crypto_sign_invalid_key());
+    let (headers, body) = content
+        .trim()
+        .split_once("\n\n")
+        .unwrap_or_else(|| crypto_sign_invalid_key());
+    if !headers
+        .lines()
+        .any(|line| line.trim() == "Proc-Type: 4,ENCRYPTED")
+    {
+        crypto_sign_invalid_key();
+    }
+    let (cipher, iv) = headers
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("DEK-Info: "))
+        .and_then(|value| value.split_once(','))
+        .unwrap_or_else(|| crypto_sign_invalid_key());
+    let key_len = match cipher {
+        "AES-128-CBC" => 16,
+        "AES-192-CBC" => 24,
+        "AES-256-CBC" => 32,
+        _ => crypto_sign_invalid_key(),
+    };
+    let iv = bytes_hex_decode(iv);
+    if iv.len() != 16 {
+        crypto_sign_invalid_key();
+    }
+    let mut derived = Vec::with_capacity(key_len + 16);
+    let mut previous = Vec::new();
+    while derived.len() < key_len {
+        let mut input = previous;
+        input.extend_from_slice(password.as_bytes());
+        input.extend_from_slice(&iv[..8]);
+        previous = md5_digest(&input).to_vec();
+        input.fill(0);
+        derived.extend_from_slice(&previous);
+    }
+    previous.fill(0);
+    derived.truncate(key_len);
+    let mut ciphertext = bytes_base64_decode(body);
+    let decrypted = match cipher {
+        "AES-128-CBC" => cbc::Decryptor::<aes::Aes128>::new_from_slices(&derived, &iv)
+            .expect("validated AES key")
+            .decrypt_padded_mut::<Pkcs7>(&mut ciphertext),
+        "AES-192-CBC" => cbc::Decryptor::<aes::Aes192>::new_from_slices(&derived, &iv)
+            .expect("validated AES key")
+            .decrypt_padded_mut::<Pkcs7>(&mut ciphertext),
+        "AES-256-CBC" => cbc::Decryptor::<aes::Aes256>::new_from_slices(&derived, &iv)
+            .expect("validated AES key")
+            .decrypt_padded_mut::<Pkcs7>(&mut ciphertext),
+        _ => unreachable!(),
+    };
+    derived.fill(0);
+    let decoded = decrypted.unwrap_or_else(|_| crypto_sign_bad_password());
+    let key = ring::signature::RsaKeyPair::from_der(decoded)
+        .unwrap_or_else(|_| crypto_sign_bad_password());
+    ciphertext.fill(0);
+    key
+}
+
+fn crypto_sign_key(key: &JsString, passphrase: Option<&JsString>) -> ring::signature::RsaKeyPair {
+    let text = key.to_utf8_lossy();
+    if text.contains("-----BEGIN RSA PRIVATE KEY-----") && text.contains("Proc-Type: 4,ENCRYPTED") {
+        return crypto_sign_legacy_key(text, passphrase);
+    }
+    let (label, document) =
+        pkcs8::SecretDocument::from_pem(text).unwrap_or_else(|_| crypto_sign_invalid_key());
+    match label {
+        "RSA PRIVATE KEY" => ring::signature::RsaKeyPair::from_der(document.as_bytes())
+            .unwrap_or_else(|_| crypto_sign_invalid_key()),
+        "PRIVATE KEY" => ring::signature::RsaKeyPair::from_pkcs8(document.as_bytes())
+            .unwrap_or_else(|_| crypto_sign_invalid_key()),
+        "ENCRYPTED PRIVATE KEY" => {
+            let password = passphrase.unwrap_or_else(|| {
+                throw_error_code("Passphrase required".into(), "ERR_OSSL_BAD_DECRYPT")
+            });
+            let key = pkcs8::EncryptedPrivateKeyInfo::try_from(document.as_bytes())
+                .unwrap_or_else(|_| crypto_sign_invalid_key());
+            let decrypted = key.decrypt(password.as_bytes()).unwrap_or_else(|_| {
+                throw_error_code(
+                    "Unable to decrypt private key".into(),
+                    "ERR_OSSL_BAD_DECRYPT",
+                )
+            });
+            ring::signature::RsaKeyPair::from_pkcs8(decrypted.as_bytes())
+                .unwrap_or_else(|_| crypto_sign_invalid_key())
+        }
+        _ => crypto_sign_invalid_key(),
+    }
+}
+
+fn crypto_sign_finish(
+    sign: &JsCryptoSign,
+    key: &JsString,
+    passphrase: Option<&JsString>,
+) -> Vec<u8> {
+    if sign.with(|state| state.finalized) {
+        crypto_sign_invalid_state();
+    }
+    let key = crypto_sign_key(key, passphrase);
+    let data = sign.with_mut(|state| {
+        state.finalized = true;
+        std::mem::take(&mut state.data)
+    });
+    let mut signature = vec![0; key.public().modulus_len()];
+    key.sign(
+        &ring::signature::RSA_PKCS1_SHA256,
+        &ring::rand::SystemRandom::new(),
+        &data,
+        &mut signature,
+    )
+    .unwrap_or_else(|_| throw_error("RSA signing failed".into()));
+    signature
+}
+
+pub fn crypto_sign_string(
+    sign: &JsCryptoSign,
+    key: &JsString,
+    passphrase: Option<&JsString>,
+    encoding: &JsString,
+) -> JsString {
+    let encoding = checked_buffer_encoding(encoding);
+    decode_bytes(
+        &crypto_sign_finish(sign, key, passphrase),
+        &string(encoding),
+    )
+}
+
+pub fn crypto_sign_bytes(
+    sign: &JsCryptoSign,
+    key: &JsString,
+    passphrase: Option<&JsString>,
+) -> JsBytes<u8> {
+    let result = bytes_from_vec(crypto_sign_finish(sign, key, passphrase));
+    result.with_mut(|data| data.buffer = true);
+    result
+}
 
 pub fn crypto_hash_new(algorithm: &JsString) -> JsCryptoHash {
     let Some(algorithm) = crypto_digest_algorithm_opt(algorithm) else {
@@ -380,13 +664,27 @@ pub fn crypto_hmac_digest_string(
     crypto_hmac_digest(algorithm, key, data.as_bytes(), encoding)
 }
 
+/// `createHmac(algorithm, stringKey).update(text).digest(encoding)`: Node
+/// encodes a string key as UTF-8 before keying the MAC.
+pub fn crypto_hmac_digest_string_key(
+    algorithm: &JsString,
+    key: &JsString,
+    data: &JsString,
+    encoding: &JsString,
+) -> JsString {
+    let key = bytes_from_vec(key.as_bytes().to_vec());
+    crypto_hmac_digest(algorithm, &key, data.as_bytes(), encoding)
+}
+
 pub fn crypto_hmac_digest_bytes(
     algorithm: &JsString,
     key: &JsBytes<u8>,
     data: &JsBytes<u8>,
     encoding: &JsString,
 ) -> JsString {
-    crypto_with_bytes(data, |data| crypto_hmac_digest(algorithm, key, data, encoding))
+    crypto_with_bytes(data, |data| {
+        crypto_hmac_digest(algorithm, key, data, encoding)
+    })
 }
 
 /// crypto.timingSafeEqual: a constant-time comparison of two equally long
@@ -431,6 +729,44 @@ pub fn crypto_hash_digest_bytes(
     encoding: &JsString,
 ) -> JsString {
     crypto_with_bytes(data, |data| crypto_hash_digest(algorithm, data, encoding))
+}
+
+pub fn crypto_hash_digest_strings(
+    algorithm: &JsString,
+    data: &JsArray<JsString>,
+    encoding: &JsString,
+) -> JsString {
+    let hash = crypto_hash_new(algorithm);
+    data.with(|chunks| {
+        for chunk in chunks.elements().iter() {
+            crypto_hash_update_string(&hash, chunk);
+        }
+    });
+    crypto_hash_digest_string_handle(&hash, encoding)
+}
+
+pub fn crypto_rsa_pkcs1_sha256(
+    algorithm: &JsString,
+    key: &JsBytes<u8>,
+    data: &JsBytes<u8>,
+) -> JsBytes<u8> {
+    if algorithm.to_utf8_lossy() != "RSASSA-PKCS1-v1_5" {
+        throw_error("scriptc: unsupported Web Crypto signing algorithm".to_owned());
+    }
+    let key = crypto_with_bytes(key, <[u8]>::to_vec);
+    let data = crypto_with_bytes(data, <[u8]>::to_vec);
+    let key = ring::signature::RsaKeyPair::from_pkcs8(&key)
+        .unwrap_or_else(|_| throw_error("Invalid keyData".to_owned()));
+    let random = ring::rand::SystemRandom::new();
+    let mut signature = vec![0; key.public().modulus_len()];
+    key.sign(
+        &ring::signature::RSA_PKCS1_SHA256,
+        &random,
+        &data,
+        &mut signature,
+    )
+    .unwrap_or_else(|_| throw_error("Web Crypto RSA signing failed".to_owned()));
+    bytes_from_vec(signature)
 }
 
 fn crypto_random_fill_range(bytes: &JsBytes<u8>, offset: f64, size: f64) -> JsBytes<u8> {
@@ -519,9 +855,9 @@ pub fn crypto_random_int(min: f64, max: f64) -> f64 {
     loop {
         let mut random = [0_u8; 6];
         crypto_random_fill(&mut random);
-        let value = random
-            .into_iter()
-            .fold(0_u64, |accumulator, byte| accumulator << 8 | u64::from(byte));
+        let value = random.into_iter().fold(0_u64, |accumulator, byte| {
+            accumulator << 8 | u64::from(byte)
+        });
         if value < limit {
             return min + (value % span) as f64;
         }
@@ -632,12 +968,21 @@ fn crypto_der_item(input: &[u8], offset: usize) -> Option<(u8, &[u8], usize)> {
 }
 
 fn crypto_x509_time(tag: u8, input: &[u8]) -> Option<JsString> {
-    let expected = if tag == 0x17 { 13 } else if tag == 0x18 { 15 } else { return None };
-    if input.len() != expected || input.last() != Some(&b'Z') ||
-        !input[..input.len() - 1].iter().all(u8::is_ascii_digit) {
+    let expected = if tag == 0x17 {
+        13
+    } else if tag == 0x18 {
+        15
+    } else {
+        return None;
+    };
+    if input.len() != expected
+        || input.last() != Some(&b'Z')
+        || !input[..input.len() - 1].iter().all(u8::is_ascii_digit)
+    {
         return None;
     }
-    let pair = |offset: usize| i32::from(input[offset] - b'0') * 10 + i32::from(input[offset + 1] - b'0');
+    let pair =
+        |offset: usize| i32::from(input[offset] - b'0') * 10 + i32::from(input[offset + 1] - b'0');
     let (year, offset) = if tag == 0x17 {
         let year = pair(0);
         (if year < 50 { year + 2000 } else { year + 1900 }, 2)
@@ -650,8 +995,7 @@ fn crypto_x509_time(tag: u8, input: &[u8]) -> Option<JsString> {
     let minute = pair(offset + 6);
     let second = pair(offset + 8);
     const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     let month_name = MONTHS.get(usize::try_from(month - 1).ok()?)?;
     Some(string(&format!(
@@ -709,6 +1053,20 @@ macro_rules! crypto_x509_exports {
     };
 }
 
-crypto_x509_exports!(crypto_x509_fingerprint_bytes, crypto_x509_fingerprint_string, crypto_x509_fingerprint);
-crypto_x509_exports!(crypto_x509_valid_from_bytes, crypto_x509_valid_from_string, crypto_x509_validity, false);
-crypto_x509_exports!(crypto_x509_valid_to_bytes, crypto_x509_valid_to_string, crypto_x509_validity, true);
+crypto_x509_exports!(
+    crypto_x509_fingerprint_bytes,
+    crypto_x509_fingerprint_string,
+    crypto_x509_fingerprint
+);
+crypto_x509_exports!(
+    crypto_x509_valid_from_bytes,
+    crypto_x509_valid_from_string,
+    crypto_x509_validity,
+    false
+);
+crypto_x509_exports!(
+    crypto_x509_valid_to_bytes,
+    crypto_x509_valid_to_string,
+    crypto_x509_validity,
+    true
+);

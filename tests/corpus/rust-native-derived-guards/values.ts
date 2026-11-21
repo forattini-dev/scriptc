@@ -19,3 +19,10 @@ function reverse(input: number | null): number {
   return 0 !== derived ? take(items.length, 1, ceiling!) : 0;
 }
 console.log('reverse', reverse(null), reverse(4));
+function passthrough(value: number): number { return value; }
+function strictNullGuard(input: number | null | undefined, fallback: number): number {
+  const value = input;
+  const derived = value === null ? 0 : fallback;
+  return derived === 0 ? 0 : passthrough(value!);
+}
+console.log('strict-null', strictNullGuard(undefined, 2), strictNullGuard(null, 2), strictNullGuard(3, 2));

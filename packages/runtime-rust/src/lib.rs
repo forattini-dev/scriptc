@@ -13,11 +13,21 @@ pub use date_value::*;
 mod bigint;
 pub use bigint::*;
 
+mod class_objects;
+mod ordinary_descriptors;
+mod ordinary_objects;
+mod property_descriptors;
 mod symbols;
 mod url_values;
+mod windows_console;
 
+pub use class_objects::*;
+pub use ordinary_descriptors::*;
+pub use ordinary_objects::*;
+pub use property_descriptors::*;
 pub use symbols::*;
 pub use url_values::*;
+pub use windows_console::*;
 
 static PROCESS_START: OnceLock<std::time::Instant> = OnceLock::new();
 
@@ -103,6 +113,7 @@ include!("crypto.rs");
 include!("collections.rs");
 include!("map_views.rs");
 include!("event_emitter.rs");
+include!("event_target.rs");
 include!("readable.rs");
 include!("writable.rs");
 include!("duplex.rs");
@@ -154,6 +165,7 @@ include!("effect_sql.rs");
 include!("effect_http.rs");
 include!("windows_paths.rs");
 include!("json.rs");
+include!("toml.rs");
 include!("json_parse_source.rs");
 include!("native_json.rs");
 include!("native_delete.rs");
@@ -177,10 +189,12 @@ include!("fetch_stream_body.rs");
 include!("fetch_reader.rs");
 include!("web_stream.rs");
 include!("web_stream_from.rs");
+include!("web_text_decoder_stream.rs");
 include!("http_agent.rs");
 include!("tls_ca.rs");
 include!("tls_client.rs");
 include!("tls_socket.rs");
+include!("tls_peer_certificate.rs");
 include!("tls_server.rs");
 include!("util_parse_args.rs");
 
@@ -204,10 +218,12 @@ mod tests {
     include!("regex.test.rs");
     include!("tests/event_loop_order.rs");
     include!("tests/crypto.rs");
+    include!("tests/crypto_sign.rs");
     include!("tests/language_and_heap.rs");
     include!("string_repeat.test.rs");
     include!("error_string.test.rs");
     include!("promise_views.test.rs");
+    include!("promise_traced_reactions.test.rs");
     include!("promise_properties.test.rs");
     include!("promises.test.rs");
     include!("promise_all_tuple.test.rs");
@@ -242,6 +258,7 @@ mod tests {
     include!("tests/fetch_reader.rs");
     include!("web_stream.test.rs");
     include!("web_stream_from.test.rs");
+    include!("web_text_decoder_stream.test.rs");
     include!("native_module.test.rs");
     include!("json_parse_source.test.rs");
     include!("collections.test.rs");

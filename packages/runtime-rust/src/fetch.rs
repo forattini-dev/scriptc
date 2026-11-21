@@ -32,6 +32,33 @@ pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
     })
 }
 
+pub fn fetch_response_new_bytes(body: &JsBytes<u8>) -> JsHttpRequest {
+    let response = fetch_response_new_text(&empty_string());
+    response.with_mut(|response| response.body = bytes_u8_values(body));
+    response
+}
+
+pub fn fetch_response_apply_init(
+    response: &JsHttpRequest,
+    status: f64,
+    status_text: &JsString,
+    headers: &JsArray<JsString>,
+) {
+    response.with_mut(|response| {
+        response.status_code = Some(status);
+        response.status_message = Some(status_text.clone());
+        response.headers.clear();
+        let values = array_values(headers);
+        for pair in values.as_chunks::<2>().0 {
+            response.headers.push((
+                pair[0].clone(),
+                pair[0].to_ascii_lowercase().into(),
+                pair[1].clone(),
+            ));
+        }
+    });
+}
+
 pub fn fetch_response_new_empty() -> JsHttpRequest {
     let response = fetch_response_new_text(&empty_string());
     response.with_mut(|r| r.fetch_null_body = true);
@@ -74,6 +101,10 @@ pub fn fetch_start(
             &request,
             Rc::new(move |response| {
                 http_request_mark_fetch_response(&response, &response_url);
+                // Every native HTTP response owns one stable body stream.
+                // text()/arrayBuffer() and Response.body therefore share
+                // disturbance, locking and object identity.
+                let _ = fetch_response_body_stream(&response);
                 let _ = promise_fulfill(&fulfilled, response);
             }),
             Rc::new(move |tracer| tracer.edge(&fulfilled_trace)),

@@ -65,17 +65,22 @@ impl Lowerer<'_> {
         }
         let source = primitives::primitive_source(condition.operand());
         let symbol = self.symbol(node);
-        if symbol == 0 || source.kind() != SyntaxKind::Identifier || self.symbol(source) != symbol
-        {
+        if symbol == 0 || source.kind() != SyntaxKind::Identifier || self.symbol(source) != symbol {
             return false;
         }
         let body = guard.then_statement();
         if body.kind() == SyntaxKind::Block {
             let statements = body.statements().into_iter().collect::<Vec<_>>();
             statements.len() == 1
-                && matches!(statements[0].kind(), SyntaxKind::ThrowStatement | SyntaxKind::ReturnStatement)
+                && matches!(
+                    statements[0].kind(),
+                    SyntaxKind::ThrowStatement | SyntaxKind::ReturnStatement
+                )
         } else {
-            matches!(body.kind(), SyntaxKind::ThrowStatement | SyntaxKind::ReturnStatement)
+            matches!(
+                body.kind(),
+                SyntaxKind::ThrowStatement | SyntaxKind::ReturnStatement
+            )
         }
     }
 
@@ -128,6 +133,15 @@ impl Lowerer<'_> {
             return None;
         }
         let condition = primitives::primitive_source(guard.expression());
+        let condition = if condition.kind() == SyntaxKind::BinaryExpression
+            && condition.operator_token().kind() == SyntaxKind::AmpersandAmpersandToken
+        {
+            // The local passed the left truthiness test before the predicate.
+            // Calling the predicate does not expose or retag that lexical cell.
+            primitives::primitive_source(condition.left())
+        } else {
+            condition
+        };
         let symbol = self.symbol(node);
         if symbol == 0
             || condition.kind() != SyntaxKind::Identifier
@@ -160,10 +174,25 @@ impl Lowerer<'_> {
         matches!(ty, Type::Union { union_id } if self.unions[*union_id].arms.contains(&Type::Undefined))
     }
 
+    // Flow presence and optional storage are deliberately different concepts.
+    // A null arm is a present JavaScript value for fields and array elements,
+    // but a local `T | null` can still be proven to contain T after a guard.
+    pub(super) fn presence_storage(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Union { union_id } if self.unions[*union_id]
+            .arms
+            .iter()
+            .any(|arm| matches!(arm, Type::Null | Type::Undefined)))
+    }
+
     fn var_value_type(&mut self, declaration: Node) -> Result<Type, String> {
         let name = declaration.name();
         if name.kind() != SyntaxKind::Identifier {
             return Err(self.refuse(declaration, "var destructuring is not ported"));
+        }
+        if !declaration.initializer().is_nil()
+            && let Some(symbol) = self.symbol_initializer_storage(declaration.initializer())
+        {
+            return Ok(symbol);
         }
         let ty = self.storage_type(name)?;
         if matches!(&ty, Type::Map { key, value } if **key == Type::Dyn && **value == Type::Dyn) {
@@ -206,15 +235,25 @@ impl Lowerer<'_> {
 
     pub(super) fn var_call_effects(&mut self) {
         self.var_defined.retain(|symbol| {
-            let immutable = self
-                .bindings
-                .get(symbol)
-                .or_else(|| self.module_bindings.get(symbol))
-                .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(symbol)))
-                .is_some_and(|local| !local.mutable);
-            // A call can change a captured mutable cell, but cannot retag an
-            // immutable value snapshot. Its object's properties remain live.
-            immutable
+            let stable = if let Some(local) = self.bindings.get(symbol) {
+                // An ordinary local is not reachable by a callee. Captured
+                // mutable locals are boxed when their closure is lowered and
+                // must be invalidated because the call may invoke that closure.
+                !local.mutable || !local.boxed || !self.nested_assignment_symbols.contains(symbol)
+            } else if let Some(global) = self.module_bindings.get(symbol) {
+                // A mutable module binding can be observed and changed by any
+                // function in the module without using the closure box ABI.
+                !global.mutable
+            } else {
+                self.outer
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(symbol))
+                    .is_some_and(|local| !local.mutable)
+            };
+            // Calls do not retag immutable snapshots or uncaptured locals.
+            // Object properties remain live and are deliberately not facts.
+            stable
                 || !matches!(
                     self.var_types.get(symbol),
                     Some(Type::Union { .. } | Type::Dyn)
@@ -222,23 +261,49 @@ impl Lowerer<'_> {
         });
     }
 
-    // A loop may execute zero times or repeatedly. Only facts about immutable
-    // bindings survive both the back edge and arbitrary calls in the body.
-    pub(super) fn immutable_var_facts(&self) -> HashSet<u32> {
-        self.var_defined
-            .iter()
-            .copied()
-            .filter(|symbol| {
-                self.bindings
-                    .get(symbol)
-                    .or_else(|| self.module_bindings.get(symbol))
-                    .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(symbol)))
+    // A loop may execute zero times or repeatedly. Besides immutable values,
+    // a definitely initialized, uncaptured local whose declared value type
+    // cannot contain undefined remains defined: every represented assignment
+    // is checked against that declared type before it reaches the optional
+    // storage cell. Mutable globals and captured cells remain call-observable.
+    pub(super) fn immutable_var_facts(&mut self) -> HashSet<u32> {
+        let symbols = self.var_defined.iter().copied().collect::<Vec<_>>();
+        let mut stable = HashSet::new();
+        for symbol in symbols {
+            let keep = if let Some(local) = self.bindings.get(&symbol) {
+                let (mutable, boxed) = (local.mutable, local.boxed);
+                if !mutable {
+                    true
+                } else if boxed {
+                    false
+                } else if !matches!(
+                    self.var_types.get(&symbol),
+                    Some(Type::Union { .. } | Type::Dyn)
+                ) {
+                    true
+                } else {
+                    let declared = self
+                        .checker
+                        .get_type_of_symbol(source_frontend::prelude::SymbolId(symbol));
+                    !self.source_has_undefined(declared)
+                }
+            } else if let Some(global) = self.module_bindings.get(&symbol) {
+                !global.mutable
+            } else {
+                self.outer
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(&symbol))
                     .is_some_and(|local| !local.mutable)
-            })
-            .collect()
+            };
+            if keep {
+                stable.insert(symbol);
+            }
+        }
+        stable
     }
 
-    fn var_undefined(&self, ty: Type, node: Node) -> Result<Expr, String> {
+    pub(super) fn var_undefined(&self, ty: Type, node: Node) -> Result<Expr, String> {
         self.coerce(
             Expr::UnitLit {
                 unit: "undefined",
@@ -403,7 +468,17 @@ impl Lowerer<'_> {
                 continue;
             }
             let symbol = self.symbol(value);
-            if !self.var_types.contains_key(&symbol) {
+            let binding_type = self
+                .bindings
+                .get(&symbol)
+                .or_else(|| self.module_bindings.get(&symbol))
+                .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
+                .map(|binding| binding.r#type.clone());
+            if !self.var_types.contains_key(&symbol)
+                && !binding_type
+                    .as_ref()
+                    .is_some_and(|ty| self.presence_storage(ty))
+            {
                 continue;
             }
             // Only the null-literal loose comparison is lowered. Its
@@ -414,6 +489,19 @@ impl Lowerer<'_> {
                     return Some(symbol);
                 }
                 continue;
+            }
+            if unit.kind() == SyntaxKind::NullKeyword
+                && binding_type.as_ref().is_some_and(|ty| {
+                    matches!(ty, Type::Union { union_id }
+                        if self.unions[*union_id].arms.contains(&Type::Null)
+                            && !self.unions[*union_id].arms.contains(&Type::Undefined))
+                })
+            {
+                // `value === null` in the false branch (and `!== null`
+                // in the true branch) proves presence only when undefined is
+                // not another storage arm. Loose null comparisons above prove
+                // absence of both unit tags.
+                return Some(symbol);
             }
             if unit.kind() != SyntaxKind::Identifier || unit.text() != "undefined" {
                 continue;
@@ -434,7 +522,107 @@ impl Lowerer<'_> {
 
     // Combine only pure presence tests. Calls or other effects inside a
     // condition can invalidate an earlier test and must not restore its facts.
+    /// `[a, b].every((value) => value != null && ...)` evaluates its callback
+    /// on every element, so a true result proves each immutable identifier
+    /// element present. The predicate must test its parameter with a loose or
+    /// strict nullish comparison as a top-level `&&` conjunct. A false result
+    /// proves nothing; the call is otherwise an ordinary expression.
+    fn guarded_every_literal(&mut self, node: Node, truth: bool) -> Option<HashSet<u32>> {
+        let member = node.expression();
+        if member.kind() != SyntaxKind::PropertyAccessExpression
+            || member.name().text() != "every"
+        {
+            return None;
+        }
+        let array = primitives::primitive_source(member.expression());
+        if array.kind() != SyntaxKind::ArrayLiteralExpression {
+            return None;
+        }
+        let args = node.arguments().into_iter().collect::<Vec<_>>();
+        let [callback] = args.as_slice() else {
+            return None;
+        };
+        let callback = primitives::primitive_source(*callback);
+        if callback.kind() != SyntaxKind::ArrowFunction {
+            return None;
+        }
+        let parameters = callback.parameters().into_iter().collect::<Vec<_>>();
+        let [parameter] = parameters.as_slice() else {
+            return None;
+        };
+        if parameter.name().kind() != SyntaxKind::Identifier {
+            return None;
+        }
+        let parameter_name = parameter.name().text().to_string();
+        let mut body = callback.body();
+        if body.kind() == SyntaxKind::Block {
+            let statements = body.statements().into_iter().collect::<Vec<_>>();
+            let [statement] = statements.as_slice() else {
+                return None;
+            };
+            if statement.kind() != SyntaxKind::ReturnStatement || statement.expression().is_nil() {
+                return None;
+            }
+            body = statement.expression();
+        }
+        fn tests_presence(node: Node, name: &str) -> bool {
+            let node = primitives::primitive_source(node);
+            if node.kind() != SyntaxKind::BinaryExpression {
+                return false;
+            }
+            let op = node.operator_token().kind();
+            if op == SyntaxKind::AmpersandAmpersandToken {
+                return tests_presence(node.left(), name) || tests_presence(node.right(), name);
+            }
+            if !matches!(
+                op,
+                SyntaxKind::ExclamationEqualsToken | SyntaxKind::ExclamationEqualsEqualsToken
+            ) {
+                return false;
+            }
+            [(node.left(), node.right()), (node.right(), node.left())]
+                .into_iter()
+                .any(|(value, unit)| {
+                    let value = primitives::primitive_source(value);
+                    let unit = primitives::primitive_source(unit);
+                    value.kind() == SyntaxKind::Identifier
+                        && value.text() == name
+                        && (unit.kind() == SyntaxKind::NullKeyword
+                            && op == SyntaxKind::ExclamationEqualsToken
+                            || unit.kind() == SyntaxKind::Identifier
+                                && unit.text() == "undefined")
+                })
+        }
+        if !tests_presence(body, &parameter_name) {
+            return None;
+        }
+        if !truth {
+            return Some(HashSet::new());
+        }
+        let mut facts = HashSet::new();
+        for element in array.elements() {
+            let element = primitives::primitive_source(element);
+            if element.kind() != SyntaxKind::Identifier {
+                continue;
+            }
+            let symbol = self.symbol(element);
+            let immutable_presence = self
+                .bindings
+                .get(&symbol)
+                .or_else(|| self.module_bindings.get(&symbol))
+                .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
+                .is_some_and(|binding| !binding.mutable && self.presence_storage(&binding.r#type));
+            if immutable_presence {
+                facts.insert(symbol);
+            }
+        }
+        Some(facts)
+    }
+
     pub(super) fn guarded_vars(&mut self, node: Node, truth: bool) -> Option<HashSet<u32>> {
+        if node.is_nil() {
+            return None;
+        }
         if node.kind() == SyntaxKind::ParenthesizedExpression {
             return self.guarded_vars(node.expression(), truth);
         }
@@ -445,15 +633,28 @@ impl Lowerer<'_> {
         }
         if node.kind() == SyntaxKind::Identifier {
             let symbol = self.symbol(node);
+            let binding_type = self
+                .bindings
+                .get(&symbol)
+                .or_else(|| self.module_bindings.get(&symbol))
+                .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
+                .map(|binding| binding.r#type.clone());
             // Truthiness proves presence, but a falsy value can still be a
             // defined empty string, zero or false. Both observations are pure.
-            return self.var_types.contains_key(&symbol).then(|| {
+            return (self.var_types.contains_key(&symbol)
+                || binding_type
+                    .as_ref()
+                    .is_some_and(|ty| self.presence_storage(ty)))
+            .then(|| {
                 if truth {
                     HashSet::from([symbol])
                 } else {
                     HashSet::new()
                 }
             });
+        }
+        if node.kind() == SyntaxKind::CallExpression {
+            return self.guarded_every_literal(node, truth);
         }
         if node.kind() != SyntaxKind::BinaryExpression {
             return None;
@@ -463,13 +664,27 @@ impl Lowerer<'_> {
             op,
             SyntaxKind::AmpersandAmpersandToken | SyntaxKind::BarBarToken
         ) {
-            let left = self.guarded_vars(node.left(), truth)?;
-            let right = self.guarded_vars(node.right(), truth)?;
-            return Some(if (op == SyntaxKind::AmpersandAmpersandToken) == truth {
-                left.union(&right).copied().collect()
-            } else {
-                left.intersection(&right).copied().collect()
-            });
+            let both_evaluated = (op == SyntaxKind::AmpersandAmpersandToken) == truth;
+            let left = self.guarded_vars(node.left(), truth);
+            let right = self.guarded_vars(node.right(), truth);
+            if both_evaluated {
+                if let (Some(left), Some(right)) = (&left, &right) {
+                    return Some(left.union(right).copied().collect());
+                }
+                let mut facts = left.or(right).unwrap_or_default();
+                // Calls in the right operand may retag captured mutable cells,
+                // but cannot change a const/immutable lexical binding proven
+                // present by the left operand.
+                facts.retain(|symbol| {
+                    self.bindings
+                        .get(symbol)
+                        .or_else(|| self.module_bindings.get(symbol))
+                        .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(symbol)))
+                        .is_some_and(|local| !local.mutable)
+                });
+                return (!facts.is_empty()).then_some(facts);
+            }
+            return Some(left?.intersection(&right?).copied().collect());
         }
         if !matches!(
             op,
@@ -513,7 +728,9 @@ impl Lowerer<'_> {
             };
             if value.ty() == Type::Dyn {
                 let symbol = self.symbol(node);
-                if let Some(signature) = self.recursive_functions.get(&symbol).cloned() {
+                if let Some(signature) = self.recursive_functions.get(&symbol).cloned()
+                    && signature != Type::Dyn
+                {
                     return Ok(Expr::DynCheck {
                         value: Box::new(value),
                         r#type: signature,
@@ -524,11 +741,22 @@ impl Lowerer<'_> {
             return Ok(value);
         }
         let value = self.expression(node)?;
+        if let Some(raw) = self.raw_record_field(&value, node) {
+            return Ok(raw);
+        }
+        if let Some(raw) = self.raw_array_element(&value, node) {
+            return Ok(raw);
+        }
         if let Expr::DynCheck { value: source, .. } = &value
-            && matches!(source.as_ref(), Expr::DynKeyGet { .. })
+            && matches!(
+                source.as_ref(),
+                Expr::DynKeyGet { .. } | Expr::FieldGet { .. }
+            )
         {
             // Equality and presence observe the current property tag. A
-            // checker scalar view may be stale after an alias mutates it.
+            // checker scalar view may be stale after an alias mutates it or a
+            // class DefineField step stores undefined before the constructor
+            // body initializes the declared string/number view.
             return Ok(source.as_ref().clone());
         }
         if let Expr::UnionNarrow { value: source, .. } = &value
@@ -536,6 +764,12 @@ impl Lowerer<'_> {
         {
             // A presence/comparison observation reads the owning property
             // slot, including tags changed through an alias or callback.
+            if let Some(raw) = self.raw_record_field(source, node) {
+                return Ok(raw);
+            }
+            if let Some(raw) = self.raw_array_element(source, node) {
+                return Ok(raw);
+            }
             return Ok(source.as_ref().clone());
         }
         Ok(value)
@@ -547,12 +781,47 @@ impl Lowerer<'_> {
             return Ok(value);
         }
         if let Type::Union { union_id } = value.ty()
-            && let Some(tag) = self.unions[union_id].arms.iter().position(|arm| *arm == Type::Stats)
-            && self.unions[union_id].arms.iter().all(|arm| matches!(arm, Type::Stats | Type::Null | Type::Undefined))
+            && let Some(tag) = self.unions[union_id]
+                .arms
+                .iter()
+                .position(|arm| self.namespace_capsule(arm))
+            && self.unions[union_id]
+                .arms
+                .iter()
+                .enumerate()
+                .all(|(index, arm)| {
+                    index == tag || matches!(arm, Type::Null | Type::Undefined | Type::Void)
+                })
+        {
+            // Module namespace objects are always truthy. A nullable
+            // namespace condition is therefore a pure union-tag test; boxing
+            // it as Dyn would discard the namespace descriptor contract.
+            return Ok(Expr::UnionIsTag {
+                union_id: format!("u{union_id}"),
+                tag,
+                negated: false,
+                value: Box::new(value),
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            });
+        }
+        if let Type::Union { union_id } = value.ty()
+            && let Some(tag) = self.unions[union_id]
+                .arms
+                .iter()
+                .position(|arm| *arm == Type::Stats)
+            && self.unions[union_id]
+                .arms
+                .iter()
+                .all(|arm| matches!(arm, Type::Stats | Type::Null | Type::Undefined))
         {
             return Ok(Expr::UnionIsTag {
-                union_id: format!("u{union_id}"), tag, negated: false,
-                value: Box::new(value), r#type: Type::Bool, loc: self.loc(node),
+                union_id: format!("u{union_id}"),
+                tag,
+                negated: false,
+                value: Box::new(value),
+                r#type: Type::Bool,
+                loc: self.loc(node),
             });
         }
         if value.ty() == Type::Void {
@@ -571,6 +840,36 @@ impl Lowerer<'_> {
     pub(super) fn var_if(&mut self, node: Node) -> Result<Stmt, String> {
         let value = self.condition_value(node.expression())?;
         let cond = self.condition(value, node.expression())?;
+        if let Expr::BoolLit { value, .. } = &cond {
+            if *value {
+                let then = self.statement(node.then_statement())?;
+                return Ok(Stmt::If {
+                    cond: Expr::BoolLit {
+                        value: true,
+                        r#type: Type::Bool,
+                        loc: self.loc(node.expression()),
+                    },
+                    then,
+                    else_: None,
+                    loc: self.loc(node),
+                });
+            }
+            let else_ = if node.else_statement().is_nil() {
+                None
+            } else {
+                Some(self.statement(node.else_statement())?)
+            };
+            return Ok(Stmt::If {
+                cond: Expr::BoolLit {
+                    value: false,
+                    r#type: Type::Bool,
+                    loc: self.loc(node.expression()),
+                },
+                then: Vec::new(),
+                else_,
+                loc: self.loc(node),
+            });
+        }
         let before = self.var_defined.clone();
         if let Some(symbols) = self.guarded_vars(node.expression(), true) {
             self.var_defined.extend(symbols);

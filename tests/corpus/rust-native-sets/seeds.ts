@@ -13,3 +13,9 @@ console.log("seed snapshot", strings.size, strings.has("c"));
 console.log("empty seeds", new Set<string>([]).size, new Set<string>(undefined).size, new Set<string>(null).size);
 const aliases: Set<string>[] = [strings, strings];
 console.log("aliases", aliases[0] === aliases[1], strings !== new Set(values));
+
+const original = new Set<string>(["b", "a", "b"]);
+const copied = new Set(original);
+original.add("later");
+copied.delete("a");
+console.log("set copy", [...original].join(","), [...copied].join(","));

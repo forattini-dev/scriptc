@@ -19,7 +19,7 @@ test("iteration-symbol descriptors retain undemanded bodies separately from stri
 });
 
 test("symbol descriptors reject duplicate keys, unknown keys, and runtime declarations", () => {
-  for (const descriptor of [{ key: "iterator" }, { key: "toPrimitive" }, { key: "constructor" }, { key: "__proto__" }]) {
+  for (const descriptor of [{ key: "iterator" }, { key: "toPrimitive" }, { key: "constructor" }, { key: "__proto__" }, { key: "unique:0" }, { key: "unique:01" }, { key: "unique:4294967296" }]) {
     const mod = moduleFor();
     mod.classes![0]!.symbolMethods!.push(descriptor as NonNullable<IrClassDef["symbolMethods"]>[number]);
     expect(validateModule(mod).some(error => error.message.includes("symbol method surface"))).toBe(true);
@@ -27,6 +27,14 @@ test("symbol descriptors reject duplicate keys, unknown keys, and runtime declar
   const mod = moduleFor();
   mod.classes![0]!.runtime = true;
   expect(validateSymbolMethods(mod)).not.toEqual([]);
+});
+
+test("unique source symbols retain distinct descriptor identities", () => {
+  const mod = moduleFor();
+  mod.classes![0]!.symbolMethods!.push({ key: "unique:7" }, { key: "unique:8" });
+  expect(validateModule(mod)).toEqual([]);
+  mod.classes![0]!.symbolMethods!.push({ key: "unique:7" });
+  expect(validateSymbolMethods(mod).some(error => error.message.includes("symbol method surface"))).toBe(true);
 });
 
 test("a demanded symbol body needs its own reserved function and receiver ABI", () => {

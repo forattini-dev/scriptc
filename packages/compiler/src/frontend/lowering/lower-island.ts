@@ -7,6 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { nativeImportValueType } from "./lower-native-import-types.js";
 import { isKernelModule } from "../builtin-modules.js";
 import { BOOL, BYTES_U8, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canConvertToDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/ir.js";
+import { nativeReferenceSupported } from "../../ir/native-record.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, STATIC_MATH_PROPS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { invalidJsonModuleDiag, requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { esmNamedImportLinkCrash, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, pathAliasesProgramModule, resolveImport } from "../program.js";
@@ -80,6 +81,11 @@ import {
 
   export function jsvalIn(lowerer: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
     if (e.type.kind === "jsval") return e;
+    if (lowerer.nativeDenseArrays && !lowerer.dynamic && ["array", "record", "func", "promise", "regex", "url"].includes(e.type.kind) &&
+        nativeReferenceSupported(e.type, id => lowerer.shapes.get(id), id => lowerer.unions.get(id)) &&
+        canConvertToDyn(e.type, id => lowerer.shapes.get(id), id => lowerer.unions.get(id))) {
+      return { kind: "jsMarshal", value: { kind: "dynFrom", value: e, type: DYN, loc: e.loc }, type: JSVAL, loc: e.loc };
+    }
     // Bare unit literals (`undefined` / `null` in an 'any' slot): the
     // engine's own units — unit-typed expressions are literals (units have
     // no other producers), so dropping the operand loses nothing.

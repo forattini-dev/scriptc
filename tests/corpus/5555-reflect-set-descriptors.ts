@@ -1,0 +1,26 @@
+'use strict';
+const target: any = {};
+Object.defineProperty(target, 'locked', { value: 1, writable: false, enumerable: true, configurable: true });
+Object.defineProperty(target, 'open', { value: 2, writable: true, enumerable: true, configurable: true });
+Object.defineProperty(target, 'readOnly', { get() { return 3; }, enumerable: true, configurable: true });
+Object.defineProperty(target, 'through', { set(value: number) { this.saved = value; }, enumerable: true, configurable: true });
+const receiver: any = {};
+Object.defineProperty(receiver, 'blocked', { value: 10, writable: false, enumerable: true, configurable: true });
+Object.defineProperty(target, 'blocked', { value: 4, writable: true, enumerable: true, configurable: true });
+let receiverSetterCalls = 0;
+Object.defineProperty(receiver, 'receiverAccessor', { set(_value: number) { receiverSetterCalls++; }, configurable: true });
+Object.defineProperty(target, 'receiverAccessor', { value: 5, writable: true, configurable: true });
+console.log('locked', Reflect.set(target, 'locked', 9), target.locked);
+console.log('getter', Reflect.set(target, 'readOnly', 9), target.readOnly);
+console.log('receiver', Reflect.set(target, 'open', 7, receiver), target.open, receiver.open);
+console.log('blocked', Reflect.set(target, 'blocked', 8, receiver), target.blocked, receiver.blocked);
+console.log('receiver-accessor', Reflect.set(target, 'receiverAccessor', 8, receiver), receiverSetterCalls);
+console.log('setter', Reflect.set(target, 'through', 11, receiver), receiver.saved);
+console.log('primitive-receiver', Reflect.set(target, 'open', 6, 1));
+const symbol = Symbol('locked');
+Object.defineProperty(target, symbol, { value: 12, writable: false, enumerable: true, configurable: true });
+console.log('symbol', Reflect.set(target, symbol, 13), target[symbol]);
+const writableSymbol = Symbol('writable');
+Object.defineProperty(target, writableSymbol, { value: 14, writable: true, enumerable: true, configurable: true });
+console.log('symbol-receiver', Reflect.set(target, writableSymbol, 15, receiver), target[writableSymbol], receiver[writableSymbol]);
+try { Reflect.set(1 as any, 'x', 1); } catch (error) { console.log('primitive-target', (error as Error).name); }

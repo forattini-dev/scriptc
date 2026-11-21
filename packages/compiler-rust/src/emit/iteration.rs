@@ -15,7 +15,9 @@ pub(super) fn definitions(module: &Emission<'_>, out: &mut String) {
                 "runtime::array_len(value) as usize".into()
             }
             Type::Bytes { .. } => "runtime::bytes_len(value) as usize".into(),
-            Type::Record { shape_id } if module.records[*shape_id].tuple => {
+            Type::Record { shape_id }
+                if module.records[*shape_id].tuple && values::specialized(ty, module) =>
+            {
                 module.records[*shape_id].fields.len().to_string()
             }
             _ => continue,

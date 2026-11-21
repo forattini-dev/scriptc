@@ -29,8 +29,14 @@ fn source_contracts_are_unique_and_bind_only_implemented_operations() {
         }
         for op in &api.operations {
             if let Implementation::NativeHelper(name) = op.implementation {
+                let helpers = concat!(
+                    include_str!("../buffer_values_support.rs"),
+                    include_str!("../emit/process.rs"),
+                    include_str!("../emit/values.rs"),
+                    include_str!("../emit/crypto_sign_support.rs")
+                );
                 assert!(
-                    include_str!("../buffer_values_support.rs").contains(&format!("fn {name}(")),
+                    helpers.contains(&format!("fn {name}(")),
                     "missing native helper {name}"
                 );
             }
@@ -44,12 +50,20 @@ fn source_contracts_are_unique_and_bind_only_implemented_operations() {
 
 #[test]
 fn internal_operations_never_manufacture_source_exports() {
-    for member in ["size", "isFile", "isDirectory", "isSymbolicLink"] {
+    for member in [
+        "size",
+        "isFile",
+        "isDirectory",
+        "isSymbolicLink",
+        "isSocket",
+    ] {
         assert!(get("fs", member).is_none());
         assert!(by_ir(&format!("stats.{member}")).is_some());
     }
     for name in [
         "appendFileModeSync",
+        "writeFileModeSync",
+        "rmOptionsSync",
         "mkdirModeSync",
         "mkdirRecursiveSync",
         "mkdirRecursiveModeSync",
@@ -95,13 +109,21 @@ fn runtime_reuse_candidates_name_existing_rust_functions() {
                     _ => None,
                 }),
         );
-        if let Some(binding) = &api.special {
-            symbols.push(binding.runtime);
-        }
         for symbol in symbols {
             assert!(
-                source.contains(&format!("pub fn {symbol}(")),
+                source.contains(&format!("pub fn {symbol}("))
+                    || source.contains(&format!("pub fn {symbol}<")),
                 "missing runtime symbol {symbol}"
+            );
+        }
+        if let Some(binding) = &api.special {
+            let native_helpers = include_str!("../emit/values.rs");
+            assert!(
+                source.contains(&format!("pub fn {}(", binding.runtime))
+                    || source.contains(&format!("pub fn {}<", binding.runtime))
+                    || native_helpers.contains(&format!("fn {}(", binding.runtime)),
+                "missing special binding {}",
+                binding.runtime
             );
         }
     }
@@ -129,10 +151,8 @@ fn module_aliases_and_unported_families_remain_explicit() {
     let apis = report["apis"].as_array().unwrap();
     assert!(apis.iter().any(|row| row["module"] == "crypto"
         && row["member"] == "createHash"
-        && row["stage"] == "runtime-only"));
-    assert!(
-        apis.iter().any(|row| row["module"] == "Bun"
-            && row["member"] == "file"
-            && row["stage"] == "planned")
-    );
+        && row["stage"] == "native-partial"));
+    assert!(apis.iter().any(|row| row["module"] == "Bun"
+        && row["member"] == "file"
+        && row["stage"] == "native-partial"));
 }

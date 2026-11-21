@@ -3,7 +3,28 @@
 use super::*;
 
 impl ClassGraph {
-    pub(super) fn accessor(&self, mut owner: usize, name: &str) -> Option<(usize, Node, Node)> {
+    pub(super) fn abstract_property(&self, mut owner: usize, name: &str) -> Option<(usize, Node)> {
+        for _ in 0..=self.definitions.len() {
+            let definition = &self.definitions[owner];
+            if !definition.node.is_nil()
+                && let Some(node) = definition.node.members().into_iter().find(|member| {
+                    member.kind() == SyntaxKind::PropertyDeclaration
+                        && member.modifier_flags().intersects(ModifierFlags::ABSTRACT)
+                        && member.name().text() == name
+                })
+            {
+                return Some((owner, node));
+            }
+            owner = definition.base?;
+        }
+        None
+    }
+
+    pub(in crate::frontend) fn accessor(
+        &self,
+        mut owner: usize,
+        name: &str,
+    ) -> Option<(usize, Node, Node)> {
         for _ in 0..=self.definitions.len() {
             if self.definitions[owner].node.is_nil() {
                 return None;
@@ -14,7 +35,8 @@ impl ClassGraph {
                 if !matches!(
                     member.kind(),
                     SyntaxKind::GetAccessor | SyntaxKind::SetAccessor
-                ) {
+                ) || member.modifier_flags().intersects(ModifierFlags::STATIC)
+                {
                     continue;
                 }
                 if member.name().text() != name {
@@ -38,6 +60,172 @@ impl ClassGraph {
 }
 
 impl Lowerer<'_> {
+    pub(super) fn abstract_property_get(
+        &mut self,
+        site: Node,
+        object: Expr,
+        name: &str,
+    ) -> Result<Option<Expr>, String> {
+        let Type::Object { class_name } = object.ty() else {
+            return Ok(None);
+        };
+        let Some(index) = self
+            .classes
+            .definitions
+            .iter()
+            .position(|definition| definition.name == class_name)
+        else {
+            return Ok(None);
+        };
+        let Some((_, declaration)) = self.classes.abstract_property(index, name) else {
+            return Ok(None);
+        };
+        let result = self.ty(declaration.name())?;
+        enum Implementation {
+            Accessor(usize, Signature),
+            Field(usize, Type),
+        }
+        let descendants = self
+            .classes
+            .definitions
+            .iter()
+            .enumerate()
+            .filter(|(child, definition)| {
+                *child != index
+                    && self.classes.subclass(&definition.name, &class_name)
+                    && !definition
+                        .node
+                        .modifier_flags()
+                        .intersects(ModifierFlags::ABSTRACT)
+            })
+            .map(|(child, _)| child)
+            .collect::<Vec<_>>();
+        let mut variants = Vec::new();
+        for child in descendants {
+            self.resolve_class(child)?;
+            self.layout_class(child)?;
+            if let Some((owner, getter, _)) = self.classes.accessor(child, name) {
+                if getter.is_nil() {
+                    return Err(self.refuse(site, "abstract property implementation is write-only"));
+                }
+                let signature = self.request_accessor(owner, name, false, getter)?;
+                if signature.return_type != result {
+                    return Err(self.refuse(
+                        getter,
+                        "abstract property getter has a different native result ABI",
+                    ));
+                }
+                variants.push((child, Implementation::Accessor(owner, signature)));
+                continue;
+            }
+            let child_name = self.classes.definitions[child].name.clone();
+            let Some(storage) = self.field_type(&child_name, name) else {
+                return Err(self.refuse(
+                    site,
+                    "concrete subclass does not implement the abstract property",
+                ));
+            };
+            variants.push((child, Implementation::Field(child, storage)));
+        }
+        if variants.is_empty() {
+            return Err(self.refuse(
+                site,
+                "abstract property has no concrete native implementation",
+            ));
+        }
+        variants.sort_by_key(|(child, _)| {
+            let mut depth = 0;
+            let mut owner = self.classes.definitions[*child].base;
+            while let Some(parent) = owner {
+                depth += 1;
+                owner = self.classes.definitions[parent].base;
+            }
+            std::cmp::Reverse(depth)
+        });
+        let mut helper = helpers::Helper::new(
+            &format!("abstract_property_get_{class_name}_{name}"),
+            vec![object.ty()],
+            result.clone(),
+            self.loc(site),
+        );
+        for (child, implementation) in variants {
+            let child_name = self.classes.definitions[child].name.clone();
+            let receiver = Expr::Downcast {
+                value: Box::new(helper.read(&helper.param(0))),
+                r#type: self.classes.object(child),
+                loc: helper.loc(),
+            };
+            let value = match implementation {
+                Implementation::Accessor(owner, signature) => {
+                    let owner_name = self.classes.definitions[owner].name.clone();
+                    let receiver = if owner == child {
+                        receiver
+                    } else {
+                        Expr::Upcast {
+                            value: Box::new(receiver),
+                            r#type: Type::Object {
+                                class_name: owner_name,
+                            },
+                            loc: helper.loc(),
+                        }
+                    };
+                    Expr::Call {
+                        callee: signature.name,
+                        args: vec![receiver],
+                        r#type: signature.return_type,
+                        loc: helper.loc(),
+                    }
+                }
+                Implementation::Field(owner, storage) => {
+                    let value = Expr::FieldGet {
+                        obj: Box::new(receiver),
+                        class_name: self.classes.definitions[owner].name.clone(),
+                        field: name.into(),
+                        r#type: storage,
+                        loc: helper.loc(),
+                    };
+                    self.coerce(value, result.clone(), site)?
+                }
+            };
+            helper.function.body.push(Stmt::If {
+                cond: Expr::InstanceOf {
+                    value: Box::new(helper.read(&helper.param(0))),
+                    class_name: child_name,
+                    r#type: Type::Bool,
+                    loc: helper.loc(),
+                },
+                then: vec![Stmt::Return {
+                    value: Some(value),
+                    loc: helper.loc(),
+                }],
+                else_: None,
+                loc: helper.loc(),
+            });
+        }
+        self.ensure_exception_classes(site)?;
+        helper.function.body.push(Stmt::Throw {
+            value: Expr::LibCall {
+                r#fn: "error.new".into(),
+                args: vec![Expr::StrLit {
+                    value: format!("Cannot read abstract property {name}"),
+                    r#type: Type::String,
+                    loc: helper.loc(),
+                }],
+                r#type: Type::Object {
+                    class_name: "%TypeError".into(),
+                },
+                loc: helper.loc(),
+            },
+            loc: helper.loc(),
+        });
+        Ok(Some(Expr::Call {
+            callee: self.install_helper(helper.function),
+            args: vec![object],
+            r#type: result,
+            loc: self.loc(site),
+        }))
+    }
+
     pub(in crate::frontend) fn class_accessor_assignment(
         &mut self,
         node: Node,
@@ -65,6 +253,12 @@ impl Lowerer<'_> {
         else {
             return Ok(None);
         };
+        // Runtime-owned classes (notably Error) have no source prototype
+        // declaration to inspect. Their expando writes are ordinary dynamic
+        // properties, not source accessors.
+        if self.classes.definitions[index].node.is_nil() {
+            return Ok(None);
+        }
         self.resolve_class(index)?;
         let lookup = if receiver.kind() == SyntaxKind::SuperKeyword {
             self.classes.definitions[index].base.ok_or_else(|| {
@@ -93,7 +287,7 @@ impl Lowerer<'_> {
         Ok(Some(self.narrowed(value, node)?))
     }
 
-    pub(super) fn request_accessor(
+    pub(in crate::frontend) fn request_accessor(
         &mut self,
         owner: usize,
         name: &str,
@@ -130,6 +324,8 @@ impl Lowerer<'_> {
                     } else {
                         vec![]
                     },
+                    optional: vec![false; usize::from(write)],
+                    parametric_callback_results: vec![false; usize::from(write)],
                     ret: Some(if write { Type::Void } else { ty }),
                     reason: None,
                     value_type: None,

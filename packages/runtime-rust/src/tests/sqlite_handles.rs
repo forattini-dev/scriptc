@@ -50,6 +50,34 @@ fn sqlite_handles_open_flags_follow_bun_defaults() {
 }
 
 #[test]
+fn numeric_sqlite_statement_handles_preserve_options_and_ownership() {
+    let db = sqlite_open(":memory:", 6.0);
+    sqlite_exec(
+        db,
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO t (name) VALUES ('a')",
+    );
+    let select = sqlite_statement_prepare(db, "SELECT id, name FROM t");
+    sqlite_statement_set_safe_integers(select, true);
+    sqlite_statement_set_return_arrays(select, true);
+    let (columns, rows, safe, arrays) =
+        sqlite_statement_rows(select, &SqliteParams::Positional(Vec::new()), 0);
+    assert_eq!(columns, vec!["id".to_owned(), "name".to_owned()]);
+    assert!(safe);
+    assert!(arrays);
+    assert!(matches!(rows[0][0], SqliteValue::Integer(1)));
+
+    let insert = sqlite_statement_prepare(db, "INSERT INTO t (name) VALUES (?)");
+    assert_eq!(
+        sqlite_statement_run(
+            insert,
+            &SqliteParams::Positional(vec![SqliteValue::Text("b".to_owned())]),
+        ),
+        (1.0, 2)
+    );
+    sqlite_close(db);
+}
+
+#[test]
 fn bigint_i64_round_trips_past_the_safe_integer_range() {
     let value = bigint_from_i64(9_007_199_254_740_993);
     assert_eq!(bigint_to_i64(&value), Some(9_007_199_254_740_993));

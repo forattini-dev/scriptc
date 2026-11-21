@@ -40,6 +40,7 @@ fn self_invocation_keeps_explicit_same_script_reexec_and_external_interpreters()
         &array_new(vec![executable.clone(), string("child-mode")]),
         false,
         &string(""),
+        false,
     )
     .unwrap();
     assert_eq!(

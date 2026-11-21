@@ -2,6 +2,96 @@
 use super::*;
 
 impl Lowerer<'_> {
+    pub(super) fn async_directory_call(&mut self, node: Node) -> Result<Expr, String> {
+        let arguments = node.arguments().into_iter().collect::<Vec<_>>();
+        if arguments.is_empty()
+            || arguments
+                .iter()
+                .any(|arg| arg.kind() == SyntaxKind::SpreadElement)
+        {
+            return Err(self.refuse(
+                node,
+                "fs/promises.mkdir needs a string path and no iterable argument spreads",
+            ));
+        }
+        self.ensure_exception_classes(node)?;
+        let mut stmts = Vec::new();
+        let path = self.directory_argument(arguments[0], Type::String, &mut stmts)?;
+        let mut mode = Expr::NumLit {
+            value: -1.0,
+            spelling: None,
+            r#type: Type::F64,
+            loc: self.loc(node),
+        };
+        let mut recursive = Expr::BoolLit {
+            value: false,
+            r#type: Type::Bool,
+            loc: self.loc(node),
+        };
+        if let Some(options) = arguments.get(1).copied() {
+            let options = receivers::reference_node(options);
+            if options.kind() != SyntaxKind::ObjectLiteralExpression {
+                return Err(self.refuse(
+                    options,
+                    "fs/promises.mkdir options require a plain recursive/mode object",
+                ));
+            }
+            for property in options.properties() {
+                if !matches!(
+                    property.kind(),
+                    SyntaxKind::PropertyAssignment | SyntaxKind::ShorthandPropertyAssignment
+                ) {
+                    return Err(self.refuse(
+                        property,
+                        "fs/promises.mkdir options require plain recursive/mode properties",
+                    ));
+                }
+                let value = if property.kind() == SyntaxKind::ShorthandPropertyAssignment {
+                    property.name()
+                } else {
+                    property.initializer()
+                };
+                let ty = match self.data_property_name(property.name()).as_deref() {
+                    Some("mode") => Type::F64,
+                    Some("recursive") => Type::Bool,
+                    _ => {
+                        return Err(self.refuse(
+                            property,
+                            "fs/promises.mkdir options beyond recursive/mode are not ported",
+                        ));
+                    }
+                };
+                let captured = self.directory_argument(value, ty.clone(), &mut stmts)?;
+                if ty == Type::F64 {
+                    mode = captured;
+                } else {
+                    recursive = captured;
+                }
+            }
+        }
+        for extra in arguments.into_iter().skip(2) {
+            stmts.push(Stmt::Expression {
+                expr: self.expression(extra)?,
+                loc: self.loc(extra),
+            });
+        }
+        Ok(Expr::Sequence {
+            stmts,
+            result: Box::new(Expr::LibCall {
+                r#fn: "fs.mkdirPromise".into(),
+                args: vec![path, mode, recursive],
+                r#type: Type::Promise {
+                    inner: Box::new(Type::Dyn),
+                },
+                loc: self.loc(node),
+            }),
+            r#type: Type::Promise {
+                inner: Box::new(Type::Dyn),
+            },
+            loc: self.loc(node),
+        })
+    }
+
     pub(super) fn directory_call(&mut self, node: Node) -> Result<Expr, String> {
         let mut parent = node.parent();
         while parent.kind() == SyntaxKind::ParenthesizedExpression {
@@ -108,13 +198,7 @@ impl Lowerer<'_> {
         ty: Type,
         stmts: &mut Vec<Stmt>,
     ) -> Result<Expr, String> {
-        let value = self.expression(receivers::reference_node(node))?;
-        if value.ty() != ty {
-            return Err(self.refuse(
-                node,
-                "mkdirSync needs represented string paths and numeric modes",
-            ));
-        }
+        let value = self.expected_expression(receivers::reference_node(node), ty.clone())?;
         let local = self.construction_local(ty, false);
         stmts.push(Stmt::VarDecl {
             local_id: local.id.clone(),

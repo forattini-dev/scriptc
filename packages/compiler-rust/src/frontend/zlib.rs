@@ -6,7 +6,7 @@ impl Lowerer<'_> {
         let args = node.arguments().into_iter().collect::<Vec<_>>();
         if args.is_empty()
             || args.len() > 2
-            || (member == "inflateSync" && args.len() != 1)
+            || (member != "deflateSync" && args.len() != 1)
             || args
                 .iter()
                 .any(|arg| arg.kind() == SyntaxKind::SpreadElement)
@@ -64,8 +64,12 @@ impl Lowerer<'_> {
             "zlib.deflateSyncLevel"
         } else if member == "deflateSync" {
             "zlib.deflateSync"
-        } else {
+        } else if member == "inflateSync" {
             "zlib.inflateSync"
+        } else if member == "gzipSync" {
+            "zlib.gzipSync"
+        } else {
+            "zlib.gunzipSync"
         };
         Ok(Expr::LibCall {
             r#fn: operation.into(),

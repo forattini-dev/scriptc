@@ -5,12 +5,19 @@ use super::*;
 // constructors here, so recursive catalog graphs are visited once per layout.
 fn error_dependency(ty: &Type) -> bool {
     match ty {
-        Type::Object { class_name } => matches!(
-            class_name.as_str(),
-            "%Error" | "%TypeError" | "%RangeError" | "%SyntaxError"
-        ),
+        Type::Object { class_name } => ir::builtin_error_class(class_name),
         Type::Array { elem } | Type::Set { elem } | Type::Promise { inner: elem } => {
             error_dependency(elem)
+        }
+        Type::Generator {
+            yield_type,
+            return_type,
+            next_type,
+            ..
+        } => {
+            error_dependency(yield_type)
+                || error_dependency(return_type)
+                || error_dependency(next_type)
         }
         Type::Map { key, value } => error_dependency(key) || error_dependency(value),
         Type::Func { params, ret, .. } => {

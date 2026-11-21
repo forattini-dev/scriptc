@@ -16,6 +16,31 @@
     }
 
     #[test]
+    fn text_decoder_stream_preserves_split_utf8_and_bom_state() {
+        let bytes = |values: &[u8]| bytes_from_elements(values.to_vec());
+        let decoder = text_decoder_new();
+
+        assert_eq!(text_decode_stream(decoder, &bytes(&[0xef]), true, false).as_ref(), "");
+        assert_eq!(
+            text_decode_stream(decoder, &bytes(&[0xbb, 0xbf, b'A', 0xf0, 0x9f]), true, false)
+                .as_ref(),
+            "A",
+        );
+        assert_eq!(
+            text_decode_stream(decoder, &bytes(&[0x98, 0x80]), true, false).as_ref(),
+            "😀",
+        );
+        assert_eq!(text_decode_stream(decoder, &bytes(&[]), false, false).as_ref(), "");
+
+        // A completed decode resets the BOM decision for the next sequence.
+        assert_eq!(
+            text_decode_stream(decoder, &bytes(&[0xef, 0xbb, 0xbf, b'B']), false, false)
+                .as_ref(),
+            "B",
+        );
+    }
+
+    #[test]
     fn text_decoder_covers_single_and_multibyte_whatwg_families() {
         let bytes = |values: &[u8]| bytes_from_elements(values.to_vec());
 

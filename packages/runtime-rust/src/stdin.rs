@@ -20,7 +20,6 @@ struct StdinErrorListener {
     callback: Rc<dyn Fn(JsError)>,
 }
 
-#[derive(Default)]
 struct StdinState {
     receiver: Option<std::sync::mpsc::Receiver<StdinEvent>>,
     waiter: Option<JsPromise<JsBytes<u8>>>,
@@ -29,6 +28,24 @@ struct StdinState {
     error_listeners: Vec<StdinErrorListener>,
     eof: bool,
     destroyed: bool,
+    paused: bool,
+}
+
+impl Default for StdinState {
+    fn default() -> Self {
+        Self {
+            receiver: None,
+            waiter: None,
+            data_listeners: Vec::new(),
+            end_listeners: Vec::new(),
+            error_listeners: Vec::new(),
+            eof: false,
+            destroyed: false,
+            // Node readable streams begin in the paused state. Adding a data
+            // listener or calling resume enters flowing mode.
+            paused: true,
+        }
+    }
 }
 
 thread_local! {
@@ -78,11 +95,43 @@ pub fn stdin_on_data(callback: Rc<dyn Fn(JsBytes<u8>)>, once: bool) {
             return false;
         }
         state.data_listeners.push(StdinDataListener { callback, once });
+        state.paused = false;
         state.receiver.is_none()
     });
     if should_start {
         stdin_start();
     }
+}
+
+pub fn stdin_remove_data(callback: &Rc<dyn Fn(JsBytes<u8>)>) {
+    STDIN_STATE.with(|state| {
+        state
+            .borrow_mut()
+            .data_listeners
+            .retain(|listener| !Rc::ptr_eq(&listener.callback, callback));
+    });
+}
+
+pub fn stdin_pause() {
+    STDIN_STATE.with(|state| state.borrow_mut().paused = true);
+}
+
+pub fn stdin_resume() {
+    let should_start = STDIN_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.eof || state.destroyed {
+            return false;
+        }
+        state.paused = false;
+        state.receiver.is_none()
+    });
+    if should_start {
+        stdin_start();
+    }
+}
+
+pub fn stdin_is_paused() -> bool {
+    STDIN_STATE.with(|state| state.borrow().paused)
 }
 
 pub fn stdin_on_end(callback: Rc<dyn Fn()>, _once: bool) {
@@ -139,7 +188,10 @@ pub fn stdin_next_chunk() -> JsPromise<JsBytes<u8>> {
 fn stdin_poll() -> Option<StdinEvent> {
     STDIN_STATE.with(|state| {
         let state = state.borrow();
-        if state.waiter.is_none() && state.data_listeners.is_empty() && !readline_stdin_pending() {
+        if state.waiter.is_none()
+            && (state.data_listeners.is_empty() || state.paused)
+            && !readline_stdin_pending()
+        {
             return None;
         }
         let receiver = state.receiver.as_ref()?;
@@ -225,7 +277,9 @@ fn stdin_dispatch_one() -> bool {
 fn stdin_pending() -> bool {
     STDIN_STATE.with(|state| {
         let state = state.borrow();
-        (state.waiter.is_some() || !state.data_listeners.is_empty() || readline_stdin_pending()) &&
+        (state.waiter.is_some()
+            || (!state.paused && !state.data_listeners.is_empty())
+            || readline_stdin_pending()) &&
             !state.eof && !state.destroyed
     })
 }
@@ -233,7 +287,10 @@ fn stdin_pending() -> bool {
 fn stdin_wait(timeout: Option<std::time::Duration>) {
     let event = STDIN_STATE.with(|state| {
         let state = state.borrow();
-        if state.waiter.is_none() && state.data_listeners.is_empty() && !readline_stdin_pending() {
+        if state.waiter.is_none()
+            && (state.data_listeners.is_empty() || state.paused)
+            && !readline_stdin_pending()
+        {
             return None;
         }
         let receiver = state.receiver.as_ref()?;

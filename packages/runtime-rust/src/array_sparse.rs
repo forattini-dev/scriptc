@@ -7,6 +7,7 @@ impl<T: ArrayElement> ArrayData<T> {
 }
 
 /// Read a typed payload. Consumers that observe absence consult slot state first.
+#[track_caller]
 pub fn array_get<T: ArrayElement>(array: &JsArray<T>, index: f64) -> T {
     // Numeric non-index keys are ordinary properties, including negatives.
     if (!(0.0..f64::from(u32::MAX)).contains(&index) || index.fract() != 0.0)
@@ -27,7 +28,9 @@ pub fn array_get<T: ArrayElement>(array: &JsArray<T>, index: f64) -> T {
 }
 
 pub fn array_next_present<T: ArrayElement>(array: &JsArray<T>, start: f64) -> f64 {
-    if let Some(view) = array_view(array) { return view.next_present(start); }
+    if let Some(view) = array_view(array) {
+        return view.next_present(start);
+    }
     let len = array_len(array);
     if start.is_nan() || start >= len {
         return len;
@@ -58,7 +61,47 @@ pub fn array_next_present<T: ArrayElement>(array: &JsArray<T>, start: f64) -> f6
     })
 }
 
+pub fn array_previous_present<T: ArrayElement>(array: &JsArray<T>, start: f64) -> f64 {
+    let len = array_len(array);
+    if start.is_nan() || len == 0.0 || start < 0.0 {
+        return -1.0;
+    }
+    let last = start.floor().min(len - 1.0);
+    if array_view(array).is_some() {
+        let mut index = last;
+        while index >= 0.0 {
+            if array_state(array, index) != ARRAY_HOLE as f64 {
+                return index;
+            }
+            index -= 1.0;
+        }
+        return -1.0;
+    }
+    array.with(|data| {
+        let Some(sparse) = data.sparse.as_ref() else {
+            return last;
+        };
+        let limit = last as usize;
+        let prefix = (0..=limit.min(sparse.states.len().saturating_sub(1)))
+            .rev()
+            .find(|index| data.slot_state(*index) != ARRAY_HOLE);
+        let undefined = sparse.tail_undefined.range(..=limit).next_back().copied();
+        let value = sparse
+            .tail_values
+            .range(..=limit)
+            .next_back()
+            .map(|(index, _)| *index);
+        prefix
+            .into_iter()
+            .chain(undefined)
+            .chain(value)
+            .max()
+            .map_or(-1.0, |index| index as f64)
+    })
+}
+
 pub fn array_set<T: ArrayElement>(array: &JsArray<T>, index: f64, value: T) {
+    array_require_template_writable(array);
     if !(0.0..f64::from(u32::MAX)).contains(&index) || index.fract() != 0.0 {
         array_property_set(array, number_to_string(index), value);
         return;
@@ -120,6 +163,12 @@ pub fn array_set<T: ArrayElement>(array: &JsArray<T>, index: f64, value: T) {
 }
 
 pub fn array_slice<T: ArrayElement>(array: &JsArray<T>, start: f64, end: f64) -> JsArray<T> {
+    if let Some(view) = array_view(array) {
+        // Slice the owning storage before applying the typed projection.
+        // Otherwise a valid JavaScript value hidden by a narrowed view (such
+        // as undefined after a non-null assertion) is eagerly converted.
+        return view.slice(start, end);
+    }
     array.with(|data| {
         let Some(sparse) = data.sparse.as_ref().filter(|_| data.view.is_none()) else {
             let elements = data.elements();
@@ -190,19 +239,28 @@ pub fn array_includes_missing_by<T: ArrayElement>(
 /// Enumerable indexed properties, excluding holes and the array's length.
 /// Sparse length growth must not allocate or scan the missing index range.
 pub fn array_own_index_keys<T: ArrayElement>(array: &JsArray<T>) -> Vec<JsString> {
-    if let Some(view) = array_view(array) { return view.own_index_keys(); }
+    if let Some(view) = array_view(array) {
+        return view.own_index_keys();
+    }
     array.with(|data| {
         let mut indices = if let Some(view) = &data.view {
             (0..view.len() as usize).collect::<Vec<_>>()
         } else {
-            (0..data.elements.len()).filter(|index| data.slot_state(*index) != ARRAY_HOLE).collect()
+            (0..data.elements.len())
+                .filter(|index| data.slot_state(*index) != ARRAY_HOLE)
+                .collect()
         };
-        if data.view.is_none() && let Some(sparse) = &data.sparse {
+        if data.view.is_none()
+            && let Some(sparse) = &data.sparse
+        {
             indices.extend(sparse.tail_undefined.iter().copied());
             indices.extend(sparse.tail_values.keys().copied());
         }
         indices.sort_unstable();
-        indices.into_iter().map(|index| index.to_string().into()).collect()
+        indices
+            .into_iter()
+            .map(|index| index.to_string().into())
+            .collect()
     })
 }
 

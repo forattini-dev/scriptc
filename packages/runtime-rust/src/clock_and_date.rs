@@ -48,13 +48,17 @@ pub struct Tracer<'a> {
 }
 
 pub fn init() {
-    let _ = PROCESS_START.get_or_init(std::time::Instant::now);
+    init_sync();
     ffi_foreign_init();
     PROMISE_CHECKS.with(|checks| checks.borrow_mut().clear());
     UNHANDLED_REJECTION.with(|unhandled| unhandled.set(false));
     UNHANDLED_REJECTION_HANDLER.with(|handler| *handler.borrow_mut() = None);
     REJECTION_HANDLED_HANDLER.with(|handler| *handler.borrow_mut() = None);
     ENTRY_PROMISE_OUTCOME.with(|outcome| *outcome.borrow_mut() = None);
+}
+
+pub fn init_sync() {
+    let _ = PROCESS_START.get_or_init(std::time::Instant::now);
 }
 
 fn process_elapsed() -> std::time::Duration {
@@ -191,6 +195,20 @@ fn date_components_ms(
     let normalized_month = (month - month_cycles * 12.0) as i32;
     let days = days_from_civil(normalized_year as i64, normalized_month + 1, 1) + (date - 1.0);
     days * 86_400_000.0 + hours * 3_600_000.0 + minutes * 60_000.0 + seconds * 1_000.0 + ms
+}
+
+pub fn date_utc(
+    year: f64,
+    month: f64,
+    date: f64,
+    hours: f64,
+    minutes: f64,
+    seconds: f64,
+    ms: f64,
+) -> f64 {
+    date_new_ms(date_components_ms(
+        year, month, date, hours, minutes, seconds, ms,
+    ))
 }
 
 fn date_make_ms(
@@ -452,10 +470,29 @@ fn date_utc_parts(ms: f64) -> Option<DateParts> {
     }
 }
 
+fn date_local_zone_id() -> Option<String> {
+    std::env::var("TZ")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.trim_start_matches(':').to_owned())
+        .or_else(|| iana_time_zone::get_timezone().ok())
+}
+
 fn date_local_snapshot(seconds: f64) -> Option<(i64, i32, i32, i32, i32, i32)> {
     let seconds_integer = seconds as i64;
     if seconds_integer as f64 != seconds {
         return None;
+    }
+    if let Some(zone) = date_local_zone_id().and_then(|zone| zone.parse::<chrono_tz::Tz>().ok()) {
+        let value = zone.timestamp_opt(seconds_integer, 0).single()?;
+        return Some((
+            i64::from(value.year()),
+            value.month() as i32,
+            value.day() as i32,
+            value.hour() as i32,
+            value.minute() as i32,
+            value.second() as i32,
+        ));
     }
     let value = Local.timestamp_opt(seconds_integer, 0).single()?;
     Some((
@@ -500,6 +537,81 @@ fn date_local_parts(ms: f64) -> Option<DateParts> {
         timezone_offset
     };
     Some(parts)
+}
+
+/// JavaScript's local Date string, with an English long timezone name.
+pub fn date_to_local_string(ms: f64) -> JsString {
+    use icu_datetime::{NoCalendarFormatter, fieldsets::zone::SpecificLong};
+    use icu_locale_core::locale;
+    use icu_time::{
+        TimeZone,
+        zone::{UtcOffset, ZoneNameTimestamp},
+    };
+
+    if !ms.is_finite() || ms.abs() > 8_640_000_000_000_000.0 {
+        return crate::string("Invalid Date");
+    }
+    let Some(parts) = date_local_parts(ms) else {
+        crate::throw_type_error("native Date local timezone is unavailable".into());
+    };
+    let zone_name = date_local_zone_id().unwrap_or_default();
+    let zone = TimeZone::from_iana_id(&zone_name);
+    if zone == TimeZone::UNKNOWN {
+        crate::throw_type_error("native Date timezone name is unavailable".into());
+    }
+    let offset_minutes = -(parts.timezone_offset as i32);
+    let zone = zone
+        .with_offset(UtcOffset::try_from_seconds(offset_minutes * 60).ok())
+        .with_zone_name_timestamp(ZoneNameTimestamp::from_epoch_seconds(
+            (ms / 1000.0).floor() as i64,
+        ));
+    let formatter = NoCalendarFormatter::try_new(locale!("en").into(), SpecificLong)
+        .expect("compiled timezone names");
+    let mut name = formatter.format(&zone).to_string();
+    // ICU can lack a historical offset-to-variant mapping even when it has
+    // the zone's long name. Use the tzdb's actual standard/daylight variant
+    // and a matching modern offset solely for name lookup, never for time.
+    if name.starts_with("GMT")
+        && let Ok(tz) = zone_name.parse::<chrono_tz::Tz>()
+        && let Some(actual) = tz.timestamp_opt((ms / 1000.0).floor() as i64, 0).single()
+    {
+        use chrono::Offset;
+        use chrono_tz::OffsetComponents;
+        let daylight = actual.offset().dst_offset().num_seconds() != 0;
+        for probe in [1_704_067_200, 1_719_792_000] {
+            let Some(reference) = tz.timestamp_opt(probe, 0).single() else { continue };
+            if (reference.offset().dst_offset().num_seconds() != 0) != daylight {
+                continue;
+            }
+            let reference_offset = reference.offset().fix().local_minus_utc();
+            let candidate = TimeZone::from_iana_id(&zone_name)
+                .with_offset(UtcOffset::try_from_seconds(reference_offset).ok())
+                .with_zone_name_timestamp(ZoneNameTimestamp::from_epoch_seconds(
+                    (ms / 1000.0).floor() as i64,
+                ));
+            let candidate = formatter.format(&candidate).to_string();
+            if !candidate.starts_with("GMT") {
+                name = candidate;
+                break;
+            }
+        }
+    }
+    let days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let year = if parts.year < 0 {
+        format!("-{:04}", -parts.year)
+    } else {
+        format!("{:04}", parts.year)
+    };
+    let sign = if offset_minutes < 0 { '-' } else { '+' };
+    let offset = offset_minutes.abs();
+    JsString::from(format!(
+        "{} {} {:02} {} {:02}:{:02}:{:02} GMT{}{:02}{:02} ({})",
+        days[parts.day as usize], months[parts.month as usize], parts.date, year,
+        parts.hours, parts.minutes, parts.seconds, sign, offset / 60, offset % 60, name
+    ))
 }
 
 fn date_parts(ms: f64, utc: bool) -> Option<DateParts> {

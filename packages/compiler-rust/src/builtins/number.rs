@@ -24,6 +24,42 @@ pub(super) fn apis() -> Vec<Api> {
         "Declaration-proven numeric receiver; eager ordinary arguments before primitive digits conversion; omitted/undefined digits default to zero; boxed receivers, object coercion hooks and iterable spreads refused",
         &["tests/corpus/rust-native-number-fixed/values.ts", "tests/corpus/rust-native-number-fixed/order.ts", "tests/corpus/rust-native-number-fixed/errors.ts"],
     ));
+    apis.push(Api::native(
+        "Number.prototype", "toExponential", Lowering::Primitive,
+        vec![
+            call!("num.toExponential", [Type::F64], Type::String, "number_to_exponential"),
+            call!("num.toExponentialDigits", [Type::F64, Type::F64], Type::String, "number_to_exponential_digits"),
+        ],
+        "Declaration-proven numeric receiver; omitted or statically undefined digits use shortest exponential formatting; represented primitive digits use the native formatter",
+        &["tests/corpus/rust-native-number-fixed/values.ts"],
+    ));
+    apis.push(Api::native(
+        "Number.prototype", "toPrecision", Lowering::Primitive,
+        vec![call!("num.toPrecision", [Type::F64, Type::F64], Type::String, "number_to_precision")],
+        "Declaration-proven numeric receiver; omitted or statically undefined precision uses ordinary numeric string formatting; represented primitive precision uses the native formatter",
+        &["tests/corpus/rust-native-number-fixed/values.ts"],
+    ));
+    apis.push(Api::native(
+        "Number.prototype",
+        "toLocaleString",
+        Lowering::Primitive,
+        vec![
+            call!(
+                "num.toLocaleStringEnUs",
+                [Type::F64],
+                Type::String,
+                "intl_number_format_en_us"
+            ),
+            call!(
+                "num.toLocaleStringPtBr",
+                [Type::F64],
+                Type::String,
+                "intl_number_format_pt_br"
+            ),
+        ],
+        "Declaration-proven numeric receiver with the deterministic native default locale, explicit en-US, or explicit pt-BR uses native Rust decimal grouping; other locale negotiation remains fenced",
+        &["tests/corpus/rust-native-number-string/locale.ts"],
+    ));
     for (name, operation) in [
         (
             "parseInt",

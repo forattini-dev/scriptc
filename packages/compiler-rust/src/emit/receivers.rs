@@ -4,7 +4,9 @@ use super::*;
 fn receiver(value: &mut Expr) -> Option<&mut Box<Expr>> {
     match value {
         Expr::DynCheck { value, .. }
+        | Expr::DynFrom { value, .. }
         | Expr::UnionNarrow { value, .. }
+        | Expr::UnionProject { value, .. }
         | Expr::Upcast { value, .. }
         | Expr::Downcast { value, .. } => receiver(value),
         Expr::RecordGet { obj, field, .. } => {

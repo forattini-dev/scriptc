@@ -2,6 +2,62 @@
 use super::*;
 use helpers::Helper;
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn invalid_tag_escape_rejects_undefined_losing_array_views() {
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                let input = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../tests/fixtures/tagged-template/invalid-typed.ts")
+                    .canonicalize()
+                    .unwrap();
+                let work = tempfile::Builder::new()
+                    .prefix("scriptc-template-invalid-")
+                    .tempdir()
+                    .unwrap();
+                let error = match crate::frontend::lower(&input, work.path(), None, false) {
+                    Ok(_) => panic!("typed views cannot preserve undefined cooked entries"),
+                    Err(error) => error,
+                };
+                assert!(
+                    error.contains("undefined-preserving typed array views"),
+                    "{error}"
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn template_strings_array_with_undefined_is_not_silently_projected_to_string() {
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                let input = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../tests/fixtures/tagged-template/undefined-slot.ts")
+                    .canonicalize()
+                    .unwrap();
+                let work = tempfile::Builder::new()
+                    .prefix("scriptc-template-undefined-")
+                    .tempdir()
+                    .unwrap();
+                let error = match crate::frontend::lower(&input, work.path(), None, false) {
+                    Ok(_) => {
+                        panic!("undefined cooked entries require a faithful native representation")
+                    }
+                    Err(error) => error,
+                };
+                assert!(error.contains("type has no representation"), "{error}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum Context {
     Template,
@@ -16,6 +72,20 @@ impl Lowerer<'_> {
         right: Expr,
         node: Node,
     ) -> Result<Expr, String> {
+        // A typed record or array view may expose a value asserted non-null by
+        // the checker while its owner still contains undefined (for example
+        // after a getter changes or a Map lookup misses). JavaScript converts
+        // the actual value during addition, not the projected static value.
+        let left = self
+            .raw_record_field(&left, node.left())
+            .or_else(|| self.raw_array_element(&left, node.left()))
+            .or_else(|| self.raw_primitive_projection(&left))
+            .unwrap_or(left);
+        let right = self
+            .raw_record_field(&right, node.right())
+            .or_else(|| self.raw_array_element(&right, node.right()))
+            .or_else(|| self.raw_primitive_projection(&right))
+            .unwrap_or(right);
         if left.ty() == Type::String && right.ty() == Type::String {
             return Ok(self.string_concat(left, right, node));
         }
@@ -89,11 +159,29 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn string_concat(&self, left: Expr, right: Expr, node: Node) -> Expr {
-        Expr::StrConcat {
-            left: Box::new(left),
-            right: Box::new(right),
-            r#type: Type::String,
-            loc: self.loc(node),
+        match (left, right) {
+            // Template lowering deliberately preserves one concatenation per
+            // source boundary so substitutions are converted in JavaScript
+            // evaluation order. Empty cooked heads and tails have no
+            // observable work of their own, however, and retaining them
+            // allocates a second string in hot templates such as `key-${n}`.
+            (Expr::StrLit { value, .. }, right) if value.is_empty() => right,
+            (left, Expr::StrLit { value, .. }) if value.is_empty() => left,
+            (
+                Expr::StrLit {
+                    value: mut left, ..
+                },
+                Expr::StrLit { value: right, .. },
+            ) => {
+                left.push_str(&right);
+                self.string_literal(&left, node)
+            }
+            (left, right) => Expr::StrConcat {
+                left: Box::new(left),
+                right: Box::new(right),
+                r#type: Type::String,
+                loc: self.loc(node),
+            },
         }
     }
 
@@ -123,12 +211,200 @@ impl Lowerer<'_> {
         Ok(result)
     }
 
+    fn template_raw_part(&self, part: Node) -> Result<String, String> {
+        let raw = part.raw_text();
+        let text = if raw.is_empty() {
+            // The parser can leave RawText empty, including for a nonempty
+            // no-substitution literal. Recover its spelling from the source,
+            // as the frontend's own tagged-template transform does.
+            let source = source_frontend::scanner_util::get_source_text_of_node_from_source_file(
+                get_source_file_of_node(part),
+                part,
+                false,
+            );
+            let end = if matches!(
+                part.kind(),
+                SyntaxKind::NoSubstitutionTemplateLiteral | SyntaxKind::TemplateTail
+            ) {
+                "`"
+            } else {
+                "${"
+            };
+            source
+                .strip_prefix(['`', '}'])
+                .and_then(|source| source.strip_suffix(end))
+                .ok_or_else(|| self.refuse(part, "template raw source spelling is unavailable"))?
+                .to_owned()
+        } else {
+            raw.to_owned()
+        };
+        Ok(text.replace("\r\n", "\n").replace('\r', "\n"))
+    }
+
+    pub(super) fn tagged_template_expression(&mut self, node: Node) -> Result<Expr, String> {
+        use source_frontend::flags::TokenFlags;
+        let tag = node.tag();
+        let reference = receivers::reference_node(tag);
+        let mut stmts = Vec::new();
+        let (callee, receiver) = if matches!(
+            reference.kind(),
+            SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression
+        ) {
+            let source = reference.expression();
+            let value = self.expression(source)?;
+            let value = self.coerce(value, Type::Dyn, source)?;
+            let receiver = self.update_temp(value, &mut stmts, source);
+            let key = if reference.kind() == SyntaxKind::PropertyAccessExpression {
+                self.string_literal(reference.name().text(), reference.name())
+            } else {
+                let source = reference.argument_expression();
+                let value = self.expression(source)?;
+                self.coerce(value, Type::Dyn, source)?
+            };
+            (
+                self.dynamic_get(reference, receiver.clone(), key),
+                Some(receiver),
+            )
+        } else {
+            (self.expression(tag)?, None)
+        };
+        let callee = self.callable_body(callee, tag)?;
+        let callee = self.coerce(callee, Type::Dyn, tag)?;
+        let callee = self.update_temp(callee, &mut stmts, tag);
+        let template = node.template();
+        let (parts, spans) = if template.kind() == SyntaxKind::NoSubstitutionTemplateLiteral {
+            (vec![template], vec![])
+        } else if template.kind() == SyntaxKind::TemplateExpression {
+            let spans = template.template_spans().nodes().to_vec();
+            let mut parts = vec![template.head()];
+            parts.extend(spans.iter().map(|span| span.literal()));
+            (parts, spans)
+        } else {
+            return Err(self.refuse(node, "tagged template requires a template literal"));
+        };
+        let mut cooked = Vec::new();
+        let mut raw = Vec::new();
+        for part in parts {
+            let value = if part
+                .template_flags()
+                .intersects(TokenFlags::CONTAINS_INVALID_ESCAPE)
+            {
+                return Err(self.refuse(part, "invalid tagged-template escapes require undefined-preserving typed array views"));
+            } else {
+                let bytes = source_frontend::scanner_util::go_string_bytes(part.text());
+                let value = std::str::from_utf8(&bytes)
+                    .map_err(|_| self.refuse(part, "lone UTF-16 surrogates are not ported"))?;
+                self.string_literal(value, part)
+            };
+            cooked.push(self.coerce(value, Type::Dyn, part)?);
+            let value = self.string_literal(&self.template_raw_part(part)?, part);
+            raw.push(self.coerce(value, Type::Dyn, part)?);
+        }
+        let array_type = Type::Array {
+            elem: Box::new(Type::Dyn),
+        };
+        let loc = self.loc(node);
+        let site = format!("{}:{}:{}", loc.file, loc.start, loc.end);
+        let array = |elems| Expr::ArrayLit {
+            elems,
+            r#type: array_type.clone(),
+            loc: loc.clone(),
+        };
+        let object = Expr::LibCall {
+            r#fn: "template.object".into(),
+            args: vec![self.string_literal(&site, node), array(cooked), array(raw)],
+            r#type: array_type.clone(),
+            loc: loc.clone(),
+        };
+        let mut args = vec![self.coerce(object, Type::Dyn, node)?];
+        for span in spans {
+            let source = span.expression();
+            args.push(self.expected_expression(source, Type::Dyn)?);
+        }
+        let result = if let Some(receiver) = receiver {
+            Expr::LibCall {
+                r#fn: "dyn.callWithThisSpread".into(),
+                args: vec![callee, receiver, array(args)],
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            }
+        } else {
+            Expr::DynCall {
+                callee: Box::new(callee),
+                callee_name: "tagged template".into(),
+                args,
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            }
+        };
+        Ok(Expr::Sequence {
+            stmts,
+            result: Box::new(result),
+            r#type: Type::Dyn,
+            loc,
+        })
+    }
+
+    pub(super) fn string_raw_template(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let tag = node.tag();
+        if tag.kind() != SyntaxKind::PropertyAccessExpression
+            || tag.name().text() != "raw"
+            || tag.expression().kind() != SyntaxKind::Identifier
+        {
+            return Ok(None);
+        }
+        let receiver_symbol = self.symbol(tag.expression());
+        let member_symbol = self.symbol(tag.name());
+        if !self.primitive_symbol(receiver_symbol, "String", None)
+            || !self.primitive_symbol(member_symbol, "raw", Some("StringConstructor"))
+        {
+            return Ok(None);
+        }
+        let template = node.template();
+        if template.kind() == SyntaxKind::NoSubstitutionTemplateLiteral {
+            let raw = self.template_raw_part(template)?;
+            return Ok(Some(self.string_literal(&raw, node)));
+        }
+        if template.kind() != SyntaxKind::TemplateExpression {
+            return Err(self.refuse(node, "String.raw requires a template literal"));
+        }
+        // A tagged template is a call: every substitution expression runs
+        // before String.raw starts converting any of the argument values.
+        let mut stmts = Vec::new();
+        let mut substitutions = Vec::new();
+        for span in template.template_spans().nodes() {
+            let source = span.expression();
+            let value = self.expression(source)?;
+            let value = self.update_temp(value, &mut stmts, source);
+            substitutions.push((source, value, span.literal()));
+        }
+        let head = self.template_raw_part(template.head())?;
+        let mut result = self.string_literal(&head, node);
+        for (source, value, literal) in substitutions {
+            let value = self.string_value(value, source, Context::Template)?;
+            result = self.string_concat(result, value, node);
+            let raw = self.template_raw_part(literal)?;
+            result = self.string_concat(result, self.string_literal(&raw, node), node);
+        }
+        Ok(Some(Expr::Sequence {
+            stmts,
+            result: Box::new(result),
+            r#type: Type::String,
+            loc: self.loc(node),
+        }))
+    }
+
     pub(super) fn string_value(
         &mut self,
         value: Expr,
         node: Node,
         context: Context,
     ) -> Result<Expr, String> {
+        let value = self
+            .raw_record_field(&value, node)
+            .or_else(|| self.raw_array_element(&value, node))
+            .or_else(|| self.raw_primitive_projection(&value))
+            .unwrap_or(value);
         let ty = value.ty();
         match ty {
             Type::String => Ok(value),
@@ -279,7 +555,15 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn array_join(&mut self, node: Node) -> Result<Expr, String> {
-        let receiver = self.expression(node.expression().expression())?;
+        let receiver_node = node.expression().expression();
+        let receiver = self.expression(receiver_node)?;
+        let receiver = self.live_member_receiver(receiver_node, receiver);
+        let receiver = self.checked_array_value(receiver_node, receiver, false)?;
+        self.array_join_value(node, receiver)
+    }
+
+    pub(super) fn array_join_value(&mut self, node: Node, receiver: Expr) -> Result<Expr, String> {
+        let receiver = self.join_receiver(receiver, node)?;
         let arguments = node.arguments().into_iter().collect::<Vec<_>>();
         if arguments.len() > 1
             || arguments
@@ -295,6 +579,81 @@ impl Lowerer<'_> {
         };
         let separator = self.string_value(separator, node, Context::Separator)?;
         self.join_value(receiver, separator, node)
+    }
+
+    /// Resolve the method receiver before evaluating the separator. A missing
+    /// receiver must throw at property access, even if the argument has effects.
+    fn join_receiver(&mut self, receiver: Expr, node: Node) -> Result<Expr, String> {
+        let Type::Union { union_id } = receiver.ty() else {
+            return Ok(receiver);
+        };
+        let Some(elem) = self.nullable_array_element(&receiver.ty()) else {
+            return Ok(receiver);
+        };
+        let array = Type::Array {
+            elem: Box::new(elem),
+        };
+        let arms = self.unions[union_id].arms.clone();
+        let mut helper = Helper::new(
+            "array_join_receiver",
+            vec![receiver.ty()],
+            array.clone(),
+            self.loc(node),
+        );
+        let input = helper.param(0);
+        for (tag, arm) in arms.iter().enumerate() {
+            let value = if *arm == array {
+                Expr::UnionNarrow {
+                    value: Box::new(helper.read(&input)),
+                    union_id: format!("u{union_id}"),
+                    tag,
+                    r#type: array.clone(),
+                    loc: helper.loc(),
+                }
+            } else {
+                let unit = Expr::UnitLit {
+                    unit: if *arm == Type::Null {
+                        "null"
+                    } else {
+                        "undefined"
+                    },
+                    r#type: arm.clone(),
+                    loc: helper.loc(),
+                };
+                let unit = self.coerce(unit, Type::Dyn, node)?;
+                let key = self.string_literal("join", node);
+                let access = self.dynamic_get(node, unit, key);
+                self.coerce(access, array.clone(), node)?
+            };
+            let ret = Stmt::Return {
+                value: Some(value),
+                loc: helper.loc(),
+            };
+            if tag + 1 == arms.len() {
+                helper.function.body.push(ret);
+            } else {
+                helper.function.body.push(Stmt::If {
+                    cond: Expr::UnionIsTag {
+                        value: Box::new(helper.read(&input)),
+                        union_id: format!("u{union_id}"),
+                        tag,
+                        negated: false,
+                        r#type: Type::Bool,
+                        loc: helper.loc(),
+                    },
+                    then: vec![ret],
+                    else_: None,
+                    loc: helper.loc(),
+                });
+            }
+        }
+        let callee = self.install_helper(helper.function);
+        Ok(Expr::Call {
+            callee,
+            args: vec![receiver],
+            r#type: array,
+            loc: self.loc(node),
+        })
     }
 
     fn join_value(&mut self, receiver: Expr, separator: Expr, node: Node) -> Result<Expr, String> {
@@ -390,7 +749,16 @@ impl Lowerer<'_> {
         helper.declare(&length, helper.length(&array));
         helper.declare(&index, helper.number(0.0));
         helper.declare(&text, self.string_literal("", node));
-        let item = self.string_value(helper.get(&array, &index, *elem), node, Context::Element)?;
+        let item = if *elem == Type::Dyn {
+            // Dynamic indexed reads map both holes and explicit undefined to
+            // undefined, which contributes an empty field to Array.join.
+            let receiver = self.coerce(helper.read(&array), Type::Dyn, node)?;
+            let key = self.string_value(helper.read(&index), node, Context::Template)?;
+            self.dynamic_get(node, receiver, key)
+        } else {
+            helper.get(&array, &index, *elem)
+        };
+        let item = self.string_value(item, node, Context::Element)?;
         helper.function.body.push(Stmt::While {
             cond: helper.less(&index, helper.read(&length)),
             body: vec![

@@ -64,6 +64,31 @@ impl<T: HeapValue, U: HeapValue, F: FnOnce(Option<T>) -> U> WebReadRequest<T> fo
 pub type JsWebStream<T> = Gc<WebStreamData<T>>;
 pub type JsWebReader<T> = Gc<WebReaderData<T>>;
 
+struct EmptyWebStreamSource<T: HeapValue> {
+    empty: T,
+}
+
+impl<T: HeapValue> Trace for EmptyWebStreamSource<T> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        self.empty.trace_value(tracer);
+    }
+}
+
+impl<T: HeapValue> WebStreamSource<T> for EmptyWebStreamSource<T> {
+    fn pull(&self, stream: &JsWebStream<T>) -> JsPromise<T> {
+        web_stream_close(stream);
+        promise_resolved(self.empty.clone())
+    }
+
+    fn cancel(&self, _: T) -> JsPromise<T> {
+        promise_resolved(self.empty.clone())
+    }
+
+    fn has_pull(&self) -> bool {
+        true
+    }
+}
+
 impl<T: HeapValue> Trace for WebStreamData<T> {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         for value in &self.queue { value.trace_value(tracer); }
@@ -98,6 +123,21 @@ pub fn web_stream_new<T: HeapValue>(source: Rc<dyn WebStreamSource<T>>) -> JsWeb
     web_stream_new_with_prefetch(source, true)
 }
 
+pub fn web_stream_empty<T: HeapValue>(empty: T) -> JsWebStream<T> {
+    let start = promise_resolved(empty.clone());
+    let stream = web_stream_new_with_prefetch(Rc::new(EmptyWebStreamSource { empty }), false);
+    web_stream_start(&stream, &start);
+    stream
+}
+
+pub fn web_stream_manual<T: HeapValue>() -> JsWebStream<T> {
+    Gc::new(WebStreamData {
+        queue: VecDeque::new(), reader: None, source: None, started: true,
+        pulling: false, prefetch: true, pull_again: false, close_requested: false,
+        closed: false, error: None, disturbed: false, bun_pipe: false,
+    })
+}
+
 fn web_stream_new_with_prefetch<T: HeapValue>(
     source: Rc<dyn WebStreamSource<T>>, prefetch: bool,
 ) -> JsWebStream<T> {
@@ -117,6 +157,14 @@ pub fn web_stream_locked<T: HeapValue>(stream: &JsWebStream<T>) -> bool {
 
 pub fn web_stream_disturbed<T: HeapValue>(stream: &JsWebStream<T>) -> bool {
     stream.with(|s| s.disturbed)
+}
+
+pub fn web_stream_errored<T: HeapValue>(stream: &JsWebStream<T>) -> bool {
+    stream.with(|s| s.error.is_some())
+}
+
+pub fn web_stream_readable<T: HeapValue>(stream: &JsWebStream<T>) -> bool {
+    stream.with(|s| !s.closed && s.error.is_none())
 }
 
 pub fn web_stream_desired_size<T: HeapValue>(stream: &JsWebStream<T>) -> Option<f64> {

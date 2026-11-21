@@ -33,6 +33,7 @@ enum BunFileResult {
 
 enum BunFilePending {
     Read(JsString, JsPromise<JsString>),
+    ReadBytes(JsString, JsPromise<JsBytes<u8>>),
     Write(JsString, JsPromise<f64>),
 }
 
@@ -125,6 +126,26 @@ pub fn bun_file_text(path: &JsString) -> JsPromise<JsString> {
     promise
 }
 
+pub fn bun_file_bytes(path: &JsString) -> JsPromise<JsBytes<u8>> {
+    let promise = promise_new();
+    bun_file_enqueue(
+        path,
+        BunFileOperation::Read,
+        BunFilePending::ReadBytes(path.clone(), promise.clone()),
+    );
+    promise
+}
+
+pub fn bun_file_exists(path: &JsString) -> JsPromise<bool> {
+    promise_resolved(std::fs::exists(path.to_utf8_lossy()).unwrap_or(false))
+}
+
+pub fn bun_file_size(path: &JsString) -> f64 {
+    std::fs::metadata(path.to_utf8_lossy())
+        .map(|metadata| metadata.len() as f64)
+        .unwrap_or(0.0)
+}
+
 fn bun_file_enqueue(path: &JsString, operation: BunFileOperation, pending: BunFilePending) {
     let work = BUN_FILES.with(|state| {
         let mut state = state.borrow_mut();
@@ -202,6 +223,24 @@ fn bun_files_dispatch_one() -> bool {
             match result {
                 Ok(bytes) => {
                     let _ = promise_fulfill(&promise, bun_file_decode(&bytes));
+                }
+                Err(error) => {
+                    let _ = promise_reject(&promise, caught_value(bun_file_error(&path, error)));
+                }
+            }
+        }
+        BunFilePending::ReadBytes(path, promise) => {
+            let result = match result {
+                BunFileResult::Read(result) => result,
+                BunFileResult::Unavailable => Err(std::io::Error::new(
+                    std::io::ErrorKind::ResourceBusy,
+                    "could not create Bun file worker",
+                )),
+                _ => unreachable!("scriptc: Bun file completion type mismatch"),
+            };
+            match result {
+                Ok(bytes) => {
+                    let _ = promise_fulfill(&promise, bytes_from_vec(bytes));
                 }
                 Err(error) => {
                     let _ = promise_reject(&promise, caught_value(bun_file_error(&path, error)));

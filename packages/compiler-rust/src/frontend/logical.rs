@@ -2,8 +2,48 @@
 use super::*;
 
 impl Lowerer<'_> {
+    fn logical_boolean_context(&self, node: Node) -> bool {
+        let parent = node.parent();
+        match parent.kind() {
+            SyntaxKind::ConditionalExpression => parent.condition() == node,
+            SyntaxKind::IfStatement | SyntaxKind::WhileStatement | SyntaxKind::DoStatement => {
+                parent.expression() == node
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn logical(&mut self, node: Node, op: &str) -> Result<Expr, String> {
-        let left = self.condition_value(node.left())?;
+        // `(value as string) || fallback`: a type assertion has no runtime
+        // effect, so an absent erased value must reach the fallback rather
+        // than fail the asserted view's check first.
+        let mut asserted = node.left();
+        while asserted.kind() == SyntaxKind::ParenthesizedExpression {
+            asserted = asserted.expression();
+        }
+        let erased_assertion = matches!(op, "||" | "??")
+            && matches!(
+                asserted.kind(),
+                SyntaxKind::AsExpression | SyntaxKind::TypeAssertionExpression
+            )
+            && self.ty(asserted.expression()).ok() == Some(Type::Dyn);
+        let left = if erased_assertion {
+            self.expression(asserted.expression())?
+        } else {
+            self.condition_value(node.left())?
+        };
+        if let Expr::BoolLit { value, .. } = left {
+            if (op == "&&" && !value) || (op == "||" && value) {
+                return Ok(Expr::BoolLit {
+                    value,
+                    r#type: Type::Bool,
+                    loc: self.loc(node),
+                });
+            }
+            if (op == "&&" && value) || (op == "||" && !value) {
+                return self.expression(node.right());
+            }
+        }
         let before = self.var_defined.clone();
         let guard = (op != "??")
             .then(|| self.guarded_vars(node.left(), op == "&&"))
@@ -25,6 +65,24 @@ impl Lowerer<'_> {
         // The right side may not execute. Only facts true on both paths survive.
         self.var_defined = before.intersection(&self.var_defined).copied().collect();
         let right = right?;
+        if op == "&&"
+            && left.ty() == Type::Bool
+            && self.contains_namespace(&right.ty())
+            && self.logical_boolean_context(node)
+        {
+            // In a condition, `boolean && nullableNamespace` only needs the
+            // truthiness of each operand. Preserve short-circuiting with a
+            // boolean IR node instead of materializing the selected namespace
+            // value through Dyn (which would discard its descriptor contract).
+            let right = self.condition(right, node.right())?;
+            return Ok(Expr::Logical {
+                op: "&&".into(),
+                left: Box::new(left),
+                right: Box::new(right),
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            });
+        }
         if op == "&&" && right.ty() == Type::Bool {
             if let Type::Union { union_id } = left.ty()
                 && self.unions[union_id].arms.contains(&Type::Stats)
@@ -32,7 +90,10 @@ impl Lowerer<'_> {
                     .arms
                     .iter()
                     .all(|arm| matches!(arm, Type::Stats | Type::Null | Type::Undefined))
-                && matches!(node.parent().kind(), SyntaxKind::IfStatement | SyntaxKind::WhileStatement)
+                && matches!(
+                    node.parent().kind(),
+                    SyntaxKind::IfStatement | SyntaxKind::WhileStatement | SyntaxKind::DoStatement
+                )
             {
                 let condition = self.condition(left, node.left())?;
                 return Ok(Expr::Logical {
@@ -125,12 +186,27 @@ impl Lowerer<'_> {
             loc: self.loc(node.left()),
         };
         let cond = if op == "??" {
-            Expr::DynTest {
-                value: Box::new(self.coerce(read(), Type::Dyn, node.left())?),
-                test: "nullish".into(),
-                negated: false,
-                r#type: Type::Bool,
-                loc: self.loc(node.left()),
+            if let Some((union_id, defined_tag, _)) = defined_arm.as_ref() {
+                // Exactly one non-nullish arm means every other valid tag is
+                // null or undefined. Test the represented discriminant
+                // directly instead of cloning the union into NativeValue just
+                // to ask the dynamic runtime whether it is nullish.
+                Expr::UnionIsTag {
+                    value: Box::new(read()),
+                    union_id: format!("u{union_id}"),
+                    tag: *defined_tag,
+                    negated: true,
+                    r#type: Type::Bool,
+                    loc: self.loc(node.left()),
+                }
+            } else {
+                Expr::DynTest {
+                    value: Box::new(self.coerce(read(), Type::Dyn, node.left())?),
+                    test: "nullish".into(),
+                    negated: false,
+                    r#type: Type::Bool,
+                    loc: self.loc(node.left()),
+                }
             }
         } else {
             self.condition(read(), node.left())?

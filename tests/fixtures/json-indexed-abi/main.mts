@@ -1,0 +1,16 @@
+import { encode, type JsonObject, type JsonValue } from './index.mjs';
+const first = { x: 1 };
+const second = { y: 'a' };
+const optional: { x: number; y?: string } = { x: 2 };
+const nested = { x: { y: 'b' }, array: [1, 2] };
+console.log(encode(first as unknown as JsonObject));
+console.log(encode(second as unknown as JsonObject));
+console.log(encode(optional as unknown as JsonObject));
+console.log(encode(nested as unknown as JsonObject));
+console.log('undefined:' + encode(undefined as unknown as JsonValue));
+import { write, erase } from './mutator.mjs';
+const object = { x: 1 };
+console.log(write(object as unknown as JsonObject));
+console.log(String(object.x));
+console.log(erase(object as unknown as JsonObject));
+console.log(String(object.x));

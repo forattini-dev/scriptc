@@ -1,0 +1,18 @@
+import * as presets from './lib.mts';
+type Factory = (options: Record<string, string>) => unknown;
+const factories = presets as unknown as Record<string, Factory | undefined>;
+const factory = factories['create'];
+if (!factory) throw new Error('missing factory');
+console.log('before', typeof factories, typeof factory, factory === (presets.create as Factory));
+const created: any = factory({});
+console.log('factory', typeof created, typeof created.value);
+console.log('symbol', created.value[Symbol.iterator](3));
+const bound = factories['boundFactory'];
+if (!bound) throw new Error('missing bound factory');
+console.log('bound', bound === presets.boundFactory, bound({}));
+console.log('bound call', (bound as any).call({ value: 100 }, {}));
+(bound as any).marker = 'shared';
+console.log('bound property', presets.boundFactory.marker, Object.keys(bound).join(','));
+const withOptions = factories['createWithOptions'];
+if (!withOptions) throw new Error('missing options factory');
+console.log('options', (withOptions({ name: 'Alice' }) as any).greeting, (withOptions({}) as any).greeting);

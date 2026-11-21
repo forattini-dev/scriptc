@@ -29,6 +29,7 @@ impl Helper {
         Self {
             function: Function {
                 is_async: false,
+                generator: None,
                 rest: false,
                 name: kind.into(),
                 params,

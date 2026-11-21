@@ -21,7 +21,8 @@ test("Bun subprocess IR rejects unsupported stdio modes and wrong exitCode resul
 
 test("Bun subprocess operations expose ambient authority and synchronous spawn failures to IR analyses", () => {
   expect(MAY_THROW_LIB_FNS.has("bun.spawn")).toBe(true);
-  for (const fn of ["bun.spawn", "bun.exited", "bun.pid", "bun.exitCode", "bun.stdout", "bun.stderr"]) {
+  expect(MAY_THROW_LIB_FNS.has("bun.responseText")).toBe(true);
+  for (const fn of ["bun.spawn", "bun.exited", "bun.pid", "bun.exitCode", "bun.stdout", "bun.stderr", "bun.responseText"]) {
     expect(LIB_NONDETERMINISTIC_PREFIXES.some(([prefix]) => fn.startsWith(prefix)), fn).toBe(true);
   }
 });

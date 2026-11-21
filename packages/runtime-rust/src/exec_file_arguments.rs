@@ -21,6 +21,7 @@ pub trait ExecFileValue: Clone {
 pub struct ExecFileRequest<V> {
     pub command: JsString,
     pub arguments: JsArray<JsString>,
+    pub display: JsString,
     pub options: ExecFileOptions,
     pub callback: V,
 }
@@ -70,6 +71,7 @@ fn exec_file_number<V: ExecFileValue>(options: &V, name: &str, default: f64) -> 
 pub fn exec_file_normalize<V: ExecFileValue>(
     mut values: Vec<V>,
     promise: bool,
+    shell: bool,
 ) -> ExecFileRequest<V> {
     use ExecFileValueKind as K;
     let callback = if values
@@ -78,35 +80,44 @@ pub fn exec_file_normalize<V: ExecFileValue>(
     {
         if promise {
             throw_type_error(
-                "scriptc: an explicit callback on the custom execFile Promise is not ported".into(),
+                "scriptc: an explicit callback on the custom child-process Promise is not ported"
+                    .into(),
             );
         }
         values.pop().unwrap()
     } else {
         V::exec_undefined()
     };
-    if values.len() > 3 {
-        throw_type_error("scriptc: execFile extra arguments are not ported".into());
+    if values.len() > if shell { 2 } else { 3 } {
+        throw_type_error(format!(
+            "scriptc: {} extra arguments are not ported",
+            if shell { "exec" } else { "execFile" }
+        ));
     }
-    let command = exec_file_string(
+    let source_command = exec_file_string(
         values.first().cloned().unwrap_or_else(V::exec_undefined),
-        "file",
+        if shell { "command" } else { "file" },
     );
-    if command.is_empty() {
+    if !shell && source_command.is_empty() {
         throw_type_error_code(
             "The argument 'file' cannot be empty. Received ''".into(),
             "ERR_INVALID_ARG_VALUE",
         );
     }
-    if command.contains('\0') {
+    if source_command.contains('\0') {
         throw_type_error_code(
-            "The argument 'file' must be a string without null bytes".into(),
+            format!(
+                "The argument '{}' must be a string without null bytes",
+                if shell { "command" } else { "file" }
+            ),
             "ERR_INVALID_ARG_VALUE",
         );
     }
     let mut arguments = Vec::new();
     let second = values.get(1).cloned().unwrap_or_else(V::exec_undefined);
-    let options = if matches!(second.exec_kind(), K::Array) {
+    let options = if shell {
+        second
+    } else if matches!(second.exec_kind(), K::Array) {
         let K::Number(len) = second.exec_get("length").exec_kind() else {
             unreachable!("native array length");
         };
@@ -148,10 +159,15 @@ pub fn exec_file_normalize<V: ExecFileValue>(
             throw_type_error(format!("scriptc: execFile option {name} is not ported"));
         }
     }
-    match exec_file_option(&options, "shell").exec_kind() {
-        K::Undefined | K::Boolean(false) => {}
+    let shell_path = match exec_file_option(&options, "shell").exec_kind() {
+        K::Undefined if shell => None,
+        K::String(path) if shell && !path.is_empty() && !path.contains('\0') => Some(path),
+        K::Undefined | K::Boolean(false) if !shell => None,
+        _ if shell => {
+            throw_type_error("scriptc: exec shell must be a non-empty string when provided".into())
+        }
         _ => throw_type_error("scriptc: execFile shell execution is not ported".into()),
-    }
+    };
     match exec_file_option(&options, "killSignal").exec_kind() {
         K::Undefined => {}
         K::String(s) if s.as_ref() == "SIGTERM" => {}
@@ -197,9 +213,37 @@ pub fn exec_file_normalize<V: ExecFileValue>(
         }
         _ => exec_file_invalid("options.env", "object", &env),
     };
+    let (command, arguments, display) = if shell {
+        #[cfg(windows)]
+        let command = shell_path.unwrap_or_else(|| {
+            std::env::var("ComSpec")
+                .map(|value| string(&value))
+                .unwrap_or_else(|_| string("cmd.exe"))
+        });
+        #[cfg(not(windows))]
+        let command = shell_path.unwrap_or_else(|| string("/bin/sh"));
+        #[cfg(windows)]
+        let arguments = vec![
+            string("/d"),
+            string("/s"),
+            string("/c"),
+            source_command.clone(),
+        ];
+        #[cfg(not(windows))]
+        let arguments = vec![string("-c"), source_command.clone()];
+        (command, arguments, source_command)
+    } else {
+        let mut display = source_command.to_string();
+        for argument in &arguments {
+            display.push(' ');
+            display.push_str(argument);
+        }
+        (source_command, arguments, string(&display))
+    };
     ExecFileRequest {
         command,
         arguments: array_new(arguments),
+        display,
         options: ExecFileOptions {
             cwd,
             env,

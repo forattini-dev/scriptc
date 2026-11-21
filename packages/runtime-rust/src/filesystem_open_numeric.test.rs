@@ -28,3 +28,22 @@ fn numeric_exclusive_creation_has_exactly_one_concurrent_owner() {
     assert_eq!(winners, 1);
     assert_eq!(mode & 0o177, 0, "creation must not grant permissions outside mode 0600");
 }
+
+#[cfg(unix)]
+#[test]
+fn numeric_no_follow_rejects_symlink_without_touching_target() {
+    use std::os::unix::fs::symlink;
+    let root = std::env::temp_dir().join(format!("scriptc-numeric-nofollow-{}", std::process::id()));
+    std::fs::create_dir(&root).expect("fresh fixture");
+    let target = root.join("target");
+    let link = root.join("link");
+    std::fs::write(&target, b"untouched").unwrap();
+    symlink(&target, &link).unwrap();
+    let flags = rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::TRUNC | rustix::fs::OFlags::NOFOLLOW;
+    let path = string(link.to_str().unwrap());
+    assert!(open_file_numeric(&path, flags.bits() as i32, 0o600).is_err());
+    assert_eq!(std::fs::read(&target).unwrap(), b"untouched");
+    std::fs::remove_file(link).unwrap();
+    std::fs::remove_file(target).unwrap();
+    std::fs::remove_dir(root).unwrap();
+}

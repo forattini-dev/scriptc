@@ -19,6 +19,34 @@ enum Access {
 }
 
 impl Lowerer<'_> {
+    pub(in crate::frontend) fn private_brand_check(&mut self, node: Node) -> Result<Expr, String> {
+        let slot = self.private_slot(node.left())?;
+        let receiver = self.expression(node.right())?;
+        let key = if matches!(receiver.ty(), Type::Object { .. }) {
+            receiver
+        } else if self.dynamic_erasure_reason(&receiver.ty()).is_none() {
+            self.coerce(receiver, Type::Dyn, node.right())?
+        } else {
+            return Err(self.refuse(
+                node.right(),
+                "private brand checks require an identity-bearing object",
+            ));
+        };
+        Ok(Expr::LibCall {
+            r#fn: "weakmap.has".into(),
+            args: vec![
+                Expr::VarRef {
+                    local_id: slot.global.id,
+                    r#type: slot.global.r#type,
+                    loc: self.loc(node.left()),
+                },
+                key,
+            ],
+            r#type: Type::Bool,
+            loc: self.loc(node),
+        })
+    }
+
     pub(super) fn inventory_private_slots(&mut self, owner: usize) -> Result<(), String> {
         let node = self.classes.definitions[owner].node;
         let mut names = HashSet::new();
@@ -28,7 +56,9 @@ impl Lowerer<'_> {
             .filter(|n| {
                 matches!(
                     n.kind(),
-                    SyntaxKind::PropertyDeclaration | SyntaxKind::MethodDeclaration
+                    SyntaxKind::PropertyDeclaration
+                        | SyntaxKind::MethodDeclaration
+                        | SyntaxKind::GetAccessor
                 ) && n.name().kind() == SyntaxKind::PrivateIdentifier
             })
             .enumerate()
@@ -58,6 +88,7 @@ impl Lowerer<'_> {
                     class_name: weak_maps::CLASS.into(),
                 },
                 mutable: false,
+                loc: self.loc(field),
             };
             self.globals.push(global.clone());
             self.classes.private_slots.insert(
@@ -127,6 +158,7 @@ impl Lowerer<'_> {
                 resolving: false,
                 signature: None,
                 token: None,
+                captures: Vec::new(),
             });
             self.classes.layouts.push(Some(ir::Class {
                 name: weak_maps::CLASS.into(),
@@ -134,8 +166,10 @@ impl Lowerer<'_> {
                 runtime: false,
                 base: None,
                 fields: vec![],
+                captures: vec![],
                 methods: vec![],
                 symbol_methods: vec![],
+                symbol_brand: None,
                 method_names: vec!["get".into(), "set".into(), "has".into(), "delete".into()],
                 loc: self.loc(site),
             }));
@@ -154,7 +188,9 @@ impl Lowerer<'_> {
         for field in self.classes.definitions[owner].node.members() {
             if !matches!(
                 field.kind(),
-                SyntaxKind::PropertyDeclaration | SyntaxKind::MethodDeclaration
+                SyntaxKind::PropertyDeclaration
+                    | SyntaxKind::MethodDeclaration
+                    | SyntaxKind::GetAccessor
             ) || field.name().kind() != SyntaxKind::PrivateIdentifier
             {
                 continue;
@@ -200,7 +236,119 @@ impl Lowerer<'_> {
     pub(in crate::frontend) fn private_get(&mut self, node: Node) -> Result<Expr, String> {
         let slot = self.private_slot(node.name())?;
         if slot.declaration.kind() == SyntaxKind::MethodDeclaration {
-            return Err(self.refuse(node, "private method values require an explicit receiver ABI; only direct calls are ported"));
+            let signature = self.request_private_method(&slot)?;
+            let receiver = self.private_receiver(node.expression())?;
+            let receiver = if matches!(receiver.ty(), Type::Union { .. }) {
+                self.coerce(receiver, Type::Dyn, node.expression())?
+            } else {
+                receiver
+            };
+            // PrivateGet performs the lexical brand check before producing the
+            // callable. Native closures have no implicit JavaScript `this`
+            // channel, so retain that checked receiver as an explicit capture.
+            let receiver =
+                self.private_access(&slot, receiver, None, Access::MethodReceiver, node)?;
+            let params = signature
+                .params
+                .iter()
+                .skip(1)
+                .map(|param| param.r#type.clone())
+                .collect::<Vec<_>>();
+            let callable = Type::Func {
+                rest: signature.rest,
+                params: params.clone(),
+                ret: Box::new(signature.return_type.clone()),
+            };
+            let adapter_name = format!("private_method_value_{}", self.next_closure);
+            self.next_closure += 1;
+            let capture = Param {
+                local_id: "c0".into(),
+                name: "this".into(),
+                r#type: receiver.ty(),
+            };
+            let mut adapter = helpers::Helper::new(
+                &adapter_name,
+                params,
+                signature.return_type.clone(),
+                self.loc(node),
+            );
+            adapter.function.rest = signature.rest;
+            adapter.function.captures = Some(vec![capture.clone()]);
+            adapter.function.locals.push(Local {
+                id: capture.local_id.clone(),
+                name: capture.name.clone(),
+                r#type: capture.r#type.clone(),
+                mutable: false,
+                boxed: true,
+            });
+            let mut args = vec![Expr::VarRef {
+                local_id: capture.local_id,
+                r#type: capture.r#type,
+                loc: self.loc(node),
+            }];
+            for index in 0..adapter.function.params.len() {
+                let param = adapter.param(index);
+                args.push(adapter.read(&param));
+            }
+            let call = Expr::Call {
+                callee: signature.name,
+                args,
+                r#type: signature.return_type.clone(),
+                loc: self.loc(node),
+            };
+            if signature.return_type == Type::Void {
+                adapter.function.body.push(Stmt::Expression {
+                    expr: call,
+                    loc: self.loc(node),
+                });
+                adapter.function.body.push(Stmt::Return {
+                    value: None,
+                    loc: self.loc(node),
+                });
+            } else {
+                adapter.function.body.push(Stmt::Return {
+                    value: Some(call),
+                    loc: self.loc(node),
+                });
+            }
+            self.lifted.push(adapter.function);
+
+            let mut factory = helpers::Helper::new(
+                &format!("{adapter_name}_factory"),
+                vec![receiver.ty()],
+                callable.clone(),
+                self.loc(node),
+            );
+            factory.function.locals[0].boxed = true;
+            factory.function.body.push(Stmt::Return {
+                value: Some(Expr::Closure {
+                    fn_name: adapter_name,
+                    captures: vec![factory.param(0).id],
+                    r#type: callable.clone(),
+                    loc: self.loc(node),
+                }),
+                loc: self.loc(node),
+            });
+            let callee = self.install_helper(factory.function);
+            return Ok(Expr::Call {
+                callee,
+                args: vec![receiver],
+                r#type: callable,
+                loc: self.loc(node),
+            });
+        }
+        if slot.declaration.kind() == SyntaxKind::GetAccessor {
+            let signature = self.request_private_method(&slot)?;
+            let receiver = self.private_receiver(node.expression())?;
+            let receiver =
+                self.private_access(&slot, receiver, None, Access::MethodReceiver, node)?;
+            let value = Expr::Call {
+                callee: signature.name,
+                args: vec![receiver],
+                r#type: signature.return_type,
+                loc: self.loc(node),
+            };
+            return self.narrowed(value, node);
         }
         let receiver = self.private_receiver(node.expression())?;
         let value = self.private_access(&slot, receiver, None, Access::Read, node)?;
@@ -216,7 +364,10 @@ impl Lowerer<'_> {
     pub(in crate::frontend) fn private_assignment(&mut self, node: Node) -> Result<Expr, String> {
         let member = node.left();
         let slot = self.private_slot(member.name())?;
-        if slot.declaration.kind() == SyntaxKind::MethodDeclaration {
+        if matches!(
+            slot.declaration.kind(),
+            SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor
+        ) {
             return Err(self.refuse(member, "writes to private methods are not ported"));
         }
         let receiver = self.private_receiver(member.expression())?;
@@ -227,7 +378,19 @@ impl Lowerer<'_> {
         } else {
             self.ty(member)?
         };
-        let value = self.expected_expression(node.right(), target)?;
+        let unchecked_unit_initializer =
+            parameter_abi::is_javascript(self.classes.definitions[slot.owner].node)
+                && matches!(target, Type::Null | Type::Undefined);
+        let value = if unchecked_unit_initializer {
+            // In unchecked JavaScript, `#slot = null`/`undefined` is an
+            // initializer, not a permanent storage contract. Private slots
+            // already own dynamic payloads, so retain the assigned value's
+            // native representation instead of projecting it back to the
+            // initializer's unit type.
+            self.expression(node.right())?
+        } else {
+            self.expected_expression(node.right(), target)?
+        };
         // A contextual optional slot may wrap a known RHS arm. Assignment
         // yields that RHS value, not the wider storage contract.
         let result_type = match &value {

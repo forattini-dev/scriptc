@@ -26,14 +26,23 @@ island-v8 = ["dep:scriptc-island-v8"]
 island-eval = ["dep:boa_engine", "boa_engine/intl_bundled", "boa_engine/temporal", "boa_engine/annex-b"]
 
 [dependencies]
+aes = "=0.8.4"
 boa_engine = { version = "=0.22.0", default-features = false, optional = true }
+cbc = "=0.1.2"
 chrono = { version = "=0.4.39", default-features = false, features = ["clock", "std"] }
+chrono-tz = "=0.10.4"
 flate2 = { version = "=1.1.9", default-features = false, features = ["zlib-rs"] }
+fs2 = "=0.4.3"
 # Select Node-compatible matching for levels 6 and 9 without changing their tuning.
 zlib-rs = { version = "=0.6.7", default-features = false, features = ["scriptc-node-level6"] }
 getrandom = "=0.4.3"
+iana-time-zone = "=0.1.60"
+icu_datetime = "=2.3.0"
+icu_locale_core = "=2.3.0"
+icu_time = "=2.3.0"
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
+pkcs8 = { version = "=0.10.2", features = ["encryption", "pem", "sha1-insecure"] }
 regress = { version = "0.12.0", features = ["prohibit-unsafe", "utf16"] }
 ring = "=0.17.14"
 scriptc-island-v8 = { path = "island-v8", optional = true }
@@ -44,12 +53,19 @@ signal-hook = { version = "=0.4.4", default-features = false }
 url = "=2.5.0"
 unicode-normalization = "=0.1.25"
 webpki-roots = "=1.0.9"
+x509-parser = "=0.18.1"
 
 [target.'cfg(all(not(windows), not(target_os = "wasi")))'.dependencies]
 rustix = { version = "=1.1.4", default-features = false, features = ["event", "fs", "net", "process", "std", "termios"] }
 
 [target.'cfg(not(target_os = "wasi"))'.dependencies]
 terminal_size = "=0.4.4"
+toml_edit = "=0.25.13"
+
+[target.'cfg(windows)'.dependencies]
+miow = "=0.6.1"
+winapi-util = "=0.1.11"
+winsafe = { version = "=0.0.19", default-features = false, features = ["kernel"] }
 
 [target.'cfg(any(windows, target_os = "linux", target_os = "android", target_vendor = "apple", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))'.dependencies]
 getifaddrs = "=0.6.2"

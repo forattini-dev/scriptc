@@ -3,6 +3,39 @@ use super::*;
 use source_frontend::ast::get_source_file_of_node;
 
 impl Lowerer<'_> {
+    pub(super) fn direct_entry_comparison(&mut self, node: Node) -> Option<bool> {
+        let matches = |lowerer: &mut Self, meta: Node, path: Node| {
+            if meta.kind() != SyntaxKind::PropertyAccessExpression || meta.name().text() != "url" {
+                return false;
+            }
+            let import_meta = meta.expression();
+            if import_meta.kind() != SyntaxKind::MetaProperty
+                || import_meta.keyword_token() != SyntaxKind::ImportKeyword
+                || import_meta.name().text() != "meta"
+                || path.kind() != SyntaxKind::TemplateExpression
+                || path.head().text() != "file://"
+            {
+                return false;
+            }
+            let spans = path
+                .template_spans()
+                .nodes()
+                .into_iter()
+                .collect::<Vec<_>>();
+            if spans.len() != 1 || !spans[0].literal().text().is_empty() {
+                return false;
+            }
+            let argv = spans[0].expression();
+            argv.kind() == SyntaxKind::ElementAccessExpression
+                && argv.argument_expression().kind() == SyntaxKind::NumericLiteral
+                && argv.argument_expression().text() == "1"
+                && lowerer.process_member(argv.expression(), "argv")
+        };
+        let recognized =
+            matches(self, node.left(), node.right()) || matches(self, node.right(), node.left());
+        recognized.then_some(self.file == self.entry_file)
+    }
+
     pub(super) fn module_metadata(&self, node: Node) -> Result<Option<Expr>, String> {
         let meta = node.expression();
         if meta.kind() != SyntaxKind::MetaProperty

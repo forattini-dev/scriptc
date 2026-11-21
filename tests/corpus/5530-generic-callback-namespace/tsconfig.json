@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
+    "allowJs": true, "checkJs": false, "strict": true,
+    "types": ["node"], "typeRoots": ["../../../node_modules/@types"]
+  },
+  "include": ["main.mts", "resource.mjs", "resource.d.mts"]
+}

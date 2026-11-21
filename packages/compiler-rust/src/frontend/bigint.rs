@@ -3,6 +3,15 @@ use super::*;
 use helpers::Helper;
 
 impl Lowerer<'_> {
+    pub(super) fn standard_bigint_value(&mut self, node: Node) -> bool {
+        node.kind() == SyntaxKind::Identifier && node.text() == "BigInt" && {
+            let lexical = self.checker.get_symbol_at_location(node, false).0;
+            let canonical = self.symbol(node);
+            self.primitive_symbol(lexical, "BigInt", None)
+                || self.primitive_symbol(canonical, "BigInt", None)
+        }
+    }
+
     pub(super) fn bigint_operation(&self, name: &str, args: Vec<Expr>, node: Node) -> Expr {
         let (_, result, _) = ir::bigint::signature(name).expect("BigInt operation");
         Expr::LibCall {

@@ -15,11 +15,22 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn try_statement(&mut self, node: Node) -> Result<Vec<Stmt>, String> {
-        let catch = node.catch_clause();
         let before = self.var_defined.clone();
         let bindings = self.bindings.clone();
         let try_body = self.statements(node.try_block().statements())?;
         let try_defined = self.var_defined.clone();
+        self.finish_try_statement(node, before, bindings, try_body, try_defined)
+    }
+
+    pub(super) fn finish_try_statement(
+        &mut self,
+        node: Node,
+        before: HashSet<u32>,
+        bindings: HashMap<u32, Local>,
+        try_body: Vec<Stmt>,
+        try_defined: HashSet<u32>,
+    ) -> Result<Vec<Stmt>, String> {
+        let catch = node.catch_clause();
         self.bindings = bindings.clone();
         self.var_defined = before.clone();
         self.var_call_effects();

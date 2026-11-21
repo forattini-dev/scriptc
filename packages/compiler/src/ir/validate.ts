@@ -1,6 +1,5 @@
 import { WELL_KNOWN_SYMBOL_LIB_SIGS } from "./well-known-symbols.js";
 import { containsSymbolMethods, validateSymbolMethods } from "./symbol-methods.js";
-import { canDynCheckTo } from "./ir.js";
 import { recordViewPairs } from "./record-views.js";
 import { validationFields, type ValidationFields } from "./validation-fields.js";
 import { BUN_WHICH_SIG, validateBunWhich } from "./bun-which.js";
@@ -35,6 +34,7 @@ import type {
 } from "./ir.js";
 import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, CHILDWRITER_T, CRYPTOHASH_T, CRYPTOHMAC_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isDynTypedRefType, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./ir.js";
 import { BIGINT_T, UNDEFINED_T } from "./ir.js";
+import { canDynCheckTo } from "./ir.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -107,6 +107,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "bun.exitCode": { argTypes: [CHILD_T], result: VOID },
   "bun.stdout": { argTypes: [CHILD_T], result: DYN },
   "bun.stderr": { argTypes: [CHILD_T], result: DYN },
+  "bun.responseText": { argTypes: [CHILD_T, BOOL], result: { kind: "promise", inner: STRING } },
   "bun.which": BUN_WHICH_SIG,
   "bun.filePath": { argTypes: [STRING], result: STRING },
   "bun.fileText": { argTypes: [STRING], result: { kind: "promise", inner: STRING } },
@@ -361,6 +362,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.linkSync": { argTypes: [STRING, STRING], result: VOID },
   "fs.openSync": { argTypes: [STRING, STRING], result: F64 },
   "fs.openNumericSync": { argTypes: [STRING, F64, F64], result: F64 },
+  "fs.openModeSync": { argTypes: [STRING, STRING, F64], result: F64 },
+  "fs.openFlagConstant": { argTypes: [STRING], result: F64 },
+  "fs.closeNullish": { argTypes: [STRING], result: VOID },
+  "bytes.indexOfNumeric": { argTypes: [bytesOf("u8"), F64, F64], result: F64 },
+  "fs.ftruncateSync": { argTypes: [F64, F64], result: VOID },
   "fs.readSync": { argTypes: [F64, BYTES_U8, F64, F64, F64], result: F64 },
   "fs.writeSync": { argTypes: [F64, BYTES_U8, F64, F64, F64], result: F64 },
   "fs.writeStrSync": { argTypes: [F64, STRING, F64, STRING], result: F64 },
@@ -377,6 +383,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "crypto.x509ValidToStr": { argTypes: [STRING], result: STRING },
   "fs.closeSync": { argTypes: [F64], result: VOID },
   "fs.appendFileSync": { argTypes: [STRING, STRING], result: VOID },
+  "fs.appendFileFdSync": { argTypes: [F64, STRING], result: VOID },
+  "fs.writeFileFdSync": { argTypes: [F64, STRING], result: VOID },
   "fs.appendFileModeSync": { argTypes: [STRING, STRING, F64, BOOL], result: VOID },
   "stats.isFile": { argTypes: [STATS_T], result: BOOL },
   "stats.isDirectory": { argTypes: [STATS_T], result: BOOL },
@@ -1108,11 +1116,18 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.classInstanceof": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.objKeys": { argTypes: [DYN], result: DYN },
   "record.view": { argTypes: [], result: DYN },
+  "callable.view": { argTypes: [], result: DYN },
   "record.fromOwn": { argTypes: [], result: DYN },
   "record.setOwn": { argTypes: [DYN, STRING, DYN], result: VOID },
   "record.cloneOwn": { argTypes: [], result: DYN }, // structural signature below
   "dyn.objectRestCheck": { argTypes: [DYN], result: VOID },
   "dyn.objectAssignSourceCheck": { argTypes: [DYN], result: VOID },
+  "dyn.copyEnumerableSymbols": { argTypes: [DYN, DYN], result: VOID },
+  "dyn.hasSymbolKey": { argTypes: [DYN, DYN], result: BOOL },
+  "dyn.defineOrdinaryData": { argTypes: [DYN, DYN, DYN], result: DYN },
+  "dyn.defineOrdinaryGetter": { argTypes: [DYN, DYN, DYN, BOOL, BOOL], result: DYN },
+  "dyn.keyDeleteComputed": { argTypes: [DYN, DYN, BOOL], result: BOOL },
+  "dyn.mapKeysImmediate": { argTypes: [DYN], result: arrayOf(DYN) },
   "dyn.hasOwn": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.assign": { argTypes: [DYN, DYN], result: DYN },
   "dyn.packPush": { argTypes: [DYN, DYN], result: VOID },
@@ -2816,6 +2831,8 @@ function validateFunction(
                     ? { argTypes: [STRING], result: STRING }
                 : e.method === "slice"
                   ? { argTypes: [F64, F64], result: e.receiver.type }
+                  : e.method === "fill"
+                    ? { argTypes: [elem, F64, F64], result: e.receiver.type }
                   : e.method === "toReversed"
                     ? { argTypes: [], result: e.receiver.type }
                     : e.method === "reverse"
@@ -2880,7 +2897,7 @@ function validateFunction(
         // slice's indices and splice's count are optional (omitted args
         // omitted from the IR — backends fill the defaults); everything
         // else is exact.
-        const minArgs = e.method === "slice" ? 0 : e.method === "splice" ? 1 : sig.argTypes.length;
+        const minArgs = e.method === "slice" ? 0 : e.method === "splice" || e.method === "fill" ? 1 : sig.argTypes.length;
         if (e.args.length < minArgs || e.args.length > sig.argTypes.length) {
           err(`arrIntrinsic ${e.method}: ${e.args.length} args, expected ${sig.argTypes.length}`, e.loc);
         }
@@ -2959,7 +2976,9 @@ function validateFunction(
           break;
         }
         const sig =
-          e.method === "set"
+          e.method === "keysToArray"
+            ? { argTypes: [], result: arrayOf(key) }
+            : e.method === "set"
             ? { argTypes: [key, value], result: VOID }
             : e.method === "has" || e.method === "delete"
               ? { argTypes: [key], result: BOOL }
@@ -3992,6 +4011,13 @@ function validateFunction(
         if (e.fn === "record.view") {
           e.args.forEach(checkExpr);
           if (e.args.length !== 1 || !recordViewPairs(e.args[0]!.type, e.type, records, unions)) err("record.view requires one unambiguous invariant closed-record projection per source arm", e.loc);
+          break;
+        }
+        if (e.fn === "callable.view") {
+          e.args.forEach(checkExpr);
+          const shape = e.type.kind === "record" ? records.get(e.type.shapeId) : undefined;
+          const call = shape?.fields.find(field => field.name === "\0scriptc.call");
+          if (e.args.length !== 1 || !shape || shape.tuple || shape.indexValue || e.args[0]?.type.kind !== "func" || !call || !typeEquals(call.type, e.args[0].type)) err("callable.view requires a matching function and callable record", e.loc);
           break;
         }
         if (e.fn === "record.fromOwn") {

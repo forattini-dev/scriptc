@@ -7,6 +7,11 @@ fn far_array_values_preserve_length_slice_overwrites_and_truncation() {
     assert_eq!(array_get(&values, 4_000_000_000.0), 7.0);
     assert_eq!(array_next_present(&values, 2.0), 4_000_000_000.0);
     assert_eq!(
+        array_previous_present(&values, 4_000_000_000.0),
+        4_000_000_000.0
+    );
+    assert_eq!(array_previous_present(&values, 3_999_999_999.0), 0.0);
+    assert_eq!(
         array_index_of_by(&values, &7.0, |a, b| a == b),
         4_000_000_000.0
     );
@@ -92,4 +97,67 @@ fn json_reviver_sparse_array_keys_preserve_absence_and_undefined() {
         vec![string("0"), string("2"), string("4"), string("4000000000")]
     );
     assert_eq!(array_len(&array), 4_000_000_001.0);
+}
+#[test]
+fn fill_populates_holes_without_changing_identity_or_unselected_slots() {
+    let array = array_new(vec![1.0, 2.0, 3.0]);
+    array_delete(&array, 1.0);
+    array_set_length(&array, 7.0);
+    array_set_undefined(&array, 5.0);
+    let returned = array_fill(&array, 9.0, -6.0, -2.0);
+    assert!(array_ptr_eq(&array, &returned));
+    assert_eq!(array_len(&array), 7.0);
+    assert_eq!(
+        array_values(&array_slice(&array, 0.0, 5.0)),
+        vec![1.0, 9.0, 9.0, 9.0, 9.0]
+    );
+    assert_eq!(array_state(&array, 5.0), 2.0);
+    assert_eq!(array_state(&array, 6.0), 0.0);
+    array_fill(&array, 8.0, 5.0, f64::INFINITY);
+    assert_eq!(
+        array_values(&array),
+        vec![1.0, 9.0, 9.0, 9.0, 9.0, 8.0, 8.0]
+    );
+    drop((array, returned));
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}
+
+#[test]
+fn fill_far_sparse_tail_does_not_allocate_the_gap() {
+    let array = array_new(vec![1.0]);
+    array_set_length(&array, 4_000_000_002.0);
+    array_set_undefined(&array, 4_000_000_000.0);
+    array_fill(&array, 7.0, 4_000_000_000.0, f64::INFINITY);
+    assert_eq!(array.with(|data| data.elements.len()), 1);
+    assert_eq!(array_state(&array, 3_999_999_999.0), 0.0);
+    assert_eq!(array_get(&array, 4_000_000_000.0), 7.0);
+    assert_eq!(array_get(&array, 4_000_000_001.0), 7.0);
+    drop(array);
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}
+
+#[test]
+fn shift_optional_preserves_holes_undefined_and_large_sparse_indices() {
+    let values = array_new(vec![1.0, 2.0, 3.0, 4.0]);
+    array_delete(&values, 0.0);
+    array_set_undefined(&values, 1.0);
+    array_delete(&values, 3.0);
+    assert_eq!(array_shift_optional(&values), None);
+    assert_eq!(array_len(&values), 3.0);
+    assert_eq!((array_state(&values, 0.0), array_state(&values, 1.0), array_state(&values, 2.0)), (2.0, 1.0, 0.0));
+    assert_eq!(array_get(&values, 1.0), 3.0);
+    assert_eq!(array_shift_optional(&values), None);
+    assert_eq!(array_shift_optional(&values), Some(3.0));
+    assert_eq!(array_shift_optional(&values), None);
+    assert_eq!(array_shift_optional(&values), None);
+
+    let sparse = array_new::<f64>(Vec::new());
+    array_set_undefined(&sparse, 3_999_999_999.0);
+    array_set(&sparse, 4_000_000_000.0, 9.0);
+    assert_eq!(array_shift_optional(&sparse), None);
+    assert_eq!(array_len(&sparse), 4_000_000_000.0);
+    assert_eq!(array_state(&sparse, 3_999_999_998.0), 2.0);
+    assert_eq!(array_get(&sparse, 3_999_999_999.0), 9.0);
 }

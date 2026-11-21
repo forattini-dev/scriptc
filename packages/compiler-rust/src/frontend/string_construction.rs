@@ -3,6 +3,43 @@ use super::*;
 use helpers::Helper;
 
 impl Lowerer<'_> {
+    pub(super) fn string_construction_value(
+        &mut self,
+        node: Node,
+        name: &str,
+    ) -> Result<Expr, String> {
+        let operation = crate::builtins::get("String", name).expect("proven String member");
+        let numbers = Type::Array {
+            elem: Box::new(Type::F64),
+        };
+        let mut helper = Helper::new(
+            &format!("string_{name}_value"),
+            vec![numbers.clone()],
+            Type::String,
+            self.loc(node),
+        );
+        helper.function.rest = true;
+        helper.function.body.push(Stmt::Return {
+            value: Some(Expr::LibCall {
+                r#fn: operation.ir.into(),
+                args: vec![helper.read(&helper.param(0))],
+                r#type: Type::String,
+                loc: helper.loc(),
+            }),
+            loc: helper.loc(),
+        });
+        Ok(Expr::Closure {
+            fn_name: self.install_helper(helper.function),
+            captures: vec![],
+            r#type: Type::Func {
+                params: vec![numbers],
+                ret: Box::new(Type::String),
+                rest: true,
+            },
+            loc: self.loc(node),
+        })
+    }
+
     pub(super) fn string_construction_call(
         &mut self,
         node: Node,

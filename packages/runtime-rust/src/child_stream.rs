@@ -44,6 +44,7 @@ pub struct ChildStreamData {
     web_pull: Option<Box<dyn ChildWebPull>>,
     bun_buffered: bool,
     read_error: Option<String>,
+    encoding_utf8: bool,
 }
 
 impl Trace for ChildStreamData {
@@ -91,6 +92,7 @@ fn child_stream_new(reader: ChildPipeReader) -> JsChildStream {
         web_pull: None,
         bun_buffered: false,
         read_error: None,
+        encoding_utf8: false,
     });
     ASYNC_CHILD_STREAMS.with(|streams| streams.borrow_mut().push(stream.clone()));
     stream
@@ -108,6 +110,7 @@ fn child_stream_husk() -> JsChildStream {
         web_pull: None,
         bun_buffered: false,
         read_error: None,
+        encoding_utf8: false,
     })
 }
 
@@ -184,6 +187,14 @@ pub fn child_stream_on_data(
     if should_start {
         child_stream_start(stream);
     }
+}
+
+pub fn child_stream_set_encoding_utf8(stream: &JsChildStream) {
+    stream.with_mut(|stream| stream.encoding_utf8 = true);
+}
+
+pub fn child_stream_encoding_utf8(stream: &JsChildStream) -> bool {
+    stream.with(|stream| stream.encoding_utf8)
 }
 
 pub fn child_stream_on_end(

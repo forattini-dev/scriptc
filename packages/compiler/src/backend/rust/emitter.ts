@@ -544,7 +544,7 @@ class RustEmitter {
     buildRustClassGraph(this.classMeta, this.functions, (kind, loc) => this.unsupported(kind, loc));
     this.discoverClosures();
     if (planSharedRecords(mod, this.records, this.unions, this.usesExplicitThis)) this.usesDyn = true;
-    registerSharedRecordMethods(this.records, type => { this.registerDynAdapter(type); this.registerDynBoxedFunction(type); });
+    registerSharedRecordMethods(this.records, this.unions, type => { this.registerDynAdapter(type); this.registerDynBoxedFunction(type); });
   }
   emit(): string {
     this.checkModuleSurface();
@@ -839,10 +839,8 @@ class RustEmitter {
     const key = typeKey(shape.type);
     if (this.dynBoxedFunctionShapes.has(key)) return;
     this.dynBoxedFunctionShapes.add(key);
-    for (const param of type.params) {
-      if (param.kind === "func") this.registerDynAdapter(param);
-    }
-    if (type.ret.kind === "func") this.registerDynBoxedFunction(type.ret);
+    for (const param of type.params) registerDynamicFunctionShapes(param, this.records, this.unions, nested => this.registerDynAdapter(nested));
+    registerDynamicFunctionShapes(type.ret, this.records, this.unions, nested => this.registerDynBoxedFunction(nested));
   }
 
   private registerDynAdapter(type: IrFuncType): void {
@@ -850,10 +848,8 @@ class RustEmitter {
     const key = typeKey(shape.type);
     if (this.dynAdapterShapes.has(key)) return;
     this.dynAdapterShapes.add(key);
-    for (const param of type.params) {
-      if (param.kind === "func") this.registerDynBoxedFunction(param);
-    }
-    if (type.ret.kind === "func") this.registerDynAdapter(type.ret);
+    for (const param of type.params) registerDynamicFunctionShapes(param, this.records, this.unions, nested => this.registerDynBoxedFunction(nested));
+    registerDynamicFunctionShapes(type.ret, this.records, this.unions, nested => this.registerDynAdapter(nested));
   }
 
   private emitClosureDefinitions(): void { this.definitionEmitter.emitClosureDefinitions(); }

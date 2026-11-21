@@ -1,11 +1,21 @@
 //! Prototype symbol descriptors stay separate from observable string names.
 use super::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SymbolMethodKey {
     Iterator,
     AsyncIterator,
+    ToStringTag,
+    InspectCustom,
+    /// A unique, immutable source binding. The frontend evaluates the binding
+    /// at class definition and never erases this prototype surface.
+    Unique(u32),
+}
+
+impl Serialize for SymbolMethodKey {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.name())
+    }
 }
 
 impl SymbolMethodKey {
@@ -13,13 +23,17 @@ impl SymbolMethodKey {
         match name {
             "iterator" => Some(Self::Iterator),
             "asyncIterator" => Some(Self::AsyncIterator),
+            "toStringTag" => Some(Self::ToStringTag),
             _ => None,
         }
     }
-    pub fn name(self) -> &'static str {
+    pub fn name(self) -> String {
         match self {
-            Self::Iterator => "iterator",
-            Self::AsyncIterator => "asyncIterator",
+            Self::Iterator => "iterator".into(),
+            Self::AsyncIterator => "asyncIterator".into(),
+            Self::ToStringTag => "toStringTag".into(),
+            Self::InspectCustom => "inspectCustom".into(),
+            Self::Unique(id) => format!("unique:{id}"),
         }
     }
     pub fn function_name(self, class: &str) -> String {
@@ -30,6 +44,8 @@ impl SymbolMethodKey {
 #[derive(Clone, Debug, Serialize)]
 pub struct SymbolMethod {
     pub key: SymbolMethodKey,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub getter: bool,
     /// Absent until a call demands this body, including generator bodies.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<String>,
@@ -42,7 +58,10 @@ pub(super) fn validate(
     for class in &module.classes {
         let mut seen = std::collections::HashSet::new();
         for descriptor in &class.symbol_methods {
-            if class.runtime || !seen.insert(descriptor.key) {
+            if class.runtime
+                || matches!(descriptor.key, SymbolMethodKey::Unique(0))
+                || !seen.insert(descriptor.key)
+            {
                 return Err("invalid native symbol method surface".into());
             }
             if let Some(name) = &descriptor.function {
@@ -67,8 +86,9 @@ pub(super) fn validate(
     Ok(())
 }
 
-/// Erased instance mirrors do not yet carry symbol descriptors. Refuse the
-/// conversion, including composite values and possible derived instances.
+/// Only symbol methods without an installed dynamic descriptor prevent
+/// erasure. Represented descriptors live on the runtime class identity and
+/// are found through the same prototype chain as typed dispatch.
 pub(crate) fn contains_symbol_methods(ty: &Type, module: &Module) -> bool {
     if module
         .classes
@@ -85,7 +105,10 @@ pub(crate) fn contains_symbol_methods(ty: &Type, module: &Module) -> bool {
             Type::Object { class_name } => module.classes.iter().any(|class| {
                 (module.subclass(&class.name, class_name)
                     || module.subclass(class_name, &class.name))
-                    && (!class.symbol_methods.is_empty()
+                    && (class
+                        .symbol_methods
+                        .iter()
+                        .any(|method| method.function.is_none())
                         || class
                             .fields
                             .iter()
@@ -93,6 +116,16 @@ pub(crate) fn contains_symbol_methods(ty: &Type, module: &Module) -> bool {
             }),
             Type::Array { elem } | Type::Promise { inner: elem } | Type::Set { elem } => {
                 visit(elem, module, seen)
+            }
+            Type::Generator {
+                yield_type,
+                return_type,
+                next_type,
+                ..
+            } => {
+                visit(yield_type, module, seen)
+                    || visit(return_type, module, seen)
+                    || visit(next_type, module, seen)
             }
             Type::Map { key, value } => visit(key, module, seen) || visit(value, module, seen),
             Type::Func { params, ret, .. } => {
@@ -131,6 +164,7 @@ mod tests {
         Module {
             ir_version: VERSION,
             source_file: loc.file.clone(),
+            source_modules: vec![],
             entry: "main".into(),
             records: vec![],
             unions: vec![],
@@ -141,12 +175,15 @@ mod tests {
                 runtime: false,
                 base: None,
                 fields: vec![],
+                captures: vec![],
                 methods: vec![],
                 method_names: vec!["iterator".into()],
                 symbol_methods: vec![SymbolMethod {
                     key: SymbolMethodKey::Iterator,
+                    getter: false,
                     function: None,
                 }],
+                symbol_brand: None,
                 loc: loc.clone(),
             }],
             functions: vec![Function {
@@ -155,6 +192,7 @@ mod tests {
                 locals: vec![],
                 captures: None,
                 is_async: false,
+                generator: None,
                 rest: false,
                 return_type: Type::Void,
                 body: vec![],
@@ -169,6 +207,7 @@ mod tests {
         super::super::validate(&module).unwrap();
         module.classes[0].symbol_methods.push(SymbolMethod {
             key: SymbolMethodKey::AsyncIterator,
+            getter: false,
             function: None,
         });
         super::super::validate(&module).unwrap();
@@ -189,6 +228,30 @@ mod tests {
     }
 
     #[test]
+    fn unique_symbol_keys_keep_distinct_canonical_wire_identities() {
+        let mut module = module();
+        module.classes[0].symbol_methods.push(SymbolMethod {
+            key: SymbolMethodKey::Unique(7),
+            getter: false,
+            function: None,
+        });
+        module.classes[0].symbol_methods.push(SymbolMethod {
+            key: SymbolMethodKey::Unique(8),
+            getter: false,
+            function: None,
+        });
+        super::super::validate(&module).unwrap();
+        let wire = serde_json::to_value(&module).unwrap();
+        assert_eq!(wire["classes"][0]["symbolMethods"][1]["key"], "unique:7");
+        module.classes[0].symbol_methods.push(SymbolMethod {
+            key: SymbolMethodKey::Unique(0),
+            getter: false,
+            function: None,
+        });
+        assert!(super::super::validate(&module).is_err());
+    }
+
+    #[test]
     fn demanded_body_requires_the_owned_function_and_receiver() {
         let mut module = module();
         let name = SymbolMethodKey::Iterator.function_name("Box");
@@ -204,6 +267,7 @@ mod tests {
             locals: vec![],
             captures: None,
             is_async: false,
+            generator: None,
             rest: false,
             return_type: Type::Void,
             body: vec![],

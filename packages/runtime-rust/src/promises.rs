@@ -41,6 +41,10 @@ where
 }
 
 type PromiseReaction<T> = Box<dyn FnOnce(Result<T, Caught>)>;
+struct PendingPromiseReaction<T: HeapValue> {
+    callback: PromiseReaction<T>,
+    trace: Option<PromiseTrace>,
+}
 type PromiseFinalizer = Box<dyn Fn(bool) -> bool>;
 type AsyncTrampolineTask = Box<dyn FnOnce()>;
 
@@ -82,7 +86,7 @@ pub fn async_trampoline(key: usize, task: AsyncTrampolineTask) {
 }
 
 enum PromiseState<T: HeapValue> {
-    Pending(Vec<PromiseReaction<T>>),
+    Pending(Vec<PendingPromiseReaction<T>>),
     Fulfilled(Option<T>),
     Rejected(Option<Caught>),
 }
@@ -103,6 +107,11 @@ impl<T: HeapValue> Trace for PromiseData<T> {
         if let PromiseState::Fulfilled(Some(value)) = &self.state {
             value.trace_value(tracer);
         }
+        if let PromiseState::Pending(reactions) = &self.state {
+            for reaction in reactions {
+                if let Some(trace) = &reaction.trace { trace(tracer); }
+            }
+        }
     }
 }
 
@@ -120,6 +129,7 @@ pub type JsPromise<T> = Gc<PromiseData<T>>;
 pub type PromiseTrace = Rc<dyn Fn(&mut Tracer<'_>)>;
 pub type PromiseCatchHook = Rc<dyn Fn(Box<dyn FnOnce(Caught)>) -> JsPromiseHandle>;
 pub type PromiseObserveHook = Rc<dyn Fn(Box<dyn FnOnce(Result<Box<dyn Any>, Caught>)>)>;
+pub type PromiseObserveTracedHook = Rc<dyn Fn(PromiseObserveCallback, PromiseTrace)>;
 pub type UnhandledRejectionHandler = Rc<dyn Fn(Caught, JsPromiseHandle)>;
 pub type RejectionHandledHandler = Rc<dyn Fn(JsPromiseHandle)>;
 
@@ -140,6 +150,7 @@ pub struct JsPromiseHandle {
     identity: usize,
     catch: PromiseCatchHook,
     observe: PromiseObserveHook,
+    observe_traced: PromiseObserveTracedHook,
     poll: PromisePollHook,
     trace: Gc<PromiseHandleEdges>,
     own: Gc<PromiseProperties>,
@@ -194,10 +205,12 @@ where
     let identity = promise_view_identity(promise);
     let source = promise.downgrade();
     let observed_source = promise.downgrade();
+    let traced_observed_source = promise.downgrade();
     let traced_source = promise.clone();
     let polled_source = promise.downgrade();
     let map = Rc::new(map);
     let poll_map = map.clone();
+    let traced_map = map.clone();
     JsPromiseHandle {
         identity,
         own: promise_properties(promise),
@@ -231,6 +244,13 @@ where
                     callback(promise_view_map_outcome(outcome, map.as_ref()));
                 }),
             );
+        }),
+        observe_traced: Rc::new(move |callback, trace| {
+            let source = traced_observed_source.upgrade().expect("scriptc: cleared Promise handle");
+            let map = traced_map.clone();
+            promise_then_internal(&source, Box::new(move |outcome| {
+                callback(promise_view_map_outcome(outcome, map.as_ref()));
+            }), Some(trace));
         }),
         poll: Rc::new(move || {
             let polled_source = polled_source.upgrade().expect("scriptc: cleared Promise handle");
@@ -531,13 +551,43 @@ pub fn promise_all_void(entries: &JsArray<JsPromise<()>>) -> JsPromise<()> {
     result
 }
 
-fn promise_schedule<T: HeapValue>(reaction: PromiseReaction<T>, outcome: Result<T, Caught>) {
-    timer_queue_microtask(Box::new(move || reaction(outcome)));
+fn promise_schedule<T: HeapValue>(reaction: PendingPromiseReaction<T>, outcome: Result<T, Caught>) {
+    timer_queue_microtask(Box::new(move || {
+        let PendingPromiseReaction { callback, trace } = reaction;
+        let _root = trace;
+        callback(outcome);
+    }));
 }
 
 pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReaction<T>) {
+    promise_then_internal(promise, reaction, None);
+}
+
+/// Register a reaction whose captured frame is visible to cycle collection,
+/// including through mapped Promise views.
+pub fn promise_then_traced<T, F>(
+    promise: &JsPromise<T>,
+    frame: Gc<F>,
+    callback: fn(Gc<F>, Result<T, Caught>),
+)
+where
+    T: HeapValue,
+    F: Trace + ClearEdges + 'static,
+{
+    let weak = frame.downgrade();
+    let trace: PromiseTrace = Rc::new(move |tracer| tracer.edge(&frame));
+    let reaction = Box::new(move |outcome| {
+        let frame = weak.upgrade().expect("scriptc: cleared Promise reaction frame");
+        callback(frame, outcome);
+    });
+    promise_then_internal(promise, reaction, Some(trace));
+}
+
+fn promise_then_internal<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReaction<T>, trace: Option<PromiseTrace>) {
     if let Some(view) = promise.with(|data| data.view.clone()) {
-        (view.observe)(Box::new(move |outcome| reaction(promise_view_outcome(outcome))));
+        let callback: PromiseObserveCallback = Box::new(move |outcome| reaction(promise_view_outcome(outcome)));
+        if let Some(trace) = trace { (view.observe_traced)(callback, trace); }
+        else { (view.observe)(callback); }
         return;
     }
     let registered_context = async_context_capture();
@@ -545,7 +595,7 @@ pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReact
         let _context_guard = async_context_install(registered_context);
         reaction(outcome);
     });
-    let mut reaction = Some(reaction);
+    let mut reaction = Some(PendingPromiseReaction { callback: reaction, trace });
     let (settled, rejection_handled) = promise.with_mut(|data| {
         let rejection_handled = data.reported;
         data.reported = false;
@@ -732,6 +782,24 @@ pub fn promise_unwrap<T: HeapValue>(outcome: Result<T, Caught>) -> T {
     match outcome {
         Ok(value) => value,
         Err(reason) => rethrow_caught(reason),
+    }
+}
+
+/// Native await for control-flow shapes that have not yet been split into a
+/// generated continuation frame. It drives the same timers, I/O and microtask
+/// queues as the program root and rethrows a rejected promise at the await
+/// expression. Specialized compiler frames remain non-blocking.
+pub fn promise_block<T: HeapValue>(promise: &JsPromise<T>) -> T {
+    loop {
+        if let Some(outcome) = promise_poll(promise) {
+            return promise_unwrap(outcome);
+        }
+        let settled = crate::run_event_loop_with_first_checkpoint(true, || {
+            promise_poll(promise).is_some()
+        });
+        if !settled {
+            throw_error("Promise resolution is still pending but the event loop has no referenced work".to_owned());
+        }
     }
 }
 

@@ -1,10 +1,13 @@
 /// Bun's native subprocess path. Spawn failures throw synchronously;
 /// Node's child_process path continues to report them through its error event.
+// This signature is the generated native-call ABI for the flattened options.
+#[allow(clippy::too_many_arguments)]
 pub fn bun_spawn(
     argv: &JsArray<JsString>,
     stdin: f64,
     stdout: f64,
     stderr: f64,
+    detached: bool,
     has_env: bool,
     env_pairs: &JsArray<JsString>,
     cwd: &JsString,
@@ -18,12 +21,25 @@ pub fn bun_spawn(
     };
     for (index, value) in values.iter().enumerate() {
         if value.to_utf8_lossy().contains('\0') {
-            let received = if index == 0 { json_stringify(value).to_string() } else { format!("\"{value}\"") };
-            throw_type_error_code(format!("The argument 'args[{index}]' must be a string without null bytes. Received {received}"), "ERR_INVALID_ARG_VALUE");
+            let received = if index == 0 {
+                json_stringify(value).to_string()
+            } else {
+                format!("\"{value}\"")
+            };
+            throw_type_error_code(
+                format!(
+                    "The argument 'args[{index}]' must be a string without null bytes. Received {received}"
+                ),
+                "ERR_INVALID_ARG_VALUE",
+            );
         }
     }
     if command.is_empty() {
-        throw_value(error_new_code("Error", string("Executable not found in $PATH: \"\""), "ENOENT"));
+        throw_value(error_new_code(
+            "Error",
+            string("Executable not found in $PATH: \"\""),
+            "ENOENT",
+        ));
     }
     let cwd = string(cwd.to_utf8_lossy().split('\0').next().unwrap_or(""));
     let arguments = array_new(values[1..].to_vec());
@@ -44,24 +60,58 @@ pub fn bun_spawn(
             }
         });
         Some(array_new(normalized))
-    } else { None };
+    } else {
+        None
+    };
     #[cfg(unix)]
-    let executable = if command.to_utf8_lossy().contains('/') { command.clone() } else {
+    let executable = if command.to_utf8_lossy().contains('/') {
+        command.clone()
+    } else {
         // Bun 1.3.14 getArgv0 uses _PATH_DEFPATH for an explicit env whose
         // PATH is absent or empty (js_bun_spawn_bindings.zig / c-bindings.cpp).
-        let default_path = if cfg!(target_os = "freebsd") { "/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin" } else { "/usr/bin:/bin" };
-        let path = normalized_env.as_ref().map(|pairs| pairs.with(|pairs| pairs.elements().as_chunks::<2>().0.iter()
-            .find(|pair| pair[0].to_utf8_lossy() == "PATH").map(|pair| pair[1].clone()))
-            .filter(|path| !path.is_empty()).unwrap_or_else(|| string(default_path)));
+        let default_path = if cfg!(target_os = "freebsd") {
+            "/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin"
+        } else {
+            "/usr/bin:/bin"
+        };
+        let path = normalized_env.as_ref().map(|pairs| {
+            pairs
+                .with(|pairs| {
+                    pairs
+                        .elements()
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .find(|pair| pair[0].to_utf8_lossy() == "PATH")
+                        .map(|pair| pair[1].clone())
+                })
+                .filter(|path| !path.is_empty())
+                .unwrap_or_else(|| string(default_path))
+        });
         // Omitting options.env searches the startup PATH, independently of
         // later mutations of the JavaScript process.env object.
-        bun_which(command, path.as_ref(), (!cwd.is_empty()).then_some(&cwd)).unwrap_or_else(||
-            throw_value(error_new_code("Error", string(&format!("Executable not found in $PATH: \"{command}\"")), "ENOENT")))
+        bun_which(command, path.as_ref(), (!cwd.is_empty()).then_some(&cwd)).unwrap_or_else(|| {
+            throw_value(error_new_code(
+                "Error",
+                string(&format!("Executable not found in $PATH: \"{command}\"")),
+                "ENOENT",
+            ))
+        })
     };
     #[cfg(not(unix))]
     let executable = command.clone();
-    let mut process = child_command(&executable, &arguments, false, &cwd)
+    let mut process = child_command(&executable, &arguments, false, &cwd, false)
         .unwrap_or_else(|error| throw_value(child_spawn_error(command, error)));
+    #[cfg(unix)]
+    if detached {
+        use std::os::unix::process::CommandExt;
+        process.process_group(0);
+    }
+    #[cfg(windows)]
+    if detached {
+        use std::os::windows::process::CommandExt;
+        process.creation_flags(0x0000_0200);
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -72,9 +122,22 @@ pub fn bun_spawn(
     // Bun 1.3.14 uses libuv's required Windows environment variables, just as
     // Node does. Omitting SYSTEMROOT can abort programs before user code runs.
     child_configure_environment(&mut process, normalized_env.as_ref());
-    if !cwd.is_empty() { process.current_dir(cwd.to_utf8_lossy()); }
-    let stdio = |mode| if mode == 1.0 { Stdio::inherit() } else if mode == 2.0 { Stdio::piped() } else { Stdio::null() };
-    process.stdin(stdio(stdin)).stdout(stdio(stdout)).stderr(stdio(stderr));
+    if !cwd.is_empty() {
+        process.current_dir(cwd.to_utf8_lossy());
+    }
+    let stdio = |mode| {
+        if mode == 1.0 {
+            Stdio::inherit()
+        } else if mode == 2.0 {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        }
+    };
+    process
+        .stdin(stdio(stdin))
+        .stdout(stdio(stdout))
+        .stderr(stdio(stderr));
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
     let spawned = process.spawn().unwrap_or_else(|error| {
@@ -84,19 +147,45 @@ pub fn bun_spawn(
         let message = if cfg!(windows) && code == "ENOENT" && bare && cwd_exists {
             format!("Executable not found in $PATH: \"{command}\"")
         } else {
-            let description = match code { "ENOENT" => "no such file or directory", "EACCES" => "permission denied", _ => "failed to spawn process" };
-            let syscall = if cfg!(windows) { "uv_spawn" } else { "posix_spawn" };
+            let description = match code {
+                "ENOENT" => "no such file or directory",
+                "EACCES" => "permission denied",
+                _ => "failed to spawn process",
+            };
+            let syscall = if cfg!(windows) {
+                "uv_spawn"
+            } else {
+                "posix_spawn"
+            };
             format!("{code}: {description}, {syscall} '{command}'")
         };
         throw_value(error_new_code("Error", string(&message), code));
     });
-    let child = child_register(command, Ok(spawned), false, stdout == 2.0, stderr == 2.0);
+    let child = child_register(
+        command,
+        Ok(spawned),
+        stdin == 2.0,
+        stdout == 2.0,
+        stderr == 2.0,
+    );
     child.with_mut(|child| child.bun_exited = Some(promise_new()));
-    for stream in [child_stdout(&child), child_stderr(&child)].into_iter().flatten() {
+    for stream in [child_stdout(&child), child_stderr(&child)]
+        .into_iter()
+        .flatten()
+    {
         stream.with_mut(|s| s.bun_buffered = true);
         child_stream_start(&stream);
     }
     child
+}
+
+pub fn bun_stdio_mode(mode: &JsString) -> f64 {
+    match mode.to_utf8_lossy() {
+        "ignore" => 0.0,
+        "inherit" => 1.0,
+        "pipe" => 2.0,
+        value => throw_type_error(format!("unsupported Bun.spawn stdio mode: {value}")),
+    }
 }
 
 /// std::process::Command may fall back to the parent's PATH on Windows.
@@ -104,11 +193,25 @@ pub fn bun_spawn(
 /// which the safe standard API cannot override on Windows. Refuse that form
 /// rather than silently executing a different program or changing its arguments.
 #[cfg(windows)]
-fn bun_spawn_check_windows_path(command: &JsString, env: Option<&JsArray<JsString>>, cwd: &JsString) {
-    if command.to_utf8_lossy().contains(['/', '\\']) { return; }
-    let supplied = env.and_then(|pairs| pairs.with(|pairs| pairs.elements().as_chunks::<2>().0.iter()
-        .find(|pair| pair[0].to_utf8_lossy().eq_ignore_ascii_case("PATH"))
-        .map(|pair| pair[1].clone())));
+fn bun_spawn_check_windows_path(
+    command: &JsString,
+    env: Option<&JsArray<JsString>>,
+    cwd: &JsString,
+) {
+    if command.to_utf8_lossy().contains(['/', '\\']) {
+        return;
+    }
+    let supplied = env.and_then(|pairs| {
+        pairs.with(|pairs| {
+            pairs
+                .elements()
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .find(|pair| pair[0].to_utf8_lossy().eq_ignore_ascii_case("PATH"))
+                .map(|pair| pair[1].clone())
+        })
+    });
     let Some(path) = supplied else { return };
     let cwd = (!cwd.is_empty()).then_some(cwd);
     let empty_path = path.is_empty();
@@ -116,18 +219,34 @@ fn bun_spawn_check_windows_path(command: &JsString, env: Option<&JsArray<JsStrin
         let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_owned());
         let working = cwd.cloned().unwrap_or_else(process_cwd);
         string(&format!("{working};{root}\\System32;{root}"))
-    } else { path };
+    } else {
+        path
+    };
     let Some(selected) = bun_which(command, Some(&path), cwd) else {
         if empty_path {
-            throw_value(error_new_code("Error", string(&format!("ENOENT: no such file or directory, uv_spawn '{command}'")), "ENOENT"));
+            throw_value(error_new_code(
+                "Error",
+                string(&format!(
+                    "ENOENT: no such file or directory, uv_spawn '{command}'"
+                )),
+                "ENOENT",
+            ));
         }
-        throw_value(error_new_code("Error", string(&format!("Executable not found in $PATH: \"{command}\"")), "ENOENT"));
+        throw_value(error_new_code(
+            "Error",
+            string(&format!("Executable not found in $PATH: \"{command}\"")),
+            "ENOENT",
+        ));
     };
     let inherited = std::env::var_os("PATH").map(|path| string(&path.to_string_lossy()));
     let default = bun_which(command, inherited.as_ref(), cwd);
     let canonical = |path: &JsString| std::fs::canonicalize(path.to_utf8_lossy()).ok();
-    let matches = canonical(&selected).zip(default.as_ref().and_then(canonical))
-        .is_some_and(|(left, right)| left.to_string_lossy().eq_ignore_ascii_case(&right.to_string_lossy()));
+    let matches = canonical(&selected)
+        .zip(default.as_ref().and_then(canonical))
+        .is_some_and(|(left, right)| {
+            left.to_string_lossy()
+                .eq_ignore_ascii_case(&right.to_string_lossy())
+        });
     if !matches {
         throw_error_code("Bun.spawn with a different Windows executable search path is not supported yet; pass an absolute executable path to preserve argv[0]".to_owned(), "SC3001");
     }
@@ -135,6 +254,40 @@ fn bun_spawn_check_windows_path(command: &JsString, env: Option<&JsArray<JsStrin
 
 pub fn bun_subprocess_exited(child: &JsChild) -> JsPromise<f64> {
     child.with(|child| child.bun_exited.clone().expect("Bun subprocess promise"))
+}
+
+pub fn bun_subprocess_timeout(child: JsChild, timeout_ms: f64) -> JsChild {
+    if timeout_ms.is_finite() && timeout_ms > 0.0 {
+        let weak = child.downgrade();
+        let id = timer_set_timeout_handle(
+            Box::new(move || {
+                if let Some(child) = weak.upgrade() {
+                    child_kill(&child, &string("SIGTERM"));
+                }
+            }),
+            timeout_ms,
+        );
+        // The child itself keeps the loop alive. Once it exits naturally, a
+        // stale timeout must not delay program termination.
+        timer_set_ref(id, false);
+    }
+    child
+}
+
+/// Execute the injection-safe argv subset of Bun's shell template while
+/// discarding output and preserving `.nothrow()` exit-code settlement.
+pub fn bun_shell_quiet_nothrow(argv: &JsArray<JsString>) -> JsPromise<f64> {
+    let child = bun_spawn(
+        argv,
+        0.0,
+        0.0,
+        0.0,
+        false,
+        false,
+        &array_new(Vec::new()),
+        &string(""),
+    );
+    bun_subprocess_exited(&child)
 }
 
 pub fn bun_subprocess_exit_code(child: &JsChild) -> Option<f64> {

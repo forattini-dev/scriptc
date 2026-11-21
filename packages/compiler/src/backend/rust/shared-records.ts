@@ -124,10 +124,16 @@ export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordSh
  * the program crosses only one direction at explicit IR boundaries. */
 export function registerSharedRecordMethods(
   records: ReadonlyMap<string, IrRecordShape>,
+  unions: ReadonlyMap<string, IrUnionDef>,
   register: (type: Extract<IrType, { kind: "func" }>) => void,
 ): void {
   for (const record of records.values()) if (isSharedRecord(record)) {
-    for (const field of record.fields) if (field.type.kind === "func") register(field.type);
+    for (const field of record.fields) {
+      if (field.type.kind === "func") register(field.type);
+      if (field.type.kind === "union") for (const arm of unions.get(field.type.unionId)?.arms ?? []) {
+        if (arm.kind === "func") register(arm);
+      }
+    }
   }
 }
 

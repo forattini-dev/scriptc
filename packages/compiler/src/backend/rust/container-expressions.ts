@@ -151,6 +151,13 @@ export class RustContainerExpressionEmitter {
       }
       case "reverse":
         return `{ let ${receiver} = ${receiverExpr}; runtime::array_reverse(&${receiver}) }`;
+      case "fill": {
+        const value = this.context.nextTemporary();
+        const start = this.context.nextTemporary();
+        const end = this.context.nextTemporary();
+        if (argExprs[0] === undefined) this.context.unsupported("array fill without a value", expr.loc);
+        return `{ let ${receiver} = ${receiverExpr}; let ${value} = ${argExprs[0]}; let ${start} = ${argExprs[1] ?? "0.0"}; let ${end} = ${argExprs[2] ?? "f64::INFINITY"}; runtime::array_fill(&${receiver}, ${value}, ${start}, ${end}) }`;
+      }
       case "toReversed":
         return `{ let ${receiver} = ${receiverExpr}; runtime::array_to_reversed(&${receiver}) }`;
       case "toSpliced": {
@@ -235,6 +242,7 @@ export class RustContainerExpressionEmitter {
     const receiverBinding = `let ${receiver} = ${this.context.emitExpr(expr.receiver)};`;
     if (expr.method === "size") return `{ ${receiverBinding} runtime::map_size(&${receiver}) }`;
     if (expr.method === "clear") return `{ ${receiverBinding} runtime::map_clear(&${receiver}) }`;
+    if (expr.method === "keysToArray") return `{ ${receiverBinding} runtime::map_keys_to_array(&${receiver}) }`;
     if (expr.method === "iterCount") return `{ ${receiverBinding} runtime::map_iter_count(&${receiver}) }`;
     if (expr.method === "iterEnter") return `{ ${receiverBinding} runtime::map_iter_enter(&${receiver}) }`;
     if (expr.method === "iterExit") return `{ ${receiverBinding} runtime::map_iter_exit(&${receiver}) }`;

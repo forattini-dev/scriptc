@@ -17,7 +17,6 @@ fn td_input(bytes: &JsBytes<u8>) -> Vec<u8> {
         storage[data.offset..data.offset + data.length].to_vec()
     })
 }
-
 fn td_table(offset: usize, index: usize) -> u32 {
     let byte = (offset + index) * 2;
     u32::from(u16::from_le_bytes([
@@ -66,6 +65,18 @@ pub fn text_decode(bytes: &JsBytes<u8>) -> JsString {
     let input = td_input(bytes);
     let input = input.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&input);
     JsString::from(String::from_utf8_lossy(input).as_ref())
+}
+
+pub fn text_decode_fatal(bytes: &JsBytes<u8>, fatal: bool) -> JsString {
+    if !fatal {
+        return text_decode(bytes);
+    }
+    let input = td_input(bytes);
+    let input = input.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&input);
+    match std::str::from_utf8(input) {
+        Ok(value) => JsString::from(value),
+        Err(_) => throw_type_error("The encoded data was not valid UTF-8".into()),
+    }
 }
 
 fn td_single_byte(input: &[u8], encoding: usize) -> JsString {
@@ -656,4 +667,118 @@ pub fn text_decode_legacy(bytes: &JsBytes<u8>, encoding: f64) -> JsString {
         35 => td_euc_kr(&input),
         _ => unreachable!("scriptc: invalid static TextDecoder encoding"),
     }
+}
+
+pub fn text_decode_selected(
+    handle: f64,
+    bytes: &JsBytes<u8>,
+    stream: bool,
+    fatal: bool,
+    encoding: f64,
+) -> JsString {
+    if encoding < 0.0 {
+        return text_decode_stream(handle, bytes, stream, fatal);
+    }
+    if fatal {
+        throw_type_error("fatal legacy TextDecoder decoding is not ported".into());
+    }
+    if stream {
+        throw_type_error("streaming legacy TextDecoder decoding is not ported".into());
+    }
+    text_decode_legacy(bytes, encoding)
+}
+
+#[derive(Default)]
+struct StreamingTextDecoder {
+    pending: Vec<u8>,
+    bom_decided: bool,
+}
+
+thread_local! {
+    static TEXT_DECODER_NEXT_ID: Cell<usize> = const { Cell::new(1) };
+    static TEXT_DECODERS: RefCell<HashMap<usize, StreamingTextDecoder>> = RefCell::new(HashMap::new());
+}
+
+pub fn text_decoder_new() -> f64 {
+    let id = TEXT_DECODER_NEXT_ID.with(|next| {
+        let id = next.get();
+        next.set(id.checked_add(1).expect("scriptc: exhausted TextDecoder handles"));
+        id
+    });
+    TEXT_DECODERS.with(|decoders| {
+        decoders.borrow_mut().insert(id, StreamingTextDecoder::default());
+    });
+    id as f64
+}
+
+fn text_decoder_id(handle: f64) -> usize {
+    if !handle.is_finite() || handle.fract() != 0.0 || handle < 1.0 {
+        panic!("scriptc: invalid TextDecoder handle");
+    }
+    handle as usize
+}
+
+pub fn text_decode_stream(
+    handle: f64,
+    bytes: &JsBytes<u8>,
+    stream: bool,
+    fatal: bool,
+) -> JsString {
+    let id = text_decoder_id(handle);
+    TEXT_DECODERS.with(|decoders| {
+        let mut decoders = decoders.borrow_mut();
+        let decoder = decoders
+            .get_mut(&id)
+            .unwrap_or_else(|| panic!("scriptc: unknown TextDecoder handle"));
+        decoder.pending.extend_from_slice(&td_input(bytes));
+
+        if !decoder.bom_decided {
+            const BOM: &[u8] = &[0xef, 0xbb, 0xbf];
+            if decoder.pending.starts_with(BOM) {
+                decoder.pending.drain(..BOM.len());
+                decoder.bom_decided = true;
+            } else if stream
+                && decoder.pending.len() < BOM.len()
+                && BOM.starts_with(&decoder.pending)
+            {
+                return JsString::from("");
+            } else {
+                decoder.bom_decided = true;
+            }
+        }
+
+        let mut cursor = 0usize;
+        let mut complete = decoder.pending.len();
+        let mut invalid = false;
+        while cursor < decoder.pending.len() {
+            match std::str::from_utf8(&decoder.pending[cursor..]) {
+                Ok(_) => break,
+                Err(error) => {
+                    let at = cursor + error.valid_up_to();
+                    if let Some(length) = error.error_len() {
+                        invalid = true;
+                        cursor = at + length;
+                    } else {
+                        complete = at;
+                        break;
+                    }
+                }
+            }
+        }
+        if fatal && invalid {
+            decoder.pending.clear();
+            decoder.bom_decided = false;
+            throw_type_error("The encoded data was not valid UTF-8".into());
+        }
+        if !stream {
+            complete = decoder.pending.len();
+        }
+        let output = String::from_utf8_lossy(&decoder.pending[..complete]).into_owned();
+        decoder.pending.drain(..complete);
+        if !stream {
+            decoder.pending.clear();
+            decoder.bom_decided = false;
+        }
+        JsString::from(output)
+    })
 }

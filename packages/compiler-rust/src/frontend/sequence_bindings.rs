@@ -2,6 +2,67 @@
 use super::*;
 
 impl Lowerer<'_> {
+    fn object_pattern_record_type(&mut self, pattern: Node) -> Result<Type, String> {
+        let mut fields = pattern
+            .elements()
+            .into_iter()
+            .map(|element| {
+                let name = if element.property_name().is_nil() {
+                    element.name().text().to_string()
+                } else {
+                    self.data_property_name(element.property_name())
+                        .ok_or_else(|| {
+                            self.refuse(element, "computed object binding name is not ported")
+                        })?
+                };
+                let r#type = if element.name().kind() == SyntaxKind::ObjectBindingPattern {
+                    self.object_pattern_record_type(element.name())?
+                } else {
+                    self.storage_type(element.name())?
+                };
+                Ok(ir::Field { name, r#type })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let declared_order = fields.iter().map(|field| field.name.clone()).collect();
+        fields.sort_by(|left, right| left.name.cmp(&right.name));
+        let shape_id = self.records.len();
+        self.records.push(ir::Record {
+            id: shape_id,
+            fields,
+            declared_order,
+            tuple: false,
+            index_value: None,
+        });
+        Ok(Type::Record { shape_id })
+    }
+
+    fn contextual_array_pattern_type(&mut self, pattern: Node) -> Result<Option<Type>, String> {
+        let mut elements = Vec::new();
+        for element in pattern.elements() {
+            if bindings::omitted(element)
+                || !element.dot_dot_dot_token().is_nil()
+                || !element.initializer().is_nil()
+            {
+                return Ok(None);
+            }
+            let ty = match element.name().kind() {
+                SyntaxKind::Identifier => self.storage_type(element.name())?,
+                SyntaxKind::ObjectBindingPattern => {
+                    self.object_pattern_record_type(element.name())?
+                }
+                SyntaxKind::ArrayBindingPattern => {
+                    let Some(ty) = self.contextual_array_pattern_type(element.name())? else {
+                        return Ok(None);
+                    };
+                    ty
+                }
+                _ => return Ok(None),
+            };
+            elements.push(ty);
+        }
+        Ok(self.intern_tuple(elements))
+    }
+
     pub(super) fn validate_array_pattern(&self, pattern: Node) -> Result<(), String> {
         let elements = pattern.elements();
         for (index, element) in elements.iter().enumerate() {
@@ -9,26 +70,125 @@ impl Lowerer<'_> {
                 continue;
             }
             if element.kind() != SyntaxKind::BindingElement
-                || element.name().kind() != SyntaxKind::Identifier
-                || !element.initializer().is_nil()
+                || !matches!(
+                    element.name().kind(),
+                    SyntaxKind::Identifier
+                        | SyntaxKind::ArrayBindingPattern
+                        | SyntaxKind::ObjectBindingPattern
+                )
+                || (!element.initializer().is_nil()
+                    && element.name().kind() != SyntaxKind::Identifier)
                 || !element.property_name().is_nil()
                 || (!element.dot_dot_dot_token().is_nil() && index + 1 != elements.len())
+                || (!element.dot_dot_dot_token().is_nil() && !element.initializer().is_nil())
             {
                 return Err(self.refuse(
                     element,
                     "nested, default and non-terminal rest array bindings are not ported",
                 ));
             }
+            if element.name().kind() == SyntaxKind::ArrayBindingPattern {
+                if !element.dot_dot_dot_token().is_nil() {
+                    return Err(self.refuse(
+                        element,
+                        "rest bindings cannot directly contain a nested array pattern",
+                    ));
+                }
+                self.validate_array_pattern(element.name())?;
+            } else if element.name().kind() == SyntaxKind::ObjectBindingPattern {
+                if !element.dot_dot_dot_token().is_nil() {
+                    return Err(self.refuse(
+                        element,
+                        "rest bindings cannot directly contain a nested object pattern",
+                    ));
+                }
+                self.validate_object_binding_pattern(element.name(), false)?;
+            }
         }
         Ok(())
     }
 
-    pub(super) fn validate_array_parameter(&self, node: Node) -> Result<(), String> {
-        if !node.initializer().is_nil() || !node.dot_dot_dot_token().is_nil() {
+    fn bind_sequence_element_value(
+        &mut self,
+        element: Node,
+        value: Expr,
+        source_type: Type,
+        mutable: bool,
+        module: bool,
+    ) -> Result<Vec<Stmt>, String> {
+        let name = element.name();
+        if name.kind() == SyntaxKind::ArrayBindingPattern {
+            return self.bind_sequence_pattern_value(
+                name,
+                (value, source_type),
+                mutable,
+                module,
+                None,
+            );
+        }
+        if name.kind() == SyntaxKind::ObjectBindingPattern {
+            let value = self.coerce(value, source_type, element)?;
+            return self.object_binding_value(name, value, mutable, module, element);
+        }
+        let value = self.coerce(value, source_type, element)?;
+        if element.initializer().is_nil() {
+            return self
+                .publish_binding(name, value, mutable, module, element)
+                .map(|statement| vec![statement]);
+        }
+        if module {
             return Err(self.refuse(
-                node,
-                "array parameter defaults and rest slots are not ported",
+                element,
+                "module array bindings with defaults are not ported",
             ));
+        }
+
+        // Snapshot the iterator slot exactly once. The shared parameter path
+        // performs JavaScript's lazy, undefined-only default and exposes prior
+        // bindings to the initializer without exposing later bindings.
+        let formal = Param {
+            local_id: format!("v{}", self.locals.len()),
+            name: name.text().into(),
+            r#type: value.ty(),
+        };
+        let mut body = vec![Stmt::VarDecl {
+            local_id: formal.local_id.clone(),
+            init: value,
+            loc: self.loc(element),
+        }];
+        body.extend(self.bind_parameter(Some(element), &formal)?);
+        let symbol = self.symbol(name);
+        if !mutable {
+            let incoming = self
+                .bindings
+                .get(&symbol)
+                .cloned()
+                .ok_or_else(|| self.refuse(element, "default binding has no native storage"))?;
+            let binding = Local {
+                id: format!("v{}", self.locals.len()),
+                name: name.text().into(),
+                r#type: incoming.r#type.clone(),
+                mutable: false,
+                boxed: false,
+            };
+            body.push(Stmt::VarDecl {
+                local_id: binding.id.clone(),
+                init: self.construction_read(&incoming, element),
+                loc: self.loc(element),
+            });
+            self.locals.push(binding.clone());
+            self.bindings.insert(symbol, binding);
+        }
+        if formal.r#type == Type::Dyn {
+            self.var_types.insert(symbol, Type::Dyn);
+            self.var_defined.remove(&symbol);
+        }
+        Ok(body)
+    }
+
+    pub(super) fn validate_array_parameter(&self, node: Node) -> Result<(), String> {
+        if !node.initializer().is_nil() {
+            return Err(self.refuse(node, "array parameter defaults are not ported"));
         }
         self.validate_array_pattern(node.name())
     }
@@ -46,7 +206,14 @@ impl Lowerer<'_> {
                 "array declarations require an inferred initialized sequence",
             ));
         }
-        let init = if node.initializer().kind() == SyntaxKind::ArrayLiteralExpression
+        let contextual = if node.initializer().kind() == SyntaxKind::AwaitExpression {
+            self.contextual_array_pattern_type(node.name())?
+        } else {
+            None
+        };
+        let init = if let Some(target) = contextual {
+            self.expected_expression(node.initializer(), target)?
+        } else if node.initializer().kind() == SyntaxKind::ArrayLiteralExpression
             && node.initializer().elements().is_empty()
         {
             Expr::DynArrLit {
@@ -65,7 +232,32 @@ impl Lowerer<'_> {
             SyntaxKind::BigIntLiteral => Some("(intermediate value)".into()),
             _ => None,
         };
-        self.bind_sequence_pattern(node.name(), init, mutable, module, spelling)
+        // A known source function can intentionally publish Dyn even when
+        // TypeScript inferred a more specific array from an unchecked JS
+        // implementation. The IR ABI is authoritative at that boundary;
+        // destructured slots acquire checked views only when consumed.
+        let erased_call = matches!(
+            &init,
+            Expr::Call {
+                r#type: Type::Dyn,
+                ..
+            }
+        );
+        let source_type = if init.ty() == Type::Dyn && !erased_call {
+            self.ty(node.initializer())
+                .ok()
+                .filter(|ty| matches!(ty, Type::Array { .. }))
+                .unwrap_or(Type::Dyn)
+        } else {
+            init.ty()
+        };
+        self.bind_sequence_pattern_value(
+            node.name(),
+            (init, source_type),
+            mutable,
+            module,
+            spelling,
+        )
     }
 
     pub(super) fn bind_sequence_pattern(
@@ -97,17 +289,91 @@ impl Lowerer<'_> {
         let has_rest = elements.last().is_some_and(|element| {
             !bindings::omitted(element) && !element.dot_dot_dot_token().is_nil()
         });
-        if has_rest && (module || !matches!(source_type, Type::Array { .. })) {
+        let rest_array_source = match &source_type {
+            Type::Array { .. } | Type::Dyn => true,
+            Type::Union { union_id } => {
+                let arms = &self.unions[*union_id].arms;
+                arms.iter().any(|arm| matches!(arm, Type::Array { .. }))
+                    && arms
+                        .iter()
+                        .all(|arm| matches!(arm, Type::Array { .. } | Type::Null | Type::Undefined))
+            }
+            _ => false,
+        };
+        if has_rest && (module || !rest_array_source) {
             return Err(self.refuse(
                 pattern,
                 "array rest bindings require a local standard array source",
             ));
         }
         self.ensure_exception_classes(pattern)?;
-        if self.native_type_contains(&source_type, |ty| {
-            matches!(ty, Type::Map { .. } | Type::Set { .. })
-        }) {
+        let direct_collection_source = match &source_type {
+            Type::Map { .. } | Type::Set { .. } => true,
+            Type::Union { union_id } => self.unions[*union_id]
+                .arms
+                .iter()
+                .any(|arm| matches!(arm, Type::Map { .. } | Type::Set { .. })),
+            _ => false,
+        };
+        if direct_collection_source {
             return Err(self.refuse(pattern, "array bindings currently require standard arrays, tuples, bytes or strings; Map/Set iterators are not ported"));
+        }
+        // Compiler-owned tuples (notably heterogeneous Promise.all results)
+        // already have a fixed native layout. Read their slots directly
+        // instead of erasing the tuple to Dyn and going through the iterator
+        // ABI. This is required when a slot is a module namespace, whose
+        // descriptor and live-binding contract deliberately forbid erasure.
+        if let Type::Record { shape_id } = &source_type
+            && self.records[*shape_id].tuple
+            && !has_rest
+        {
+            let shape_id = *shape_id;
+            let tuple = self.records[shape_id].clone();
+            let source_type = Type::Record { shape_id };
+            let init = if init.ty() == source_type {
+                init
+            } else {
+                // A callback/rest/erased boundary can preserve the checked
+                // tuple layout while publishing the live value as Dyn. Attach
+                // the shared checked view before storing it in the typed
+                // construction local; RecordGet below then reads the same
+                // identity with a validator-sound ABI.
+                self.coerce(init, source_type.clone(), pattern)?
+            };
+            let source = self.construction_local(source_type, false);
+            let mut body = vec![Stmt::VarDecl {
+                local_id: source.id.clone(),
+                init,
+                loc: self.loc(pattern),
+            }];
+            for (index, element) in elements.iter().enumerate() {
+                if bindings::omitted(element) {
+                    continue;
+                }
+                let key = index.to_string();
+                let field = tuple
+                    .fields
+                    .iter()
+                    .find(|field| field.name == key)
+                    .ok_or_else(|| {
+                        self.refuse(element, "tuple binding position is outside its layout")
+                    })?;
+                let value = Expr::RecordGet {
+                    obj: Box::new(self.construction_read(&source, element)),
+                    shape_id: format!("r{shape_id}"),
+                    field: key,
+                    r#type: field.r#type.clone(),
+                    loc: self.loc(element),
+                };
+                body.extend(self.bind_sequence_element_value(
+                    element,
+                    value,
+                    field.r#type.clone(),
+                    mutable,
+                    module,
+                )?);
+            }
+            return Ok(body);
         }
         let value = self.coerce(init, Type::Dyn, pattern)?;
         let source = self.construction_local(Type::Dyn, false);
@@ -178,10 +444,21 @@ impl Lowerer<'_> {
                 continue;
             }
             if !element.dot_dot_dot_token().is_nil() {
+                let result_type = match &source_type {
+                    Type::Array { elem } => Type::Array { elem: elem.clone() },
+                    Type::Dyn => Type::Array {
+                        elem: Box::new(Type::Dyn),
+                    },
+                    Type::Union { .. } => Type::Array {
+                        elem: Box::new(Type::Dyn),
+                    },
+                    _ => unreachable!("validated array rest source"),
+                };
                 let value = self.sequence_array_rest(
                     self.construction_read(&source, element),
                     index,
                     element,
+                    result_type,
                 )?;
                 body.push(self.publish_binding(element.name(), value, mutable, module, element)?);
                 continue;
@@ -207,38 +484,51 @@ impl Lowerer<'_> {
                 Some(ty) => ty,
                 None => self.sequence_slot_type(&source_type, index, element)?,
             };
-            let value = self.coerce(value, ty, element)?;
-            body.push(self.publish_binding(element.name(), value, mutable, module, element)?);
+            body.extend(self.bind_sequence_element_value(element, value, ty, mutable, module)?);
         }
         Ok(body)
     }
 
     /// An array iterator reads every index, including holes as undefined. A
     /// slice would incorrectly preserve holes, so build a fresh dense array.
-    fn sequence_array_rest(
+    pub(super) fn sequence_array_rest(
         &mut self,
         source: Expr,
         start: usize,
         node: Node,
+        result_type: Type,
     ) -> Result<Expr, String> {
-        let result_type = Type::Array {
-            elem: Box::new(Type::Dyn),
+        let Type::Array { elem } = &result_type else {
+            unreachable!("array rest result type")
         };
+        let storage_type = if matches!(
+            elem.as_ref(),
+            Type::F64 | Type::String | Type::Bool | Type::Bigint | Type::Symbol
+        ) {
+            // Iteration visits holes as undefined even when the checker calls
+            // this a number[] or string[]. Keep a dense owning array of the
+            // actual values, then attach the contextual element view below.
+            Type::Array { elem: Box::new(Type::Dyn) }
+        } else {
+            result_type.clone()
+        };
+        let Type::Array { elem } = &storage_type else { unreachable!() };
+        let element_type = (**elem).clone();
         let mut helper = helpers::Helper::new(
             "sequence_array_rest",
             vec![Type::Dyn, Type::F64],
-            result_type.clone(),
+            storage_type.clone(),
             self.loc(node),
         );
         let input = helper.param(0);
         let index = helper.local("iterator index", Type::F64, true);
-        let output = helper.local("rest array", result_type.clone(), false);
+        let output = helper.local("rest array", storage_type.clone(), false);
         helper.declare(&index, helper.read(&helper.param(1)));
         helper.declare(
             &output,
             Expr::ArrayLit {
                 elems: vec![],
-                r#type: result_type.clone(),
+                r#type: storage_type.clone(),
                 loc: helper.loc(),
             },
         );
@@ -258,6 +548,7 @@ impl Lowerer<'_> {
             loc: helper.loc(),
         };
         let value = self.dynamic_get(node, helper.read(&input), key);
+        let value = self.coerce(value, element_type, node)?;
         helper.function.body.push(Stmt::While {
             cond: helper.less(&index, length),
             body: vec![
@@ -276,7 +567,7 @@ impl Lowerer<'_> {
             loc: helper.loc(),
         });
         let callee = self.install_helper(helper.finish(&output));
-        Ok(Expr::Call {
+        let value = Expr::Call {
             callee,
             args: vec![
                 source,
@@ -287,9 +578,14 @@ impl Lowerer<'_> {
                     loc: self.loc(node),
                 },
             ],
-            r#type: result_type,
+            r#type: storage_type.clone(),
             loc: self.loc(node),
-        })
+        };
+        if storage_type != result_type {
+            self.array_checked_projection(node, value, result_type)
+        } else {
+            Ok(value)
+        }
     }
 
     pub(super) fn sequence_slot_type(
@@ -298,16 +594,20 @@ impl Lowerer<'_> {
         index: usize,
         node: Node,
     ) -> Result<Type, String> {
-        let element = match source {
-            Type::Array { elem } => (**elem).clone(),
-            Type::String => Type::String,
-            Type::Bytes { .. } => Type::F64,
-            Type::Record { shape_id } if self.records[*shape_id].tuple => self.records[*shape_id]
+        if let Type::Record { shape_id } = source
+            && self.records[*shape_id].tuple
+        {
+            return self.records[*shape_id]
                 .fields
                 .iter()
                 .find(|field| field.name == index.to_string())
                 .map(|field| field.r#type.clone())
-                .unwrap_or(Type::Dyn),
+                .ok_or_else(|| self.refuse(node, "tuple binding position is outside its layout"));
+        }
+        let element = match source {
+            Type::Array { elem } => (**elem).clone(),
+            Type::String => Type::String,
+            Type::Bytes { .. } => Type::F64,
             _ => Type::Dyn,
         };
         self.undefined_storage_type(element, node)

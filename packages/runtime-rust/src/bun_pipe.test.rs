@@ -3,7 +3,7 @@
 fn bun_pipe_identity_response_consumption_and_heap() {
     let _guard = loop_deadline(DEADLINE_MS);
     let argv = array_new(vec![string("/bin/sh"), string("-c"), string("printf hello; printf error >&2")]);
-    let child = bun_spawn(&argv, 0.0, 2.0, 2.0, false, &array_new(vec![]), &empty_string());
+    let child = bun_spawn(&argv, 0.0, 2.0, 2.0, false, false, &array_new(vec![]), &empty_string());
     let empty = bytes_from_vec(vec![]);
     let stdout = bun_subprocess_output(&child, false, |b| b, empty.clone()).unwrap();
     assert!(stdout.ptr_eq(&bun_subprocess_output(&child, false, |b| b, empty.clone()).unwrap()));

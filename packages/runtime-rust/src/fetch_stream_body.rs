@@ -26,6 +26,86 @@ impl<T: HeapValue> FetchStreamBody for FetchWebBody<T> {
     }
 }
 
+// Adapt an HTTP response to the same ReadableStream representation used by
+// constructed Responses.  The native fetch reader keeps the socket paused
+// until a read is pending, so exposing Response.body does not eagerly buffer
+// the response or defeat backpressure.
+struct FetchHttpBodySource {
+    request: JsHttpRequest,
+    reader: RefCell<Option<JsFetchReader>>,
+}
+
+impl Trace for FetchHttpBodySource {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        tracer.edge(&self.request);
+        if let Some(reader) = self.reader.borrow().as_ref() { tracer.edge(reader); }
+    }
+}
+
+impl FetchHttpBodySource {
+    fn reader(&self) -> JsFetchReader {
+        if let Some(reader) = self.reader.borrow().as_ref() { return reader.clone(); }
+        let reader = fetch_body_get_reader(&self.request);
+        *self.reader.borrow_mut() = Some(reader.clone());
+        reader
+    }
+}
+
+impl WebStreamSource<JsBytes<u8>> for FetchHttpBodySource {
+    fn has_pull(&self) -> bool { true }
+
+    fn pull(&self, stream: &JsWebStream<JsBytes<u8>>) -> JsPromise<JsBytes<u8>> {
+        let result = promise_new();
+        let next = fetch_reader_read(&self.reader());
+        let output = result.clone();
+        let stream = stream.clone();
+        promise_then(&next, Box::new(move |outcome| match outcome {
+            Ok(Some(chunk)) => promise_run_segment(&output.clone(), || {
+                let open = stream.with(|data| {
+                    !data.close_requested && !data.closed && data.error.is_none()
+                });
+                if open { web_stream_enqueue(&stream, chunk.clone()); }
+                let _ = promise_fulfill(&output, chunk);
+            }),
+            Ok(None) => promise_run_segment(&output.clone(), || {
+                let open = stream.with(|data| {
+                    !data.close_requested && !data.closed && data.error.is_none()
+                });
+                if open { web_stream_close(&stream); }
+                let _ = promise_fulfill(&output, bytes_empty::<u8>());
+            }),
+            Err(error) => { let _ = promise_reject(&output, error); }
+        }));
+        result
+    }
+
+    fn cancel(&self, _reason: JsBytes<u8>) -> JsPromise<JsBytes<u8>> {
+        promise_map(&fetch_reader_cancel(&self.reader()), |_| bytes_empty::<u8>())
+    }
+}
+
+pub fn fetch_response_body_stream(
+    response: &JsHttpRequest,
+) -> Option<JsWebStream<JsBytes<u8>>> {
+    if fetch_body_is_null(response) { return None; }
+    if let Some(stream) = fetch_response_web_body::<JsBytes<u8>>(response) {
+        return Some(stream);
+    }
+    let stream = web_stream_new_with_prefetch(Rc::new(FetchHttpBodySource {
+        request: response.clone(),
+        reader: RefCell::new(None),
+    }), false);
+    let start = promise_resolved(bytes_empty::<u8>());
+    web_stream_start(&stream, &start);
+    response.with_mut(|data| {
+        data.fetch_stream_body = Some(Rc::new(FetchWebBody {
+            stream: stream.clone(),
+            bytes: |bytes| bytes,
+        }));
+    });
+    Some(stream)
+}
+
 fn fetch_stream_consume<T: HeapValue>(
     reader: JsWebReader<T>, result: JsPromise<JsBytes<u8>>,
     buffer: Rc<RefCell<Vec<u8>>>, bytes: fn(T) -> JsBytes<u8>,

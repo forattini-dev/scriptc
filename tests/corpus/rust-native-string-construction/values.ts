@@ -24,3 +24,6 @@ show("undefined",String.fromCharCode(undefined));
 let sixel=0;for(let row=0;row<6;row++){sixel|=1<<row;}
 show("sixel",String.fromCharCode(63+sixel));
 const saved=String.fromCodePoint(0x1f600);const read=():string=>saved;show("capture",read());
+const pointFactory=String.fromCodePoint;show("point-alias",pointFactory(65,0x1f600));
+const unitFactory=String.fromCharCode;show("unit-alias",unitFactory(65,0xd83d,0xde00));
+const fallbackPoint=String.fromCodePoint??((_value:number):string=>"fallback");show("point-fallback",fallbackPoint(66));

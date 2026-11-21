@@ -20,6 +20,30 @@ const SELFSIGNED_KEY_PEM: &str = include_str!("certs/selfsigned-key.pem");
 const SNI: &str = "localhost";
 
 #[test]
+fn tls_peer_certificate_extracts_node_fields() {
+    let der = rustls_pemfile::certs(&mut std::io::Cursor::new(LOCALHOST_CERT_PEM))
+        .next()
+        .unwrap()
+        .unwrap();
+    let certificate = tls_parse_peer_certificate(der.as_ref()).unwrap();
+    assert_eq!(certificate.subject, vec![(string("CN"), vec![string("localhost")])]);
+    assert_eq!(certificate.issuer, vec![(string("CN"), vec![string("tsnative test CA")])]);
+    assert_eq!(certificate.valid_from, string("Jul 16 20:37:08 2026 GMT"));
+    assert_eq!(certificate.valid_to, string("Jun 22 20:37:08 2126 GMT"));
+    assert_eq!(certificate.fingerprint, string("37:ED:E8:E2:65:72:14:E2:DC:D7:3B:C1:F5:5D:4F:9F:28:DF:3F:A7"));
+    assert_eq!(certificate.serial_number, string("4399CEECFF2899EBF65ADADFFB85645D570771AF"));
+    assert!(!certificate.ca);
+    assert_eq!(certificate.raw, der.as_ref());
+
+    let ca = rustls_pemfile::certs(&mut std::io::Cursor::new(CA_PEM))
+        .next()
+        .unwrap()
+        .unwrap();
+    assert!(tls_parse_peer_certificate(ca.as_ref()).unwrap().ca);
+    assert!(tls_parse_peer_certificate(&[0x30, 0]).is_err());
+}
+
+#[test]
 fn tls_echo_roundtrip_with_custom_ca() {
     let _guard = loop_deadline(DEADLINE_MS);
     let log = transcript();
@@ -38,6 +62,7 @@ fn tls_echo_roundtrip_with_custom_ca() {
     assert_eq!(
         entries,
         vec![
+            "client-connect",
             "client-secure:true:none",
             "server-secure",
             "server-data:ping",
@@ -75,6 +100,10 @@ fn tls_rejects_unknown_issuer() {
     net_socket_on_error(
         &client,
         Rc::new(move |error: JsError| {
+            assert_eq!(
+                error_code(&error).map(|value| value.to_string()).as_deref(),
+                Some("UNABLE_TO_VERIFY_LEAF_SIGNATURE")
+            );
             note(&error_log, &format!("error:{}", error_message(&error)));
             net_server_close(&reborrow(&error_server));
         }),
@@ -123,6 +152,7 @@ fn tls_unauthorized_but_permitted() {
     assert_eq!(
         entries,
         vec![
+            "client-connect",
             "client-secure:false:UNABLE_TO_VERIFY_LEAF_SIGNATURE",
             "server-secure",
             "server-data:ping",
@@ -200,6 +230,7 @@ fn tls_default_ca_store_injection() {
     assert_eq!(
         entries,
         vec![
+            "client-connect",
             "client-secure:true:none",
             "server-secure",
             "server-data:ping",
@@ -441,6 +472,15 @@ fn echo_once(
         reject_unauthorized,
         ca,
     );
+    assert_eq!(tls_socket_protocol(&client), Some(string("TLSv1.3")));
+    assert!(matches!(tls_socket_cipher(&client), Some(None)));
+    let connect_log = log.clone();
+    net_socket_on_connect(
+        &client,
+        Rc::new(move || note(&connect_log, "client-connect")),
+        no_trace(),
+        true,
+    );
     let secure_log = log.clone();
     let writing = client.downgrade();
     tls_socket_on_secure_connect(
@@ -450,6 +490,11 @@ fn echo_once(
             // Read the verification verdict here, not after the loop: the
             // socket drops its TLS state when it is destroyed.
             assert_eq!(tls_socket_encrypted(&client), Some(true));
+            assert_eq!(tls_socket_protocol(&client), Some(string("TLSv1.3")));
+            let cipher = tls_socket_cipher(&client).flatten().expect("negotiated cipher");
+            assert_eq!(cipher.name, string("TLS_AES_256_GCM_SHA384"));
+            assert_eq!(cipher.standard_name, cipher.name);
+            assert_eq!(cipher.version, string("TLSv1.3"));
             note(
                 &secure_log,
                 &format!(
@@ -487,6 +532,9 @@ fn echo_once(
     run_event_loop();
 
     let entries = entries(log);
+
+    assert!(tls_socket_protocol(&client).is_none());
+    assert!(tls_socket_cipher(&client).is_none());
 
     drop(client);
     drop(server);

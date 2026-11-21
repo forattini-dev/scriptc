@@ -9,7 +9,10 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 #[derive(Clone)]
-pub struct JsString(Repr);
+pub struct JsString {
+    repr: Repr,
+    stable_hash: u64,
+}
 
 #[derive(Clone)]
 enum Repr {
@@ -20,6 +23,17 @@ enum Repr {
 struct Utf16String {
     units: Box<[u16]>,
     host_utf8: OnceCell<String>,
+}
+
+fn stable_utf16_hash(units: impl Iterator<Item = u16>) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for unit in units {
+        for byte in unit.to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    hash
 }
 
 #[derive(Clone)]
@@ -75,7 +89,7 @@ impl JsStringSource for JsString {
         self.encode_utf16()
     }
     fn well_formed_utf8(&self) -> Option<&str> {
-        match &self.0 {
+        match &self.repr {
             Repr::Utf8(text) => Some(text),
             Repr::Utf16(_) => None,
         }
@@ -89,35 +103,41 @@ impl JsString {
     pub fn from_utf16(units: &[u16]) -> Self {
         match String::from_utf16(units) {
             Ok(text) => Self::from(text),
-            Err(_) => Self(Repr::Utf16(Rc::new(Utf16String {
-                units: units.into(),
-                host_utf8: OnceCell::new(),
-            }))),
+            Err(_) => Self {
+                repr: Repr::Utf16(Rc::new(Utf16String {
+                    units: units.into(),
+                    host_utf8: OnceCell::new(),
+                })),
+                stable_hash: stable_utf16_hash(units.iter().copied()),
+            },
         }
     }
     pub fn encode_utf16(&self) -> Utf16Units<'_> {
-        match &self.0 {
+        match &self.repr {
             Repr::Utf8(text) => Utf16Units::Utf8(text.encode_utf16()),
             Repr::Utf16(text) => Utf16Units::Utf16(text.units.iter().copied()),
         }
     }
     pub fn ptr_eq(left: &Self, right: &Self) -> bool {
-        match (&left.0, &right.0) {
+        match (&left.repr, &right.repr) {
             (Repr::Utf8(a), Repr::Utf8(b)) => Rc::ptr_eq(a, b),
             (Repr::Utf16(a), Repr::Utf16(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
     pub fn is_well_formed(&self) -> bool {
-        matches!(self.0, Repr::Utf8(_))
+        matches!(self.repr, Repr::Utf8(_))
     }
     pub fn to_utf8_lossy(&self) -> &str {
-        match &self.0 {
+        match &self.repr {
             Repr::Utf8(text) => text,
             Repr::Utf16(text) => text
                 .host_utf8
                 .get_or_init(|| String::from_utf16_lossy(&text.units)),
         }
+    }
+    pub fn stable_hash(&self) -> u64 {
+        self.stable_hash
     }
 }
 impl Default for JsString {
@@ -127,12 +147,19 @@ impl Default for JsString {
 }
 impl From<&str> for JsString {
     fn from(value: &str) -> Self {
-        Self(Repr::Utf8(Rc::from(value)))
+        Self {
+            repr: Repr::Utf8(Rc::from(value)),
+            stable_hash: stable_utf16_hash(value.encode_utf16()),
+        }
     }
 }
 impl From<String> for JsString {
     fn from(value: String) -> Self {
-        Self(Repr::Utf8(Rc::from(value)))
+        let stable_hash = stable_utf16_hash(value.encode_utf16());
+        Self {
+            repr: Repr::Utf8(Rc::from(value)),
+            stable_hash,
+        }
     }
 }
 impl From<&JsString> for JsString {
@@ -172,7 +199,7 @@ impl fmt::Debug for JsString {
 }
 impl PartialEq for JsString {
     fn eq(&self, other: &Self) -> bool {
-        match (&self.0, &other.0) {
+        match (&self.repr, &other.repr) {
             (Repr::Utf8(a), Repr::Utf8(b)) => a == b,
             _ => self.encode_utf16().eq(other.encode_utf16()),
         }
@@ -191,11 +218,11 @@ impl Ord for JsString {
 }
 impl Hash for JsString {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for unit in self.encode_utf16() {
-            unit.hash(state);
-        }
-        // Distinguish concatenated hash inputs without relying on UTF-8 views.
-        0x10000u32.hash(state);
+        // Strings are immutable, so compute their representation-independent
+        // UTF-16 fingerprint once at construction and carry it through cheap
+        // clones. Equal strings always feed the same value to the caller's
+        // hasher; candidate collisions are still resolved by Eq.
+        self.stable_hash.hash(state);
     }
 }
 impl PartialEq<str> for JsString {

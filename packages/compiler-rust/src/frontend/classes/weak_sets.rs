@@ -59,6 +59,7 @@ impl Lowerer<'_> {
             resolving: false,
             signature: None,
             token: None,
+            captures: Vec::new(),
         });
         self.classes.layouts.push(Some(ir::Class {
             name: CLASS.into(),
@@ -69,8 +70,10 @@ impl Lowerer<'_> {
                 name: DATA.into(),
                 r#type: Type::Dyn,
             }],
+            captures: vec![],
             methods: vec![],
             symbol_methods: vec![],
+            symbol_brand: None,
             method_names: vec!["add".into(), "has".into(), "delete".into()],
             loc: self.loc(site),
         }));

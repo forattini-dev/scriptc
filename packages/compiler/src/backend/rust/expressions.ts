@@ -1006,6 +1006,7 @@ export class RustExpressionEmitter {
         }
         return this.emitExpr(expr.value);
       case "libCall":
+        if (expr.fn === "callable.view") return this.context.unsupported("callable views in the reference Rust backend", expr.loc);
         if (expr.fn === "record.view") return emitRecordView(expr, this.context, value => this.emitExpr(value));
         if (["record.fromOwn", "record.setOwn"].includes(expr.fn)) return emitRecordOwnValues(expr, this.context, value => this.emitExpr(value));
         if (expr.fn === "record.cloneOwn") return emitRecordOwnConstruction(expr, this.context, value => this.emitExpr(value));

@@ -1,0 +1,1 @@
+{"compilerOptions":{"allowJs":true,"checkJs":false,"strict":false,"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","skipLibCheck":true},"include":["./self-capture-constructor.mjs","./self-capture-constructor-eager.mjs"]}

@@ -97,6 +97,7 @@ fn exec_file_capture_chunk(
 pub fn child_exec_file_options(
     command: &JsString,
     arguments: &JsArray<JsString>,
+    display: &JsString,
     options: ExecFileOptions,
     callback: Rc<dyn Fn(ExecFileOutput)>,
     trace: ChildTrace,
@@ -114,6 +115,7 @@ pub fn child_exec_file_options(
         options.env.as_ref().unwrap_or(&array_new(Vec::new())),
         &options.cwd,
         options.windows_hide,
+        false,
     );
     let capture = Rc::new(RefCell::new(ExecFileCapture {
         stdout: Vec::new(),
@@ -151,14 +153,7 @@ pub fn child_exec_file_options(
         );
         capture.borrow_mut().timer = Some(id);
     }
-    let display = arguments.with(|args| {
-        let mut display = command.to_string();
-        for arg in args.elements().iter() {
-            display.push(' ');
-            display.push_str(arg);
-        }
-        string(&display)
-    });
+    let display = display.clone();
     let state = capture.clone();
     let error_callback = callback.clone();
     let error_trace = trace.clone();

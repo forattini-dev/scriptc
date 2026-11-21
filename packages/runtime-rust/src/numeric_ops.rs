@@ -69,6 +69,10 @@ pub fn to_uint32(value: f64) -> u32 {
     to_int32(value) as u32
 }
 
+pub fn math_imul(left: f64, right: f64) -> f64 {
+    to_int32(left).wrapping_mul(to_int32(right)) as f64
+}
+
 pub fn bit_not(value: f64) -> f64 {
     (!to_int32(value)) as f64
 }

@@ -1,0 +1,10 @@
+const params = new URLSearchParams();
+params.set('since_lsn', 'a b');
+params.set('limit', '5');
+console.log(params.toString(), `${params}`, params.get('limit'), params.has('missing'));
+params.set('limit', '6');
+params.append('tag', 'a+b');
+console.log(params.toString());
+params.append('tag', 'second');
+const keys = Array.from(params.keys());
+console.log(keys.length, keys.join('|'));

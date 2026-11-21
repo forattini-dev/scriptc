@@ -21,7 +21,7 @@ export interface AmbientSurfaceRow {
 
 export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
   {
-    id: "stdlib.Bun.spawn", kind: "stdlib", name: "Bun.spawn", fns: ["bun.spawn", "bun.exited", "bun.pid", "bun.exitCode", "bun.stdout", "bun.stderr"],
+    id: "stdlib.Bun.spawn", kind: "stdlib", name: "Bun.spawn", fns: ["bun.spawn", "bun.exited", "bun.pid", "bun.exitCode", "bun.stdout", "bun.stderr", "bun.responseText"],
     note: "Rust native argv subprocesses with inline ignore/inherit stdio and output ReadableStream pipes, env and cwd; Response.text() consumption, reader locking/cancellation, exited promise identity, pid and exitCode; Windows custom PATH selecting a different executable requires an absolute command to preserve argv[0]; stdin pipes, callbacks, signals, timeout, object overload and other members are unsupported; corpus:rust-bun-spawn,rust-bun-pipe,rust-response-web-stream",
   },
   {

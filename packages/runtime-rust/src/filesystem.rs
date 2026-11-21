@@ -27,9 +27,16 @@ fn fs_error_is_badf(error: &std::io::Error) -> bool {
         || (cfg!(windows) && error.raw_os_error() == Some(6))
 }
 
+fn fs_error_is_privilege_not_held(error: &std::io::Error) -> bool {
+    cfg!(windows) && error.raw_os_error() == Some(1314)
+}
+
 fn fs_error_code(error: &std::io::Error) -> &'static str {
     if fs_error_is_badf(error) {
         return "EBADF";
+    }
+    if fs_error_is_privilege_not_held(error) {
+        return "EPERM";
     }
     fs_error_entry(error.kind()).map_or("EIO", |(code, _)| code)
 }
@@ -37,6 +44,9 @@ fn fs_error_code(error: &std::io::Error) -> &'static str {
 fn fs_error_text(error: &std::io::Error) -> String {
     if fs_error_is_badf(error) {
         return "bad file descriptor".to_owned();
+    }
+    if fs_error_is_privilege_not_held(error) {
+        return "operation not permitted".to_owned();
     }
     match fs_error_entry(error.kind()) {
         Some((_, text)) => text.to_owned(),
@@ -204,17 +214,24 @@ fn fs_read_all(path: &JsString) -> Vec<u8> {
     }
     let mut file = options.open(path.to_utf8_lossy()).unwrap_or_else(|error| {
         #[cfg(windows)]
-        let resolved = if path.is_empty() { path.clone() } else { path_win32_resolve(&array_new(vec![path.clone()])) };
+        let resolved = if path.is_empty() {
+            path.clone()
+        } else {
+            path_win32_resolve(&array_new(vec![path.clone()]))
+        };
         #[cfg(windows)]
         let path = &resolved;
         throw_fs_error("open", path, error)
     });
-    let metadata = file.metadata().unwrap_or_else(|error| throw_fs_fd_io_error("fstat", error));
+    let metadata = file
+        .metadata()
+        .unwrap_or_else(|error| throw_fs_fd_io_error("fstat", error));
     if metadata.is_dir() {
         throw_fs_fd_error("read", "EISDIR", "illegal operation on a directory");
     }
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).unwrap_or_else(|error| throw_fs_fd_io_error("read", error));
+    file.read_to_end(&mut bytes)
+        .unwrap_or_else(|error| throw_fs_fd_io_error("read", error));
     bytes
 }
 
@@ -228,6 +245,25 @@ pub fn fs_read_file_bytes(path: &JsString) -> JsBytes<u8> {
     bytes_from_vec(fs_read_all(path))
 }
 
+pub fn fs_read_file_bytes_promise(path: &JsString) -> JsPromise<JsBytes<u8>> {
+    let path = path.clone();
+    promise_from_sync(move || fs_read_file_bytes(&path))
+}
+
+/// Snapshot a regular file using Node's default file ReadStream chunk size.
+/// The compiler consumes this owning array directly for `for await`; no JS
+/// stream engine or background runtime is embedded in the native binary.
+pub fn fs_read_stream_chunks(path: &JsString) -> JsArray<JsBytes<u8>> {
+    const CHUNK_SIZE: usize = 64 * 1024;
+    let bytes = fs_read_all(path);
+    array_new(
+        bytes
+            .chunks(CHUNK_SIZE)
+            .map(|chunk| bytes_from_vec(chunk.to_vec()))
+            .collect(),
+    )
+}
+
 pub fn fs_write_file_bytes(path: &JsString, data: &JsBytes<u8>) {
     let result = data.with(|data| {
         let storage = data.storage.borrow();
@@ -239,6 +275,52 @@ pub fn fs_write_file_bytes(path: &JsString, data: &JsBytes<u8>) {
     if let Err(error) = result {
         throw_fs_error("open", path, error);
     }
+}
+
+pub fn fs_write_file_promise(
+    path: &JsString,
+    data: &JsString,
+    mode: f64,
+    exclusive: bool,
+    flush: bool,
+) -> JsPromise<()> {
+    let path = path.clone();
+    let data = data.clone();
+    promise_from_sync(move || {
+        if flush {
+            fs_write_file_flushed(&path, &data, mode, exclusive);
+        } else if exclusive {
+            fs_write_file_exclusive_mode(&path, &data, mode);
+        } else if mode >= 0.0 {
+            fs_write_file_mode(&path, &data, mode);
+        } else {
+            fs_write_file(&path, &data);
+        }
+    })
+}
+
+fn fs_write_file_flushed(path: &JsString, data: &JsString, mode: f64, exclusive: bool) {
+    use std::io::Write;
+    let creation_mode = if mode >= 0.0 {
+        fs_creation_mode(mode)
+    } else {
+        0o666
+    };
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true);
+    if exclusive {
+        options.create_new(true);
+    } else {
+        options.create(true).truncate(true);
+    }
+    fs_set_creation_mode(&mut options, creation_mode);
+    let mut file = options
+        .open(path.to_utf8_lossy())
+        .unwrap_or_else(|error| throw_fs_error("open", path, error));
+    file.write_all(data.as_bytes())
+        .unwrap_or_else(|error| throw_fs_error("write", path, error));
+    file.sync_all()
+        .unwrap_or_else(|error| throw_fs_error("fsync", path, error));
 }
 
 pub fn fs_append_file(path: &JsString, data: &JsString) {
@@ -314,10 +396,165 @@ pub fn fs_readdir(path: &JsString) -> JsArray<JsString> {
     array_new(names)
 }
 
+pub fn fs_readdir_promise(path: &JsString) -> JsPromise<JsArray<JsString>> {
+    let path = path.clone();
+    promise_from_sync(move || fs_readdir(&path))
+}
+
+pub fn fs_truncate(path: &JsString, length: f64) {
+    let received = bytes_received_number(length);
+    if !length.is_finite() || length.fract() != 0.0 {
+        throw_out_of_range(format!(
+            "The value of \"len\" is out of range. It must be an integer. Received {received}"
+        ));
+    }
+    if !(-9_007_199_254_740_991.0..=9_007_199_254_740_991.0).contains(&length) {
+        throw_out_of_range(format!(
+            "The value of \"len\" is out of range. It must be >= -9007199254740991 && <= 9007199254740991. Received {received}"
+        ));
+    }
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(path.to_utf8_lossy())
+        .unwrap_or_else(|error| throw_fs_error("open", path, error));
+    file.set_len(if length > 0.0 { length as u64 } else { 0 })
+        .unwrap_or_else(|error| throw_fs_error("truncate", path, error));
+}
+
+pub fn fs_truncate_promise(path: &JsString, length: f64) -> JsPromise<()> {
+    let path = path.clone();
+    promise_from_sync(move || fs_truncate(&path, length))
+}
+
+fn glob_segment_matches(pattern: &[char], value: &[char]) -> bool {
+    let (mut pattern_index, mut value_index) = (0, 0);
+    let (mut star, mut star_value) = (None, 0);
+    while value_index < value.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == '?' || pattern[pattern_index] == value[value_index])
+        {
+            pattern_index += 1;
+            value_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == '*' {
+            star = Some(pattern_index);
+            pattern_index += 1;
+            star_value = value_index;
+        } else if let Some(star_index) = star {
+            pattern_index = star_index + 1;
+            star_value += 1;
+            value_index = star_value;
+        } else {
+            return false;
+        }
+    }
+    while pattern_index < pattern.len() && pattern[pattern_index] == '*' {
+        pattern_index += 1;
+    }
+    pattern_index == pattern.len()
+}
+
+fn glob_path_matches(pattern: &str, value: &str) -> bool {
+    fn matches(pattern: &[&str], value: &[&str]) -> bool {
+        match pattern.split_first() {
+            None => value.is_empty(),
+            Some((&"**", rest)) => {
+                matches(rest, value) || (!value.is_empty() && matches(pattern, &value[1..]))
+            }
+            Some((segment, rest)) => {
+                !value.is_empty()
+                    && glob_segment_matches(
+                        &segment.chars().collect::<Vec<_>>(),
+                        &value[0].chars().collect::<Vec<_>>(),
+                    )
+                    && matches(rest, &value[1..])
+            }
+        }
+    }
+    let pattern = pattern
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect::<Vec<_>>();
+    let value = value
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect::<Vec<_>>();
+    matches(&pattern, &value)
+}
+
+fn glob_normalized(value: &std::path::Path) -> String {
+    value
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy()),
+            std::path::Component::ParentDir => Some("..".into()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+pub fn fs_glob_sync(
+    pattern: &JsString,
+    cwd: &JsString,
+    excludes: &JsArray<JsString>,
+) -> JsArray<JsString> {
+    let exclude_values = array_values(excludes);
+    for value in std::iter::once(pattern)
+        .chain(std::iter::once(cwd))
+        .chain(exclude_values.iter())
+    {
+        if value.contains('\0') {
+            throw_invalid_arg_value(
+                "The argument must be a string without null bytes. Received ",
+                value,
+            );
+        }
+        if !value.is_well_formed() {
+            throw_type_error("scriptc: lone UTF-16 glob strings are not ported".into());
+        }
+    }
+    let pattern = pattern.to_utf8_lossy().replace('\\', "/");
+    if std::path::Path::new(pattern.as_str()).is_absolute() {
+        throw_type_error("scriptc: absolute fs.globSync patterns are not ported".into());
+    }
+    let excludes = exclude_values
+        .into_iter()
+        .map(|value| value.to_utf8_lossy().replace('\\', "/"))
+        .collect::<Vec<_>>();
+    let root = std::path::PathBuf::from(cwd.to_utf8_lossy().to_string());
+    let mut pending = vec![(root.clone(), std::path::PathBuf::new())];
+    let mut found = Vec::new();
+    while let Some((directory, relative)) = pending.pop() {
+        let entries = std::fs::read_dir(&directory)
+            .unwrap_or_else(|error| throw_fs_error("scandir", cwd, error));
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|error| throw_fs_error("scandir", cwd, error));
+            let child_relative = relative.join(entry.file_name());
+            let normalized = glob_normalized(&child_relative);
+            let excluded = excludes
+                .iter()
+                .any(|exclude| glob_path_matches(exclude, &normalized));
+            if excluded {
+                continue;
+            }
+            let file_type = entry
+                .file_type()
+                .unwrap_or_else(|error| throw_fs_error("lstat", cwd, error));
+            if file_type.is_dir() {
+                pending.push((entry.path(), child_relative));
+            } else if glob_path_matches(&pattern, &normalized) {
+                found.push(normalized);
+            }
+        }
+    }
+    found.sort();
+    array_new(found.into_iter().map(JsString::from).collect())
+}
+
 pub fn fs_realpath(path: &JsString) -> JsString {
     match std::fs::canonicalize(path.to_utf8_lossy()) {
         Ok(resolved) => fs_realpath_result(&resolved),
-        Err(error) => throw_fs_error("lstat", path, error),
+        Err(error) => throw_fs_error("realpath", path, error),
     }
 }
 
@@ -373,6 +610,64 @@ pub fn fs_mkdir_recursive(path: &JsString) {
     }
 }
 
+pub fn fs_mkdir_promise(
+    path: &JsString,
+    mode: f64,
+    recursive: bool,
+) -> JsPromise<Option<JsString>> {
+    let path = path.clone();
+    promise_from_sync(move || {
+        let first_created = if recursive {
+            std::path::Path::new(path.to_utf8_lossy())
+                .ancestors()
+                .take_while(|candidate| !candidate.as_os_str().is_empty())
+                .filter(|candidate| {
+                    matches!(
+                        std::fs::symlink_metadata(candidate),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                    )
+                })
+                .last()
+                .map(|candidate| {
+                    #[cfg(windows)]
+                    {
+                        let absolute = if candidate.is_absolute() {
+                            candidate.to_path_buf()
+                        } else {
+                            std::env::current_dir()
+                                .unwrap_or_else(|error| throw_fs_error("mkdir", &path, error))
+                                .join(candidate)
+                        };
+                        let absolute = absolute.to_string_lossy();
+                        if absolute.starts_with(r"\\?\") {
+                            JsString::from(absolute.as_ref())
+                        } else if let Some(unc) = absolute.strip_prefix(r"\\") {
+                            JsString::from(format!(r"\\?\UNC\{unc}"))
+                        } else {
+                            JsString::from(format!(r"\\?\{absolute}"))
+                        }
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        JsString::from(candidate.to_string_lossy().as_ref())
+                    }
+                })
+        } else {
+            None
+        };
+        if mode < 0.0 {
+            if recursive {
+                fs_mkdir_recursive(&path);
+            } else {
+                fs_mkdir(&path);
+            }
+        } else {
+            fs_mkdir_mode(&path, mode, recursive);
+        }
+        first_created
+    })
+}
+
 pub fn fs_rm_options(path: &JsString, recursive: bool, force: bool) {
     let metadata = match std::fs::symlink_metadata(path.to_utf8_lossy()) {
         Ok(metadata) => metadata,
@@ -393,6 +688,14 @@ pub fn fs_rm_options(path: &JsString, recursive: bool, force: bool) {
     }
 }
 
+/// Promise-facing `fs.rm` ABI. Removal stays synchronous at the filesystem
+/// boundary, while the shared promise adapter preserves rejection and
+/// microtask ordering without a JavaScript executor.
+pub fn fs_rm_promise(path: &JsString, recursive: bool, force: bool) -> JsPromise<()> {
+    let path = path.clone();
+    promise_from_sync(move || fs_rm_options(&path, recursive, force))
+}
+
 pub fn fs_unlink(path: &JsString) {
     if path.contains('\0') {
         throw_invalid_arg_value(
@@ -405,24 +708,187 @@ pub fn fs_unlink(path: &JsString) {
     }
     if let Err(error) = std::fs::remove_file(path.to_utf8_lossy()) {
         #[cfg(windows)]
-        let resolved = if path.is_empty() { path.clone() } else { path_win32_resolve(&array_new(vec![path.clone()])) };
+        let resolved = if path.is_empty() {
+            path.clone()
+        } else {
+            path_win32_resolve(&array_new(vec![path.clone()]))
+        };
         #[cfg(windows)]
         let path = &resolved;
         throw_fs_error("unlink", path, error);
     }
 }
 
+/// Promise-facing `fs.unlink` ABI. The filesystem contract stays centralized
+/// in `fs_unlink`; `promise_from_sync` turns its native throw into a rejected
+/// promise and schedules observers through the regular microtask machinery.
+pub fn fs_unlink_promise(path: &JsString) -> JsPromise<()> {
+    let path = path.clone();
+    promise_from_sync(move || fs_unlink(&path))
+}
+
+pub fn fs_rename_promise(from: &JsString, to: &JsString) -> JsPromise<()> {
+    let from = from.clone();
+    let to = to.clone();
+    promise_from_sync(move || fs_rename(&from, &to))
+}
+
 pub fn fs_copy_file(from: &JsString, to: &JsString) {
+    for (name, path) in [("src", from), ("dest", to)] {
+        if path.contains('\0') {
+            throw_invalid_arg_value(
+                &format!(
+                    "The argument '{name}' must be a string, Uint8Array, or URL without null bytes. Received "
+                ),
+                path,
+            );
+        }
+        if !path.is_well_formed() {
+            throw_type_error("scriptc: lone UTF-16 filesystem paths are not ported".into());
+        }
+    }
     if let Err(error) = std::fs::copy(from.to_utf8_lossy(), to.to_utf8_lossy()) {
         throw_fs_error2("copyfile", from, to, error);
     }
+}
+
+pub fn fs_copy_file_promise(from: &JsString, to: &JsString) -> JsPromise<()> {
+    let from = from.clone();
+    let to = to.clone();
+    promise_from_sync(move || fs_copy_file(&from, &to))
+}
+
+pub fn fs_access_promise(path: &JsString, mode: f64) -> JsPromise<()> {
+    let path = path.clone();
+    promise_from_sync(move || fs_access(&path, mode))
+}
+
+pub fn fs_link(from: &JsString, to: &JsString) {
+    for (name, path) in [("existingPath", from), ("newPath", to)] {
+        if path.contains('\0') {
+            throw_invalid_arg_value(
+                &format!(
+                    "The argument '{name}' must be a string, Uint8Array, or URL without null bytes. Received "
+                ),
+                path,
+            );
+        }
+        if !path.is_well_formed() {
+            throw_type_error("scriptc: lone UTF-16 filesystem paths are not ported".into());
+        }
+    }
+    if let Err(error) = std::fs::hard_link(from.to_utf8_lossy(), to.to_utf8_lossy()) {
+        throw_fs_error2("link", from, to, error);
+    }
+}
+
+fn fs_cp_sync_with_filter(
+    from: &JsString,
+    to: &JsString,
+    recursive: bool,
+    dereference: bool,
+    filter: &mut impl FnMut(&JsString, &JsString) -> bool,
+) {
+    for (name, path) in [("src", from), ("dest", to)] {
+        if path.contains('\0') {
+            throw_invalid_arg_value(
+                &format!(
+                    "The argument '{name}' must be a string, Uint8Array, or URL without null bytes. Received "
+                ),
+                path,
+            );
+        }
+        if !path.is_well_formed() {
+            throw_type_error("scriptc: lone UTF-16 filesystem paths are not ported".into());
+        }
+    }
+
+    fn copy_entry(
+        from: &std::path::Path,
+        to: &std::path::Path,
+        recursive: bool,
+        dereference: bool,
+        filter: &mut impl FnMut(&JsString, &JsString) -> bool,
+    ) -> std::io::Result<()> {
+        let source = JsString::from(from.to_string_lossy().as_ref());
+        let destination = JsString::from(to.to_string_lossy().as_ref());
+        if !filter(&source, &destination) {
+            return Ok(());
+        }
+        let metadata = if dereference {
+            std::fs::metadata(from)?
+        } else {
+            std::fs::symlink_metadata(from)?
+        };
+        if metadata.file_type().is_symlink() {
+            let target = std::fs::read_link(from)?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(target, to)?;
+            #[cfg(windows)]
+            {
+                let resolved = from
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."))
+                    .join(&target);
+                if std::fs::metadata(resolved).is_ok_and(|value| value.is_dir()) {
+                    std::os::windows::fs::symlink_dir(target, to)?;
+                } else {
+                    std::os::windows::fs::symlink_file(target, to)?;
+                }
+            }
+            return Ok(());
+        }
+        if metadata.is_dir() {
+            if !recursive {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "recursive option is required to copy a directory",
+                ));
+            }
+            std::fs::create_dir_all(to)?;
+            for entry in std::fs::read_dir(from)? {
+                let entry = entry?;
+                copy_entry(
+                    &entry.path(),
+                    &to.join(entry.file_name()),
+                    true,
+                    dereference,
+                    filter,
+                )?;
+            }
+            return Ok(());
+        }
+        std::fs::copy(from, to).map(|_| ())
+    }
+
+    let from_path = std::path::PathBuf::from(from.to_utf8_lossy().to_owned());
+    let to_path = std::path::PathBuf::from(to.to_utf8_lossy().to_owned());
+    if let Err(error) = copy_entry(&from_path, &to_path, recursive, dereference, filter) {
+        throw_fs_error2("cp", from, to, error);
+    }
+}
+
+pub fn fs_cp_sync(from: &JsString, to: &JsString, recursive: bool, dereference: bool) {
+    fs_cp_sync_with_filter(from, to, recursive, dereference, &mut |_, _| true);
+}
+
+pub fn fs_cp_sync_filtered(
+    from: &JsString,
+    to: &JsString,
+    recursive: bool,
+    dereference: bool,
+    mut filter: impl FnMut(&JsString, &JsString) -> bool,
+) {
+    fs_cp_sync_with_filter(from, to, recursive, dereference, &mut filter);
 }
 
 pub fn fs_rename(from: &JsString, to: &JsString) {
     for (name, path) in [("oldPath", from), ("newPath", to)] {
         if path.contains('\0') {
             throw_invalid_arg_value(
-                &format!("The argument '{name}' must be a string, Uint8Array, or URL without null bytes. Received "),
+                &format!(
+                    "The argument '{name}' must be a string, Uint8Array, or URL without null bytes. Received "
+                ),
                 path,
             );
         }
@@ -432,9 +898,17 @@ pub fn fs_rename(from: &JsString, to: &JsString) {
     }
     if let Err(error) = std::fs::rename(from.to_utf8_lossy(), to.to_utf8_lossy()) {
         #[cfg(windows)]
-        let resolved_from = if from.is_empty() { from.clone() } else { path_win32_resolve(&array_new(vec![from.clone()])) };
+        let resolved_from = if from.is_empty() {
+            from.clone()
+        } else {
+            path_win32_resolve(&array_new(vec![from.clone()]))
+        };
         #[cfg(windows)]
-        let resolved_to = if to.is_empty() { to.clone() } else { path_win32_resolve(&array_new(vec![to.clone()])) };
+        let resolved_to = if to.is_empty() {
+            to.clone()
+        } else {
+            path_win32_resolve(&array_new(vec![to.clone()]))
+        };
         #[cfg(windows)]
         let (from, to) = (&resolved_from, &resolved_to);
         throw_fs_error2("rename", from, to, error);
@@ -689,6 +1163,11 @@ pub fn fs_chmod(path: &JsString, _mode: f64) {
     }
 }
 
+pub fn fs_chmod_promise(path: &JsString, mode: f64) -> JsPromise<()> {
+    let path = path.clone();
+    promise_from_sync(move || fs_chmod(&path, mode))
+}
+
 #[cfg(not(windows))]
 pub fn fs_chown(path: &JsString, uid: f64, gid: f64) {
     if let Err(error) = std::fs::metadata(path.to_utf8_lossy()) {
@@ -735,6 +1214,26 @@ pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
     }
 }
 
+#[cfg(unix)]
+pub fn fs_write_file_bytes_mode(path: &JsString, data: &JsBytes<u8>, mode: f64) {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(fs_creation_mode(mode))
+        .open(path.to_utf8_lossy())
+        .unwrap_or_else(|error| throw_fs_error("open", path, error));
+    let result = data.with(|data| {
+        let storage = data.storage.borrow();
+        file.write_all(&storage[data.offset..data.offset + data.length])
+    });
+    if let Err(error) = result {
+        throw_fs_error("write", path, error);
+    }
+}
+
 pub fn fs_write_file_exclusive_mode(path: &JsString, data: &JsString, mode: f64) {
     use std::io::Write;
     let mode = fs_creation_mode(mode);
@@ -752,6 +1251,31 @@ pub fn fs_write_file_exclusive_mode(path: &JsString, data: &JsString, mode: f64)
         Err(error) => throw_fs_error("open", path, error),
     };
     if let Err(error) = file.write_all(data.as_bytes()) {
+        throw_fs_error("write", path, error);
+    }
+}
+
+pub fn fs_write_file_bytes_exclusive_mode(path: &JsString, data: &JsBytes<u8>, mode: f64) {
+    use std::io::Write;
+    let mode = fs_creation_mode(mode);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode);
+    }
+    #[cfg(not(unix))]
+    fs_set_creation_mode(&mut options, mode);
+    let mut file = match options.open(path.to_utf8_lossy()) {
+        Ok(file) => file,
+        Err(error) => throw_fs_error("open", path, error),
+    };
+    let result = data.with(|data| {
+        let storage = data.storage.borrow();
+        file.write_all(&storage[data.offset..data.offset + data.length])
+    });
+    if let Err(error) = result {
         throw_fs_error("write", path, error);
     }
 }
@@ -926,6 +1450,10 @@ fn file_id(_file: &std::fs::File) -> i32 {
 }
 
 pub fn fs_open(path: &JsString, flags: &JsString) -> f64 {
+    fs_open_mode(path, flags, 0o666 as f64)
+}
+
+pub fn fs_open_mode(path: &JsString, flags: &JsString, mode: f64) -> f64 {
     if path.contains('\0') {
         throw_invalid_arg_value(
             "The argument 'path' must be a string, Uint8Array, or URL without null bytes. Received ",
@@ -935,12 +1463,17 @@ pub fn fs_open(path: &JsString, flags: &JsString) -> f64 {
     if !path.is_well_formed() {
         throw_type_error("scriptc: lone UTF-16 open paths are not ported".into());
     }
-    let options = fs_open_options(flags);
+    let mut options = fs_open_options(flags);
+    fs_set_creation_mode(&mut options, fs_creation_mode(mode));
     let file = match options.open(path.to_utf8_lossy()) {
         Ok(file) => file,
         Err(error) => {
             #[cfg(windows)]
-            let resolved = if path.is_empty() { path.clone() } else { path_win32_resolve(&array_new(vec![path.clone()])) };
+            let resolved = if path.is_empty() {
+                path.clone()
+            } else {
+                path_win32_resolve(&array_new(vec![path.clone()]))
+            };
             #[cfg(windows)]
             let path = &resolved;
             throw_fs_error("open", path, error)
@@ -999,6 +1532,16 @@ pub fn file_handle_open(path: &JsString, flags: &JsString, mode: f64) -> JsFileH
     file_handle_register(file)
 }
 
+pub fn file_handle_open_promise(
+    path: &JsString,
+    flags: &JsString,
+    mode: f64,
+) -> JsPromise<JsFileHandle> {
+    let path = path.clone();
+    let flags = flags.clone();
+    promise_from_sync(move || file_handle_open(&path, &flags, mode))
+}
+
 fn file_handle_register(file: std::fs::File) -> JsFileHandle {
     let fd = file_id(&file);
     OPEN_FILES.with(|files| {
@@ -1041,6 +1584,11 @@ pub fn file_handle_close(handle: &JsFileHandle) {
     }
 }
 
+pub fn file_handle_close_promise(handle: &JsFileHandle) -> JsPromise<()> {
+    let handle = handle.clone();
+    promise_from_sync(move || file_handle_close(&handle))
+}
+
 pub fn file_handle_read(
     handle: &JsFileHandle,
     bytes: &JsBytes<u8>,
@@ -1074,6 +1622,18 @@ pub fn file_handle_read(
         length = byte_length as f64 - offset;
     }
     fs_read_sync(fd, bytes, offset, length, position)
+}
+
+pub fn file_handle_read_promise(
+    handle: &JsFileHandle,
+    bytes: &JsBytes<u8>,
+    offset: f64,
+    length: f64,
+    position: f64,
+) -> JsPromise<f64> {
+    let handle = handle.clone();
+    let bytes = bytes.clone();
+    promise_from_sync(move || file_handle_read(&handle, &bytes, offset, length, position, false))
 }
 
 pub fn file_handle_write_bytes(
@@ -1156,6 +1716,24 @@ fn with_open_file<T>(
     })
 }
 
+/// Change permissions through the open descriptor, without resolving its path again.
+pub fn fs_fchmod(fd: f64, mode: f64) {
+    let mode = fs_creation_mode(mode);
+    with_open_file(fd, "fchmod", |file| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(mode))
+        }
+        #[cfg(not(unix))]
+        {
+            let mut permissions = file.metadata()?.permissions();
+            permissions.set_readonly(mode & 0o200 == 0);
+            file.set_permissions(permissions)
+        }
+    });
+}
+
 fn with_preserved_position<T>(
     file: &mut std::fs::File,
     position: f64,
@@ -1182,6 +1760,17 @@ pub fn fs_close(fd: f64) {
     if file.is_none() {
         throw_fs_fd_error("close", "EBADF", "bad file descriptor");
     }
+}
+
+/// The nullish descriptor overload must throw before attempting an OS close.
+pub fn fs_close_nullish(kind: &JsString) {
+    throw_type_error_code(
+        format!(
+            "The \"fd\" argument must be of type number. Received {}",
+            kind.to_utf8_lossy()
+        ),
+        "ERR_INVALID_ARG_TYPE",
+    );
 }
 
 fn validate_write_fd(fd: f64) {
@@ -1257,13 +1846,25 @@ pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, posi
     // Node normalizes length with ToInt32 before checking the window, position
     // or descriptor. A zero result succeeds even for a closed descriptor.
     let length = to_int32(length);
-    if length == 0 { return 0.0; }
+    if length == 0 {
+        return 0.0;
+    }
     let byte_length = bytes.with(|data| data.length);
     if byte_length == 0 {
         throw_value(JsError {
-            identity: Rc::new(()), name: "TypeError".to_owned(),
-            message: format!("The argument 'buffer' is empty and cannot be written. Received {}", if bytes_is_buffer(bytes) { "<Buffer >" } else { "Uint8Array(0) []" }),
-            code: Some("ERR_INVALID_ARG_VALUE".to_owned()), cause: None, dom: None,
+            identity: Rc::new(()),
+            name: "TypeError".to_owned(),
+            message: format!(
+                "The argument 'buffer' is empty and cannot be written. Received {}",
+                if bytes_is_buffer(bytes) {
+                    "<Buffer >"
+                } else {
+                    "Uint8Array(0) []"
+                }
+            ),
+            code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+            cause: None,
+            dom: None,
         });
     }
     if length < 0 {
@@ -1334,9 +1935,13 @@ mod descriptor_tests {
         }
         let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             fs_read_sync(-1.0, &bytes, 0.0, 4_294_967_297.0, -1.0);
-        })).unwrap_err();
+        }))
+        .unwrap_err();
         let caught = caught_from_panic(failure);
-        assert_eq!(caught_error_code(&caught).as_deref(), Some("ERR_OUT_OF_RANGE"));
+        assert_eq!(
+            caught_error_code(&caught).as_deref(),
+            Some("ERR_OUT_OF_RANGE")
+        );
         assert!(caught_error_message(&caught).contains("\"fd\""));
     }
 
@@ -1346,7 +1951,8 @@ mod descriptor_tests {
         for (offset, length, expected) in [(3.0, 1.0, "<= -1"), (0.0, -1.0, ">= 0")] {
             let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 fs_read_sync(-1.0, &bytes, offset, length, -99.0);
-            })).unwrap_err();
+            }))
+            .unwrap_err();
             let caught = caught_from_panic(failure);
             let message = caught_error_message(&caught);
             assert!(message.contains("\"length\""), "{message}");
@@ -1357,10 +1963,14 @@ mod descriptor_tests {
     #[test]
     fn sync_close_checks_numeric_contract_before_lookup() {
         for fd in [-1.0, 0.5, f64::NAN, f64::INFINITY, 2_147_483_648.0] {
-            let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fs_close(fd))).unwrap_err();
+            let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fs_close(fd)))
+                .unwrap_err();
             let caught = caught_from_panic(failure);
             assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
-            assert_eq!(caught_error_code(&caught).as_deref(), Some("ERR_OUT_OF_RANGE"));
+            assert_eq!(
+                caught_error_code(&caught).as_deref(),
+                Some("ERR_OUT_OF_RANGE")
+            );
         }
     }
 }

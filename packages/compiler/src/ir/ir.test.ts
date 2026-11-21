@@ -4,6 +4,7 @@ import { deserializeModule, serializeModule } from "./serialize.js";
 import { describe, expect, test } from "vitest";
 import {
   DYN,
+  BOOL,
   F64,
   HANDLE_KINDS,
   POINTER_KINDS,
@@ -69,6 +70,90 @@ test.each(["dyn.objectRestCheck", "dyn.objectAssignSourceCheck"] as const)("%s v
   const restored = deserializeModule(serializeModule(module));
   expect(validateModule(restored)).toEqual([]);
   expect(moduleHasLibCall(restored, fn)).toBe(true);
+});
+
+test("symbol copy validates and round-trips both owning operands", () => {
+  const object: IrExpr = { kind: "dynObjLit", fields: [], type: DYN, loc };
+  const copy: IrExpr = { kind: "libCall", fn: "dyn.copyEnumerableSymbols", args: [object, object], type: VOID, loc };
+  const module = moduleWithExpr(copy);
+  expect(validateModule(module)).toEqual([]);
+  expect(moduleHasLibCall(module, "dyn.copyEnumerableSymbols")).toBe(true);
+  expect(validateModule(deserializeModule(serializeModule(module)))).toEqual([]);
+});
+
+test("symbol presence validates and round-trips both dynamic operands", () => {
+  const object: IrExpr = { kind: "dynObjLit", fields: [], type: DYN, loc };
+  const check: IrExpr = { kind: "libCall", fn: "dyn.hasSymbolKey", args: [object, object], type: BOOL, loc };
+  const module = moduleWithExpr(check);
+  expect(validateModule(module)).toEqual([]);
+  expect(moduleHasLibCall(module, "dyn.hasSymbolKey")).toBe(true);
+  expect(validateModule(deserializeModule(serializeModule(module)))).toEqual([]);
+});
+
+test("dynamic ordinary data descriptors validate and round-trip their three operands", () => {
+  const object: IrExpr = { kind: "dynObjLit", fields: [], type: DYN, loc };
+  const define: IrExpr = { kind: "libCall", fn: "dyn.defineOrdinaryData", args: [object, object, object], type: DYN, loc };
+  const module = moduleWithExpr(define);
+  expect(validateModule(module)).toEqual([]);
+  expect(moduleHasLibCall(module, "dyn.defineOrdinaryData")).toBe(true);
+  expect(validateModule(deserializeModule(serializeModule(module)))).toEqual([]);
+  expect(validateModule(moduleWithExpr({ ...define, args: [object, object] })).length).toBeGreaterThan(0);
+});
+
+test("callable views require the record's exact function signature", () => {
+  const signature = funcOf([], VOID);
+  const record: IrType = { kind: "record", shapeId: "callable" };
+  const closure: IrExpr = { kind: "closure", fnName: "target", captures: [], type: signature, loc };
+  const view: IrExpr = { kind: "libCall", fn: "callable.view", args: [closure], type: record, loc };
+  const module = moduleWithExpr(view);
+  module.records = [{ id: "callable", fields: [{ name: "\0scriptc.call", type: signature }] }];
+  module.functions.push({ name: "target", params: [], locals: [], returnType: VOID, body: [], loc });
+  expect(validateModule(module)).toEqual([]);
+  expect(validateModule(deserializeModule(serializeModule(module)))).toEqual([]);
+  module.records[0]!.fields[0]!.type = STRING;
+  expect(validateModule(module).some(error => error.message.includes("callable.view"))).toBe(true);
+});
+
+test("native await wire representation validates only inside async functions", () => {
+  const promise: IrType = { kind: "promise", inner: F64 };
+  const value: IrExpr = { kind: "numLit", value: 1, type: F64, loc };
+  const resolved: IrExpr = { kind: "intrinsic", name: "promise.resolve", args: [value], type: promise, loc };
+  const awaited: IrExpr = { kind: "awaitExpr", value: resolved, type: F64, loc };
+  const module = moduleWithExpr(value);
+  module.functions.push({ name: "suspended", async: true, params: [], locals: [], returnType: F64, body: [{ kind: "return", value: awaited, loc }], loc });
+  expect(validateModule(module)).toEqual([]);
+  expect(validateModule(deserializeModule(serializeModule(module)))).toEqual([]);
+  delete module.functions[1]!.async;
+  expect(validateModule(module).some(error => error.message.includes("await outside"))).toBe(true);
+});
+
+test("computed deletion validates key and strictness operands", () => {
+  const object: IrExpr = { kind: "dynObjLit", fields: [], type: DYN, loc };
+  const strict: IrExpr = { kind: "boolLit", value: true, type: BOOL, loc };
+  const remove: IrExpr = { kind: "libCall", fn: "dyn.keyDeleteComputed", args: [object, object, strict], type: BOOL, loc };
+  const module = moduleWithExpr(remove);
+  expect(validateModule(module)).toEqual([]);
+  expect(validateModule(deserializeModule(serializeModule(module)))).toEqual([]);
+  expect(validateModule(moduleWithExpr({ ...remove, args: [object, strict, strict] })).length).toBeGreaterThan(0);
+});
+
+test("immediate Map key materialization preserves the key array type", () => {
+  const mapType: IrType = { kind: "map", key: STRING, value: F64 };
+  const map: IrExpr = { kind: "mapNew", seed: [], type: mapType, loc };
+  const keys: IrExpr = { kind: "mapIntrinsic", method: "keysToArray", receiver: map, args: [], type: arrayOf(STRING), loc };
+  const module = moduleWithExpr(keys);
+  expect(validateModule(module)).toEqual([]);
+  expect(validateModule(deserializeModule(serializeModule(module)))).toEqual([]);
+  expect(validateModule(moduleWithExpr({ ...keys, type: arrayOf(F64) })).length).toBeGreaterThan(0);
+});
+
+test("dynamic immediate Map keys use an owning array of dynamic keys", () => {
+  const object: IrExpr = { kind: "dynObjLit", fields: [], type: DYN, loc };
+  const keys: IrExpr = { kind: "libCall", fn: "dyn.mapKeysImmediate", args: [object], type: arrayOf(DYN), loc };
+  const module = moduleWithExpr(keys);
+  expect(validateModule(module)).toEqual([]);
+  expect(validateModule(deserializeModule(serializeModule(module)))).toEqual([]);
+  expect(validateModule(moduleWithExpr({ ...keys, type: arrayOf(STRING) })).length).toBeGreaterThan(0);
 });
 
 describe("IR kind sets", () => {

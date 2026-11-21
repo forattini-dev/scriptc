@@ -7,7 +7,9 @@ export function validateSymbolMethods(mod: IrModule): { message: string; loc: Sr
     const seen = new Set<string>();
     for (const descriptor of cls.symbolMethods ?? []) {
       const bad = (message: string) => errors.push({ message: `class ${cls.name}: ${message}`, loc: cls.loc });
-      if (cls.runtime || !["iterator", "asyncIterator"].includes(descriptor.key) || seen.has(descriptor.key)) {
+      const unique = /^unique:([1-9][0-9]*)$/.exec(descriptor.key);
+      const validUnique = unique !== null && Number(unique[1]) <= 0xffff_ffff;
+      if (cls.runtime || !(descriptor.key === "iterator" || descriptor.key === "asyncIterator" || validUnique) || seen.has(descriptor.key)) {
         bad("invalid symbol method surface");
       }
       seen.add(descriptor.key);

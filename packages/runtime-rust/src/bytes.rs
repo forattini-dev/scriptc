@@ -8,6 +8,7 @@ pub trait ByteElement: Copy + Default + 'static {
 #[derive(Clone)]
 pub enum ByteBacking {
     U8(Rc<RefCell<Vec<u8>>>),
+    U16(Rc<RefCell<Vec<u16>>>),
     U32(Rc<RefCell<Vec<u32>>>),
     I32(Rc<RefCell<Vec<i32>>>),
     F32(Rc<RefCell<Vec<f32>>>),
@@ -18,6 +19,7 @@ impl ByteBacking {
     fn byte_len(&self) -> usize {
         match self {
             Self::U8(storage) => storage.borrow().len(),
+            Self::U16(storage) => storage.borrow().len() * 2,
             Self::U32(storage) => storage.borrow().len() * 4,
             Self::I32(storage) => storage.borrow().len() * 4,
             Self::F32(storage) => storage.borrow().len() * 4,
@@ -30,6 +32,7 @@ impl ByteBacking {
         let byte = index % 4;
         match self {
             Self::U8(storage) => storage.borrow()[index],
+            Self::U16(storage) => storage.borrow()[index / 2].to_ne_bytes()[index % 2],
             Self::U32(storage) => storage.borrow()[element].to_ne_bytes()[byte],
             Self::I32(storage) => storage.borrow()[element].to_ne_bytes()[byte],
             Self::F32(storage) => storage.borrow()[element].to_ne_bytes()[byte],
@@ -42,6 +45,12 @@ impl ByteBacking {
         let byte = index % 4;
         match self {
             Self::U8(storage) => storage.borrow_mut()[index] = value,
+            Self::U16(storage) => {
+                let mut storage = storage.borrow_mut();
+                let mut bytes = storage[index / 2].to_ne_bytes();
+                bytes[index % 2] = value;
+                storage[index / 2] = u16::from_ne_bytes(bytes);
+            }
             Self::U32(storage) => {
                 let mut storage = storage.borrow_mut();
                 let mut bytes = storage[element].to_ne_bytes();
@@ -79,7 +88,11 @@ impl ByteElement for u8 {
         // this correction. No binary64 truncates to i64::MAX itself.
         // Rust's safe saturating cast maps NaN to zero and handles infinities.
         let integer = value as i64;
-        if integer == i64::MAX { 0 } else { integer as u8 }
+        if integer == i64::MAX {
+            0
+        } else {
+            integer as u8
+        }
     }
     fn to_number(self) -> f64 {
         f64::from(self)
@@ -89,6 +102,22 @@ impl ByteElement for u8 {
     }
     fn byte_backing(storage: &Rc<RefCell<Vec<Self>>>) -> ByteBacking {
         ByteBacking::U8(storage.clone())
+    }
+}
+
+impl ByteElement for u16 {
+    fn from_number(value: f64) -> Self {
+        let integer = value as i64;
+        if integer == i64::MAX { 0 } else { integer as u16 }
+    }
+    fn to_number(self) -> f64 {
+        f64::from(self)
+    }
+    fn same_bits(self, other: Self) -> bool {
+        self == other
+    }
+    fn byte_backing(storage: &Rc<RefCell<Vec<Self>>>) -> ByteBacking {
+        ByteBacking::U16(storage.clone())
     }
 }
 
@@ -335,6 +364,42 @@ pub fn bytes_copy<T: ByteElement>(bytes: &JsBytes<T>) -> JsBytes<T> {
     bytes_from_elements(bytes_values(bytes))
 }
 
+/// Create the Uint8Array view produced by
+/// `new Uint8Array(owner.buffer, owner.byteOffset, owner.byteLength)`.
+/// It shares the exact source window, has distinct object identity and never
+/// inherits Node's Buffer brand from the source view.
+pub fn bytes_u8_window_view(bytes: &JsBytes<u8>) -> JsBytes<u8> {
+    bytes.with(|data| {
+        Gc::new(BytesData {
+            storage: data.storage.clone(),
+            backing: data.backing.clone(),
+            offset: data.offset,
+            length: data.length,
+            buffer: false,
+        })
+    })
+}
+
+/// Materialize the ArrayBuffer observed through a represented typed array's
+/// `.buffer` property. The returned byte view covers the complete backing
+/// store (not merely the typed array window) and shares mutations with it.
+pub fn bytes_array_buffer<T: ByteElement>(bytes: &JsBytes<T>) -> JsBytes<u8> {
+    bytes.with(|data| {
+        let backing = data
+            .backing
+            .clone()
+            .unwrap_or_else(|| T::byte_backing(&data.storage));
+        let length = backing.byte_len();
+        Gc::new(BytesData {
+            storage: Rc::new(RefCell::new(Vec::new())),
+            backing: Some(backing),
+            offset: 0,
+            length,
+            buffer: false,
+        })
+    })
+}
+
 /// Stable, contiguous input storage for the duration of one outbound FFI call.
 pub fn ffi_bytes_snapshot(bytes: &JsBytes<u8>) -> Vec<u8> {
     bytes_values(bytes)
@@ -375,9 +440,25 @@ pub fn process_stderr_write_bytes(bytes: &JsBytes<u8>, encoding: &JsString) -> b
 }
 
 pub fn bytes_from_array<T: ByteElement>(array: &JsArray<f64>) -> JsBytes<T> {
-    let elements: Vec<T> =
-        array.with(|data| data.elements().iter().copied().map(T::from_number).collect());
+    let elements: Vec<T> = array.with(|data| {
+        data.elements()
+            .iter()
+            .copied()
+            .map(T::from_number)
+            .collect()
+    });
     bytes_from_elements(elements)
+}
+
+pub fn bytes_set_from_array<T: ByteElement>(
+    target: &JsBytes<T>,
+    source: &JsArray<f64>,
+    offset: f64,
+) {
+    // The emitted call evaluates the source and offset first. Snapshot before
+    // writing so conversion cannot observe a partially updated target.
+    let converted = bytes_from_array::<T>(source);
+    bytes_set_from(target, &converted, offset);
 }
 
 pub fn bytes_len<T: ByteElement>(bytes: &JsBytes<T>) -> f64 {
@@ -408,8 +489,8 @@ fn checked_bytes_index(index: f64, length: usize) -> Option<usize> {
 
 pub fn bytes_get<T: ByteElement>(bytes: &JsBytes<T>, index: f64) -> f64 {
     bytes.with(|data| {
-        let index = checked_bytes_index(index, data.length)
-            .expect("scriptc: bytes index out of bounds");
+        let index =
+            checked_bytes_index(index, data.length).expect("scriptc: bytes index out of bounds");
         match &data.backing {
             Some(backing) => f64::from(backing.get(data.offset + index)),
             None => data.storage.borrow()[data.offset + index].to_number(),
@@ -419,13 +500,12 @@ pub fn bytes_get<T: ByteElement>(bytes: &JsBytes<T>, index: f64) -> f64 {
 
 pub fn bytes_set<T: ByteElement>(bytes: &JsBytes<T>, index: f64, value: f64) {
     bytes.with(|data| {
-        let index = checked_bytes_index(index, data.length)
-            .expect("scriptc: bytes index out of bounds");
+        let index =
+            checked_bytes_index(index, data.length).expect("scriptc: bytes index out of bounds");
         match &data.backing {
-            Some(backing) => backing.set(
-                data.offset + index,
-                T::from_number(value).to_number() as u8,
-            ),
+            Some(backing) => {
+                backing.set(data.offset + index, T::from_number(value).to_number() as u8)
+            }
             None => data.storage.borrow_mut()[data.offset + index] = T::from_number(value),
         }
     });
@@ -434,9 +514,15 @@ pub fn bytes_set<T: ByteElement>(bytes: &JsBytes<T>, index: f64, value: f64) {
 /// Compiler region for a fresh, non-escaping allocation. The emitter proves
 /// no use of the original buffer can access storage while this slice is live.
 /// Backed DataViews are excluded by that allocation proof and checked here.
-pub fn bytes_with_mut_slice<T: ByteElement, R>(bytes: &JsBytes<T>, body: impl FnOnce(&mut [T]) -> R) -> R {
+pub fn bytes_with_mut_slice<T: ByteElement, R>(
+    bytes: &JsBytes<T>,
+    body: impl FnOnce(&mut [T]) -> R,
+) -> R {
     bytes.with(|data| {
-        assert!(data.backing.is_none(), "scriptc: byte region requires direct storage");
+        assert!(
+            data.backing.is_none(),
+            "scriptc: byte region requires direct storage"
+        );
         let mut storage = data.storage.borrow_mut();
         body(&mut storage[data.offset..data.offset + data.length])
     })
@@ -498,7 +584,9 @@ pub fn bytes_region_set<T: ByteElement>(data: &mut [T], index: f64, value: f64) 
 }
 
 pub fn bytes_region_get_usize<T: ByteElement>(data: &[T], index: usize) -> f64 {
-    data.get(index).expect("scriptc: bytes index out of bounds").to_number()
+    data.get(index)
+        .expect("scriptc: bytes index out of bounds")
+        .to_number()
 }
 
 /// Integer-valued byte observation: avoid a floating conversion between the
@@ -512,11 +600,15 @@ pub fn bytes_region_get_u8_integer(data: &[u8], index: usize) -> i64 {
 /// bits, including for negative values. The index remains checked.
 #[inline]
 pub fn bytes_region_set_u8_integer(data: &mut [u8], index: usize, value: i64) {
-    *data.get_mut(index).expect("scriptc: bytes index out of bounds") = value as u8;
+    *data
+        .get_mut(index)
+        .expect("scriptc: bytes index out of bounds") = value as u8;
 }
 
 pub fn bytes_region_set_usize<T: ByteElement>(data: &mut [T], index: usize, value: f64) {
-    *data.get_mut(index).expect("scriptc: bytes index out of bounds") = T::from_number(value);
+    *data
+        .get_mut(index)
+        .expect("scriptc: bytes index out of bounds") = T::from_number(value);
 }
 
 // Integer induction proves the index representation, not the bounds of an
@@ -539,10 +631,9 @@ pub fn bytes_set_usize<T: ByteElement>(bytes: &JsBytes<T>, index: usize, value: 
     bytes.with(|data| {
         assert!(index < data.length, "scriptc: bytes index out of bounds");
         match &data.backing {
-            Some(backing) => backing.set(
-                data.offset + index,
-                T::from_number(value).to_number() as u8,
-            ),
+            Some(backing) => {
+                backing.set(data.offset + index, T::from_number(value).to_number() as u8)
+            }
             None => data.storage.borrow_mut()[data.offset + index] = T::from_number(value),
         }
     });
@@ -582,7 +673,12 @@ pub fn bytes_join<T: ByteElement>(bytes: &JsBytes<T>, separator: &JsString) -> J
         ),
         None => {
             let storage = data.storage.borrow();
-            join_numbers(storage[data.offset..data.offset + data.length].iter().map(|value| value.to_number()), separator)
+            join_numbers(
+                storage[data.offset..data.offset + data.length]
+                    .iter()
+                    .map(|value| value.to_number()),
+                separator,
+            )
         }
     })
 }
@@ -825,6 +921,41 @@ pub fn bytes_index_of_num(bytes: &JsBytes<u8>, value: f64, offset: f64, forward:
     bytes_index_of(bytes, &needle, offset, 1.0, forward)
 }
 
+/// Buffer coerces numeric needles to a byte; Uint8Array uses strict equality.
+pub fn bytes_index_of_numeric(bytes: &JsBytes<u8>, value: f64, offset: f64) -> f64 {
+    if !bytes_is_buffer(bytes)
+        && (!value.is_finite() || value.fract() != 0.0 || !(0.0..=255.0).contains(&value))
+    {
+        return -1.0;
+    }
+    bytes_index_of_num(bytes, value, offset, true)
+}
+
+pub fn bytes_index_of_bytes(
+    bytes: &JsBytes<u8>,
+    needle: &JsBytes<u8>,
+    offset: f64,
+) -> f64 {
+    bytes_index_of(bytes, needle, offset, 1.0, true)
+}
+
+pub fn bytes_last_index_of_bytes(
+    bytes: &JsBytes<u8>,
+    needle: &JsBytes<u8>,
+    offset: f64,
+) -> f64 {
+    bytes_index_of(bytes, needle, offset, 1.0, false)
+}
+
+pub fn bytes_last_index_of_numeric(bytes: &JsBytes<u8>, value: f64, offset: f64) -> f64 {
+    if !bytes_is_buffer(bytes)
+        && (!value.is_finite() || value.fract() != 0.0 || !(0.0..=255.0).contains(&value))
+    {
+        return -1.0;
+    }
+    bytes_index_of_num(bytes, value, offset, false)
+}
+
 fn bytes_fill_core(
     bytes: &JsBytes<u8>,
     pattern: &[u8],
@@ -1043,15 +1174,30 @@ mod checked_byte_index_tests {
     #[test]
     fn index_roundtrip_matches_original_checks_over_binary64_values() {
         fn reference(value: f64, length: usize) -> Option<usize> {
-            if !value.is_finite() || value < 0.0 || value.fract() != 0.0 { return None; }
+            if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+                return None;
+            }
             let index = value as usize;
             (index < length).then_some(index)
         }
         let check = |value| {
-            for length in [0, 1, 3, 255, 65_536, usize::MAX / 2,
-                usize::MAX / 2 + 1, usize::MAX / 2 + 2, usize::MAX] {
-                assert_eq!(checked_bytes_index(value, length), reference(value, length),
-                    "index bits={:016x}, length={length}", value.to_bits());
+            for length in [
+                0,
+                1,
+                3,
+                255,
+                65_536,
+                usize::MAX / 2,
+                usize::MAX / 2 + 1,
+                usize::MAX / 2 + 2,
+                usize::MAX,
+            ] {
+                assert_eq!(
+                    checked_bytes_index(value, length),
+                    reference(value, length),
+                    "index bits={:016x}, length={length}",
+                    value.to_bits()
+                );
             }
         };
         for exponent in 0_u64..2048 {
@@ -1063,14 +1209,31 @@ mod checked_byte_index_tests {
         }
         let mut seed = 0x4567_89ab_cdef_0123_u64;
         for _ in 0..100_000 {
-            seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
             check(f64::from_bits(seed));
         }
-        for value in [-0.0, 0.0, 0.5, 1.0, 2.0, 2.5, 3.0, 255.0, 65_535.0,
-            9_007_199_254_740_992.0, usize::MAX as f64] { check(value); }
+        for value in [
+            -0.0,
+            0.0,
+            0.5,
+            1.0,
+            2.0,
+            2.5,
+            3.0,
+            255.0,
+            65_535.0,
+            9_007_199_254_740_992.0,
+            usize::MAX as f64,
+        ] {
+            check(value);
+        }
         for boundary in [isize::MIN as f64, isize::MAX as f64] {
             for delta in -4..=4 {
-                check(f64::from_bits(boundary.to_bits().wrapping_add_signed(delta)));
+                check(f64::from_bits(
+                    boundary.to_bits().wrapping_add_signed(delta),
+                ));
             }
         }
     }
@@ -1082,9 +1245,12 @@ mod checked_byte_index_tests {
         assert_eq!(bytes_get(&view, -0.0), 20.0);
         bytes_set(&view, -0.0, 7.0);
         for index in [-1.0, 0.5, 1.0, f64::NAN, f64::INFINITY, f64::MAX] {
-            let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bytes_get(&view, index)));
+            let read =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bytes_get(&view, index)));
             assert!(read.is_err());
-            let write = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bytes_set(&view, index, 99.0)));
+            let write = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                bytes_set(&view, index, 99.0)
+            }));
             assert!(write.is_err());
         }
         assert_eq!(bytes_get(&data, 0.0), 10.0);

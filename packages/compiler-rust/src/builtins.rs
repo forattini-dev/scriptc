@@ -14,6 +14,9 @@ pub fn strings() -> Type {
 pub enum Implementation {
     Runtime(&'static str),
     NativeHelper(&'static str),
+    /// Emitted by a typed backend module because the operation works on the
+    /// generated program's owning NativeValue representation.
+    Emitter(&'static str),
     FloatMethod(&'static str),
     FloatBinaryMethod(&'static str),
 }
@@ -46,8 +49,13 @@ pub enum Lowering {
     PathVariadic,
     PathBasename,
     Directory,
+    Copy,
     AppendFile,
+    WriteFile,
+    Remove,
     ReadFile,
+    ReadDirectory,
+    Glob,
     Descriptor,
     Zlib,
     Buffer,
@@ -146,18 +154,35 @@ macro_rules! call {
     };
 }
 use Type::{Bool, String};
+mod assertions;
+mod asset;
 mod buffer;
 mod bun;
+mod bun_ffi;
+mod child_process;
 mod crypto;
+mod diagnostics;
+mod dns;
+mod events;
+mod fetch;
 mod filesystem;
+mod http;
 mod math;
+mod module;
+mod net;
 mod number;
 mod path;
 mod platform;
 mod process;
+mod querystring;
+mod readline;
+mod sqlite;
+mod stream;
 mod string;
+mod string_decoder;
 #[cfg(test)]
 mod tests;
+mod util;
 mod zlib;
 
 pub fn apis() -> &'static [Api] {
@@ -165,15 +190,31 @@ pub fn apis() -> &'static [Api] {
     APIS.get_or_init(|| {
         [
             math::apis(),
+            net::apis(),
+            asset::apis(),
+            assertions::apis(),
             number::apis(),
             string::apis(),
+            string_decoder::apis(),
+            stream::apis(),
             buffer::apis(),
             path::apis(),
             platform::apis(),
             filesystem::apis(),
+            http::apis(),
             process::apis(),
+            module::apis(),
+            querystring::apis(),
+            readline::apis(),
+            sqlite::apis(),
             crypto::apis(),
+            diagnostics::apis(),
+            dns::apis(),
+            events::apis(),
             bun::apis(),
+            bun_ffi::apis(),
+            child_process::apis(),
+            util::apis(),
             zlib::apis(),
         ]
         .into_iter()
@@ -184,6 +225,19 @@ pub fn apis() -> &'static [Api] {
 pub fn source(module: &str, member: &str) -> Option<&'static Api> {
     entry(module, member)
         .filter(|api| api.stage == Stage::NativePartial && api.access == Access::Call)
+}
+pub fn direct_value_members(module: &str) -> Vec<&'static str> {
+    apis()
+        .iter()
+        .filter(|api| {
+            api.module == module
+                && api.stage == Stage::NativePartial
+                && api.access == Access::Call
+                && api.lowering == Lowering::Direct
+                && api.operations.len() == 1
+        })
+        .map(|api| api.member)
+        .collect()
 }
 pub fn entry(module: &str, member: &str) -> Option<&'static Api> {
     apis()
@@ -216,6 +270,12 @@ pub fn by_ir(name: &str) -> Option<Builtin> {
             math::internal()
                 .into_iter()
                 .chain(buffer::internal())
+                .chain(crypto::internal())
+                .chain(fetch::internal())
+                .chain(filesystem::internal())
+                .chain(path::internal())
+                .chain(platform::internal())
+                .chain(string::internal())
                 .find(|op| op.ir == name)
         })
 }
@@ -236,6 +296,15 @@ pub fn manifest() -> serde_json::Value {
 }
 
 pub fn module(name: &str) -> Option<&'static str> {
+    if name == "bun:sqlite" {
+        return Some("bun:sqlite");
+    }
+    if name == "node:sqlite" {
+        return Some("node:sqlite");
+    }
+    if name == "bun:ffi" {
+        return Some("bun:ffi");
+    }
     let name = name.strip_prefix("node:").unwrap_or(name);
     match name {
         "path" if cfg!(windows) => Some("path/win32"),
@@ -265,6 +334,7 @@ pub fn module(name: &str) -> Option<&'static str> {
             "http",
             "http2",
             "https",
+            "inspector",
             "module",
             "net",
             "perf_hooks",
@@ -282,6 +352,8 @@ pub fn module(name: &str) -> Option<&'static str> {
             "tty",
             "util",
             "util/types",
+            "v8",
+            "vm",
             "worker_threads",
             "zlib",
         ]

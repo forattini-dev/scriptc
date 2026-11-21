@@ -41,6 +41,23 @@ pub fn finish() {
     ENTRY_PROMISE_OUTCOME.with(|outcome| *outcome.borrow_mut() = None);
     promises_finish();
     collect_cycles();
+    audit_finished_heap();
+}
+
+/// Minimal process teardown for generated programs proven not to schedule
+/// promises, callbacks, I/O, timers, signals, or foreign work.
+pub fn finish_sync() {
+    live_dyn_refs_clear();
+    PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
+    template_strings_clear();
+    native_modules_finish();
+    errors_finish();
+    promises_finish();
+    collect_cycles();
+    audit_finished_heap();
+}
+
+fn audit_finished_heap() {
     if std::env::var_os("SCRIPTC_RUST_HEAP_AUDIT").is_some() {
         let live = live_heap_objects();
         assert_eq!(live, 0, "scriptc: {live} Rust heap object(s) still live");
@@ -480,6 +497,26 @@ pub fn run_event_loop() {
     let _ = run_event_loop_with_first_checkpoint(true, || false);
 }
 
+/// Resume native work after a JavaScript exception delivered to a process listener.
+/// Panics other than JavaScript throws, and throws from the listener itself,
+/// continue unwinding to the caller.
+pub fn run_event_loop_with_uncaught_handler(mut handler: impl FnMut(Caught)) {
+    let mut first = true;
+    loop {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_event_loop_with_first_checkpoint(first, || false)
+        }));
+        match result {
+            Ok(_) => break,
+            Err(payload) => {
+                EVENT_PHASE.with(|phase| phase.set(0));
+                handler(caught_from_panic(payload));
+                first = false;
+            }
+        }
+    }
+}
+
 pub fn run_event_loop_commonjs() {
     let _ = run_event_loop_with_first_checkpoint(false, || false);
 }
@@ -496,7 +533,7 @@ fn run_event_loop_with_first_checkpoint(
     skip_initial_ticks: bool,
     mut stop: impl FnMut() -> bool,
 ) -> bool {
-    let mut turn = 0_u64;
+    let mut turn = EVENT_TURN.with(Cell::get);
     let mut first_checkpoint = skip_initial_ticks;
     let mut stopped = false;
     loop {
@@ -535,6 +572,12 @@ fn run_event_loop_with_first_checkpoint(
         }
 
         if native_module_dispatch_one() {
+            // Imports already queued in this loader turn begin evaluation
+            // before Promise reactions resume their callers. Each module may
+            // enqueue microtasks; those run at the following checkpoint.
+            while native_module_dispatch_one() {
+                collect_cycles_if_pressured();
+            }
             continue;
         }
 
@@ -555,7 +598,9 @@ fn run_event_loop_with_first_checkpoint(
                 collect_cycles_if_pressured();
                 promise_check = PROMISE_CHECKS.with(|checks| checks.borrow_mut().pop_front());
             }
-            if had_unhandled_rejection() { break; }
+            if had_unhandled_rejection() {
+                break;
+            }
             continue;
         }
 
@@ -636,7 +681,8 @@ fn run_event_loop_with_first_checkpoint(
             FIRING_TIMER_REFRESHED.with(|refreshed| refreshed.set(false));
             FIRING_TIMER_CLEARED.with(|cleared| cleared.set(false));
             FIRING_TIMER_REFERENCED.with(|referenced| referenced.set(timer.referenced));
-            (timer.callback)();
+            let outcome =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (timer.callback)()));
             let refreshed = FIRING_TIMER_REFRESHED.with(|refreshed| refreshed.get());
             let cleared = FIRING_TIMER_CLEARED.with(|cleared| cleared.get());
             timer.referenced = FIRING_TIMER_REFERENCED.with(|referenced| referenced.get());
@@ -645,6 +691,9 @@ fn run_event_loop_with_first_checkpoint(
                 timer.turn = turn + 1;
                 timer.due = std::time::Instant::now() + timer.delay;
                 TIMER_TASKS.with(|tasks| tasks.borrow_mut().push(timer));
+            }
+            if let Err(payload) = outcome {
+                std::panic::resume_unwind(payload);
             }
             continue;
         }
@@ -691,7 +740,8 @@ fn run_event_loop_with_first_checkpoint(
         if bun_files_pending() {
             // Other IO sources retain a chance to dispatch while a file read
             // runs; timers above have already received their normal turn.
-            let wait = event_loop_wait_timeout(next_due, true).unwrap_or(std::time::Duration::from_millis(1));
+            let wait = event_loop_wait_timeout(next_due, true)
+                .unwrap_or(std::time::Duration::from_millis(1));
             bun_files_wait(wait);
             continue;
         }
@@ -745,7 +795,11 @@ fn run_event_loop_with_first_checkpoint(
             dgram_wait(wait);
             continue;
         }
-        if children_referenced_pending() || child_streams_pending() || child_writers_pending() || child_ipc_pending() {
+        if children_referenced_pending()
+            || child_streams_pending()
+            || child_writers_pending()
+            || child_ipc_pending()
+        {
             let wait =
                 next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
             children_wait(wait);

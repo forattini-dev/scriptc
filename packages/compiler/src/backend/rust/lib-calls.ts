@@ -672,6 +672,33 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "fs.openSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
     return `runtime::fs_open(&(${context.emitExpr(arg)}), &(${context.emitExpr(expr.args[1])}))`;
   }
+  if (expr.fn === "fs.openNumericSync" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+    return `runtime::fs_open_numeric(&(${context.emitExpr(arg)}), ${context.emitExpr(expr.args[1])}, ${context.emitExpr(expr.args[2])})`;
+  }
+  if (expr.fn === "fs.openModeSync" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+    return `runtime::fs_open_mode(&(${context.emitExpr(arg)}), &(${context.emitExpr(expr.args[1])}), ${context.emitExpr(expr.args[2])})`;
+  }
+  if (expr.fn === "fs.openFlagConstant" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::fs_open_flag_constant(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "fs.closeNullish" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::fs_close_nullish(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "bytes.indexOfNumeric" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+    return `runtime::bytes_index_of_numeric(&(${context.emitExpr(arg)}), ${context.emitExpr(expr.args[1])}, ${context.emitExpr(expr.args[2])})`;
+  }
+  if (expr.fn === "fs.ftruncateSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+    return `runtime::fs_ftruncate(${context.emitExpr(arg)}, ${context.emitExpr(expr.args[1])})`;
+  }
+  if (expr.fn === "fs.fstatSync" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::fs_fstat(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "fs.fchmodSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+    return `runtime::fs_fchmod(${context.emitExpr(arg)}, ${context.emitExpr(expr.args[1])})`;
+  }
+  if ((expr.fn === "fs.appendFileFdSync" || expr.fn === "fs.writeFileFdSync") && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+    return `runtime::fs_append_file_fd(${context.emitExpr(arg)}, &(${context.emitExpr(expr.args[1])}))`;
+  }
   if (expr.fn === "fs.closeSync" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::fs_close(${context.emitExpr(arg)})`;
   }
@@ -1068,6 +1095,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "stats.nlink" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_nlink(&(${context.emitExpr(arg)}))`;
   if (expr.fn === "stats.atimeMs" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_atime_ms(&(${context.emitExpr(arg)}))`;
   if (expr.fn === "stats.mtimeMs" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_mtime_ms(&(${context.emitExpr(arg)}))`;
+  if (expr.fn === "stats.dev" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_dev(&(${context.emitExpr(arg)}))`;
+  if (expr.fn === "stats.ino" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_ino(&(${context.emitExpr(arg)}))`;
   if (expr.fn === "path.join" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::path_join(&(${context.emitExpr(arg)}))`;
   }

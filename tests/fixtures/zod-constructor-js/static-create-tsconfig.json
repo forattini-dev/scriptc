@@ -1,0 +1,1 @@
+{"compilerOptions":{"allowJs":true,"checkJs":false,"strict":false,"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","skipLibCheck":true},"include":["./static-create-extracted.mjs","./static-create-call-first.mjs"]}

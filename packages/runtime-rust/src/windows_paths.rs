@@ -323,7 +323,11 @@ fn windows_cwd() -> Vec<u8> {
     cwd
 }
 
-fn resolve_windows_path(parts: &JsArray<JsString>, cwd: &[u8]) -> JsString {
+fn resolve_windows_path(
+    parts: &JsArray<JsString>,
+    cwd: &[u8],
+    use_process_drive_cwds: bool,
+) -> JsString {
     let inputs = parts.with(|data| {
         data.elements()
             .iter()
@@ -356,7 +360,7 @@ fn resolve_windows_path(parts: &JsArray<JsString>, cwd: &[u8]) -> JsString {
             cwd
         } else {
             let drive = String::from_utf8_lossy(&resolved_device);
-            let mut cwd = (cfg!(windows))
+            let mut cwd = (cfg!(windows) && use_process_drive_cwds)
                 .then(|| std::env::var_os(format!("={drive}")))
                 .flatten()
                 .map(|value| value.to_string_lossy().as_bytes().to_vec())
@@ -411,7 +415,7 @@ fn resolve_windows_path(parts: &JsArray<JsString>, cwd: &[u8]) -> JsString {
 }
 
 pub fn path_win32_resolve(parts: &JsArray<JsString>) -> JsString {
-    resolve_windows_path(parts, &windows_cwd())
+    resolve_windows_path(parts, &windows_cwd(), true)
 }
 
 pub fn path_win32_is_absolute(path: &JsString) -> bool {
@@ -423,12 +427,25 @@ pub fn path_win32_is_absolute(path: &JsString) -> bool {
             && windows_path_separator(path[2]))
 }
 
-fn relative_windows_path(from: &JsString, to: &JsString, cwd: &[u8]) -> JsString {
+fn relative_windows_path(
+    from: &JsString,
+    to: &JsString,
+    cwd: &[u8],
+    use_process_drive_cwds: bool,
+) -> JsString {
     if from == to {
         return empty_string();
     }
-    let resolved_from = resolve_windows_path(&array_new(vec![from.clone()]), cwd);
-    let resolved_to = resolve_windows_path(&array_new(vec![to.clone()]), cwd);
+    let resolved_from = resolve_windows_path(
+        &array_new(vec![from.clone()]),
+        cwd,
+        use_process_drive_cwds,
+    );
+    let resolved_to = resolve_windows_path(
+        &array_new(vec![to.clone()]),
+        cwd,
+        use_process_drive_cwds,
+    );
     if resolved_from == resolved_to
         || windows_ascii_eq(resolved_from.as_bytes(), resolved_to.as_bytes())
     {
@@ -529,14 +546,22 @@ fn relative_windows_path(from: &JsString, to: &JsString, cwd: &[u8]) -> JsString
 }
 
 pub fn path_win32_relative(from: &JsString, to: &JsString) -> JsString {
-    relative_windows_path(from, to, &windows_cwd())
+    relative_windows_path(from, to, &windows_cwd(), true)
 }
 
-fn windows_namespaced_path(path: &JsString, cwd: &[u8]) -> JsString {
+fn windows_namespaced_path(
+    path: &JsString,
+    cwd: &[u8],
+    use_process_drive_cwds: bool,
+) -> JsString {
     if path.is_empty() {
         return path.clone();
     }
-    let resolved = resolve_windows_path(&array_new(vec![path.clone()]), cwd);
+    let resolved = resolve_windows_path(
+        &array_new(vec![path.clone()]),
+        cwd,
+        use_process_drive_cwds,
+    );
     if resolved.encode_utf16().count() <= 2 {
         return path.clone();
     }
@@ -559,7 +584,7 @@ fn windows_namespaced_path(path: &JsString, cwd: &[u8]) -> JsString {
 }
 
 pub fn path_win32_to_namespaced_path(path: &JsString) -> JsString {
-    windows_namespaced_path(path, &windows_cwd())
+    windows_namespaced_path(path, &windows_cwd(), true)
 }
 
 pub fn path_win32_dirname(path: &JsString) -> JsString {

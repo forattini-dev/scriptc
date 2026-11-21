@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "module": "commonjs",
+    "target": "es2022"
+  },
+  "include": ["main.cjs"]
+}

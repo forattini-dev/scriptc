@@ -33,7 +33,6 @@ impl Lowerer<'_> {
                 | "bind"
                 | "call"
                 | "apply"
-                | "prototype"
                 | "caller"
                 | "arguments"
                 | "constructor"

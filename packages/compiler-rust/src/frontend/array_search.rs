@@ -45,12 +45,6 @@ fn nan(value: Expr, loc: &Loc) -> Expr {
 impl Lowerer<'_> {
     pub(super) fn array_includes(&mut self, node: Node) -> Result<Expr, String> {
         let member = node.expression();
-        let symbol = self.symbol(member.name());
-        if !self.primitive_symbol(symbol, "includes", Some("Array"))
-            && !self.primitive_symbol(symbol, "includes", Some("ReadonlyArray"))
-        {
-            return Err(self.refuse(member, "array.includes requires its standard declaration"));
-        }
         let source = primitives::primitive_source(member.expression());
         if source != member.expression()
             && matches!(self.ty(source), Ok(Type::Record { shape_id }) if self.records[shape_id].tuple)
@@ -62,8 +56,28 @@ impl Lowerer<'_> {
             }
             return Err(self.refuse(source, "tuple.includes requires a non-null native tuple"));
         }
-        let receiver = self.expression(member.expression())?;
-        let receiver = self.live_member_receiver(member.expression(), receiver);
+        let require_standard_symbol = !matches!(self.ty(member.expression()), Ok(Type::Dyn));
+        let receiver = self.checked_array_receiver(member.expression())?;
+        // An unannotated JavaScript parameter can own a closed native Array
+        // ABI from whole-program planning while the checker still exposes its
+        // member as `any`. In that case the represented receiver, not a missing
+        // lib.d.ts symbol, proves dispatch to the native Array operation.
+        self.array_includes_value(node, receiver, require_standard_symbol)
+    }
+
+    pub(super) fn array_includes_value(
+        &mut self,
+        node: Node,
+        receiver: Expr,
+        require_standard_symbol: bool,
+    ) -> Result<Expr, String> {
+        let member = node.expression();
+        let symbol = self.symbol(member.name());
+        if require_standard_symbol
+            && !self.native_array_method_provenance(member.expression(), symbol, "includes")
+        {
+            return Err(self.refuse(member, "array.includes requires its standard declaration"));
+        }
         if !matches!(receiver.ty(), Type::Array { .. }) {
             return Err(self.refuse(node, "array.includes requires a non-null native array"));
         }

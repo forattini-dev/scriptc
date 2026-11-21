@@ -1,0 +1,10 @@
+type Small = { source: string };
+type Large = { source: string; value: number };
+type Source = { kind: "a"; callback: (value: Small) => string; extra: boolean };
+type Target = { kind: "a"; callback: (value: Large, ignored: number) => string } | { kind: "b"; count: number };
+const original: Source[] = [{ kind: "a", callback: (value: Small) => value.source, extra: true }];
+const erased: any = original;
+const view: Target[] = erased;
+const item = view[0];
+if (item.kind === "a") console.log(item.callback({ source: "ok", value: 7 }, 9));
+console.log((view as any) === (original as any));

@@ -516,9 +516,7 @@ fn increment_decimal_digits(digits: &mut Vec<u8>) -> bool {
     true
 }
 
-/// The embedded `en-US` default decimal formatter used by
-/// `Intl.NumberFormat` and `Number.prototype.toLocaleString`.
-pub fn intl_number_format_en_us(value: f64) -> JsString {
+fn intl_number_format_default(value: f64, grouping_separator: char, decimal_separator: char) -> JsString {
     if value.is_nan() {
         return string("NaN");
     }
@@ -575,7 +573,7 @@ pub fn intl_number_format_en_us(value: f64) -> JsString {
     } else {
         for index in 0..exponent as usize {
             if index > 0 && (exponent as usize - index).is_multiple_of(3) {
-                output.push(',');
+                output.push(grouping_separator);
             }
             output.push(if index < digits.len() {
                 digits[index] as char
@@ -585,13 +583,24 @@ pub fn intl_number_format_en_us(value: f64) -> JsString {
         }
     }
     if fraction_len > 0 {
-        output.push('.');
+        output.push(decimal_separator);
         output.push_str(
             std::str::from_utf8(&fraction[..fraction_len])
                 .expect("scriptc: Intl formatter emitted non-ASCII fraction digits"),
         );
     }
     JsString::from(output)
+}
+
+/// The embedded `en-US` default decimal formatter used by
+/// `Intl.NumberFormat` and `Number.prototype.toLocaleString`.
+pub fn intl_number_format_en_us(value: f64) -> JsString {
+    intl_number_format_default(value, ',', '.')
+}
+
+/// The default decimal formatter for the explicit `pt-BR` locale.
+pub fn intl_number_format_pt_br(value: f64) -> JsString {
+    intl_number_format_default(value, '.', ',')
 }
 
 pub fn number_to_fixed(value: f64, fraction_digits: f64) -> JsString {
@@ -964,3 +973,4 @@ pub fn number_to_radix_string(value: f64, radix: f64) -> JsString {
             .expect("scriptc: radix formatter emitted non-ASCII digits"),
     )
 }
+

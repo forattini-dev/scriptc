@@ -17,6 +17,7 @@ fn controlled_child_writer() -> (
         drain_listeners: Vec::new(),
         finish_listeners: Vec::new(),
         error_listeners: Vec::new(),
+        write_callbacks: VecDeque::new(),
     });
     ASYNC_CHILD_WRITERS.with(|writers| writers.borrow_mut().push(writer.clone()));
     (writer, events, commands)
@@ -36,9 +37,10 @@ fn child_writer_drain_waits_for_all_queued_bytes() {
         );
         assert!(!child_writer_write(
             &writer,
-            vec![0; CHILD_WRITER_HIGH_WATER_MARK]
+            vec![0; CHILD_WRITER_HIGH_WATER_MARK],
+            None
         ));
-        assert!(!child_writer_write(&writer, vec![0; 4096]));
+        assert!(!child_writer_write(&writer, vec![0; 4096], None));
         events
             .send(ChildWriterEvent::Wrote(CHILD_WRITER_HIGH_WATER_MARK))
             .unwrap();
@@ -75,7 +77,8 @@ fn child_writer_end_suppresses_drain_but_finishes_once() {
         );
         assert!(!child_writer_write(
             &writer,
-            vec![0; CHILD_WRITER_HIGH_WATER_MARK]
+            vec![0; CHILD_WRITER_HIGH_WATER_MARK],
+            None
         ));
         child_writer_end(&writer);
         events
@@ -106,7 +109,7 @@ fn child_writer_partial_write_preserves_bytes_and_original_queue_length() {
             writer.sync_stdin = Some(std::process::ChildStdin::from(OwnedFd::from(stdin)))
         });
         let data: Vec<u8> = (0..1024 * 1024).map(|index| (index % 251) as u8).collect();
-        assert!(!child_writer_write(&writer, data.clone()));
+        assert!(!child_writer_write(&writer, data.clone(), None));
         let ChildWriterCommand::Write { data: tail, length } = commands.try_recv().unwrap() else {
             panic!("expected a partial write");
         };
@@ -129,7 +132,7 @@ fn child_writer_partial_write_preserves_bytes_and_original_queue_length() {
         assert_eq!(tail, data[prefix_length..]);
 
         // Even with socket capacity now free, a pending chunk owns the queue.
-        assert!(!child_writer_write(&writer, vec![252; 4096]));
+        assert!(!child_writer_write(&writer, vec![252; 4096], None));
         let ChildWriterCommand::Write {
             data: next,
             length: next_length,
@@ -177,7 +180,8 @@ fn child_writer_once_drain_listener_is_removed_before_reentrant_write() {
                 seen.set(seen.get() + 1);
                 assert!(!child_writer_write(
                     &next_writer,
-                    vec![0; CHILD_WRITER_HIGH_WATER_MARK]
+                    vec![0; CHILD_WRITER_HIGH_WATER_MARK],
+                    None
                 ));
             }),
             Rc::new(move |tracer| tracer.edge(&traced_writer)),
@@ -185,7 +189,8 @@ fn child_writer_once_drain_listener_is_removed_before_reentrant_write() {
         );
         assert!(!child_writer_write(
             &writer,
-            vec![0; CHILD_WRITER_HIGH_WATER_MARK]
+            vec![0; CHILD_WRITER_HIGH_WATER_MARK],
+            None
         ));
         for _ in 0..2 {
             events

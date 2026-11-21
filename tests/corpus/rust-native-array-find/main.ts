@@ -65,3 +65,22 @@ console.log("grow", growVisits, grow.length);
 try {
   values.find((value: any): boolean => { throw new Error("callback error"); });
 } catch { console.log("throws"); }
+
+let indexVisits = "";
+console.log("find-index", values.findIndex((value: any, index: number): boolean => {
+  indexVisits += String(index);
+  return value === 3;
+}), indexVisits);
+const sparseIndex: any[] = [1, 2, 3];
+delete sparseIndex[1];
+let sparseIndexVisits = "";
+console.log("find-index-hole", sparseIndex.findIndex((value: any, index: number): boolean => {
+  sparseIndexVisits += String(index);
+  return value === undefined;
+}), sparseIndexVisits);
+
+const listing = "\nfirst\nsecond".split("\n");
+console.log("boolean", String(listing.find(Boolean)), listing.findIndex(Boolean));
+const booleanSparse: any[] = ["", "kept"];
+delete booleanSparse[0];
+console.log("boolean-hole", String(booleanSparse.find(Boolean)), booleanSparse.findIndex(Boolean));

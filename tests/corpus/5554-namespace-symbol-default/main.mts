@@ -1,0 +1,13 @@
+import * as all from './index.mts';
+type Factory = (options: Record<string, string>) => unknown;
+const factories = all as unknown as Record<string, Factory | undefined>;
+const first = factories.android;
+const second = factories.withPayload;
+if (!first || !second) throw new Error('missing');
+const empty: any = first({});
+const populated: any = second({});
+console.log('factory', first === all.android, empty.label, populated.payload[Symbol.iterator](3));
+const method = populated.payload[Symbol.iterator];
+console.log('receiver', method.call(populated.payload, 4));
+populated.payload.count = 10;
+console.log('mutated', populated.payload[Symbol.iterator](2), method.call(populated.payload, 1));

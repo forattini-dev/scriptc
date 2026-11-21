@@ -15,9 +15,13 @@ pub(super) fn expression(
     } else {
         "NativeValue::Instance(value) => Some(runtime::WeakKey::new(value)),"
     };
-    let key = format!(
-        r#"match &key {{ NativeValue::Record(_, value) => Some(runtime::WeakKey::new(value)), NativeValue::Object(value) => Some(runtime::WeakKey::new(value)), {instance} NativeValue::Undefined | NativeValue::Null | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::String(_) => None, _ => runtime::throw_type_error("scriptc: WeakMap key representation is not ported".into()) }}"#
-    );
+    let key = if matches!(args[1].ty(), Type::Object { .. }) {
+        "Some(runtime::WeakKey::new(&key))".into()
+    } else {
+        format!(
+            r#"match &key {{ NativeValue::Record(_, value) => Some(runtime::WeakKey::new(value)), NativeValue::Object(value) => Some(runtime::WeakKey::new(value)), {instance} NativeValue::Undefined | NativeValue::Null | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::String(_) => None, _ => runtime::throw_type_error("scriptc: WeakMap key representation is not ported".into()) }}"#
+        )
+    };
     let result = match operation {
         "get" => {
             "key.as_ref().and_then(|key| runtime::weak_map_get::<NativeValue>(&owner, key)).unwrap_or(NativeValue::Undefined)"

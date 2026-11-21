@@ -5,6 +5,29 @@
 // are deliberately boring — `exit 7`, `printf`, `sleep` — so a failure points
 // at the runtime rather than at the fixture.
 
+#[test]
+fn spawn_sync_full_preserves_cwd_environment_and_exit_status() {
+    let directory = std::env::temp_dir();
+    let cwd = directory.to_str().unwrap();
+    let args = array_new(vec![
+        string("-e"),
+        string("process.stdout.write(process.cwd() + '\\n' + process.env.SCRIPTC_SPAWN_TEST); process.stderr.write('failure'); process.exitCode = 7"),
+    ]);
+    let env = array_new(vec![string("SCRIPTC_SPAWN_TEST"), string("native-value")]);
+    let executable = std::env::var("SCRIPTC_TEST_NODE").unwrap_or_else(|_| "node".into());
+    let result = child_spawn_sync_full(
+        &string(&executable), &args, 0.0, &string("SIGTERM"), 0.0, 0.0, 0.0,
+        Some(&env), &string(cwd),
+    );
+    assert!(spawn_result_error(&result).is_none());
+    assert_eq!(spawn_result_status(&result), Some(7.0));
+    assert_eq!(spawn_result_stderr(&result).to_utf8_lossy(), "failure");
+    let stdout = spawn_result_stdout(&result).to_utf8_lossy().to_owned();
+    let (actual_cwd, actual_env) = stdout.split_once('\n').unwrap();
+    assert_eq!(std::fs::canonicalize(actual_cwd).unwrap(), std::fs::canonicalize(cwd).unwrap());
+    assert_eq!(actual_env, "native-value");
+}
+
 /// `stdio` mode for a piped stream, as `child_spawn_options` numbers them.
 #[cfg(unix)]
 const STDIO_PIPE: f64 = 3.0;

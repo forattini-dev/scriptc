@@ -128,10 +128,33 @@ pub fn map_symbol_has<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, key: &JsSym
     map.with(|data| data.symbol_entries.iter().any(|(stored, _)| symbol_ptr_eq(stored, key)))
 }
 
+/// Delete an ordinary owning symbol property without confusing equal descriptions.
+pub fn map_symbol_delete<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, key: &JsSymbol) {
+    if map_view(map).is_some() {
+        throw_error_code("scriptc SC1031: symbol deletion through a projected map is not ported".into(), "SC1031");
+    }
+    if map_is_module_namespace(map) {
+        throw_type_error("Cannot modify module namespace".to_owned());
+    }
+    map.with_mut(|data| data.symbol_entries.retain(|(stored, _)| !symbol_ptr_eq(stored, key)));
+}
+
 /// Presence-only inspection must not read or convert projected values.
 pub fn map_has_symbol_properties<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> bool {
     if let Some(view) = map_view(map) { return view.has_symbol_properties(); }
     map.with(|data| !data.symbol_entries.is_empty())
+}
+
+/// Snapshot symbol values in insertion order. Projected views must not invent
+/// symbol values when their source cannot be enumerated through the view ABI.
+pub fn map_symbol_entries<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> Vec<(JsSymbol, V)> {
+    if let Some(view) = map_view(map) {
+        if view.has_symbol_properties() {
+            throw_error("scriptc: symbol enumeration through a projected map is not ported".into());
+        }
+        return Vec::new();
+    }
+    map.with(|data| data.symbol_entries.clone())
 }
 
 pub fn map_symbol_set<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, key: JsSymbol, value: V) {
@@ -259,12 +282,14 @@ pub fn map_iter_count<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> f64 {
     map.with(|data| data.entries.len() as f64)
 }
 
+#[track_caller]
 pub fn map_iter_live<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> bool {
     if let Some(view) = map_view(map) { return view.iter_live(index); }
     let index = array_index(index, false, map.with(|data| data.entries.len()));
     map.with(|data| data.entries[index].is_some())
 }
 
+#[track_caller]
 pub fn map_iter_key<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> K {
     if let Some(view) = map_view(map) { return view.iter_key(index); }
     let index = array_index(index, false, map.with(|data| data.entries.len()));
@@ -277,6 +302,7 @@ pub fn map_iter_key<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, index: f64) -
     })
 }
 
+#[track_caller]
 pub fn map_iter_value<K: HeapValue, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> V {
     if let Some(view) = map_view(map) { return view.iter_value(index); }
     let index = array_index(index, false, map.with(|data| data.entries.len()));
@@ -408,4 +434,13 @@ pub fn set_to_array<T: ArrayElement + HeapValue>(set: &JsSet<T>) -> JsArray<T> {
             .collect()
     });
     array_new(values)
+}
+
+/// Immediately consume the built-in key iterator without exposing its lifetime.
+pub fn map_keys_to_array<K: ArrayElement + HeapValue, V: HeapValue>(map: &JsMap<K, V>) -> JsArray<K> {
+    let count = map_iter_count(map) as usize;
+    array_new((0..count).filter_map(|index| {
+        let index = index as f64;
+        map_iter_live(map, index).then(|| map_iter_key(map, index))
+    }).collect())
 }

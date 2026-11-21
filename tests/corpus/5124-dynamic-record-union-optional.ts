@@ -1,0 +1,18 @@
+type BooleanFlag = { kind: "boolean"; aliases?: string[] };
+type ValueFlag = { kind: "value"; aliases?: string[]; coerce: (value: string) => unknown };
+type Flag = BooleanFlag | ValueFlag;
+const concrete = { kind: "boolean" as const, aliases: ["h"] };
+const erased: any = concrete;
+const view: Flag = erased;
+console.log((view as any) === (concrete as any));
+console.log(view.kind);
+console.log(view.aliases?.[0]);
+view.aliases = ["help"];
+console.log(concrete.aliases.join(","));
+view.aliases = undefined;
+console.log((concrete as any).aliases === undefined);
+const concreteValue = { kind: "value" as const, coerce: (value: string) => value + "!" };
+const erasedValue: any = concreteValue;
+const valueView: Flag = erasedValue;
+console.log((valueView as any) === (concreteValue as any));
+if (valueView.kind === "value") console.log(String(valueView.coerce("ok")));

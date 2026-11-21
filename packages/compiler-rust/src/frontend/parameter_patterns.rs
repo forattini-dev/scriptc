@@ -6,12 +6,21 @@ impl Lowerer<'_> {
         let elements = node.name().elements();
         for (index, element) in elements.iter().enumerate() {
             let rest = !element.dot_dot_dot_token().is_nil();
-            if element.name().kind() != SyntaxKind::Identifier
-                || (rest && (index + 1 != elements.len() || !element.initializer().is_nil()))
+            let identifier = element.name().kind() == SyntaxKind::Identifier;
+            let nested = element.name().kind() == SyntaxKind::ObjectBindingPattern;
+            if (!identifier && !nested)
+                || (rest
+                    && (!identifier
+                        || index + 1 != elements.len()
+                        || !element.initializer().is_nil()))
+                || (nested && !element.initializer().is_nil())
                 || (!element.property_name().is_nil()
                     && self.data_property_name(element.property_name()).is_none())
             {
-                return Err(self.refuse(element, "object parameters require flat named data bindings and a terminal rest binding; nested and computed patterns are not ported"));
+                return Err(self.refuse(element, "object parameters require named data bindings, nested object patterns without defaults, and a terminal rest binding"));
+            }
+            if nested {
+                self.validate_object_parameter(element)?;
             }
         }
         Ok(())
@@ -28,10 +37,15 @@ impl Lowerer<'_> {
                 let arms = self.unions[*union_id]
                     .arms
                     .iter()
-                    .filter(|arm| **arm != Type::Undefined)
+                    .filter(|arm| !matches!(arm, Type::Null | Type::Undefined))
                     .cloned()
                     .collect::<Vec<_>>();
-                if node.initializer().is_nil() || arms.len() != 1 {
+                let nullable_record = arms.len() == 1
+                    && matches!(arms[0], Type::Record { .. })
+                    && self.unions[*union_id].arms.iter().all(|arm| {
+                        matches!(arm, Type::Record { .. } | Type::Null | Type::Undefined)
+                    });
+                if arms.len() != 1 || (node.initializer().is_nil() && !nullable_record) {
                     return Err(self.refuse(
                         node,
                         "object parameter unions require a default and one native data-record arm",
@@ -68,7 +82,12 @@ impl Lowerer<'_> {
         let incoming = self.locals.last().unwrap().clone();
         let read = self.construction_read(&incoming, node);
         let value = if node.initializer().is_nil() {
-            read
+            if param.r#type == source_type {
+                read
+            } else {
+                let erased = self.coerce(read, Type::Dyn, node)?;
+                self.coerce(erased, source_type.clone(), node)?
+            }
         } else {
             let raw = self.coerce(read.clone(), Type::Dyn, node)?;
             let default = self.expected_expression(node.initializer(), source_type.clone())?;
@@ -190,6 +209,15 @@ impl Lowerer<'_> {
                 name: element.name().text().into(),
                 r#type: value.ty(),
             };
+            if element.name().kind() == SyntaxKind::ObjectBindingPattern {
+                body.push(Stmt::VarDecl {
+                    local_id: formal.local_id.clone(),
+                    init: value,
+                    loc: self.loc(element),
+                });
+                body.extend(self.bind_object_parameter(element, &formal)?);
+                continue;
+            }
             body.push(Stmt::VarDecl {
                 local_id: formal.local_id.clone(),
                 init: value,
@@ -214,7 +242,7 @@ impl Lowerer<'_> {
     ) -> Result<Expr, String> {
         if target != Type::Dyn
             && !matches!(target, Type::Record { shape_id }
-            if !self.records[shape_id].tuple && self.records[shape_id].index_value.is_none()
+            if !self.records[shape_id].tuple
                 && !self.enum_shape(shape_id) && !self.callables.contains_key(&shape_id))
         {
             return Err(self.refuse(
@@ -333,6 +361,15 @@ impl Lowerer<'_> {
         helper.function.body.push(Stmt::While {
             cond: helper.less(&index, helper.read(&length)),
             body: iteration,
+            loc: helper.loc(),
+        });
+        helper.function.body.push(Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "dyn.copyEnumerableSymbols".into(),
+                args: vec![helper.read(&output), helper.read(&helper.param(0))],
+                r#type: Type::Void,
+                loc: helper.loc(),
+            },
             loc: helper.loc(),
         });
         let result = self.coerce(helper.read(&output), target.clone(), node)?;

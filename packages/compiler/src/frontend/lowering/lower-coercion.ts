@@ -7,7 +7,7 @@ import { VOID } from "../../ir/ir.js";
 import { lowerReturnAdoption } from "./lower-return-adoption.js";
 import { lowerPromiseView } from "./lower-promise-view.js";
 import { lowerDiscriminatedView } from "./lower-discriminated-view.js";
-import { nativeRecordCheckSupported } from "../../ir/native-record.js";
+import { nativeRecordCheckSupported, nativeReferenceSupported } from "../../ir/native-record.js";
 import * as ts from "../ts7/adapter.js";
 import type {
   IrExpr,
@@ -15,7 +15,7 @@ import type {
   IrType,
   SrcLoc,
 } from "../../ir/ir.js";
-import { canAdaptDynFuncTo, canConvertToDyn, canMarshalTypedFuncIntoIsland, DYN, isUnitType, JSVAL, typeEquals, UNDEFINED_T } from "../../ir/ir.js";
+import { canAdaptDynFuncTo, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, DYN, isUnitType, JSVAL, typeEquals, UNDEFINED_T } from "../../ir/ir.js";
 import {
   isJsSourceFile,
 } from "../program.js";
@@ -89,6 +89,11 @@ import { lowerFreshArrayMapExpecting } from "./lower-fresh-array-map.js";
     // TypeError instead of corrupting memory (SEMANTICS.md). Unmarshalable
     // and unextractable types fall through to requireExactShape's fences.
     if (expected.kind === "jsval" && expr.type.kind !== "jsval") {
+      if (lowerer.nativeDenseArrays && !lowerer.dynamic && ["array", "record", "func", "promise", "regex", "url"].includes(expr.type.kind) &&
+          nativeReferenceSupported(expr.type, id => lowerer.shapes.get(id), id => lowerer.unions.get(id)) &&
+          canConvertToDyn(expr.type, id => lowerer.shapes.get(id), id => lowerer.unions.get(id))) {
+        return { kind: "jsMarshal", value: { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc }, type: JSVAL, loc: expr.loc };
+      }
       // Bare unit literals: the engine's own undefined/null (units have no
       // other producers, so dropping the operand loses nothing).
       if (isUnitType(expr.type)) {
@@ -139,6 +144,12 @@ import { lowerFreshArrayMapExpecting } from "./lower-fresh-array-map.js";
       return expr;
     }
     if (expr.type.kind === "jsval" && expected.kind !== "jsval") {
+      // Static Rust JSVALs are native handles. Validate their live value
+      // directly instead of imposing the embedded engine's JSON exit domain.
+      if (lowerer.nativeDenseArrays && !lowerer.dynamic &&
+          canDynCheckTo(expected, id => lowerer.shapes.get(id), id => lowerer.unions.get(id))) {
+        return { kind: "dynCheck", value: { kind: "dynFromJsval", value: expr, type: DYN, loc: expr.loc }, type: expected, loc: expr.loc };
+      }
       // The jsval→dyn crossing (the world unification's engine-handle
       // kind): an 'any'-typed engine value flowing into an 'unknown'/
       // 'object'/JS-residue slot wraps BY REFERENCE as the checked-dynamic tree's island
@@ -244,7 +255,8 @@ import { lowerFreshArrayMapExpecting } from "./lower-fresh-array-map.js";
       const callableOrRecordOk =
         (expected.kind === "func" && canAdaptDynFuncTo(expected, (id) => lowerer.shapes.get(id), (id) => lowerer.unions.get(id))) ||
         nativeRecordCheckSupported(expected, (id) => lowerer.shapes.get(id), (id) => lowerer.unions.get(id));
-      if (lowerer.jsonSafe(expected) || undefArmedOk || bytesOk || errorOk || callableOrRecordOk) {
+      if (lowerer.jsonSafe(expected) || undefArmedOk || bytesOk || errorOk || callableOrRecordOk ||
+          lowerer.nativeDenseArrays && canDynCheckTo(expected, id => lowerer.shapes.get(id), id => lowerer.unions.get(id))) {
         return { kind: "dynCheck", value: expr, type: expected, loc: expr.loc };
       }
       return expr;

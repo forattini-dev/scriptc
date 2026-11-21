@@ -20,3 +20,10 @@ function input():number[]{evaluations+=1;return source;}
 const [first,second]=input();
 source.pop();source.pop();source.push(90);
 console.log("snapshot",evaluations,first,second,source.join(","));
+function testDefaults():void{
+  let defaults=0;
+  function fallback(label:string):string{defaults+=1;return label;}
+  const [empty="wrong",present="wrong",missing=fallback("missing"),after=missing+"!"]=["","set"] as string[];
+  console.log(`defaults ${JSON.stringify(empty)} ${present} ${missing} ${after} ${defaults}`);
+}
+testDefaults();

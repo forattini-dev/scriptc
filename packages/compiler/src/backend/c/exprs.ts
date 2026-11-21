@@ -652,6 +652,9 @@ function emitMapLikeIntrinsic(
       // Fresh +1 elem[] of the live entries in insertion order.
       return emitter.newTemp(e.type, `scr_set_to_arr_${kAcc}(${r.name})`);
     }
+    case "keysToArray":
+      if (receiverType.kind !== "map") throw new InternalCompilerError("unreachable");
+      return emitter.newTemp(e.type, `scr_set_to_arr_${kAcc}(${r.name})`);
     default: {
       const _exhaustive: never = method;
       void _exhaustive;
@@ -1824,6 +1827,8 @@ function emitContainerExpr(
             const end = e.args[1] ? emitter.emitExpr(e.args[1]).name : "INFINITY";
             return emitter.newTemp(e.type, `scr_arr_slice(${r.name}, ${start}, ${end})`);
           }
+          case "fill":
+            throw new CUnsupportedError("array.fill", e.loc);
           case "toReversed":
             return emitter.newTemp(e.type, `scr_arr_to_reversed(${r.name})`);
           case "reverse":
@@ -8347,7 +8352,7 @@ function emitIoLibCall(state: LibCallState): Temp {
 }
 
 function emitLibCallExpr(emitter: CEmitter, e: LibCallExpr): Temp {
-  if (["record.cloneOwn", "record.view", "record.fromOwn", "record.setOwn"].includes(e.fn)) throw new CUnsupportedError(e.fn, e.loc);
+  if (["record.cloneOwn", "record.view", "record.fromOwn", "record.setOwn", "callable.view"].includes(e.fn)) throw new CUnsupportedError(e.fn, e.loc);
         const packed = e.args[0];
         if (e.fn === "string.fromCharCode" && packed?.kind === "arrayLit" &&
             packed.elems.length === 1 && !packed.spreads?.length) {
@@ -8485,6 +8490,7 @@ function emitLibCallExpr(emitter: CEmitter, e: LibCallExpr): Temp {
     case "strdec":
       return emitIoLibCall(state);
     case "record":
+    case "callable":
     case "weakmap":
       throw new CUnsupportedError(e.fn, e.loc);
     default: {

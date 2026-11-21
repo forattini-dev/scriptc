@@ -39,12 +39,14 @@ struct Definition {
     symbol: u32,
     shape: usize,
     entries: Vec<Entry>,
+    node: Node,
 }
 #[derive(Clone, Default)]
 pub(super) struct EnumGraph {
     statements: HashMap<declarations::Key, Definition>,
     bindings: HashMap<u32, usize>,
     members: HashMap<usize, HashMap<String, Type>>,
+    declared: HashSet<u32>,
 }
 
 fn unwrap(mut node: Node) -> Node {
@@ -79,6 +81,72 @@ fn literal(node: Node) -> Option<Value> {
 }
 
 impl Lowerer<'_> {
+    fn declared_enum(&mut self, statement: Node) -> Result<Option<(u32, Vec<Entry>)>, String> {
+        if statement.kind() != SyntaxKind::EnumDeclaration {
+            return Ok(None);
+        }
+        let name = statement.name();
+        if name.kind() != SyntaxKind::Identifier {
+            return Err(self.refuse(statement, "enum name needs a native identifier"));
+        }
+        let symbol = self.symbol(name);
+        if symbol == 0 {
+            return Err(self.refuse(statement, "enum has no resolved native binding"));
+        }
+        let mut entries = Vec::new();
+        let mut next = Some(0.0);
+        for member in statement.members() {
+            let member_name = member.name();
+            if !matches!(
+                member_name.kind(),
+                SyntaxKind::Identifier | SyntaxKind::StringLiteral
+            ) {
+                return Err(self.refuse(member, "computed enum member names are not ported"));
+            }
+            let key = member_name.text().to_string();
+            let value = if member.initializer().is_nil() {
+                Value::Number(next.ok_or_else(|| {
+                    self.refuse(
+                        member,
+                        "enum member after a string needs a literal initializer",
+                    )
+                })?)
+            } else {
+                literal(member.initializer()).ok_or_else(|| {
+                    self.refuse(
+                        member,
+                        "enum member needs a native number or string literal",
+                    )
+                })?
+            };
+            next = match &value {
+                Value::Number(value) if value.is_finite() => Some(value + 1.0),
+                _ => None,
+            };
+            if entries.iter().any(|entry: &Entry| entry.key == key) {
+                return Err(self.refuse(member, "duplicate enum member names are not ported"));
+            }
+            if let Value::Number(value) = &value {
+                if !value.is_finite()
+                    || value.fract() != 0.0
+                    || value.abs() > 9_007_199_254_740_991.0
+                {
+                    return Err(self.refuse(member, "enum numeric member needs a safe integer"));
+                }
+                entries.push(Entry {
+                    key: if *value == 0.0 {
+                        "0".into()
+                    } else {
+                        format!("{value:.0}")
+                    },
+                    value: Value::String(key.clone()),
+                });
+            }
+            entries.push(Entry { key, value });
+        }
+        Ok(Some((symbol, entries)))
+    }
+
     fn enum_member(&mut self, node: Node, param: u32) -> Option<String> {
         if node.kind() != SyntaxKind::ElementAccessExpression
             || self.symbol(node.expression()) != param
@@ -199,7 +267,13 @@ impl Lowerer<'_> {
     pub(super) fn inventory_enums(&mut self, files: &[Node]) -> Result<(), String> {
         for file in files {
             for statement in file.statements() {
-                let Some((symbol, entries)) = self.compiled_enum(statement) else {
+                let declared = statement.kind() == SyntaxKind::EnumDeclaration;
+                let source = if declared {
+                    self.declared_enum(statement)?
+                } else {
+                    self.compiled_enum(statement)
+                };
+                let Some((symbol, entries)) = source else {
                     continue;
                 };
                 // Only the module's own bare var may be initialized here.
@@ -207,14 +281,15 @@ impl Lowerer<'_> {
                     .checker
                     .sym(source_frontend::prelude::SymbolId(symbol))
                     .value_declaration;
-                if declaration.is_nil()
-                    || declaration.kind() != SyntaxKind::VariableDeclaration
-                    || !declaration.initializer().is_nil()
-                    || declaration
-                        .parent()
-                        .flags()
-                        .intersects(NodeFlags::LET | NodeFlags::CONST)
-                    || declaration.parent().parent().parent() != *file
+                if !declared
+                    && (declaration.is_nil()
+                        || declaration.kind() != SyntaxKind::VariableDeclaration
+                        || !declaration.initializer().is_nil()
+                        || declaration
+                            .parent()
+                            .flags()
+                            .intersects(NodeFlags::LET | NodeFlags::CONST)
+                        || declaration.parent().parent().parent() != *file)
                 {
                     continue;
                 }
@@ -254,11 +329,41 @@ impl Lowerer<'_> {
                         symbol,
                         shape,
                         entries,
+                        node: statement,
                     },
                 );
+                if declared {
+                    self.enums.declared.insert(symbol);
+                    let ty = self
+                        .intern_union(vec![Type::Record { shape_id: shape }, Type::Undefined])
+                        .unwrap();
+                    self.module_binding(statement.name(), ty, true);
+                }
             }
         }
         Ok(())
+    }
+
+    pub(super) fn enum_prelude(&self) -> Result<Vec<Stmt>, String> {
+        let mut definitions = self
+            .enums
+            .statements
+            .values()
+            .filter(|definition| self.enums.declared.contains(&definition.symbol))
+            .collect::<Vec<_>>();
+        definitions.sort_by_key(|definition| self.module_bindings[&definition.symbol].id.clone());
+        definitions
+            .into_iter()
+            .map(|definition| {
+                let binding = &self.module_bindings[&definition.symbol];
+                Ok(Stmt::Assign {
+                    local_id: binding.id.clone(),
+                    initializes_global: true,
+                    value: self.var_undefined(binding.r#type.clone(), definition.node)?,
+                    loc: self.loc(definition.node),
+                })
+            })
+            .collect()
     }
 
     pub(super) fn enum_type(&mut self, node: Node) -> Option<Type> {
@@ -316,6 +421,7 @@ impl Lowerer<'_> {
             }),
             else_: Box::new(Expr::RecordLit {
                 fields: vec![],
+                null_prototype: false,
                 r#type: ty.clone(),
                 loc: self.loc(node),
             }),

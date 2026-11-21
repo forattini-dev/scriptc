@@ -72,16 +72,23 @@ pub fn os_homedir() -> JsString {
     // catchable system error — never abort the process for this.
     match std::env::current_dir() {
         Ok(dir) => JsString::from(dir.to_string_lossy().as_ref()),
-        Err(error) => throw_error_code(
-            format!("os.homedir() failed: {error}"),
-            "ERR_SYSTEM_ERROR",
-        ),
+        Err(error) => throw_error_code(format!("os.homedir() failed: {error}"), "ERR_SYSTEM_ERROR"),
     }
 }
 
 pub fn os_hostname() -> JsString {
     let value = if cfg!(target_os = "windows") {
-        std::env::var_os("COMPUTERNAME").map(|value| value.to_string_lossy().into_owned())
+        #[cfg(windows)]
+        {
+            use winapi_util::sysinfo::{ComputerNameKind, get_computer_name};
+            get_computer_name(ComputerNameKind::DnsHostname)
+                .ok()
+                .map(|value| value.to_string_lossy().into_owned())
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
     } else if cfg!(target_os = "linux") || cfg!(target_os = "android") {
         std::fs::read_to_string("/proc/sys/kernel/hostname")
             .ok()
@@ -131,7 +138,8 @@ pub fn os_type() -> JsString {
     } else if cfg!(target_os = "wasi") {
         "WASI"
     } else {
-        return os_command_output("uname", &["-s"]).map_or_else(empty_string, |value| string(&value));
+        return os_command_output("uname", &["-s"])
+            .map_or_else(empty_string, |value| string(&value));
     })
 }
 
@@ -169,17 +177,19 @@ pub fn os_totalmem() -> f64 {
             })
             .map_or(0.0, |kibibytes| kibibytes * 1024.0);
     }
-    let output = if cfg!(target_os = "windows") {
-        os_command_output(
-            "powershell",
-            &[
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
-            ],
-        )
-    } else if cfg!(target_os = "wasi") {
+    if cfg!(target_os = "windows") {
+        #[cfg(windows)]
+        {
+            let mut status = winsafe::MEMORYSTATUSEX::default();
+            return winsafe::GlobalMemoryStatusEx(&mut status)
+                .map_or(0.0, |_| status.ullTotalPhys as f64);
+        }
+        #[cfg(not(windows))]
+        {
+            return 0.0;
+        }
+    }
+    let output = if cfg!(target_os = "wasi") {
         None
     } else {
         os_command_output("sysctl", &["-n", "hw.memsize"])
@@ -283,14 +293,31 @@ pub fn os_network_interfaces() -> Vec<OsNetworkInterfaceRow> {
                 Address::V4(value) => {
                     let netmask = value.netmask.unwrap_or(std::net::Ipv4Addr::UNSPECIFIED);
                     let prefix = os_netmask_prefix(&netmask.octets());
-                    (value.address.to_string(), netmask.to_string(), false, 0.0, prefix)
+                    (
+                        value.address.to_string(),
+                        netmask.to_string(),
+                        false,
+                        0.0,
+                        prefix,
+                    )
                 }
                 Address::V6(value) => {
                     let netmask = value.netmask.unwrap_or(std::net::Ipv6Addr::UNSPECIFIED);
                     let prefix = os_netmask_prefix(&netmask.octets());
-                    let scoped = value.address.is_unicast_link_local() || value.address.is_multicast();
-                    let scopeid = if scoped { interface.index.unwrap_or(0) as f64 } else { 0.0 };
-                    (value.address.to_string(), netmask.to_string(), true, scopeid, prefix)
+                    let scoped =
+                        value.address.is_unicast_link_local() || value.address.is_multicast();
+                    let scopeid = if scoped {
+                        interface.index.unwrap_or(0) as f64
+                    } else {
+                        0.0
+                    };
+                    (
+                        value.address.to_string(),
+                        netmask.to_string(),
+                        true,
+                        scopeid,
+                        prefix,
+                    )
                 }
                 Address::Mac(_) => return None,
             };

@@ -26,6 +26,7 @@ struct GeneratorData<Y, R, N> {
     state: GeneratorState,
     continuation: Option<GeneratorContinuation<Y, R, N>>,
     panic_handlers: Vec<GeneratorPanicHandler<Y, R, N>>,
+    next_argument_present: bool,
 }
 
 /// Safe, synchronous JavaScript generator handle. The suspended continuation
@@ -55,6 +56,7 @@ where
         state: GeneratorState::Unstarted,
         continuation: Some(Box::new(start)),
         panic_handlers: Vec::new(),
+        next_argument_present: false,
     })))
 }
 
@@ -91,6 +93,7 @@ where
 fn generator_resume<Y, R, N>(
     generator: &JsGenerator<Y, R, N>,
     command: GeneratorCommand<N, R>,
+    next_argument_present: bool,
 ) -> GeneratorStep<Y, R> {
     let continuation = {
         let mut data = generator.0.borrow_mut();
@@ -120,6 +123,7 @@ fn generator_resume<Y, R, N>(
                 }
                 GeneratorCommand::Next(value) => {
                     data.state = GeneratorState::Executing;
+                    data.next_argument_present = next_argument_present;
                     let continuation = data
                         .continuation
                         .take()
@@ -133,6 +137,7 @@ fn generator_resume<Y, R, N>(
             },
             GeneratorState::Suspended => {
                 data.state = GeneratorState::Executing;
+                data.next_argument_present = next_argument_present;
                 data.continuation
                     .take()
                     .expect("scriptc: suspended generator without continuation")
@@ -186,21 +191,83 @@ fn generator_finish_resume<Y, R, N>(
 }
 
 pub fn generator_next<Y, R, N>(generator: &JsGenerator<Y, R, N>, value: N) -> GeneratorStep<Y, R> {
-    generator_resume(generator, GeneratorCommand::Next(value))
+    generator_resume(generator, GeneratorCommand::Next(value), true)
+}
+
+/// Resume an iterator without an argument, as required by `for...of`.
+pub fn generator_next_without_arg<Y, R, N>(
+    generator: &JsGenerator<Y, R, N>,
+    value: N,
+) -> GeneratorStep<Y, R> {
+    generator_resume(generator, GeneratorCommand::Next(value), false)
+}
+
+/// Whether the currently executing next command supplied an argument.
+pub fn generator_next_has_argument<Y, R, N>(generator: &JsGenerator<Y, R, N>) -> bool {
+    generator.0.borrow().next_argument_present
 }
 
 pub fn generator_return<Y, R, N>(
     generator: &JsGenerator<Y, R, N>,
     value: Option<R>,
 ) -> GeneratorStep<Y, R> {
-    generator_resume(generator, GeneratorCommand::Return(value))
+    generator_resume(generator, GeneratorCommand::Return(value), false)
 }
 
 pub fn generator_throw<Y, R, N>(
     generator: &JsGenerator<Y, R, N>,
     reason: Caught,
 ) -> GeneratorStep<Y, R> {
-    generator_resume(generator, GeneratorCommand::Throw(reason))
+    generator_resume(generator, GeneratorCommand::Throw(reason), false)
+}
+
+fn array_generator_step<T: ArrayElement, N: Clone + 'static>(
+    generator: JsGenerator<T, (), N>,
+    iterator: JsArrayIterator<T>,
+    absent: Option<T>,
+    command: GeneratorCommand<N, ()>,
+) -> GeneratorStep<T, ()> {
+    match command {
+        GeneratorCommand::Next(_) => match match &absent {
+            Some(value) => array_iterator_next_or(&iterator, value.clone()),
+            None => array_iterator_next(&iterator),
+        } {
+            Some(ArrayIteratorItem::Value(value)) => {
+                let next_iterator = iterator.clone();
+                generator_suspend(&generator, move |generator, command| {
+                    array_generator_step(generator, next_iterator, absent, command)
+                });
+                GeneratorStep::Yielded(value)
+            }
+            None => GeneratorStep::Returned(None),
+            Some(ArrayIteratorItem::Entry(..) | ArrayIteratorItem::Key(_)) => {
+                unreachable!("value iterator returned a non-value array item")
+            }
+        },
+        GeneratorCommand::Return(value) => GeneratorStep::Returned(value),
+        GeneratorCommand::Throw(reason) => rethrow_caught(reason),
+    }
+}
+
+/// The built-in Array iterator protocol represented as a native generator.
+/// The iterator retains the source array and reads its live length/value at
+/// each resume, matching `yield* array` rather than snapshotting the elements.
+pub fn generator_from_array<T: ArrayElement, N: Clone + 'static>(
+    array: JsArray<T>,
+) -> JsGenerator<T, (), N> {
+    let iterator = array_iterator_new(&array, ArrayIteratorKind::Values);
+    generator_new(move |generator, command| array_generator_step(generator, iterator, None, command))
+}
+
+/// Array iteration with an explicit representation for absent elements.
+pub fn generator_from_array_or<T: ArrayElement, N: Clone + 'static>(
+    array: JsArray<T>,
+    absent: T,
+) -> JsGenerator<T, (), N> {
+    let iterator = array_iterator_new(&array, ArrayIteratorKind::Values);
+    generator_new(move |generator, command| {
+        array_generator_step(generator, iterator, Some(absent), command)
+    })
 }
 
 pub fn generator_ptr_eq<Y, R, N>(
@@ -223,7 +290,7 @@ pub enum AsyncGeneratorYield<Y> {
 pub type AsyncGeneratorInput = Box<dyn Any>;
 pub type AsyncGeneratorAwait =
     Box<dyn FnOnce(Box<dyn FnOnce(Result<AsyncGeneratorInput, Caught>)>)>;
-type AsyncGeneratorBody<Y, R> = JsGenerator<AsyncGeneratorYield<Y>, R, AsyncGeneratorInput>;
+pub type AsyncGeneratorBody<Y, R> = JsGenerator<AsyncGeneratorYield<Y>, R, AsyncGeneratorInput>;
 
 #[derive(Clone)]
 pub enum AsyncGeneratorStep<Y, R> {
@@ -273,6 +340,20 @@ where
     R: Clone + 'static,
     N: Clone + 'static,
 {
+}
+
+// Generator handles retain their suspended state through the same shared Rc
+// when stored in an array. Their HeapValue implementation already defines
+// their tracing contract for closures and queued requests.
+impl<Y, R, N> ArrayElement for JsAsyncGenerator<Y, R, N>
+where
+    Y: Clone + 'static,
+    R: Clone + 'static,
+    N: Clone + 'static,
+{
+    fn trace_element(&self, tracer: &mut Tracer<'_>) {
+        self.trace_value(tracer);
+    }
 }
 
 pub fn async_generator_new<Y, R, N, F>(start: F) -> JsAsyncGenerator<Y, R, N>

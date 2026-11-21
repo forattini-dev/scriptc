@@ -3,17 +3,18 @@ use super::*;
 use std::fmt::Write;
 
 pub(super) fn definitions(module: &Emission<'_>, output: &mut String) {
-    output.push_str("fn native_exception_string(caught: &runtime::Caught) -> runtime::JsString { if runtime::caught_is::<NativeValue>(caught) { return match runtime::caught_narrow::<NativeValue>(caught) {\n");
+    output.push_str("fn native_exception_value_string(value: &NativeValue) -> runtime::JsString { match value.clone() {\n");
     if !module.classes.is_empty() {
         output.push_str("NativeValue::Instance(object) if object.with(|o| o.error.is_some()) => error_string(object),\n");
     }
-    output.push_str("value @ (NativeValue::Undefined | NativeValue::Null | NativeValue::BigInt(_) | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::String(_)) => native_value_string(value), _ => runtime::JsString::from(\"[object Object]\"), }; } runtime::caught_to_string(caught) }\n");
+    output.push_str("value @ (NativeValue::Undefined | NativeValue::Null | NativeValue::BigInt(_) | NativeValue::Number(_) | NativeValue::Boolean(_) | NativeValue::String(_)) => native_value_string(value), _ => runtime::JsString::from(\"[object Object]\"), } }\n");
+    output.push_str("fn native_exception_string(caught: &runtime::Caught) -> runtime::JsString { if runtime::caught_is::<NativeValue>(caught) { let value = runtime::caught_narrow::<NativeValue>(caught); return native_exception_value_string(&value); } runtime::caught_to_string(caught) }\n");
     if module.classes.iter().any(|c| c.name == "%Error") {
         output.push_str("fn native_caught(caught: runtime::Caught) -> NativeValue { if runtime::caught_is::<NativeValue>(&caught) { return runtime::caught_narrow::<NativeValue>(&caught); } if runtime::caught_is::<f64>(&caught) { return NativeValue::Number(runtime::caught_narrow::<f64>(&caught)); } if runtime::caught_is::<bool>(&caught) { return NativeValue::Boolean(runtime::caught_narrow::<bool>(&caught)); } if runtime::caught_is::<runtime::JsString>(&caught) { return NativeValue::String(runtime::caught_narrow::<runtime::JsString>(&caught)); } if runtime::caught_is_error(&caught) { let error = runtime::caught_error_value(&caught); let name = runtime::error_name(&error); let message = runtime::error_message(&error); let code = runtime::error_code(&error); let object = match name.well_formed_utf8().unwrap_or(\"\") {\n");
         for (index, class) in module.classes.iter().enumerate().filter(|(_, c)| c.runtime) {
             writeln!(
                 output,
-                "{:?} => instance_allocate_{index}(),",
+                "{:?} => instance_allocate_{index}(NativeClass({index})),",
                 class.js_name
             )
             .unwrap();
@@ -23,12 +24,12 @@ pub(super) fn definitions(module: &Emission<'_>, output: &mut String) {
             .iter()
             .position(|c| c.name == "%Error")
             .unwrap();
-        writeln!(output, "_ => instance_allocate_{root}(), }}; object.with_mut(|object| {{ let error = object.error.as_mut().expect(\"validated Error receiver\"); error.name = name; error.message = message; if let Some(code) = code {{ error.own.push((runtime::JsString::from(\"code\"), NativeValue::String(code))); }} }}); return NativeValue::Instance(object); }} runtime::throw_type_error(\"scriptc: unknown native exception payload\".into()) }}").unwrap();
+        writeln!(output, "_ => instance_allocate_{root}(NativeClass({root})), }}; object.with_mut(|object| {{ let error = object.error.as_mut().expect(\"validated Error receiver\"); error.name = NativeValue::String(name); error.message = NativeValue::String(message); if let Some(code) = code {{ error.own.push((runtime::JsString::from(\"code\"), NativeValue::String(code))); }} }}); return NativeValue::Instance(object); }} runtime::throw_type_error(\"scriptc: unknown native exception payload\".into()) }}").unwrap();
     } else {
         output.push_str("fn native_caught(caught: runtime::Caught) -> NativeValue { if runtime::caught_is::<NativeValue>(&caught) { return runtime::caught_narrow::<NativeValue>(&caught); } runtime::throw_type_error(\"scriptc: native exception conversion requires Error classes\".into()) }\n");
     }
 }
-fn region(
+pub(super) fn region(
     body: &[Stmt],
     function: &Function,
     module: &Emission<'_>,
@@ -53,6 +54,38 @@ pub(super) fn statement(
     module: &Emission<'_>,
     output: &mut String,
     flow: &FlowContext,
+) {
+    statement_with_return(stmt, function, module, output, flow, None);
+}
+
+pub(super) fn generator_statement(
+    stmt: &Stmt,
+    function: &Function,
+    module: &Emission<'_>,
+    output: &mut String,
+) {
+    let returned = if matches!(function.return_type, Type::Void | Type::Undefined) {
+        "return runtime::GeneratorStep::Returned(None)"
+    } else {
+        "return runtime::GeneratorStep::Returned(Some(value))"
+    };
+    statement_with_return(
+        stmt,
+        function,
+        module,
+        output,
+        &FlowContext::default(),
+        Some(returned),
+    );
+}
+
+fn statement_with_return(
+    stmt: &Stmt,
+    function: &Function,
+    module: &Emission<'_>,
+    output: &mut String,
+    flow: &FlowContext,
+    returned_override: Option<&str>,
 ) {
     let Stmt::TryCatch {
         try_body,
@@ -96,25 +129,35 @@ pub(super) fn statement(
     } else {
         "()"
     };
-    let returned = if flow.region != 0 {
+    let returned = if let Some(returned) = returned_override {
+        returned
+    } else if flow.region != 0 {
         "return runtime::Completion::Return(value)"
     } else {
         "return value"
     };
-    writeln!(output, "match pending {{ runtime::Completion::Normal => {normal}, runtime::Completion::Return(value) => {{ {returned} }}, runtime::Completion::Throw(caught) => runtime::rethrow_caught(caught),").unwrap();
+    writeln!(output, "match pending {{ runtime::Completion::Normal => {normal}, runtime::Completion::Return(value) => {{").unwrap();
+    iterator_closes(output, &flow.targets, flow.region, 0);
+    writeln!(
+        output,
+        "{returned} }}, runtime::Completion::Throw(caught) => runtime::rethrow_caught(caught),"
+    )
+    .unwrap();
     for (id, target) in flow.targets.iter().enumerate() {
+        writeln!(output, "runtime::Completion::Break({id}) => {{").unwrap();
+        iterator_closes(output, &flow.targets, flow.region, id);
         if target.region == flow.region {
-            writeln!(
-                output,
-                "runtime::Completion::Break({id}) => break 'native_loop_{id},"
-            )
-            .unwrap();
-            if target.allows_continue {
-                writeln!(
-                    output,
-                    "runtime::Completion::Continue({id}) => continue 'native_loop_{id},"
-                )
-                .unwrap();
+            writeln!(output, "break 'native_loop_{id}; }},").unwrap();
+        } else {
+            writeln!(output, "return runtime::Completion::Break({id}); }},").unwrap();
+        }
+        if target.allows_continue {
+            writeln!(output, "runtime::Completion::Continue({id}) => {{").unwrap();
+            iterator_closes(output, &flow.targets, flow.region, id + 1);
+            if target.region == flow.region {
+                writeln!(output, "continue 'native_loop_{id}; }},").unwrap();
+            } else {
+                writeln!(output, "return runtime::Completion::Continue({id}); }},").unwrap();
             }
         }
     }

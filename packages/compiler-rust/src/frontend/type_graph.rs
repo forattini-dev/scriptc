@@ -5,6 +5,58 @@ mod resolution;
 pub(super) use cache::TypeCache;
 pub(super) use resolution::{Checkpoint, LayoutKind, Resolution};
 impl Lowerer<'_> {
+    /// Like `native_type_contains`, but a nominal class instance is an opaque
+    /// owning handle: erasing it keeps its fields native, so they are not
+    /// visited. Records, arrays, unions and callables are still traversed.
+    pub(super) fn native_value_contains(
+        &self,
+        ty: &Type,
+        predicate: impl Fn(&Type) -> bool,
+    ) -> bool {
+        fn visit(
+            lowerer: &Lowerer<'_>,
+            predicate: &impl Fn(&Type) -> bool,
+            ty: &Type,
+            seen: &mut HashSet<Type>,
+        ) -> bool {
+            if !seen.insert(ty.clone()) {
+                return false;
+            }
+            if predicate(ty) {
+                return true;
+            }
+            match ty {
+                Type::Array { elem } | Type::Set { elem } | Type::Promise { inner: elem } => {
+                    visit(lowerer, predicate, elem, seen)
+                }
+                Type::Map { key, value } => {
+                    visit(lowerer, predicate, key, seen) || visit(lowerer, predicate, value, seen)
+                }
+                Type::Func { params, ret, .. } => {
+                    params.iter().any(|t| visit(lowerer, predicate, t, seen))
+                        || visit(lowerer, predicate, ret, seen)
+                }
+                Type::Union { union_id } => lowerer.unions[*union_id]
+                    .arms
+                    .iter()
+                    .any(|t| visit(lowerer, predicate, t, seen)),
+                Type::Record { shape_id } => {
+                    let record = &lowerer.records[*shape_id];
+                    record
+                        .fields
+                        .iter()
+                        .any(|f| visit(lowerer, predicate, &f.r#type, seen))
+                        || record
+                            .index_value
+                            .as_ref()
+                            .is_some_and(|t| visit(lowerer, predicate, t, seen))
+                }
+                _ => false,
+            }
+        }
+        visit(self, &predicate, ty, &mut HashSet::new())
+    }
+
     pub(super) fn native_type_contains(
         &self,
         ty: &Type,
@@ -25,6 +77,16 @@ impl Lowerer<'_> {
             match ty {
                 Type::Array { elem } | Type::Set { elem } | Type::Promise { inner: elem } => {
                     visit(lowerer, predicate, elem, seen)
+                }
+                Type::Generator {
+                    yield_type,
+                    return_type,
+                    next_type,
+                    ..
+                } => {
+                    visit(lowerer, predicate, yield_type, seen)
+                        || visit(lowerer, predicate, return_type, seen)
+                        || visit(lowerer, predicate, next_type, seen)
                 }
                 Type::Map { key, value } => {
                     visit(lowerer, predicate, key, seen) || visit(lowerer, predicate, value, seen)

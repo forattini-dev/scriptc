@@ -23,10 +23,12 @@ fn collect(node: Node, declarations: &mut Vec<Node>, calls: &mut Vec<Node>) {
 
 impl Lowerer<'_> {
     pub(super) fn plan_value_layouts(&mut self, files: &[Node]) {
+        self.plan_record_field_writes(files);
         let owners = self.container_owners(files);
         loop {
             let before = (
                 self.js_absence_parameters.len(),
+                self.js_null_parameters.len(),
                 self.js_absent_fields.len(),
                 self.absence_returns.len(),
                 self.absence_assignments.len(),
@@ -36,6 +38,7 @@ impl Lowerer<'_> {
             if before
                 == (
                     self.js_absence_parameters.len(),
+                    self.js_null_parameters.len(),
                     self.js_absent_fields.len(),
                     self.absence_returns.len(),
                     self.absence_assignments.len(),

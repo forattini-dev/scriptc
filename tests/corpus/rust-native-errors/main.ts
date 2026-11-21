@@ -1,5 +1,6 @@
 // @rust-only
 // @no-engine
+/// <reference lib="dom" />
 let effects = 0;
 function mark(label: string, value: number): number {
   effects = effects + 1;
@@ -35,6 +36,10 @@ const syntax = new SyntaxError("bad input");
 console.log("syntax", syntax.name, syntax.message, syntax.toString(), syntax instanceof Error, syntax instanceof TypeError);
 const empty = new Error();
 console.log("empty", empty.name, empty.message === "", empty.toString());
+console.log("capture presence", "captureStackTrace" in Error);
+const dynamicUndefined: any = undefined;
+const dynamicNumber: any = 17;
+console.log("dynamic message", new Error(dynamicUndefined).message === "", new Error(dynamicNumber).message);
 empty.name = "";
 empty.message = "message only";
 console.log(empty.toString());
@@ -46,3 +51,43 @@ console.log("inherited", inherited.name, inherited.message, inherited.code, inhe
 const builtin = new Error("same");
 const builtinAlias: Error = builtin;
 console.log("builtin identity", builtinAlias === builtin, builtinAlias !== new Error("same"), base !== builtin);
+const reference = new ReferenceError("missing binding");
+const evaluation = new EvalError("bad evaluation");
+const uri = new URIError("bad uri");
+console.log(
+  "other builtins",
+  reference.name,
+  reference.message,
+  reference instanceof Error,
+  evaluation.name,
+  evaluation instanceof Error,
+  uri.name,
+  uri instanceof Error,
+);
+const timeout = new DOMException("deadline", "TimeoutError");
+const defaultDom = new DOMException();
+console.log(
+  "dom exception",
+  timeout.name,
+  timeout.message,
+  timeout.code,
+  timeout.toString(),
+  timeout instanceof DOMException,
+  timeout instanceof Error,
+  defaultDom.name,
+  defaultDom.message === "",
+  defaultDom.code,
+);
+const aggregateInput: unknown[] = [new Error("first"), 17];
+const aggregate = new AggregateError(aggregateInput, "many");
+aggregateInput.push("late");
+console.log(
+  "aggregate error",
+  aggregate.name,
+  aggregate.message,
+  aggregate.errors.length,
+  String(aggregate.errors[1]),
+  aggregate.toString(),
+  aggregate instanceof AggregateError,
+  aggregate instanceof Error,
+);

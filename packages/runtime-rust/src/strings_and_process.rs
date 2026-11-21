@@ -1,12 +1,17 @@
 use unicode_normalization::UnicodeNormalization;
 
+#[track_caller]
 fn array_index(index: f64, allow_end: bool, len: usize) -> usize {
     if !index.is_finite() || index < 0.0 || index.fract() != 0.0 || index > usize::MAX as f64 {
         panic!("scriptc: invalid array index");
     }
     let index = index as usize;
     if index > len || (!allow_end && index == len) {
-        panic!("scriptc: array index out of bounds");
+        // A typed slot cannot hold the `undefined` a JavaScript read past the
+        // end produces. Raise a catchable TypeError rather than aborting.
+        throw_type_error(format!(
+            "scriptc: array index {index} is out of bounds for length {len}"
+        ));
     }
     index
 }
@@ -24,6 +29,41 @@ pub fn string_concat(left: &JsString, right: &JsString) -> JsString {
     result.push_str(left);
     result.push_str(right);
     result.finish()
+}
+
+/// ECMAScript's legacy global `unescape` decodes individual UTF-16 units;
+/// unlike decodeURIComponent it neither decodes UTF-8 nor rejects bad escapes.
+pub fn string_unescape(value: &JsString) -> JsString {
+    fn hex(unit: u16) -> Option<u16> {
+        match unit {
+            0x30..=0x39 => Some(unit - 0x30),
+            0x41..=0x46 => Some(unit - 0x41 + 10),
+            0x61..=0x66 => Some(unit - 0x61 + 10),
+            _ => None,
+        }
+    }
+    let source = value.encode_utf16().collect::<Vec<_>>();
+    let mut output = Vec::with_capacity(source.len());
+    let mut index = 0;
+    while index < source.len() {
+        if source[index] == b'%' as u16 {
+            let wide = source.get(index + 1) == Some(&(b'u' as u16));
+            let digits = if wide { 4 } else { 2 };
+            let start = index + 1 + usize::from(wide);
+            if let Some(encoded) = source.get(start..start + digits)
+                && let Some(decoded) = encoded.iter().try_fold(0_u16, |value, digit| {
+                    hex(*digit).map(|digit| (value << 4) | digit)
+                })
+            {
+                output.push(decoded);
+                index = start + digits;
+                continue;
+            }
+        }
+        output.push(source[index]);
+        index += 1;
+    }
+    JsString::from_utf16(&output)
 }
 
 pub fn string_raw(raw: &JsArray<JsString>, substitutions: &JsArray<JsString>) -> JsString {
@@ -98,34 +138,34 @@ fn uri_hex_nibble(byte: u8) -> Option<u8> {
     }
 }
 
-fn uri_hex_byte(bytes: &[u8], index: usize) -> Option<u8> {
-    if bytes.get(index) != Some(&b'%') {
+fn uri_hex_byte(units: &[u16], index: usize) -> Option<u8> {
+    if units.get(index) != Some(&u16::from(b'%')) {
         return None;
     }
-    let high = uri_hex_nibble(*bytes.get(index + 1)?)?;
-    let low = uri_hex_nibble(*bytes.get(index + 2)?)?;
+    let high = uri_hex_nibble(u8::try_from(*units.get(index + 1)?).ok()?)?;
+    let low = uri_hex_nibble(u8::try_from(*units.get(index + 2)?).ok()?)?;
     Some((high << 4) | low)
 }
 
 fn decode_uri_try(value: &JsString, keep_reserved: bool) -> Option<JsString> {
-    let bytes = value.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
+    let units = value.encode_utf16().collect::<Vec<_>>();
+    let mut decoded = Vec::with_capacity(units.len());
     let mut index = 0usize;
-    while index < bytes.len() {
-        if bytes[index] != b'%' {
-            decoded.push(bytes[index]);
+    while index < units.len() {
+        if units[index] != u16::from(b'%') {
+            decoded.push(units[index]);
             index += 1;
             continue;
         }
 
-        let leading = uri_hex_byte(bytes, index)?;
+        let leading = uri_hex_byte(&units, index)?;
         let escape_start = index;
         index += 3;
         if leading < 0x80 {
             if keep_reserved && matches!(leading, b';' | b'/' | b'?' | b':' | b'@' | b'&' | b'=' | b'+' | b'$' | b',' | b'#') {
-                decoded.extend_from_slice(&bytes[escape_start..index]);
+                decoded.extend_from_slice(&units[escape_start..index]);
             } else {
-                decoded.push(leading);
+                decoded.push(u16::from(leading));
             }
             continue;
         }
@@ -140,9 +180,9 @@ fn decode_uri_try(value: &JsString, keep_reserved: bool) -> Option<JsString> {
             0xf4 => (3, 0x80, 0x8f),
             _ => return None,
         };
-        decoded.push(leading);
+        let mut sequence = vec![leading];
         for continuation_index in 0..continuations {
-            let continuation = uri_hex_byte(bytes, index)?;
+            let continuation = uri_hex_byte(&units, index)?;
             let valid = if continuation_index == 0 {
                 (first_low..=first_high).contains(&continuation)
             } else {
@@ -151,11 +191,12 @@ fn decode_uri_try(value: &JsString, keep_reserved: bool) -> Option<JsString> {
             if !valid {
                 return None;
             }
-            decoded.push(continuation);
+            sequence.push(continuation);
             index += 3;
         }
+        decoded.extend(std::str::from_utf8(&sequence).ok()?.encode_utf16());
     }
-    Some(JsString::from(String::from_utf8(decoded).ok()?))
+    Some(JsString::from_utf16(&decoded))
 }
 
 pub fn string_decode_uri_component(value: &JsString) -> JsString {
@@ -363,6 +404,19 @@ pub fn string_index_of(value: &JsString, search: &JsString, from_index: f64) -> 
         .windows(needle.len())
         .position(|window| window == needle)
         .map_or(-1.0, |index| (start + index) as f64)
+}
+
+/// Deterministic native comparison for the no-locale `localeCompare` subset.
+/// ECMAScript only specifies the sign of the result. Comparing UTF-16 units
+/// matches ordinary filename ordering used by native compiler workloads while
+/// avoiding a platform locale dependency.
+pub fn string_locale_compare(value: &JsString, other: &JsString) -> f64 {
+    use std::cmp::Ordering;
+    match value.encode_utf16().cmp(other.encode_utf16()) {
+        Ordering::Less => -1.0,
+        Ordering::Equal => 0.0,
+        Ordering::Greater => 1.0,
+    }
 }
 
 pub fn string_last_index_of(value: &JsString, search: &JsString, position: f64) -> f64 {
@@ -685,6 +739,23 @@ pub fn string_split(value: &JsString, separator: &JsString, limit: f64) -> JsArr
 
 const SELF_REEXEC_MARKER: &str = "\u{1f}scriptc-self-reexec";
 
+thread_local! {
+    static PROCESS_ENTRY_SCRIPT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Record the canonical path of the program's entry module. Like
+/// `node <entry>`, `process.argv[1]` then names that module, so the
+/// `import.meta.url === pathToFileURL(process.argv[1]).href` main-module
+/// idiom holds for the entry module only.
+pub fn process_set_entry_script(path: &str) {
+    PROCESS_ENTRY_SCRIPT.with(|slot| *slot.borrow_mut() = Some(path.to_owned()));
+    PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
+}
+
+fn process_entry_script() -> Option<String> {
+    PROCESS_ENTRY_SCRIPT.with(|slot| slot.borrow().clone())
+}
+
 pub fn process_argv() -> JsArray<JsString> {
     PROCESS_ARGV.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -694,10 +765,11 @@ pub fn process_argv() -> JsArray<JsString> {
         let mut native = std::env::args();
         let executable = native.next().unwrap_or_else(|| "scriptc".to_owned());
         let first = native.next();
+        let default_script = process_entry_script().unwrap_or_else(|| executable.clone());
         let script = if first.as_deref() == Some(SELF_REEXEC_MARKER) {
-            native.next().unwrap_or_else(|| executable.clone())
+            native.next().unwrap_or(default_script)
         } else {
-            executable.clone()
+            default_script
         };
         let mut values = vec![JsString::from(executable.as_str()), JsString::from(script.as_str())];
         if let Some(first) = first.filter(|value| value != SELF_REEXEC_MARKER) {
@@ -959,6 +1031,9 @@ pub fn process_env_get(name: &JsString) -> Option<JsString> {
 }
 
 pub fn process_env_set(name: &JsString, value: &JsString) {
+    if name.contains('\0') || name.contains('=') || value.contains('\0') {
+        throw_type_error("process.env names cannot contain '=' or NUL and values cannot contain NUL".into());
+    }
     process_env_write(name, Some(value.clone()));
 }
 
@@ -1014,6 +1089,10 @@ const NODE_COMPAT_USER_AGENT: &str = "Node.js/24";
 
 pub fn process_versions_node() -> JsString {
     string(target_node_version())
+}
+
+pub fn process_version() -> JsString {
+    string(&format!("v{}", target_node_version()))
 }
 
 pub fn navigator_user_agent() -> JsString {

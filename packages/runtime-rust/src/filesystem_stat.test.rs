@@ -17,6 +17,31 @@ fn stat_snapshots_own_identity_and_metadata() {
     std::fs::remove_file(path).unwrap();
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn descriptor_and_path_identity_detect_replacement() {
+    let root = std::env::temp_dir().join(format!("scriptc-stat-identity-{}", crypto_random_uuid()));
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join("lock");
+    let moved = root.join("old-lock");
+    std::fs::write(&path, b"old").unwrap();
+    let name = string(path.to_str().unwrap());
+    let fd = fs_open(&name, &string("r"));
+    let before = fs_fstat(fd);
+    let by_path = fs_stat_sync(&name);
+    assert_eq!((stats_dev(&before), stats_ino(&before)), (stats_dev(&by_path), stats_ino(&by_path)));
+    std::fs::rename(&path, &moved).unwrap();
+    std::fs::write(&path, b"new").unwrap();
+    let replacement = fs_stat_sync(&name);
+    let still_open = fs_fstat(fd);
+    assert_eq!((stats_dev(&before), stats_ino(&before)), (stats_dev(&still_open), stats_ino(&still_open)));
+    assert_ne!((stats_dev(&before), stats_ino(&before)), (stats_dev(&replacement), stats_ino(&replacement)));
+    fs_close(fd);
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_file(moved).unwrap();
+    std::fs::remove_dir(root).unwrap();
+}
+
 #[test]
 fn stat_paths_validate_before_os_calls() {
     for follow in [false, true] {

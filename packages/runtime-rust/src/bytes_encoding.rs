@@ -2,6 +2,12 @@ pub fn atomics_wait(bytes: &JsBytes<i32>, index: f64, expected: f64, timeout_ms:
     if bytes_get(bytes, index) != f64::from(to_int32(expected)) {
         return string("not-equal");
     }
+    if !timeout_ms.is_finite() || !(0.0..=60_000.0).contains(&timeout_ms) {
+        throw_range_error(
+            "scriptc: native Atomics.wait timeout must be finite and between 0 and 60000 ms"
+                .to_owned(),
+        );
+    }
     if timeout_ms.is_finite() && timeout_ms > 0.0 {
         std::thread::sleep(std::time::Duration::from_secs_f64(timeout_ms / 1000.0));
     }
@@ -187,6 +193,36 @@ pub fn data_view_set(
     bytes_write_unsigned(bytes, offset, width, little_endian, bits);
 }
 
+pub fn buffer_write_uint_be(
+    bytes: &JsBytes<u8>,
+    value: f64,
+    byte_offset: f64,
+    byte_length: f64,
+) -> f64 {
+    if !byte_length.is_finite() || byte_length.fract() != 0.0 || !(1.0..=6.0).contains(&byte_length)
+    {
+        throw_range_error("The value of byteLength is out of range".to_owned());
+    }
+    let width = byte_length as usize;
+    let offset = data_view_offset(bytes, byte_offset, width);
+    let limit = 2_f64.powi((width * 8) as i32);
+    if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value >= limit {
+        throw_range_error("The value is out of range".to_owned());
+    }
+    bytes_write_unsigned(bytes, offset, width, false, value as u64);
+    (offset + width) as f64
+}
+
+pub fn buffer_read_uint_be(bytes: &JsBytes<u8>, byte_offset: f64, byte_length: f64) -> f64 {
+    if !byte_length.is_finite() || byte_length.fract() != 0.0 || !(1.0..=6.0).contains(&byte_length)
+    {
+        throw_range_error("The value of byteLength is out of range".to_owned());
+    }
+    let width = byte_length as usize;
+    let offset = data_view_offset(bytes, byte_offset, width);
+    bytes_read_unsigned(bytes, offset, width, false) as f64
+}
+
 pub fn bytes_set_from<T: ByteElement>(target: &JsBytes<T>, source: &JsBytes<T>, offset: f64) {
     let offset = if offset.is_nan() { 0.0 } else { offset.trunc() };
     let target_length = target.with(|data| data.length);
@@ -317,14 +353,18 @@ fn checked_buffer_encoding(encoding: &JsString) -> &'static str {
 pub fn fs_read_file_encoded(path: &JsString, encoding: &JsString) -> JsString {
     let encoding = normalize_buffer_encoding(encoding).unwrap_or_else(|| {
         throw_type_error_code(
-            format!(
-                "The argument 'encoding' is invalid encoding. Received '{encoding}'"
-            ),
+            format!("The argument 'encoding' is invalid encoding. Received '{encoding}'"),
             "ERR_INVALID_ARG_VALUE",
         )
     });
     let bytes = fs_read_file_bytes(path);
     bytes_to_string(&bytes, &string(encoding))
+}
+
+pub fn fs_read_file_encoded_promise(path: &JsString, encoding: &JsString) -> JsPromise<JsString> {
+    let path = path.clone();
+    let encoding = encoding.clone();
+    promise_from_sync(move || fs_read_file_encoded(&path, &encoding))
 }
 
 pub fn bytes_to_string(bytes: &JsBytes<u8>, encoding: &JsString) -> JsString {
@@ -603,10 +643,44 @@ fn buffer_string_bytes(value: &JsString, encoding: &JsString) -> Vec<u8> {
 }
 
 pub fn buffer_from_string(value: &JsString, encoding: &JsString) -> JsBytes<u8> {
-    let encoding = if encoding.is_empty() { "utf8" } else { checked_buffer_encoding(encoding) };
+    let encoding = if encoding.is_empty() {
+        "utf8"
+    } else {
+        checked_buffer_encoding(encoding)
+    };
     let bytes = bytes_from_vec(buffer_string_bytes(value, &string(encoding)));
     bytes.with_mut(|data| data.buffer = true);
     bytes
+}
+
+/// Write a string into the existing Buffer window, preserving character boundaries.
+pub fn buffer_write_string(
+    bytes: &JsBytes<u8>,
+    value: &JsString,
+    offset: f64,
+    length: f64,
+    encoding: &JsString,
+) -> f64 {
+    let encoding = if encoding.is_empty() {
+        "utf8"
+    } else {
+        checked_buffer_encoding(encoding)
+    };
+    let mut encoded = buffer_string_bytes(value, &string(encoding));
+    let limit = length as usize;
+    if encoded.len() > limit {
+        let end = match encoding {
+            "utf8" => std::str::from_utf8(&encoded[..limit])
+                .map_or_else(|error| error.valid_up_to(), |_| limit),
+            "utf16le" => limit - limit % 2,
+            _ => limit,
+        };
+        encoded.truncate(end);
+    }
+    for (index, byte) in encoded.iter().enumerate() {
+        bytes_set(bytes, offset + index as f64, f64::from(*byte));
+    }
+    encoded.len() as f64
 }
 
 /// Buffer.from(view) copies elements into an independent Buffer owner.
@@ -617,23 +691,37 @@ pub fn buffer_from_bytes(value: &JsBytes<u8>) -> JsBytes<u8> {
     bytes
 }
 
+/// Buffer.from(view.buffer, view.byteOffset, view.byteLength) shares the
+/// exact window and backing store with the owning Uint8Array view.
+pub fn buffer_from_u8_window_view(value: &JsBytes<u8>) -> JsBytes<u8> {
+    value.with(|data| {
+        Gc::new(BytesData {
+            storage: data.storage.clone(),
+            backing: data.backing.clone(),
+            offset: data.offset,
+            length: data.length,
+            buffer: true,
+        })
+    })
+}
+
 pub fn buffer_concat(values: &JsArray<JsBytes<u8>>) -> JsBytes<u8> {
     let mut output = Vec::new();
     values.with(|array| {
         for bytes in array.elements().iter() {
-            bytes.with(|data| {
-                output.extend_from_slice(
-                    &data.storage.borrow()[data.offset..data.offset + data.length],
-                );
-            });
+            output.extend_from_slice(&bytes_u8_values(bytes));
         }
     });
-    bytes_from_vec(output)
+    let result = bytes_from_vec(output);
+    result.with_mut(|data| data.buffer = true);
+    result
 }
 
 pub fn buffer_concat_len(values: &JsArray<JsBytes<u8>>, total: f64) -> JsBytes<u8> {
     if array_len(values) == 0.0 {
-        return bytes_empty();
+        let result = bytes_empty();
+        result.with_mut(|data| data.buffer = true);
+        return result;
     }
     bytes_validate_offset("length", total, 9_007_199_254_740_991.0);
     let mut output = vec![0; total as usize];
@@ -649,12 +737,16 @@ pub fn buffer_concat_len(values: &JsArray<JsBytes<u8>>, total: f64) -> JsBytes<u
             offset += count;
         }
     });
-    bytes_from_vec(output)
+    let result = bytes_from_vec(output);
+    result.with_mut(|data| data.buffer = true);
+    result
 }
 
 pub fn buffer_byte_length_string(value: &JsString, encoding: &JsString) -> f64 {
     let units: Vec<u16> = value.encode_utf16().collect();
-    match encoding.to_utf8_lossy() {
+    let supplied = encoding.to_utf8_lossy();
+    let encoding = normalize_buffer_encoding(supplied).unwrap_or("utf8");
+    match encoding {
         "latin1" | "ascii" => units.len() as f64,
         "utf16le" => (units.len() * 2) as f64,
         "hex" => (units.len() / 2) as f64,
@@ -787,7 +879,11 @@ fn bytes_read_unsigned(
 ) -> u64 {
     let mut value = 0_u64;
     for index in 0..width {
-        let source = if little_endian { index } else { width - 1 - index };
+        let source = if little_endian {
+            index
+        } else {
+            width - 1 - index
+        };
         value |= u64::from(bytes_u8_at(bytes, offset + source)) << (8 * index);
     }
     value
@@ -801,7 +897,11 @@ fn bytes_write_unsigned(
     value: u64,
 ) {
     for index in 0..width {
-        let target = if little_endian { index } else { width - 1 - index };
+        let target = if little_endian {
+            index
+        } else {
+            width - 1 - index
+        };
         bytes_u8_set_at(bytes, offset + target, (value >> (8 * index)) as u8);
     }
 }
@@ -830,7 +930,9 @@ pub fn data_view_write_u64(bytes: &JsBytes<u8>, offset: f64, little_endian: bool
 pub fn bytes_read_num(bytes: &JsBytes<u8>, kind: &str, offset: f64) -> f64 {
     let width = bytes_num_width(kind);
     let offset = bytes_num_offset(bytes, offset, width);
-    let input: Vec<u8> = (0..width).map(|index| bytes_u8_at(bytes, offset + index)).collect();
+    let input: Vec<u8> = (0..width)
+        .map(|index| bytes_u8_at(bytes, offset + index))
+        .collect();
     match kind {
         "u8" => f64::from(input[0]),
         "i8" => f64::from(input[0] as i8),
@@ -984,7 +1086,10 @@ mod buffer_allocation_tests {
         assert!(bytes_is_buffer(&value));
         assert_eq!(bytes_join(&value, &string(",")).as_ref(), "97,0,98,0");
         let empty_encoding = buffer_from_string(&string("é"), &string(""));
-        assert_eq!(bytes_join(&empty_encoding, &string(",")).as_ref(), "195,169");
+        assert_eq!(
+            bytes_join(&empty_encoding, &string(",")).as_ref(),
+            "195,169"
+        );
         assert!(bytes_is_buffer(&empty_encoding));
         let empty = buffer_from_string(&string(""), &string("utf8"));
         assert!(bytes_is_buffer(&empty));

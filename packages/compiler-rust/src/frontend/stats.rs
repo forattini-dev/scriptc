@@ -6,6 +6,20 @@ impl Lowerer<'_> {
     /// An immutable local cannot be retagged between a truthy guard and a
     /// property read, even when the checker exposes a wider overload union.
     pub(super) fn guarded_stats_receiver(&mut self, node: Node) -> Option<Expr> {
+        fn exits_branch(node: Node) -> bool {
+            match node.kind() {
+                SyntaxKind::ReturnStatement
+                | SyntaxKind::ThrowStatement
+                | SyntaxKind::ContinueStatement
+                | SyntaxKind::BreakStatement => true,
+                SyntaxKind::Block => node
+                    .statements()
+                    .into_iter()
+                    .last()
+                    .is_some_and(exits_branch),
+                _ => false,
+            }
+        }
         if node.kind() != SyntaxKind::Identifier {
             return None;
         }
@@ -32,6 +46,40 @@ impl Lowerer<'_> {
         let mut child = node;
         let mut parent = node.parent();
         while !parent.is_nil() {
+            if parent.kind() == SyntaxKind::Block {
+                for statement in parent.statements() {
+                    if statement == child {
+                        break;
+                    }
+                    if statement.kind() != SyntaxKind::IfStatement
+                        || !statement.else_statement().is_nil()
+                        || !exits_branch(statement.then_statement())
+                    {
+                        continue;
+                    }
+                    let guard = receivers::reference_node(statement.expression());
+                    if guard.kind() == SyntaxKind::PrefixUnaryExpression
+                        && guard.operator() == SyntaxKind::ExclamationToken
+                    {
+                        let guarded = receivers::reference_node(guard.operand());
+                        if guarded.kind() == SyntaxKind::Identifier
+                            && self.symbol(guarded) == symbol
+                        {
+                            return Some(Expr::UnionNarrow {
+                                union_id: format!("u{union_id}"),
+                                tag,
+                                value: Box::new(Expr::VarRef {
+                                    local_id: local.id,
+                                    r#type: Type::Union { union_id },
+                                    loc: self.loc(node),
+                                }),
+                                r#type: Type::Stats,
+                                loc: self.loc(node),
+                            });
+                        }
+                    }
+                }
+            }
             if parent.kind() == SyntaxKind::BinaryExpression
                 && parent.operator_token().kind() == SyntaxKind::AmpersandAmpersandToken
                 && parent.right() == child
@@ -120,6 +168,12 @@ impl Lowerer<'_> {
         let mut has_stats = false;
         let mut has_null = false;
         for value in result {
+            // A bare `return;` has a nil expression node. It proves this is
+            // not the specialized Stats/null contract; never pass that
+            // sentinel through reference stripping or ask it for a kind.
+            if value.is_nil() {
+                return None;
+            }
             let value = receivers::reference_node(value);
             if value.kind() == SyntaxKind::NullKeyword {
                 has_null = true;
@@ -182,24 +236,90 @@ impl Lowerer<'_> {
             })
     }
 
+    pub(super) fn standard_statfs_type(&self, id: TypeId) -> bool {
+        let symbol = self.checker.ty(id).symbol();
+        symbol.0 != 0
+            && self.checker.sym(symbol).name.as_ref() == "StatsFs"
+            && self.checker.sym(symbol).declarations.iter().any(|decl| {
+                let file = source_file_info(get_source_file_of_node(*decl));
+                file.file_name.ends_with("/fs.d.ts")
+                    && (file.file_name.contains("/@types/node/")
+                        || file.file_name.contains("/bun-types/"))
+            })
+    }
+
+    pub(super) fn statfs_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let checked = self.checker.get_type_at_location(node.expression());
+        if !self.standard_statfs_type(checked) {
+            return Ok(None);
+        }
+        let index = match node.name().text() {
+            "type" => 0.0,
+            "bsize" => 1.0,
+            "blocks" => 2.0,
+            "bfree" => 3.0,
+            "bavail" => 4.0,
+            "files" => 5.0,
+            "ffree" => 6.0,
+            _ => return Err(self.refuse(node, "StatFs property is not ported")),
+        };
+        let receiver = self.expression(node.expression())?;
+        let snapshot = Type::Array {
+            elem: Box::new(Type::F64),
+        };
+        if receiver.ty() != snapshot {
+            return Err(self.refuse(node, "StatFs property needs a represented snapshot"));
+        }
+        Ok(Some(Expr::LibCall {
+            r#fn: "fs.statfsField".into(),
+            args: vec![
+                receiver,
+                Expr::NumLit {
+                    value: index,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: self.loc(node),
+                },
+            ],
+            r#type: Type::F64,
+            loc: self.loc(node),
+        }))
+    }
+
     pub(super) fn stats_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let guarded = self.guarded_stats_receiver(node.expression());
         if guarded.is_none() && self.ty(node.expression()).ok() != Some(Type::Stats) {
             return Ok(None);
         }
-        if node.name().text() != "size" {
-            return Err(self.refuse(node, "Stats properties beyond size are not ported"));
-        }
-        let receiver = if let Some(guarded) = guarded {
+        let operation = match node.name().text() {
+            "size" => "stats.size",
+            "mode" => "stats.mode",
+            "uid" => "stats.uid",
+            "gid" => "stats.gid",
+            "atimeMs" => "stats.atimeMs",
+            "mtimeMs" => "stats.mtimeMs",
+            "dev" => "stats.dev",
+            "ino" => "stats.ino",
+            "blocks" => "stats.blocks",
+            "nlink" => "stats.nlink",
+            _ => return Err(self.refuse(node, "Stats property is not ported")),
+        };
+        let mut receiver = if let Some(guarded) = guarded {
             guarded
         } else {
             self.expression(node.expression())?
         };
         if receiver.ty() != Type::Stats {
+            if receiver.ty() != Type::Dyn {
+                receiver = self.coerce(receiver, Type::Dyn, node.expression())?;
+            }
+            receiver = self.coerce(receiver, Type::Stats, node.expression())?;
+        }
+        if receiver.ty() != Type::Stats {
             return Err(self.refuse(node, "Stats property needs a represented snapshot"));
         }
         Ok(Some(Expr::LibCall {
-            r#fn: "stats.size".into(),
+            r#fn: operation.into(),
             args: vec![receiver],
             r#type: Type::F64,
             loc: self.loc(node),
@@ -211,7 +331,7 @@ impl Lowerer<'_> {
         if member.kind() != SyntaxKind::PropertyAccessExpression
             || !matches!(
                 member.name().text(),
-                "isFile" | "isDirectory" | "isSymbolicLink"
+                "isFile" | "isDirectory" | "isSymbolicLink" | "isSocket"
             )
         {
             return Ok(None);
@@ -223,11 +343,17 @@ impl Lowerer<'_> {
         if !node.arguments().is_empty() {
             return Err(self.refuse(node, "Stats method argument overloads are not ported"));
         }
-        let receiver = if let Some(guarded) = guarded {
+        let mut receiver = if let Some(guarded) = guarded {
             guarded
         } else {
             self.expression(member.expression())?
         };
+        if receiver.ty() != Type::Stats {
+            if receiver.ty() != Type::Dyn {
+                receiver = self.coerce(receiver, Type::Dyn, member.expression())?;
+            }
+            receiver = self.coerce(receiver, Type::Stats, member.expression())?;
+        }
         if receiver.ty() != Type::Stats {
             return Err(self.refuse(node, "Stats method needs a represented snapshot"));
         }

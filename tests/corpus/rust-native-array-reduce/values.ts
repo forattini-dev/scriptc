@@ -62,3 +62,4 @@ console.log("no-initial-live", liveNoInitial.reduce((a, b, i) => {
 }), liveTrace);
 try { ([] as number[]).reduce((a, b) => a + b); }
 catch (error) { if (error instanceof TypeError) console.log("no-initial-zero", error.message); }
+

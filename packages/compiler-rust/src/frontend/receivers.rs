@@ -24,13 +24,15 @@ pub(super) struct PendingCall {
 
 /// Parentheses and type-only assertions retain a JavaScript call reference.
 pub(super) fn reference_node(mut node: Node) -> Node {
-    while matches!(
-        node.kind(),
-        SyntaxKind::ParenthesizedExpression
-            | SyntaxKind::AsExpression
-            | SyntaxKind::TypeAssertionExpression
-            | SyntaxKind::SatisfiesExpression
-    ) {
+    while !node.is_nil()
+        && matches!(
+            node.kind(),
+            SyntaxKind::ParenthesizedExpression
+                | SyntaxKind::AsExpression
+                | SyntaxKind::TypeAssertionExpression
+                | SyntaxKind::SatisfiesExpression
+        )
+    {
         node = node.expression();
     }
     node
@@ -49,6 +51,22 @@ pub(super) fn reads_this(node: Node) -> bool {
     fn visit(node: Node, root: bool) -> bool {
         if node.kind() == SyntaxKind::ThisKeyword {
             return true;
+        }
+        if !root
+            && matches!(
+                node.kind(),
+                SyntaxKind::ClassDeclaration | SyntaxKind::ClassExpression
+            )
+        {
+            // A class body has its own receiver, but its heritage expression
+            // is evaluated in the enclosing scope (e.g. class extends this).
+            return node.heritage_clauses().nodes().into_iter().any(|clause| {
+                clause
+                    .types()
+                    .nodes()
+                    .into_iter()
+                    .any(|base| visit(base.expression(), false))
+            });
         }
         if !root
             && matches!(
@@ -77,6 +95,12 @@ pub(super) fn reads_this(node: Node) -> bool {
 pub(super) fn strict(node: Node) -> bool {
     let file = get_source_file_of_node(node);
     let info = source_file_info(file);
+    let filename = info.file_name.to_string();
+    let path = std::path::Path::new(&filename);
+    let extension = path.extension().and_then(|ext| ext.to_str());
+    if matches!(extension, Some("js" | "ts")) && package_type_module(path) {
+        return true;
+    }
     let format = program::get_source_file_meta_data(&info.path).implied_node_format;
     if !commonjs::is_module(file)
         && (info.file_name.ends_with(".mjs")
@@ -124,6 +148,45 @@ pub(super) fn strict(node: Node) -> bool {
     false
 }
 
+fn package_type_module(path: &std::path::Path) -> bool {
+    thread_local! {
+        static CACHE: std::cell::RefCell<std::collections::HashMap<std::path::PathBuf, bool>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    let Some(directory) = path.parent() else {
+        return false;
+    };
+    CACHE.with(|cache| {
+        if let Some(value) = cache.borrow().get(directory) {
+            return *value;
+        }
+        let module = directory
+            .ancestors()
+            .find_map(|ancestor| {
+                let package = ancestor.join("package.json");
+                if !package.is_file() {
+                    return None;
+                }
+                let value = std::fs::read(package).ok().and_then(|contents| {
+                    serde_json::from_slice::<serde_json::Value>(&contents).ok()
+                });
+                Some(
+                    value
+                        .and_then(|value| {
+                            value
+                                .get("type")
+                                .and_then(serde_json::Value::as_str)
+                                .map(|kind| kind == "module")
+                        })
+                        .unwrap_or(false),
+                )
+            })
+            .unwrap_or(false);
+        cache.borrow_mut().insert(directory.to_path_buf(), module);
+        module
+    })
+}
+
 impl Lowerer<'_> {
     pub(super) fn initialize_receiver(&mut self, node: Node) -> Result<Vec<Stmt>, String> {
         if !reads_this(node) {
@@ -133,12 +196,6 @@ impl Lowerer<'_> {
             return Err(self.refuse(
                 node,
                 "sloppy function this requires global substitution and primitive boxing",
-            ));
-        }
-        if node.modifier_flags().intersects(ModifierFlags::ASYNC) {
-            return Err(self.refuse(
-                node,
-                "async function this requires a deferred receiver contract",
             ));
         }
         self.receiver_local(
@@ -190,6 +247,12 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn function_receiver_call(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        if let Some(value) = self.array_prototype_push_apply(node)? {
+            return Ok(Some(value));
+        }
+        if let Some(value) = self.array_splice_method_call(node)? {
+            return Ok(Some(value));
+        }
         let member = node.expression();
         if member.kind() != SyntaxKind::PropertyAccessExpression
             || !matches!(member.name().text(), "call" | "apply")
@@ -232,6 +295,7 @@ impl Lowerer<'_> {
             recv: Box::new(recv),
             method: member.name().text().into(),
             callee_name: member.name().text().into(),
+            optional: false,
             args,
             r#type: Type::Dyn,
             loc: self.loc(node),
@@ -243,15 +307,7 @@ impl Lowerer<'_> {
     /// Implicit method receivers obey the same erasure fences as explicit values.
     /// Run after reachability closes, when every possible function target is known.
     pub(super) fn validate_call_receivers(&self, functions: &[Function]) -> Result<(), String> {
-        let targets = functions
-            .iter()
-            .filter(|function| function.reads_receiver())
-            .map(|function| Type::Func {
-                rest: function.rest,
-                params: function.params.iter().map(|p| p.r#type.clone()).collect(),
-                ret: Box::new(function.call_result()),
-            })
-            .collect::<HashSet<_>>();
+        let targets = ir::receiver_aware_function_types(functions);
         for PendingCall { ty, loc, boundary } in &self.receiver_calls {
             if targets.contains(ty) || (*ty == Type::Dyn && !targets.is_empty()) {
                 return Err(format!(

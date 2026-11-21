@@ -36,10 +36,16 @@ impl Lowerer<'_> {
             written.insert(name);
         }
         let source = first.expression();
-        let value = self.expression(source)?;
-        let inputs = match value.ty() {
+        let inputs = match self.ty(source)? {
             Type::Union { union_id } => self.unions[union_id].arms.clone(),
             ty @ Type::Record { .. } => vec![ty],
+            Type::Dyn => {
+                // An erased JavaScript source has no closed record layout to
+                // distribute. Copy its live own keys once, then check the
+                // resulting value against the requested union at the boundary.
+                let value = self.dynamic_literal(node)?;
+                return self.coerce(value, target, node).map(Some);
+            }
             _ => {
                 return Err(self.refuse(source, "union spread requires closed record alternatives"));
             }
@@ -76,13 +82,18 @@ impl Lowerer<'_> {
             // Select only an unambiguous structural projection; never guess a
             // target tag from checker arm order or erased literal values.
             if choices.len() != 1 {
-                return Err(self.refuse(
-                    node,
-                    "union spread needs one lossless target layout per source arm",
-                ));
+                // Literal discriminants can collapse to the same native scalar
+                // layout, leaving several structurally compatible output arms.
+                // Build the ordinary object once and attach the checked union
+                // view to that shared property store. This preserves source
+                // evaluation order, identity and every own key without guessing
+                // a tag from checker arm order.
+                let value = self.dynamic_literal(node)?;
+                return self.coerce(value, target, node).map(Some);
             }
             projections.push(choices[0].clone());
         }
+        let value = self.expression(source)?;
         let local = self.construction_local(value.ty(), false);
         let before = self.var_defined.clone();
         let mut after: Option<HashSet<u32>> = None;

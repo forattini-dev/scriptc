@@ -6,9 +6,110 @@ pub(super) fn erased_rest(ty: &Type) -> bool {
         if matches!(params.as_slice(), [Type::Array { elem }] if **elem == Type::Dyn))
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn generic_rest_with_unrepresentable_collection_remains_refused() {
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../tests/fixtures/generic-rest-pick");
+                for name in ["weak-map.ts", "set-inspection.ts"] {
+                    let input = std::fs::canonicalize(root.join(name)).unwrap();
+                    let work = tempfile::Builder::new()
+                        .prefix("scriptc-generic-rest-")
+                        .tempdir()
+                        .unwrap();
+                    let error = match crate::frontend::lower(&input, work.path(), None, false) {
+                        Ok(_) => panic!("{name}: generic rest must not silently erase collections"),
+                        Err(error) => error,
+                    };
+                    assert!(
+                        error.contains("generic source rest parameters"),
+                        "{name}: {error}"
+                    );
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+}
+
+pub(super) fn arguments_reference(function: Node) -> Option<Node> {
+    arguments_reference_except(function, Node::NIL)
+}
+
+/// The first `arguments` reference in `function` other than `skip`.
+pub(super) fn arguments_reference_except(function: Node, skip: Node) -> Option<Node> {
+    fn visit(node: Node, skip: Node, found: &mut Option<Node>) {
+        if found.is_some() {
+            return;
+        }
+        node.for_each_child(&mut |child: Node| {
+            // Property names spelled `arguments` (`call.arguments`,
+            // `{ arguments: value }`, member and binding property names) are
+            // not references to the function's arguments object. Shorthand
+            // `{ arguments }` still reads the binding and keeps counting.
+            let property_name = child.kind() == SyntaxKind::Identifier
+                && match node.kind() {
+                    SyntaxKind::PropertyAccessExpression
+                    | SyntaxKind::PropertyAssignment
+                    | SyntaxKind::PropertyDeclaration
+                    | SyntaxKind::PropertySignature
+                    | SyntaxKind::MethodDeclaration
+                    | SyntaxKind::MethodSignature
+                    | SyntaxKind::GetAccessor
+                    | SyntaxKind::SetAccessor
+                    | SyntaxKind::EnumMember => node.name() == child,
+                    SyntaxKind::BindingElement => node.property_name() == child,
+                    SyntaxKind::QualifiedName => node.right() == child,
+                    _ => false,
+                };
+            if child.kind() == SyntaxKind::Identifier
+                && child.text() == "arguments"
+                && !property_name
+                && child != skip
+            {
+                *found = Some(child);
+                return true;
+            }
+            // Arrow functions inherit the surrounding arguments object;
+            // ordinary nested functions and classes own a different one.
+            if !matches!(
+                child.kind(),
+                SyntaxKind::FunctionDeclaration
+                    | SyntaxKind::FunctionExpression
+                    | SyntaxKind::MethodDeclaration
+                    | SyntaxKind::Constructor
+                    | SyntaxKind::GetAccessor
+                    | SyntaxKind::SetAccessor
+                    | SyntaxKind::ClassDeclaration
+                    | SyntaxKind::ClassExpression
+            ) {
+                visit(child, skip, found);
+            }
+            found.is_some()
+        });
+    }
+    let mut found = None;
+    if !function.body().is_nil() {
+        visit(function.body(), skip, &mut found);
+    }
+    found
+}
+
 impl Lowerer<'_> {
     pub(super) fn parameter_symbol(&mut self, node: Node) -> u32 {
-        if node.parent().kind() == SyntaxKind::Constructor && classes::parameter_property(node) {
+        if node.is_nil() || node.name().is_nil() {
+            return 0;
+        }
+        let parent = node.parent();
+        if !parent.is_nil()
+            && parent.kind() == SyntaxKind::Constructor
+            && classes::parameter_property(node)
+        {
             // The declaration-name symbol denotes the instance property; bare
             // references in defaults and the constructor body denote a local.
             self.checker
@@ -20,8 +121,11 @@ impl Lowerer<'_> {
         }
     }
 
-    /// Unpack a public (...args: any[]) contract without changing callable
-    /// identity or exposing its transport vector as a source parameter.
+    /// Unpack a public rest contract without changing callable identity or
+    /// exposing its transport vector as a source parameter. Typed rest
+    /// elements are boxed for ordinary JavaScript formals; an omitted formal
+    /// remains the JavaScript `undefined` value rather than inventing a native
+    /// scalar default.
     pub(super) fn bind_erased_rest_formals(
         &mut self,
         nodes: &[Node],
@@ -41,6 +145,41 @@ impl Lowerer<'_> {
                 r#type: Type::F64,
                 loc: loc.clone(),
             };
+            if !node.dot_dot_dot_token().is_nil() {
+                let ty = incoming.r#type.clone();
+                let formal = Param {
+                    local_id: format!("v{}", self.locals.len()),
+                    name: node.name().text().into(),
+                    r#type: ty.clone(),
+                };
+                body.push(Stmt::VarDecl {
+                    local_id: formal.local_id.clone(),
+                    init: Expr::ArrayIntrinsic {
+                        method: "slice".into(),
+                        receiver: Box::new(read()),
+                        args: vec![offset()],
+                        r#type: ty,
+                        loc: loc.clone(),
+                    },
+                    loc,
+                });
+                body.extend(self.bind_parameter(Some(node), &formal)?);
+                continue;
+            }
+            let Type::Array { elem } = &incoming.r#type else {
+                unreachable!("validated rest transport")
+            };
+            let present = Expr::ArrayGet {
+                arr: Box::new(read()),
+                index: Box::new(offset()),
+                r#type: (**elem).clone(),
+                loc: loc.clone(),
+            };
+            let present = if **elem == Type::Dyn {
+                present
+            } else {
+                self.coerce(present, Type::Dyn, node)?
+            };
             let value = Expr::Ternary {
                 cond: Box::new(Expr::Bin {
                     op: "<".into(),
@@ -55,12 +194,7 @@ impl Lowerer<'_> {
                     r#type: Type::Bool,
                     loc: loc.clone(),
                 }),
-                then: Box::new(Expr::ArrayGet {
-                    arr: Box::new(read()),
-                    index: Box::new(offset()),
-                    r#type: Type::Dyn,
-                    loc: loc.clone(),
-                }),
+                then: Box::new(present),
                 else_: Box::new(self.coerce(
                     Expr::UnitLit {
                         unit: "undefined",
@@ -101,10 +235,20 @@ impl Lowerer<'_> {
         if self.data_bindings.contains(&symbol) {
             return Ok(Type::Dyn);
         }
+        if parameter_abi::is_javascript(node)
+            && !node.initializer().is_nil()
+            && node.initializer().kind() == SyntaxKind::NullKeyword
+            && matches!(ty, Type::Null | Type::Undefined)
+        {
+            // In checked JavaScript a null default does not declare a
+            // null-only public ABI. It is the conventional sentinel for an
+            // otherwise unannotated value (for example an optional event
+            // name), so retain the owning dynamic argument contract.
+            return Ok(Type::Dyn);
+        }
         if node.question_token().is_nil()
             && node.initializer().is_nil()
-            && !(self.js_absence_parameters.contains(&symbol)
-                && matches!(ty, Type::String | Type::F64 | Type::Bool))
+            && !self.js_absence_parameters.contains(&symbol)
         {
             return Ok(ty);
         }
@@ -112,6 +256,9 @@ impl Lowerer<'_> {
             Type::Union { union_id } => self.unions[union_id].arms.clone(),
             _ => vec![ty],
         };
+        if self.js_null_parameters.contains(&symbol) {
+            arms.push(Type::Null);
+        }
         arms.push(Type::Undefined);
         self.intern_union(arms).ok_or_else(|| {
             self.refuse(
@@ -132,6 +279,7 @@ impl Lowerer<'_> {
             .map(|tag| (*union_id, tag))
     }
 
+    #[track_caller]
     pub(super) fn call_arguments(
         &mut self,
         node: Node,
@@ -140,6 +288,7 @@ impl Lowerer<'_> {
         self.call_arguments_in(node, types, false, false)
     }
 
+    #[track_caller]
     pub(super) fn rest_call_arguments(
         &mut self,
         node: Node,
@@ -149,6 +298,7 @@ impl Lowerer<'_> {
         self.call_arguments_in(node, types, false, rest)
     }
 
+    #[track_caller]
     pub(super) fn method_arguments(
         &mut self,
         node: Node,
@@ -157,6 +307,17 @@ impl Lowerer<'_> {
         self.call_arguments_in(node, types, true, false)
     }
 
+    #[track_caller]
+    pub(super) fn rest_method_arguments(
+        &mut self,
+        node: Node,
+        types: &[Type],
+        rest: bool,
+    ) -> Result<Vec<Expr>, String> {
+        self.call_arguments_in(node, types, true, rest)
+    }
+
+    #[track_caller]
     fn call_arguments_in(
         &mut self,
         node: Node,
@@ -165,15 +326,93 @@ impl Lowerer<'_> {
         rest: bool,
     ) -> Result<Vec<Expr>, String> {
         let arguments = node.arguments().into_iter().collect::<Vec<_>>();
-        if arguments
+        let first_spread = arguments
             .iter()
-            .any(|arg| arg.kind() == SyntaxKind::SpreadElement)
-        {
-            return Err(self.refuse(node, "iterable call spreads are not ported"));
+            .position(|arg| arg.kind() == SyntaxKind::SpreadElement);
+        if let Some(index) = first_spread {
+            if !rest {
+                if index == 0
+                    && arguments.len() == 1
+                    && arguments[0].expression().kind() == SyntaxKind::Identifier
+                {
+                    let source = self.expression(arguments[0].expression())?;
+                    if matches!(&source.ty(), Type::Array { elem } if **elem == Type::Dyn) {
+                        return types
+                            .iter()
+                            .enumerate()
+                            .map(|(position, ty)| {
+                                let value = Expr::ArrayGet {
+                                    arr: Box::new(source.clone()),
+                                    index: Box::new(Expr::NumLit {
+                                        value: position as f64,
+                                        spelling: None,
+                                        r#type: Type::F64,
+                                        loc: self.loc(node),
+                                    }),
+                                    r#type: Type::Dyn,
+                                    loc: self.loc(node),
+                                };
+                                self.coerce(value, ty.clone(), node)
+                            })
+                            .collect();
+                    }
+                }
+                return Err(self.refuse(node, "iterable call spreads are not ported"));
+            }
+            if types.is_empty() || index < types.len() - 1 {
+                return Err(
+                    self.refuse(node, "call spreads before fixed parameters are not ported")
+                );
+            }
         }
         if !rest && arguments.len() > types.len() {
-            return Err(self.refuse(node, "extra native call arguments are not ported"));
+            return Err(self.refuse(
+                node,
+                &format!(
+                    "extra native call arguments are not ported ({} supplied for {} ABI slots; preserve_values={preserve_values})",
+                    arguments.len(),
+                    types.len()
+                ),
+            ));
         }
+        let target = node.expression();
+        let checked_target = self.checker.get_type_at_location(target);
+        let checked_arities = self
+            .checker
+            .get_signatures_of_type(
+                checked_target,
+                source_frontend::prelude::SignatureKind::CALL,
+            )
+            .into_iter()
+            .map(|signature| self.checker.sig(signature).parameters.len())
+            .collect::<Vec<_>>();
+        let argument_caller = std::panic::Location::caller();
+        let (member_name, receiver_detail) = if target.kind()
+            == SyntaxKind::PropertyAccessExpression
+        {
+            let receiver = target.expression();
+            let symbol = self.symbol(receiver);
+            let binding = self
+                .bindings
+                .get(&symbol)
+                .or_else(|| self.module_bindings.get(&symbol))
+                .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
+                .map(|local| local.r#type.clone());
+            let projection = self
+                .projections
+                .get(&declarations::Key::of(receiver))
+                .cloned();
+            (
+                target.name().text().to_string(),
+                format!(
+                    "receiver={:?}/{:?}, symbol={symbol}, binding={binding:?}, projection={projection:?}",
+                    receiver.kind(),
+                    receiver.text(),
+                ),
+            )
+        } else {
+            (String::new(), "no property receiver".to_string())
+        };
         types
             .iter()
             .enumerate()
@@ -182,6 +421,13 @@ impl Lowerer<'_> {
                     let Type::Array { elem } = ty else {
                         return Err(self.refuse(node, "rest ABI needs a trailing native array"));
                     };
+                    if first_spread.is_some() {
+                        return self.array_spread_elements(
+                            node,
+                            arguments.iter().skip(index).copied().collect(),
+                            ty.clone(),
+                        );
+                    }
                     let elems = arguments
                         .iter()
                         .skip(index)
@@ -194,20 +440,7 @@ impl Lowerer<'_> {
                     });
                 }
                 if let Some(arg) = arguments.get(index) {
-                    if preserve_values
-                        && *ty == Type::Dyn
-                        && matches!(
-                            arg.kind(),
-                            SyntaxKind::ObjectLiteralExpression
-                                | SyntaxKind::ArrayLiteralExpression
-                        )
-                        && let Ok(layout @ (Type::Record { .. } | Type::Array { .. })) =
-                            self.ty(*arg)
-                    {
-                        let value = self.expected_expression(*arg, layout)?;
-                        return self.coerce(value, Type::Dyn, *arg);
-                    }
-                    self.expected_expression(*arg, ty.clone())
+                    self.expected_call_argument(*arg, ty.clone(), preserve_values)
                 } else if *ty == Type::Dyn || self.undefined_tag(ty).is_some() {
                     self.coerce(
                         Expr::UnitLit {
@@ -219,13 +452,44 @@ impl Lowerer<'_> {
                         node,
                     )
                 } else {
-                    Err(self.refuse(
-                        node,
-                        "missing argument has no native undefined representation",
-                    ))
+                    let message = format!(
+                            "missing argument {index} has no native undefined representation for {}; call node {:?}, target {:?}/{:?}.{:?}, checker type {:?}, checker call arities {:?}; {}; argument ABI requested at {}:{}:{}",
+                            self.contextual_type_description(ty),
+                            node.kind(),
+                            target.kind(),
+                            target.text(),
+                            member_name,
+                            checked_target,
+                            checked_arities,
+                            receiver_detail,
+                            argument_caller.file(),
+                            argument_caller.line(),
+                            argument_caller.column(),
+                        );
+                    Err(self.refuse(node, &message))
                 }
             })
             .collect()
+    }
+
+    pub(super) fn expected_call_argument(
+        &mut self,
+        argument: Node,
+        ty: Type,
+        preserve_value: bool,
+    ) -> Result<Expr, String> {
+        if preserve_value
+            && ty == Type::Dyn
+            && matches!(
+                argument.kind(),
+                SyntaxKind::ObjectLiteralExpression | SyntaxKind::ArrayLiteralExpression
+            )
+            && let Ok(layout @ (Type::Record { .. } | Type::Array { .. })) = self.ty(argument)
+        {
+            let value = self.expected_expression(argument, layout)?;
+            return self.coerce(value, Type::Dyn, argument);
+        }
+        self.expected_expression(argument, ty)
     }
 
     pub(super) fn bind_parameter(
@@ -293,11 +557,15 @@ impl Lowerer<'_> {
             .undefined_tag(&param.r#type)
             .filter(|_| !node.initializer().is_nil())
         else {
-            if parameter_abi::is_javascript(node) && self.optional_storage(&local.r#type) {
+            if self.optional_storage(&local.r#type) {
                 let source = self.checker.get_type_at_location(node.name());
                 if !self.source_has_undefined(source) {
-                    // A planned/contextual input can be wider than its JS
-                    // annotation. Read its live tags until a presence test.
+                    // A planned/contextual input can be wider than its source
+                    // annotation. This also occurs in TypeScript because
+                    // method parameters are bivariant: the emitted JavaScript
+                    // still receives `undefined` through an optional public
+                    // view. Read the live tags until a presence test instead
+                    // of projecting the checker's narrower static type.
                     self.var_types.insert(symbol, local.r#type.clone());
                     self.var_defined.remove(&symbol);
                 }
@@ -313,8 +581,33 @@ impl Lowerer<'_> {
             .collect::<Vec<_>>();
         // Lower exactly once against the complete call contract. Native builtin
         // result types can be wider than the checker declaration's default type.
-        let default = self.expected_expression(node.initializer(), param.r#type.clone())?;
-        let maybe_undefined = self.default_may_be_undefined(&default);
+        let default = self
+            .expected_expression(node.initializer(), param.r#type.clone())
+            .map_err(|error| {
+                format!(
+                    "{error}; while lowering default for parameter {:?} with ABI {}",
+                    node.name().text(),
+                    self.contextual_type_description(&param.r#type)
+                )
+            })?;
+        let source = self.checker.get_type_at_location(node.initializer());
+        let source_flags = self.checker.ty(source).flags;
+        // Contextual lowering uses the whole public parameter union, so a
+        // definitely-present default can acquire an artificial undefined arm
+        // in the IR.  The source type remains the authority here: default
+        // initializers only run for an omitted/undefined argument, and a
+        // non-any expression whose type excludes undefined produces the
+        // defined local binding used by the function body.
+        let source_proves_defined = !source_flags.intersects(TypeFlags::ANY | TypeFlags::UNKNOWN)
+            && !self.source_has_undefined(source);
+        let initializer = node.initializer();
+        let native_tty = initializer.kind() == SyntaxKind::PropertyAccessExpression
+            && initializer.name().text() == "isTTY"
+            && ["stdin", "stdout", "stderr"]
+                .iter()
+                .any(|stream| self.process_member(initializer.expression(), stream));
+        let maybe_undefined =
+            self.default_may_be_undefined(&default) && (!source_proves_defined || native_tty);
         let target = if maybe_undefined {
             param.r#type.clone()
         } else {

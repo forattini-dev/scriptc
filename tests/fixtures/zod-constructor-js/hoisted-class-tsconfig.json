@@ -1,0 +1,1 @@
+{"compilerOptions":{"allowJs":true,"checkJs":false,"strict":false,"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","skipLibCheck":true},"include":["./hoisted-class-capture.mjs","./hoisted-class-early.mjs","./hoisted-class-typeof.mjs","./hoisted-class-repeat.mjs"]}

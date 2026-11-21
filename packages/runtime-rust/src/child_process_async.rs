@@ -16,6 +16,7 @@ pub struct ChildData {
     spawn_errno: Option<i32>,
     pid: Option<u32>,
     exit_code: Option<f64>,
+    signal_code: Option<JsString>,
     bun_exited: Option<JsPromise<f64>>,
     bun_exit_code: Option<f64>,
     killed: bool,
@@ -38,7 +39,9 @@ pub struct ChildData {
 
 impl Trace for ChildData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
-        if let Some(promise) = &self.bun_exited { tracer.edge(promise); }
+        if let Some(promise) = &self.bun_exited {
+            tracer.edge(promise);
+        }
         for listener in &self.exit_listeners {
             (listener.trace)(tracer);
         }
@@ -69,6 +72,7 @@ impl ClearEdges for ChildData {
         self.close_listeners.clear();
         self.error_listeners.clear();
         self.spawn_error = None;
+        self.signal_code = None;
         self.spawn_errno = None;
         self.bun_exited = None;
         self.process = None;
@@ -78,7 +82,9 @@ impl ClearEdges for ChildData {
         self.ipc = None;
         self.pending_exit = None;
         #[cfg(windows)]
-        { self.windows_exit_signal = None; }
+        {
+            self.windows_exit_signal = None;
+        }
         self.settled = true;
         self.referenced = false;
     }
@@ -153,10 +159,33 @@ fn child_command(
     arguments: &JsArray<JsString>,
     detached: bool,
     cwd: &JsString,
+    shell: bool,
 ) -> std::io::Result<std::process::Command> {
     use std::process::Command;
 
     child_validate_self_invocation(command, arguments);
+
+    if shell {
+        if array_len(arguments) != 0.0 {
+            throw_type_error("scriptc: shell spawn with argv is not ported".into());
+        }
+        #[cfg(windows)]
+        let mut child_command = {
+            let mut shell = Command::new(
+                std::env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into()),
+            );
+            shell.args(["/d", "/s", "/c"]);
+            shell
+        };
+        #[cfg(not(windows))]
+        let mut child_command = {
+            let mut shell = Command::new("/bin/sh");
+            shell.arg("-c");
+            shell
+        };
+        child_command.arg(command.to_utf8_lossy());
+        return Ok(child_command);
+    }
 
     #[cfg(unix)]
     if let Some(launcher) = detached.then(detached_launcher).flatten() {
@@ -167,7 +196,12 @@ fn child_command(
             child_command.arg(SELF_REEXEC_MARKER);
         }
         arguments.with(|arguments| {
-            child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
+            child_command.args(
+                arguments
+                    .elements()
+                    .iter()
+                    .map(|value| value.to_utf8_lossy()),
+            );
         });
         return Ok(child_command);
     }
@@ -182,7 +216,12 @@ fn child_command(
         child_command.arg(SELF_REEXEC_MARKER);
     }
     arguments.with(|arguments| {
-        child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
+        child_command.args(
+            arguments
+                .elements()
+                .iter()
+                .map(|value| value.to_utf8_lossy()),
+        );
     });
     #[cfg(unix)]
     if detached {
@@ -262,6 +301,7 @@ fn child_register(
         spawn_errno,
         pid,
         exit_code: None,
+        signal_code: None,
         bun_exited: None,
         bun_exit_code: None,
         killed: false,
@@ -316,16 +356,69 @@ pub fn child_spawn_options(
     env_pairs: &JsArray<JsString>,
     cwd: &JsString,
 ) -> JsChild {
-    child_spawn_configured(command, arguments, stdin_mode, stdout_mode, stderr_mode,
-        stdout_fd, stderr_fd, detached, has_env, env_pairs, cwd, false)
+    child_spawn_configured(
+        command,
+        arguments,
+        stdin_mode,
+        stdout_mode,
+        stderr_mode,
+        stdout_fd,
+        stderr_fd,
+        detached,
+        has_env,
+        env_pairs,
+        cwd,
+        false,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn child_spawn_node_options(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    stdin_mode: f64,
+    stdout_mode: f64,
+    stderr_mode: f64,
+    detached: bool,
+    has_env: bool,
+    env_pairs: &JsArray<JsString>,
+    cwd: &JsString,
+    windows_hide: bool,
+    shell: bool,
+) -> JsChild {
+    child_spawn_configured(
+        command,
+        arguments,
+        stdin_mode,
+        stdout_mode,
+        stderr_mode,
+        0.0,
+        0.0,
+        detached,
+        has_env,
+        env_pairs,
+        cwd,
+        windows_hide,
+        shell,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
 fn child_spawn_configured(
-    command: &JsString, arguments: &JsArray<JsString>,
-    stdin_mode: f64, stdout_mode: f64, stderr_mode: f64,
-    stdout_fd: f64, stderr_fd: f64, detached: bool, has_env: bool,
-    env_pairs: &JsArray<JsString>, cwd: &JsString, windows_hide: bool,
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    stdin_mode: f64,
+    stdout_mode: f64,
+    stderr_mode: f64,
+    stdout_fd: f64,
+    stderr_fd: f64,
+    detached: bool,
+    has_env: bool,
+    env_pairs: &JsArray<JsString>,
+    cwd: &JsString,
+    windows_hide: bool,
+    shell: bool,
 ) -> JsChild {
     use std::io::Write;
     use std::process::Stdio;
@@ -337,7 +430,7 @@ fn child_spawn_configured(
         let _ = std::io::stdout().flush();
         let _ = std::io::stderr().flush();
     }
-    let mut child_command = match child_command(command, arguments, detached, cwd) {
+    let mut child_command = match child_command(command, arguments, detached, cwd, shell) {
         Ok(child_command) => child_command,
         Err(error) => {
             return child_register(
@@ -526,6 +619,10 @@ pub fn child_exit_code(child: &JsChild) -> Option<f64> {
     child.with(|child| child.exit_code)
 }
 
+pub fn child_signal_code(child: &JsChild) -> Option<JsString> {
+    child.with(|child| child.signal_code.clone())
+}
+
 pub fn child_killed(child: &JsChild) -> bool {
     child.with(|child| child.killed)
 }
@@ -613,16 +710,30 @@ fn child_signal_number(name: &str) -> Option<i32> {
 fn child_send_signal(child: &JsChild, signal: &str) -> bool {
     #[cfg(windows)]
     {
-        let number = signal.parse::<i32>().ok().or_else(|| child_signal_number(signal));
-        let Some(number @ (0 | 2 | 3 | 9 | 15)) = number else { return false; };
+        let number = signal
+            .parse::<i32>()
+            .ok()
+            .or_else(|| child_signal_number(signal));
+        let Some(number @ (0 | 2 | 3 | 9 | 15)) = number else {
+            return false;
+        };
         child.with_mut(|child| {
-            let Some(process) = child.process.as_mut() else { return false; };
-            if !matches!(process.try_wait(), Ok(None)) { return false; }
-            if number != 0 && process.kill().is_err() { return false; }
+            let Some(process) = child.process.as_mut() else {
+                return false;
+            };
+            if !matches!(process.try_wait(), Ok(None)) {
+                return false;
+            }
+            if number != 0 && process.kill().is_err() {
+                return false;
+            }
             child.killed = true;
             if number != 0 {
                 child.windows_exit_signal = Some(string(match number {
-                    2 => "SIGINT", 3 => "SIGQUIT", 9 => "SIGKILL", _ => "SIGTERM",
+                    2 => "SIGINT",
+                    3 => "SIGQUIT",
+                    9 => "SIGKILL",
+                    _ => "SIGTERM",
                 }));
             }
             true
@@ -630,14 +741,15 @@ fn child_send_signal(child: &JsChild, signal: &str) -> bool {
     }
     #[cfg(not(windows))]
     {
-    let Some(pid) = child.with(|child| child.process.as_ref().map(std::process::Child::id)) else {
-        return false;
-    };
-    let sent = process_signal_send(pid as i32, signal).is_ok();
-    if sent {
-        child.with_mut(|child| child.killed = true);
-    }
-    sent
+        let Some(pid) = child.with(|child| child.process.as_ref().map(std::process::Child::id))
+        else {
+            return false;
+        };
+        let sent = process_signal_send(pid as i32, signal).is_ok();
+        if sent {
+            child.with_mut(|child| child.killed = true);
+        }
+        sent
     }
 }
 
@@ -656,10 +768,65 @@ fn process_kill_pid(pid: f64) -> i32 {
     if pid.is_finite() && pid.fract() == 0.0 && pid >= i32::MIN as f64 && pid <= i32::MAX as f64 {
         return pid as i32;
     }
-    throw_type_error(format!(
-        "The \"pid\" argument must be of type number. Received type number ({})",
-        format_number(pid)
-    ))
+    throw_type_error_code(
+        format!(
+            "The \"pid\" argument must be of type number. Received type number ({})",
+            format_number(pid)
+        ),
+        "ERR_INVALID_ARG_TYPE",
+    )
+}
+
+#[cfg(unix)]
+fn process_probe(pid: i32) -> Result<(), &'static str> {
+    use rustix::process::{
+        Pid, test_kill_current_process_group, test_kill_process, test_kill_process_group,
+    };
+    let result = if pid == 0 {
+        test_kill_current_process_group()
+    } else if pid > 0 {
+        test_kill_process(Pid::from_raw(pid).expect("positive pid"))
+    } else if let Some(group) = pid.checked_neg().and_then(Pid::from_raw) {
+        test_kill_process_group(group)
+    } else {
+        return Err("ESRCH");
+    };
+    result.map_err(|error| match error {
+        rustix::io::Errno::SRCH => "ESRCH",
+        rustix::io::Errno::PERM => "EPERM",
+        _ => "EIO",
+    })
+}
+
+#[cfg(windows)]
+fn process_probe(pid: i32) -> Result<(), &'static str> {
+    use winsafe::{HPROCESS, co, prelude::*};
+    if pid == 0 {
+        return Ok(());
+    }
+    let access = co::PROCESS::TERMINATE | co::PROCESS::QUERY_INFORMATION | co::PROCESS::SYNCHRONIZE;
+    let handle = HPROCESS::OpenProcess(access, false, pid as u32).map_err(|error| {
+        if error == co::ERROR::INVALID_PARAMETER {
+            "ESRCH"
+        } else if error == co::ERROR::ACCESS_DENIED {
+            "EPERM"
+        } else {
+            "EIO"
+        }
+    })?;
+    if handle.GetExitCodeProcess().map_err(|_| "EIO")? != 259 {
+        return Err("ESRCH");
+    }
+    match handle.WaitForSingleObject(Some(0)).map_err(|_| "EIO")? {
+        co::WAIT::TIMEOUT => Ok(()),
+        co::WAIT::OBJECT_0 => Err("ESRCH"),
+        _ => Err("EIO"),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn process_probe(_pid: i32) -> Result<(), &'static str> {
+    Err("ENOSYS")
 }
 
 fn process_kill_send(pid: i32, signal: &str) -> bool {
@@ -678,7 +845,14 @@ pub fn process_kill_named(pid: f64, signal: &JsString) -> bool {
 }
 
 pub fn process_kill_num(pid: f64, signal: f64) -> bool {
-    process_kill_send(process_kill_pid(pid), &(signal as i32).to_string())
+    let pid = process_kill_pid(pid);
+    if signal == 0.0 {
+        return match process_probe(pid) {
+            Ok(()) => true,
+            Err(code) => throw_error_code(format!("kill {code}"), code),
+        };
+    }
+    process_kill_send(pid, &(signal as i32).to_string())
 }
 
 pub fn child_on_exit(
@@ -753,17 +927,28 @@ fn child_poll(child: &JsChild) -> Option<ChildOutcome> {
             #[cfg(unix)]
             {
                 use std::os::unix::process::ExitStatusExt;
-                child.bun_exit_code = status.code().map(f64::from)
+                child.bun_exit_code = status
+                    .code()
+                    .map(f64::from)
                     .or_else(|| status.signal().map(|signal| f64::from(128 + signal)));
             }
             #[cfg(not(unix))]
-            { child.bun_exit_code = status.code().map(f64::from); }
+            {
+                child.bun_exit_code = status.code().map(f64::from);
+            }
         }
         let signal = child_exit_signal(&status);
         #[cfg(windows)]
         let signal = child.windows_exit_signal.take().or(signal);
-        if child.bun_exited.is_some() && signal.is_some() { child.killed = true; }
-        child.exit_code = if signal.is_some() { None } else { status.code().map(f64::from) };
+        child.signal_code = signal.clone();
+        if child.bun_exited.is_some() && signal.is_some() {
+            child.killed = true;
+        }
+        child.exit_code = if signal.is_some() {
+            None
+        } else {
+            status.code().map(f64::from)
+        };
         let outcome = (child.exit_code, signal);
         if child.ipc.as_ref().is_some_and(child_ipc_open) {
             child.pending_exit = Some(outcome);
@@ -821,7 +1006,10 @@ fn children_dispatch_one() -> bool {
                 if let Some(code) = child.with(|child| child.bun_exit_code) {
                     let _ = promise_fulfill(&promise, code);
                 } else {
-                    let _ = promise_reject(&promise, caught_value(error_new("Error", string("Failed to wait for subprocess"))));
+                    let _ = promise_reject(
+                        &promise,
+                        caught_value(error_new("Error", string("Failed to wait for subprocess"))),
+                    );
                 }
             }
             drop(error_listeners);

@@ -16,6 +16,11 @@ pub fn string_iteration_prefix(value: &JsString, count: usize) -> Vec<JsString> 
     output
 }
 
+pub fn string_iteration_array(value: &JsString) -> JsArray<JsString> {
+    let count = value.encode_utf16().count();
+    array_new(string_iteration_prefix(value, count))
+}
+
 fn string_change_case(value: &JsString, upper: bool) -> JsString {
     let mut output = JsStringBuilder::new();
     let mut run = String::new();

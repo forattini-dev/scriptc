@@ -91,3 +91,21 @@ pub fn bun_subprocess_output<T: HeapValue>(
     web_stream_start(&stream, &promise_resolved(empty));
     Some(stream)
 }
+
+/// Compose a Bun subprocess pipe with a fresh Response and consume it as text.
+/// The cached pipe stream preserves its lock and disturbance across calls.
+pub fn bun_subprocess_response_text(child: &JsChild, stderr: bool) -> JsPromise<JsString> {
+    let stream = bun_subprocess_output(child, stderr, |bytes| bytes, bytes_empty::<u8>());
+    let response = match stream {
+        Some(stream) => {
+            // Bun's pipe-specific constructor error is independent of the
+            // surrounding program's default Node compatibility target.
+            if web_stream_disturbed(&stream) || web_stream_locked(&stream) {
+                throw_value(error_new("Error", string("ReadableStream has already been used")));
+            }
+            fetch_response_new_stream(&stream, |bytes| bytes)
+        }
+        None => fetch_response_new_empty(),
+    };
+    fetch_response_text(&response)
+}

@@ -8,8 +8,10 @@ impl Lowerer<'_> {
     ) -> Result<Vec<Stmt>, String> {
         let mut body = Vec::new();
         for method in self.classes.definitions[owner].node.members() {
-            if method.kind() != SyntaxKind::MethodDeclaration
-                || method.name().kind() != SyntaxKind::PrivateIdentifier
+            if !matches!(
+                method.kind(),
+                SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor
+            ) || method.name().kind() != SyntaxKind::PrivateIdentifier
             {
                 continue;
             }
@@ -32,7 +34,7 @@ impl Lowerer<'_> {
         Ok(body)
     }
 
-    fn request_private_method(&mut self, slot: &Slot) -> Result<Signature, String> {
+    pub(super) fn request_private_method(&mut self, slot: &Slot) -> Result<Signature, String> {
         if let Some(signature) = self.classes.private_method_signatures.get(&slot.global.id) {
             return Ok(signature.clone());
         }
@@ -79,6 +81,59 @@ impl Lowerer<'_> {
     ) -> Result<Option<Expr>, String> {
         let member = call.expression();
         let slot = self.private_slot(member.name())?;
+        if matches!(
+            slot.declaration.kind(),
+            SyntaxKind::PropertyDeclaration | SyntaxKind::GetAccessor
+        ) {
+            if !call.question_dot_token().is_nil() {
+                return Err(self.refuse(call, "optional private field calls are not ported"));
+            }
+            // PrivateGet is a reference: evaluate the receiver once, perform
+            // its brand check before the arguments, and keep it as `this`.
+            let mut stmts = Vec::new();
+            let receiver = self.private_receiver(member.expression())?;
+            let receiver = self.update_temp(receiver, &mut stmts, member.expression());
+            let target = if slot.declaration.kind() == SyntaxKind::GetAccessor {
+                let signature = self.request_private_method(&slot)?;
+                let checked = self.private_access(
+                    &slot,
+                    receiver.clone(),
+                    None,
+                    Access::MethodReceiver,
+                    member,
+                )?;
+                let value = Expr::Call {
+                    callee: signature.name,
+                    args: vec![checked],
+                    r#type: signature.return_type,
+                    loc: self.loc(member),
+                };
+                self.coerce(value, Type::Dyn, member)?
+            } else {
+                self.private_access(&slot, receiver.clone(), None, Access::Read, member)?
+            };
+            let target = self.update_temp(target, &mut stmts, member);
+            let args = self.array_spread_elements(
+                call,
+                call.arguments().into_iter().collect(),
+                Type::Array {
+                    elem: Box::new(Type::Dyn),
+                },
+            )?;
+            let args = self.coerce(args, Type::Dyn, call)?;
+            let receiver = self.coerce(receiver, Type::Dyn, member.expression())?;
+            return Ok(Some(Expr::Sequence {
+                stmts,
+                result: Box::new(Expr::LibCall {
+                    r#fn: "dyn.reflectApply".into(),
+                    args: vec![target, receiver, args],
+                    r#type: Type::Dyn,
+                    loc: self.loc(call),
+                }),
+                r#type: Type::Dyn,
+                loc: self.loc(call),
+            }));
+        }
         if slot.declaration.kind() != SyntaxKind::MethodDeclaration {
             return Ok(None);
         }

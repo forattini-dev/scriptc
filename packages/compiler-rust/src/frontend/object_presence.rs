@@ -4,6 +4,52 @@ use helpers::Helper;
 
 impl Lowerer<'_> {
     pub(super) fn object_presence(&mut self, node: Node) -> Result<Expr, String> {
+        let key = primitives::primitive_source(node.left());
+        let receiver = primitives::primitive_source(node.right());
+        let os_signals = if receiver.kind() == SyntaxKind::PropertyAccessExpression
+            && receiver.name().text() == "signals"
+            && receiver.expression().kind() == SyntaxKind::Identifier
+        {
+            let symbol = self.native_symbol(receiver.expression());
+            self.native_functions
+                .get(&symbol)
+                .is_some_and(|(module, member)| *module == "os" && member == "constants")
+        } else {
+            false
+        };
+        if os_signals {
+            let signal = self.expected_expression(key, Type::String)?;
+            return Ok(Expr::LibCall {
+                r#fn: "os.signalKnown".into(),
+                args: vec![signal],
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            });
+        }
+        if matches!(
+            key.kind(),
+            SyntaxKind::StringLiteral | SyntaxKind::NoSubstitutionTemplateLiteral
+        ) && key.text() == "captureStackTrace"
+            && receiver.kind() == SyntaxKind::Identifier
+            && self.error_capture_stack_trace_constructor(receiver)
+        {
+            // The native Error value deliberately exposes the Node-compatible
+            // captureStackTrace capability handled by classes::values. Its
+            // membership test is therefore statically true. Recognition is
+            // restricted to the declaration-identified global Error binding,
+            // whose identifier evaluation has no user-visible side effects.
+            return Ok(Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            });
+        }
+        if let Some(value) = self.class_symbol_presence(node)? {
+            return Ok(value);
+        }
+        if let Some(value) = self.guaranteed_class_string_presence(node)? {
+            return Ok(value);
+        }
         let receiver = receivers::reference_node(node.right());
         let symbol = self.symbol(receiver);
         if receiver.kind() == SyntaxKind::Identifier && self.primitive_symbol(symbol, "JSON", None)
@@ -106,29 +152,19 @@ impl Lowerer<'_> {
             r#type: Type::Bool,
             loc: helper.loc(),
         };
-        // Represented ordinary records cannot acquire symbol slots. Still
-        // validate their owning layout before answering false: an erased
-        // array, class, function or other exotic must retain its explicit fence.
+        // Symbol presence is independent of the value (which may be undefined).
+        // Exotic receivers remain fenced by the native symbol presence helper.
         body.push(Stmt::If {
             cond: test(&key_slot, "symbol"),
-            then: vec![
-                Stmt::Expression {
-                    expr: membership(Expr::StrLit {
-                        value: "".into(),
-                        r#type: Type::String,
-                        loc: helper.loc(),
-                    }),
+            then: vec![Stmt::Return {
+                value: Some(Expr::LibCall {
+                    r#fn: "dyn.hasSymbolKey".into(),
+                    args: vec![helper.read(&object_slot), helper.read(&key_slot)],
+                    r#type: Type::Bool,
                     loc: helper.loc(),
-                },
-                Stmt::Return {
-                    value: Some(Expr::BoolLit {
-                        value: false,
-                        r#type: Type::Bool,
-                        loc: helper.loc(),
-                    }),
-                    loc: helper.loc(),
-                },
-            ],
+                }),
+                loc: helper.loc(),
+            }],
             else_: None,
             loc: helper.loc(),
         });
@@ -149,6 +185,53 @@ impl Lowerer<'_> {
         })
     }
 
+    fn guaranteed_class_string_presence(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let key = primitives::primitive_source(node.left());
+        if !matches!(
+            key.kind(),
+            SyntaxKind::StringLiteral | SyntaxKind::NoSubstitutionTemplateLiteral
+        ) {
+            return Ok(None);
+        }
+        let receiver_node = primitives::primitive_source(node.right());
+        let represented = if receiver_node.kind() == SyntaxKind::Identifier {
+            let symbol = self.symbol(receiver_node);
+            self.bindings
+                .get(&symbol)
+                .or_else(|| self.module_bindings.get(&symbol))
+                .or_else(|| self.outer.iter().rev().find_map(|scope| scope.get(&symbol)))
+                .map(|local| local.r#type.clone())
+                .or_else(|| self.ty(receiver_node).ok())
+        } else {
+            self.ty(receiver_node).ok()
+        };
+        let Some(Type::Object { class_name }) = represented else {
+            return Ok(None);
+        };
+        if !self
+            .classes
+            .guaranteed_string_presence(&class_name, key.text())
+        {
+            return Ok(None);
+        }
+        // The literal key has no evaluation hooks. Preserve evaluation of the
+        // receiver expression before returning the proven own/prototype hit.
+        let receiver = self.expression(receiver_node)?;
+        Ok(Some(Expr::Sequence {
+            stmts: vec![Stmt::Expression {
+                expr: receiver,
+                loc: self.loc(receiver_node),
+            }],
+            result: Box::new(Expr::BoolLit {
+                value: true,
+                r#type: Type::Bool,
+                loc: self.loc(node),
+            }),
+            r#type: Type::Bool,
+            loc: self.loc(node),
+        }))
+    }
+
     fn presence_receiver(&self, ty: &Type) -> bool {
         match ty {
             Type::Dyn
@@ -160,7 +243,10 @@ impl Lowerer<'_> {
             | Type::Symbol
             | Type::Null
             | Type::Undefined
-            | Type::Void => true,
+            | Type::Void
+            | Type::Generator { .. }
+            | Type::Bytes { .. }
+            | Type::Object { .. } => true,
             Type::Record { shape_id } => {
                 !self.records[*shape_id].tuple
                     && !self.enum_shape(*shape_id)

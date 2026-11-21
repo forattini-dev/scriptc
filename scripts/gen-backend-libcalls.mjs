@@ -26,11 +26,13 @@
  *       (`startsWith("url.")`) and names the member tail as its own
  *       literal — the one other dispatch idiom in the tree (the Rust
  *       backend's URL component getters), which rule (1) alone would
- *       under-report.
+ *       under-report; or
+ *   (3) the emitter dispatches through the shared well-known-symbol map,
+ *       in which case the names in that map are recognized.
  *
  * Rule (2) is not a heuristic reaching for extra hits: over the current
  * tree it adds exactly the eleven Rust `url.*` component getters and
- * nothing else. Both rules are syntactic, so the table is a claim about
+ * nothing else. These rules describe named emitter dispatch, so the table is a claim about
  * what each emitter NAMES, never about which argument shapes it accepts —
  * the manifest's coverage notes say so, and the arity/shape fences the
  * emitters raise per site stay outside this projection.
@@ -44,6 +46,7 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { LIB_FN_SIGS } from "../packages/compiler/src/ir/validate.js";
+import { WELL_KNOWN_SYMBOLS } from "../packages/compiler/src/ir/well-known-symbols.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outPath = path.join(root, "packages/compiler/src/coverage/backend-libcalls.ts");
@@ -78,6 +81,9 @@ function recognized(dir, names) {
   const found = new Set();
   for (const file of sources(dir)) {
     const text = readFileSync(file, "utf8");
+    if (text.includes("wellKnownSymbolVariant(expr.fn)")) {
+      for (const name of Object.keys(WELL_KNOWN_SYMBOLS)) if (names.includes(name)) found.add(name);
+    }
     const literals = new Set();
     for (const m of text.matchAll(LITERAL)) literals.add(m[1]);
     const prefixes = new Set();

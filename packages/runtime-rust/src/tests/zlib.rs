@@ -38,7 +38,7 @@ fn wrapped_zlib_results_are_node_buffers() {
 fn gzip_matches_node_framing() {
     let text = b"hello hello hello hello compression works";
     let zipped = bytes_u8_values(&zlib_gzip_sync(&bytes_from_elements(text.to_vec())));
-    assert_eq!(&zipped[..10], &[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3]);
+    assert_eq!(&zipped[..10], &[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, if cfg!(windows) { 10 } else { 3 }]);
     // CRC32 and ISIZE little-endian, exactly Node's trailer for this input.
     assert_eq!(&zipped[zipped.len() - 8..], &[0x12, 0xce, 0x94, 0xd8, 41, 0, 0, 0]);
 

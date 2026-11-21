@@ -25,6 +25,8 @@ try {
   writeFileSync(join(root, "marker"), "fixture");
   const proc = globalThis.Bun.spawn(command(), { stdout: "ignore", cwd: cwd(), env: environment(), stderr: "ignore" });
   console.log("environment", await proc.exited, order);
+  const env = environment();
+  console.log("shorthand env", await Bun.spawn(command(), { env, stdout: "ignore", stderr: "ignore" }).exited);
   process.env.SC_BUN_FROM_PARENT = "kept";
   const sharedEnv = { ...process.env, SC_BUN_SPAWN: "before" };
   function mutateCwd(): string { sharedEnv.SC_BUN_SPAWN = "present"; return root; }

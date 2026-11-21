@@ -345,6 +345,39 @@ pub fn http_request_header(request: &JsHttpRequest, name: &JsString) -> Option<J
     })
 }
 
+pub fn http_request_header_has(request: &JsHttpRequest, name: &JsString) -> bool {
+    let lower = name.to_ascii_lowercase();
+    request.with(|request| request.headers.iter().any(|(_, key, _)| *key == lower))
+}
+
+pub fn http_request_header_append(
+    request: &JsHttpRequest,
+    name: &JsString,
+    value: &JsString,
+) {
+    let lower = name.to_ascii_lowercase();
+    request.with_mut(|request| {
+        request
+            .headers
+            .push((name.clone(), lower.into(), value.clone()));
+    });
+}
+
+pub fn http_request_header_set(request: &JsHttpRequest, name: &JsString, value: &JsString) {
+    let lower = name.to_ascii_lowercase();
+    request.with_mut(|request| {
+        request.headers.retain(|(_, key, _)| *key != lower);
+        request
+            .headers
+            .push((name.clone(), lower.into(), value.clone()));
+    });
+}
+
+pub fn http_request_header_delete(request: &JsHttpRequest, name: &JsString) {
+    let lower = name.to_ascii_lowercase();
+    request.with_mut(|request| request.headers.retain(|(_, key, _)| *key != lower));
+}
+
 pub fn http_request_headers(request: &JsHttpRequest) -> Vec<(JsString, JsString)> {
     request.with(|request| {
         let mut output = Vec::new();

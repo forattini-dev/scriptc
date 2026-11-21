@@ -15,13 +15,14 @@ impl runtime::NativeJsonValue for NativeValue {
             runtime::JsonNode::Object(values) => {
                 let mut entries = Vec::new();
                 for (key,value) in values { js_data_set(&mut entries, key, Self::json_from_node(value)); }
-                Self::Object(runtime::Gc::new(NativeMap { null_prototype: false, entries }))
+                Self::Object(runtime::Gc::new(NativeMap { null_prototype: false, symbol_properties: None, entries, hash_index: NativeHashIndex::default() }))
             }
         }
     }
-    fn json_root(value: Self) -> Self { Self::Object(runtime::Gc::new(NativeMap { null_prototype: false, entries: vec![(runtime::JsString::default(), value)] })) }
+    fn json_root(value: Self) -> Self { Self::Object(runtime::Gc::new(NativeMap { null_prototype: false, symbol_properties: None, entries: vec![(runtime::JsString::default(), value)], hash_index: NativeHashIndex::default() })) }
     fn json_get(&self, key: &runtime::JsString) -> Self { native_value_get(self.clone(), key.clone()) }
     fn json_define(&self, key: &runtime::JsString, value: Self) {
+        if native_getter_has_any(self) { runtime::throw_error_code("scriptc SC1031: JSON reviver writes with accessors are not ported".into(), "SC1031"); }
         match self {
             Self::Object(object) | Self::Record(_, object) => object.with_mut(|data| js_data_set(&mut data.entries, key.clone(), value)),
             Self::Array(array) => runtime::array_set(array, key.parse::<f64>().expect("JSON array index"), value),
@@ -29,6 +30,7 @@ impl runtime::NativeJsonValue for NativeValue {
         }
     }
     fn json_delete(&self, key: &runtime::JsString) {
+        if native_getter_has_any(self) { runtime::throw_error_code("scriptc SC1031: JSON reviver deletion with accessors is not ported".into(), "SC1031"); }
         match self {
             Self::Object(object) | Self::Record(_, object) => object.with_mut(|data| data.entries.retain(|(name, _)| name != key)),
             Self::Array(array) => { runtime::array_delete(array, key.parse::<f64>().expect("JSON array index")); },
@@ -38,6 +40,7 @@ impl runtime::NativeJsonValue for NativeValue {
     fn json_keys(&self) -> Vec<runtime::JsString> {
         let keys = match self { Self::Record(..) | Self::Object(..) => native_value_own_keys(self), _ => native_json_typed_keys(self) };
         let mut keys = keys;
+        keys.retain(|key| native_getter_enumerable(self, key));
         keys.sort_by_key(|key| key.parse::<u32>().ok().filter(|i| *i != u32::MAX && *key == i.to_string()).map(|i| (0,i)).unwrap_or((1,0)));
         keys.into_iter().map(runtime::JsString::from).collect()
     }

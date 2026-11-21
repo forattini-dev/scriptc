@@ -193,7 +193,7 @@ impl Lowerer<'_> {
         }
     }
 
-    fn numeric_result_type(&mut self, left: &Type, right: &Type, op: &str) -> Type {
+    pub(super) fn numeric_result_type(&mut self, left: &Type, right: &Type, op: &str) -> Type {
         // Every successful unsigned shift is a Number, including erased inputs.
         if op == ">>>" {
             return Type::F64;
@@ -214,6 +214,9 @@ impl Lowerer<'_> {
     /// Checker-only `number` inference for `any - any` loses valid BigInts.
     pub(super) fn numeric_initializer_type(&mut self, node: Node) -> Option<Type> {
         let node = receivers::reference_node(node);
+        if node.is_nil() {
+            return None;
+        }
         if node.kind() == SyntaxKind::PrefixUnaryExpression
             && node.operator() == SyntaxKind::TildeToken
         {
@@ -305,6 +308,9 @@ impl Lowerer<'_> {
 
     fn numeric_source_type(&mut self, node: Node) -> Option<Type> {
         let node = receivers::reference_node(node);
+        if node.is_nil() {
+            return None;
+        }
         if let Some(ty) = self.numeric_initializer_type(node) {
             return Some(ty);
         }

@@ -51,3 +51,8 @@ tmp-*/
 .red/tmp/
 .env*.local
 packages/compiler/native-checker/bin/
+
+# Agent probe scratch (emitted IR/Rust/binaries and captured outputs), never sources.
+.codex-*
+/packages/compiler-rust/targets/*
+!/packages/compiler-rust/targets/reddb*.json

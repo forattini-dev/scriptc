@@ -22,7 +22,7 @@ export function nativeRecordShapeSupported(
     const scalar = (type: IrType): boolean => type.kind === "union"
       ? unions.get(type.unionId)?.arms.every(scalar) ?? false
       : (type.kind === "bytes" && type.elem === "u8") ||
-        ["effect", "date", "bigint", "symbol", "f64", "bool", "string", "nullT", "undefinedT", "dyn"].includes(type.kind);
+        ["effect", "date", "regex", "url", "bigint", "symbol", "f64", "bool", "string", "nullT", "undefinedT", "dyn"].includes(type.kind);
     const optionalArray = (type: IrType): boolean => {
       const arms = type.kind === "union" ? unions.get(type.unionId)?.arms : undefined;
       return arms !== undefined && arms.filter(arm => arm.kind === "array").length === 1 &&
@@ -40,10 +40,17 @@ export function nativeRecordShapeSupported(
         (union !== undefined && validRecordDiscriminant(union, getRecord))) &&
         arms.every(arm => arm.kind === "undefinedT" || arm.kind === "nullT" || record(arm));
     };
-    const methodValue = (type: IrType): boolean => type.kind === "union"
-      ? scalar(type) || optionalArray(type) || optionalRecord(type)
+    const optionalCallable = (type: IrType): boolean => {
+      const arms = type.kind === "union" ? unions.get(type.unionId)?.arms : undefined;
+      return arms !== undefined && arms.filter(arm => arm.kind === "func").length === 1 &&
+        arms.every(arm => arm.kind === "undefinedT" || arm.kind === "nullT" || method(arm));
+    };
+    const methodValue = (type: IrType): boolean => type.kind === "promise"
+      ? type.inner.kind === "void" || methodValue(type.inner)
+      : type.kind === "func" ? method(type) : type.kind === "union"
+      ? scalar(type) || optionalArray(type) || optionalRecord(type) || optionalCallable(type)
       : record(type) || array(type) ||
-        (type.kind === "bytes" && type.elem === "u8") || ["effect", "date", "bigint", "symbol", "f64", "bool", "string", "dyn"].includes(type.kind);
+        (type.kind === "bytes" && type.elem === "u8") || ["effect", "date", "regex", "url", "bigint", "symbol", "f64", "bool", "string", "dyn"].includes(type.kind);
     const method = (type: IrType): boolean => type.kind === "func" && type.rest !== true &&
       type.params.every(methodValue) && (type.ret.kind === "void" || methodValue(type.ret));
     return !shape.tuple && (shape.indexValue === undefined || shape.indexValue.kind === "dyn" ||
@@ -137,4 +144,30 @@ export function nativeIndexedRecordValue(
   return shape?.fields.length === 0 && shape.indexValue !== undefined &&
     nativeRecordShapeSupported(shape, { get: getUnion }, getRecord)
     ? shape.indexValue : undefined;
+}
+
+/** Values whose Rust checked-dynamic representation retains the original
+ * reference, including every argument/result of a callable boundary. */
+export function nativeReferenceSupported(
+  type: IrType,
+  getRecord: (id: string) => IrRecordShape | undefined,
+  getUnion: (id: string) => IrUnionDef | undefined,
+): boolean {
+  if (nativeRecordCheckSupported(type, getRecord, getUnion) || nativeArrayViewSupported(type, getRecord, getUnion)) return true;
+  if (type.kind === "promise") return nativeReferenceSupported(type.inner, getRecord, getUnion);
+  if (type.kind === "func") return type.rest !== true &&
+    type.params.every(param => nativeReferenceSupported(param, getRecord, getUnion)) &&
+    nativeReferenceSupported(type.ret, getRecord, getUnion);
+  if (type.kind === "union") {
+    const arms = getUnion(type.unionId)?.arms;
+    if (!arms) return false;
+    if (arms.some(arm => arm.kind === "array" || arm.kind === "record")) {
+      return arms.filter(arm => arm.kind === "array").length === 1 &&
+        arms.every(arm => arm.kind === "nullT" || arm.kind === "undefinedT" ||
+          arm.kind === "array" && nativeArrayViewSupported(arm, getRecord, getUnion));
+    }
+    return arms.every(arm => nativeReferenceSupported(arm, getRecord, getUnion));
+  }
+  return type.kind === "bytes" && type.elem === "u8" ||
+    ["effect", "date", "bigint", "symbol", "regex", "url", "f64", "bool", "string", "nullT", "undefinedT", "void", "jsval", "dyn"].includes(type.kind);
 }

@@ -81,6 +81,7 @@ impl Lowerer<'_> {
             resolving: false,
             signature: None,
             token: None,
+            captures: Vec::new(),
         });
         self.classes.layouts.push(Some(ir::Class {
             name: class_name,
@@ -88,10 +89,12 @@ impl Lowerer<'_> {
             runtime: false,
             base: None,
             fields: vec![],
+            captures: vec![],
             methods: vec![],
             method_names: vec!["valueOf".into()],
             symbol_methods: vec![],
-            loc,
+            symbol_brand: None,
+            loc: loc.clone(),
         }));
         let global = ir::Global {
             id: format!("%g.boxed.{name}"),
@@ -100,6 +103,7 @@ impl Lowerer<'_> {
                 class_name: weak_maps::CLASS.into(),
             },
             mutable: false,
+            loc,
         };
         self.globals.push(global.clone());
         self.classes.boxed_slots.push((name.into(), global));
@@ -417,6 +421,28 @@ impl Lowerer<'_> {
             loc: self.loc(site),
         })
     }
+    pub(in crate::frontend) fn standard_string_prototype_member(&mut self, node: Node) -> bool {
+        if node.kind() != SyntaxKind::PropertyAccessExpression
+            || crate::string_builtins::by_method(node.name().text()).is_none()
+        {
+            return false;
+        }
+        let prototype = node.expression();
+        if prototype.kind() != SyntaxKind::PropertyAccessExpression
+            || prototype.name().text() != "prototype"
+            || prototype.expression().kind() != SyntaxKind::Identifier
+        {
+            return false;
+        }
+        let constructor = prototype.expression();
+        let constructor_symbol = self.symbol(constructor);
+        let prototype_symbol = self.symbol(prototype.name());
+        let member_symbol = self.symbol(node.name());
+        self.primitive_symbol(constructor_symbol, "String", None)
+            && self.primitive_symbol(prototype_symbol, "prototype", Some("StringConstructor"))
+            && self.primitive_symbol(member_symbol, node.name().text(), Some("String"))
+    }
+
     pub(in crate::frontend) fn boxed_get(&mut self, node: Node) -> Result<Option<Expr>, String> {
         if !matches!(
             node.kind(),
@@ -531,6 +557,7 @@ impl Lowerer<'_> {
             method: "call".into(),
             args,
             callee_name: "valueOf".into(),
+            optional: false,
             r#type: Type::Dyn,
             loc: self.loc(node),
         };

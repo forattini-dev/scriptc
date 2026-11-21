@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { nativeArrayCheckSupported, nativeArrayViewSupported, nativeRecordCheckSupported, nativeRecordSpreadSupported } from "./native-record.js";
+import { nativeArrayCheckSupported, nativeArrayViewSupported, nativeRecordCheckSupported, nativeRecordSpreadSupported, nativeReferenceSupported } from "./native-record.js";
 import { BOOL, DYN, F64, STRING, VOID, type IrRecordShape, type IrType } from "./ir.js";
 
 const admitted = (member: IrType): boolean => nativeRecordCheckSupported(
@@ -16,7 +16,6 @@ test.each<IrType>([
   { kind: "array", elem: { kind: "record", shapeId: "nested" } },
   { kind: "record", shapeId: "nested" },
   { kind: "bytes", elem: "u32" },
-  { kind: "promise", inner: F64 },
 ])("shared method admission cannot silently copy a composite: %j", composite => {
   expect(admitted(composite)).toBe(false);
   expect(admitted({ kind: "func", params: [composite], ret: F64 })).toBe(false);
@@ -25,6 +24,23 @@ test.each<IrType>([
 
 test("rest methods require a separate adapter contract", () => {
   expect(admitted({ kind: "func", params: [DYN], ret: DYN, rest: true })).toBe(false);
+});
+
+test("optional async callbacks retain reference admission without admitting ambiguous record unions", () => {
+  const callback: IrType = { kind: "func", params: [STRING], ret: { kind: "promise", inner: STRING } };
+  const optional: IrType = { kind: "union", unionId: "callback" };
+  const getRecord = (id: string): IrRecordShape => ({ id, fields: [{ name: "read", type: optional }] });
+  const getUnion = (id: string) => ({ id, arms: [callback, { kind: "undefinedT" }] as IrType[] });
+  expect(nativeRecordCheckSupported({ kind: "record", shapeId: "seams" }, getRecord, getUnion)).toBe(true);
+  expect(nativeReferenceSupported(callback, getRecord, getUnion)).toBe(true);
+  expect(nativeReferenceSupported({ kind: "union", unionId: "records" }, getRecord, id => ({ id, arms: [
+    { kind: "record", shapeId: "first" }, { kind: "record", shapeId: "second" },
+  ] }))).toBe(false);
+});
+
+test.each<IrType>([{ kind: "promise", inner: F64 }, { kind: "regex" }, { kind: "url" }])("shared methods retain native promise and branded values: %j", value => {
+  expect(admitted(value)).toBe(true);
+  expect(admitted({ kind: "func", params: [value], ret: value })).toBe(true);
 });
 
 test.each<IrType>([{ kind: "bigint" }, { kind: "bytes", elem: "u8" }])("shared fields and methods retain native references: %j", value => {

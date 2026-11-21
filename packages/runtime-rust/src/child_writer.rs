@@ -15,6 +15,12 @@ struct ChildWriterErrorListener {
     trace: ChildWriterTrace,
 }
 
+#[derive(Clone)]
+struct ChildWriterWriteListener {
+    invoke: Rc<dyn Fn(Option<JsError>)>,
+    trace: ChildWriterTrace,
+}
+
 enum ChildWriterCommand {
     Write { data: Vec<u8>, length: usize },
     End,
@@ -25,6 +31,7 @@ enum ChildWriterEvent {
     Wrote(usize),
     Finished,
     Error,
+    FileError { message: String, code: String },
 }
 
 pub struct ChildWriterData {
@@ -39,6 +46,7 @@ pub struct ChildWriterData {
     drain_listeners: Vec<ChildWriterVoidListener>,
     finish_listeners: Vec<ChildWriterVoidListener>,
     error_listeners: Vec<ChildWriterErrorListener>,
+    write_callbacks: VecDeque<Option<ChildWriterWriteListener>>,
 }
 
 impl Trace for ChildWriterData {
@@ -50,6 +58,9 @@ impl Trace for ChildWriterData {
             (listener.trace)(tracer);
         }
         for listener in &self.error_listeners {
+            (listener.trace)(tracer);
+        }
+        for listener in self.write_callbacks.iter().flatten() {
             (listener.trace)(tracer);
         }
     }
@@ -71,6 +82,7 @@ impl ClearEdges for ChildWriterData {
         self.drain_listeners.clear();
         self.finish_listeners.clear();
         self.error_listeners.clear();
+        self.write_callbacks.clear();
     }
 }
 
@@ -159,6 +171,77 @@ fn child_writer_new(mut stdin: std::process::ChildStdin) -> JsChildWriter {
         drain_listeners: Vec::new(),
         finish_listeners: Vec::new(),
         error_listeners: Vec::new(),
+        write_callbacks: VecDeque::new(),
+    });
+    ASYNC_CHILD_WRITERS.with(|writers| writers.borrow_mut().push(writer.clone()));
+    writer
+}
+
+/// A file stream shares the child stdin queue, callbacks and drain scheduling.
+/// Opening happens in the worker, so callers can attach an error listener to
+/// the returned stream before a failed open is reported.
+pub fn file_writer_new(path: &JsString) -> JsChildWriter {
+    use std::io::Write;
+
+    let path = path.to_utf8_lossy().to_owned();
+    let (command_sender, command_receiver) = std::sync::mpsc::channel();
+    let (event_sender, event_receiver) = std::sync::mpsc::channel();
+    let _ = std::thread::Builder::new()
+        .name("scriptc-file-writer".to_owned())
+        .spawn(move || {
+            let mut file = match std::fs::File::create(&path) {
+                Ok(file) => file,
+                Err(error) => {
+                    let _ = event_sender.send(ChildWriterEvent::FileError {
+                        message: format!("open {path}: {error}"),
+                        code: fs_error_code(&error).to_owned(),
+                    });
+                    return;
+                }
+            };
+            while let Ok(command) = command_receiver.recv() {
+                match command {
+                    ChildWriterCommand::Write { data, length } => {
+                        if let Err(error) = file.write_all(&data) {
+                            let _ = event_sender.send(ChildWriterEvent::FileError {
+                                message: format!("write {path}: {error}"),
+                                code: fs_error_code(&error).to_owned(),
+                            });
+                            return;
+                        }
+                        if event_sender.send(ChildWriterEvent::Wrote(length)).is_err() {
+                            return;
+                        }
+                    }
+                    ChildWriterCommand::End => {
+                        if let Err(error) = file.flush() {
+                            let _ = event_sender.send(ChildWriterEvent::FileError {
+                                message: format!("flush {path}: {error}"),
+                                code: fs_error_code(&error).to_owned(),
+                            });
+                        } else {
+                            drop(file);
+                            let _ = event_sender.send(ChildWriterEvent::Finished);
+                        }
+                        return;
+                    }
+                    ChildWriterCommand::Destroy => return,
+                }
+            }
+        });
+    let writer = Gc::new(ChildWriterData {
+        sender: Some(command_sender),
+        receiver: Some(event_receiver),
+        #[cfg(unix)]
+        sync_stdin: None,
+        queued: 0,
+        needs_drain: false,
+        writable: true,
+        finished: false,
+        drain_listeners: Vec::new(),
+        finish_listeners: Vec::new(),
+        error_listeners: Vec::new(),
+        write_callbacks: VecDeque::new(),
     });
     ASYNC_CHILD_WRITERS.with(|writers| writers.borrow_mut().push(writer.clone()));
     writer
@@ -183,6 +266,7 @@ fn child_writer_husk() -> JsChildWriter {
         drain_listeners: Vec::new(),
         finish_listeners: Vec::new(),
         error_listeners: Vec::new(),
+        write_callbacks: VecDeque::new(),
     })
 }
 
@@ -198,7 +282,7 @@ fn child_writer_error(message: &str, code: &str) -> JsError {
 }
 
 fn child_writer_fail(writer: &JsChildWriter, error: JsError) {
-    writer.with_mut(|writer| {
+    let callbacks = writer.with_mut(|writer| {
         writer.sender = None;
         writer.receiver = None;
         #[cfg(unix)]
@@ -210,10 +294,14 @@ fn child_writer_fail(writer: &JsChildWriter, error: JsError) {
         writer.writable = false;
         writer.drain_listeners.clear();
         writer.finish_listeners.clear();
+        std::mem::take(&mut writer.write_callbacks)
     });
     child_writer_remove(writer);
     let writer = writer.clone();
     process_next_tick(Box::new(move || {
+        for callback in callbacks.into_iter().flatten() {
+            (callback.invoke)(Some(error.clone()));
+        }
         // A synchronous write failure still reports its event on a later
         // turn, so listeners installed immediately after write must see it.
         let listeners = writer.with_mut(|writer| std::mem::take(&mut writer.error_listeners));
@@ -248,7 +336,12 @@ fn child_writer_try_write(
     result
 }
 
-fn child_writer_write(writer: &JsChildWriter, data: Vec<u8>) -> bool {
+fn child_writer_write(
+    writer: &JsChildWriter,
+    data: Vec<u8>,
+    callback: Option<ChildWriterWriteListener>,
+) -> bool {
+    let mut callback = callback;
     let result = writer.with_mut(|writer| {
         if !writer.writable {
             return Err(Box::new(child_writer_error(
@@ -269,7 +362,7 @@ fn child_writer_write(writer: &JsChildWriter, data: Vec<u8>) -> bool {
                 let written = child_writer_try_write(stdin, &data)
                     .map_err(|_| Box::new(child_writer_error("write EPIPE", "EPIPE")))?;
                 if written == length {
-                    return Ok(true);
+                    return Ok((true, true));
                 }
                 data.drain(..written);
             }
@@ -284,13 +377,23 @@ fn child_writer_write(writer: &JsChildWriter, data: Vec<u8>) -> bool {
             return Err(Box::new(child_writer_error("write EPIPE", "EPIPE")));
         }
         writer.queued = writer.queued.saturating_add(length);
+        writer.write_callbacks.push_back(callback.take());
         let ready = writer.queued < CHILD_WRITER_HIGH_WATER_MARK;
         writer.needs_drain |= !ready;
-        Ok(ready)
+        Ok((ready, false))
     });
     match result {
-        Ok(ready) => ready,
+        Ok((ready, completed_sync)) => {
+            if completed_sync && let Some(callback) = callback {
+                process_next_tick(Box::new(move || (callback.invoke)(None)));
+            }
+            ready
+        }
         Err(error) => {
+            if let Some(callback) = callback {
+                let reported = (*error).clone();
+                process_next_tick(Box::new(move || (callback.invoke)(Some(reported))));
+            }
             child_writer_fail(writer, *error);
             false
         }
@@ -302,6 +405,10 @@ pub fn child_stdin_write(child: &JsChild, data: &JsBytes<u8>) -> bool {
     child_stdin(child).is_some_and(|writer| child_writer_write_bytes(&writer, data))
 }
 
+pub fn child_stdin_present(child: &JsChild) -> bool {
+    child_stdin(child).is_some()
+}
+
 /// The island hosts' `childStdinEnd(id)`.
 pub fn child_stdin_end(child: &JsChild) {
     if let Some(writer) = child_stdin(child) {
@@ -310,11 +417,30 @@ pub fn child_stdin_end(child: &JsChild) {
 }
 
 pub fn child_writer_write_string(writer: &JsChildWriter, data: &JsString) -> bool {
-    child_writer_write(writer, data.as_bytes().to_vec())
+    child_writer_write(writer, data.as_bytes().to_vec(), None)
 }
 
 pub fn child_writer_write_bytes(writer: &JsChildWriter, data: &JsBytes<u8>) -> bool {
-    child_writer_write(writer, bytes_u8_values(data))
+    child_writer_write(writer, bytes_u8_values(data), None)
+}
+
+pub fn child_stdin_write_callback(
+    child: &JsChild,
+    data: &JsBytes<u8>,
+    invoke: Rc<dyn Fn(Option<JsError>)>,
+    trace: ChildWriterTrace,
+) -> bool {
+    let Some(writer) = child_stdin(child) else {
+        process_next_tick(Box::new(move || {
+            invoke(Some(child_writer_error("write EPIPE", "EPIPE")))
+        }));
+        return false;
+    };
+    child_writer_write(
+        &writer,
+        bytes_u8_values(data),
+        Some(ChildWriterWriteListener { invoke, trace }),
+    )
 }
 
 pub fn child_writer_end(writer: &JsChildWriter) {
@@ -424,16 +550,20 @@ fn child_writers_dispatch_one() -> bool {
     };
     match event {
         ChildWriterEvent::Wrote(length) => {
-            let listeners = writer.with_mut(|writer| {
+            let (callback, listeners) = writer.with_mut(|writer| {
                 writer.queued = writer.queued.saturating_sub(length);
+                let callback = writer.write_callbacks.pop_front().flatten();
                 if !writer.needs_drain || writer.queued != 0 || !writer.writable {
-                    return Vec::new();
+                    return (callback, Vec::new());
                 }
                 writer.needs_drain = false;
                 let snapshot = writer.drain_listeners.clone();
                 writer.drain_listeners.retain(|listener| !listener.once);
-                snapshot
+                (callback, snapshot)
             });
+            if let Some(callback) = callback {
+                (callback.invoke)(None);
+            }
             for listener in listeners {
                 (listener.invoke)();
             }
@@ -465,6 +595,9 @@ fn child_writers_dispatch_one() -> bool {
         }
         ChildWriterEvent::Error => {
             child_writer_fail(&writer, child_writer_error("write EPIPE", "EPIPE"));
+        }
+        ChildWriterEvent::FileError { message, code } => {
+            child_writer_fail(&writer, child_writer_error(&message, &code));
         }
     }
     true

@@ -1,10 +1,20 @@
 //! Side-effect-free literal property-key conversion shared by native aggregates.
 use super::*;
 
+#[derive(PartialEq)]
+enum KeyContext {
+    StringOnly,
+    Literal,
+    DynamicRead,
+}
+
 impl Lowerer<'_> {
     // Property names use ECMAScript NumberToString, including radix spellings,
     // rounded large literals, exponent thresholds and negative zero.
     pub(super) fn literal_property_key(&self, node: Node) -> Option<String> {
+        if node.is_nil() {
+            return None;
+        }
         match node.kind() {
             SyntaxKind::StringLiteral | SyntaxKind::NoSubstitutionTemplateLiteral => {
                 Some(node.text().into())
@@ -32,6 +42,9 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn data_property_name(&self, node: Node) -> Option<String> {
+        if node.is_nil() {
+            return None;
+        }
         if node.kind() == SyntaxKind::Identifier {
             Some(node.text().into())
         } else {
@@ -39,16 +52,26 @@ impl Lowerer<'_> {
         }
     }
     pub(super) fn property_key_expression(&mut self, node: Node) -> Result<Expr, String> {
-        self.represented_property_key(node, false)
+        self.represented_property_key(node, KeyContext::StringOnly)
     }
 
-    /// Dynamic member reads use the shared IR's symbol-key ABI. Other
-    /// property operations still require a string and retain their fences.
+    /// Literals and writes require an already represented string or symbol key.
     pub(super) fn dynamic_property_key_expression(&mut self, node: Node) -> Result<Expr, String> {
-        self.represented_property_key(node, true)
+        self.represented_property_key(node, KeyContext::Literal)
     }
 
-    fn represented_property_key(&mut self, node: Node, allow_symbol: bool) -> Result<Expr, String> {
+    pub(super) fn dynamic_read_key_expression(&mut self, node: Node) -> Result<Expr, String> {
+        self.represented_property_key(node, KeyContext::DynamicRead)
+    }
+
+    fn represented_property_key(
+        &mut self,
+        node: Node,
+        context: KeyContext,
+    ) -> Result<Expr, String> {
+        if node.is_nil() {
+            return Err("property key expression is missing".into());
+        }
         if let Some(value) = self.literal_property_key(node) {
             Ok(Expr::StrLit {
                 value,
@@ -59,7 +82,12 @@ impl Lowerer<'_> {
             // Type-only assertions do not perform ToPropertyKey or erase
             // observable object conversion hooks.
             let value = self.primitive_operand(node)?;
-            if allow_symbol && value.ty() == Type::Symbol {
+            if (context != KeyContext::StringOnly && value.ty() == Type::Symbol)
+                || (context == KeyContext::DynamicRead && value.ty() == Type::Dyn)
+            {
+                // DynKeyGet owns primitive ToPropertyKey conversion and
+                // symbol dispatch. A checked string cast would reject numeric
+                // loop indices carried by JavaScript/any local storage.
                 Ok(value)
             } else if value.ty() == Type::F64 {
                 // Object keys use NumberToString, not Map's numeric identity.
@@ -72,6 +100,7 @@ impl Lowerer<'_> {
                 !matches!(
                     ty,
                     Type::String
+                        | Type::Bigint
                         | Type::Bool
                         | Type::Null
                         | Type::Undefined

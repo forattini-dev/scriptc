@@ -40,10 +40,11 @@ fn net_poll_handles() -> NetPollHandles {
     NET_SERVERS.with(|servers| {
         for server in servers.borrow().iter() {
             server.with(|server| match &server.listener {
-                Some(listener) => match listener.try_clone() {
+                Some(NetListener::Tcp(listener)) => match listener.try_clone() {
                     Ok(listener) => handles.listeners.push(listener),
                     Err(_) => handles.unpollable = true,
                 },
+                Some(NetListener::Local(_)) => handles.unpollable = true,
                 None if server.closing => handles.unpollable = true,
                 None => {}
             });

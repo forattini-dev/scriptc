@@ -5,6 +5,7 @@ pub struct AbortSignalData<T: HeapValue> {
     reason: Option<T>,
     dependents: Vec<GcWeak<AbortSignalData<T>>>,
     listeners: Vec<AbortListener<T>>,
+    max_listeners: f64,
 }
 
 #[derive(Clone)]
@@ -41,6 +42,7 @@ pub fn abort_controller_new<T: HeapValue>() -> JsAbortSignal<T> {
         reason: None,
         dependents: Vec::new(),
         listeners: Vec::new(),
+        max_listeners: 0.0,
     })
 }
 
@@ -50,6 +52,7 @@ pub fn abort_signal_new_aborted<T: HeapValue>(reason: T) -> JsAbortSignal<T> {
         reason: Some(reason),
         dependents: Vec::new(),
         listeners: Vec::new(),
+        max_listeners: 0.0,
     })
 }
 
@@ -91,6 +94,14 @@ pub fn abort_signal_aborted<T: HeapValue>(signal: &JsAbortSignal<T>) -> bool {
 
 pub fn abort_signal_reason<T: HeapValue>(signal: &JsAbortSignal<T>) -> Option<T> {
     signal.with(|signal| signal.reason.clone())
+}
+
+pub fn abort_signal_max_listeners<T: HeapValue>(signal: &JsAbortSignal<T>) -> f64 {
+    signal.with(|signal| signal.max_listeners)
+}
+
+pub fn abort_signal_set_max_listeners<T: HeapValue>(signal: &JsAbortSignal<T>, value: f64) {
+    signal.with_mut(|signal| signal.max_listeners = value);
 }
 
 pub fn abort_signal_add_listener<T: HeapValue>(

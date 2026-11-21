@@ -204,6 +204,40 @@ where
     })
 }
 
+pub fn emitter_off_matching<L>(
+    emitter: &JsEventEmitter<L>,
+    name: &JsString,
+    matches: impl Fn(&L) -> bool,
+) -> bool
+where
+    L: Clone + Trace + 'static,
+{
+    emitter.with_mut(|emitter| {
+        let Some(event_index) = emitter
+            .events
+            .iter()
+            .position(|event| event.name == *name)
+        else {
+            return false;
+        };
+        let event = &mut emitter.events[event_index];
+        let removed = if let Some(index) = event
+            .listeners
+            .iter()
+            .rposition(|listener| matches(&listener.callback))
+        {
+            event.listeners.remove(index);
+            true
+        } else {
+            false
+        };
+        if event.listeners.is_empty() && !event.preserve_when_empty {
+            emitter.events.remove(event_index);
+        }
+        removed
+    })
+}
+
 pub fn emitter_remove_last<L>(emitter: &JsEventEmitter<L>, name: &JsString) -> bool
 where
     L: Clone + Trace + 'static,

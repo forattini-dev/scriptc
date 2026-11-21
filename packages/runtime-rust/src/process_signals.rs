@@ -19,6 +19,26 @@ thread_local! {
     static NEXT_PROCESS_SIGNAL_LISTENER_ID: Cell<u64> = const { Cell::new(1) };
 }
 
+pub fn process_signal_number(signal: &JsString) -> f64 {
+    match signal.well_formed_utf8().unwrap_or("") {
+        "SIGINT" => 2.0,
+        "SIGTERM" => 15.0,
+        "SIGWINCH" => 28.0,
+        name => throw_type_error(format!("Unknown signal: {name}")),
+    }
+}
+
+pub fn os_signal_supported(signal: &JsString) -> bool {
+    let name = signal.well_formed_utf8().unwrap_or("");
+    #[cfg(windows)]
+    let names = ["SIGABRT", "SIGBREAK", "SIGFPE", "SIGHUP", "SIGILL", "SIGINT", "SIGKILL", "SIGQUIT", "SIGSEGV", "SIGTERM", "SIGWINCH"].as_slice();
+    #[cfg(target_os = "macos")]
+    let names = ["SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGFPE", "SIGKILL", "SIGBUS", "SIGSEGV", "SIGSYS", "SIGPIPE", "SIGALRM", "SIGTERM", "SIGURG", "SIGSTOP", "SIGTSTP", "SIGCONT", "SIGCHLD", "SIGTTIN", "SIGTTOU", "SIGIO", "SIGXCPU", "SIGXFSZ", "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGUSR1", "SIGUSR2"].as_slice();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let names = ["SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM", "SIGCHLD", "SIGCONT", "SIGSTOP", "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGURG", "SIGXCPU", "SIGXFSZ", "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGIO", "SIGSYS"].as_slice();
+    names.contains(&name)
+}
+
 pub fn process_signal_on(signal: f64, identity: usize, callback: Rc<dyn Fn()>, once: bool) {
     let signal = signal as i32;
     PROCESS_SIGNAL_REGISTRATIONS.with(|registrations| {

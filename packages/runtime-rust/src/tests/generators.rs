@@ -17,6 +17,20 @@ fn generator_protocol_suspends_resumes_and_finishes_once() {
 }
 
 #[test]
+fn generator_resume_retains_argument_presence_across_suspensions() {
+    let generator: JsGenerator<bool, bool, ()> = generator_new(|generator, _| {
+        let first = generator_next_has_argument(&generator);
+        generator_suspend(&generator, |generator, _| {
+            GeneratorStep::Returned(Some(generator_next_has_argument(&generator)))
+        });
+        GeneratorStep::Yielded(first)
+    });
+
+    assert!(matches!(generator_next_without_arg(&generator, ()), GeneratorStep::Yielded(false)));
+    assert!(matches!(generator_next(&generator, ()), GeneratorStep::Returned(Some(true))));
+}
+
+#[test]
 fn generator_return_closes_an_unstarted_generator_without_running_it() {
     let generator: JsGenerator<f64, f64, ()> =
         generator_new(|_, _| panic!("an unstarted generator body must not run on return"));
@@ -79,6 +93,25 @@ fn async_generator_queues_requests_and_settles_them_in_order() {
     assert!(matches!(promise_poll(&first), Some(Ok(AsyncGeneratorStep::Yielded(1.0)))));
     assert!(matches!(promise_poll(&second), Some(Ok(AsyncGeneratorStep::Returned(Some(5.0))))));
     assert!(matches!(promise_poll(&third), Some(Ok(AsyncGeneratorStep::Returned(None)))));
+}
+
+#[test]
+fn async_generator_array_keeps_identity_and_suspended_state() {
+    let generator: JsAsyncGenerator<f64, f64, ()> = async_generator_new(|body, _| {
+        generator_suspend(&body, |_, _| GeneratorStep::Returned(Some(2.0)));
+        GeneratorStep::Yielded(AsyncGeneratorYield::Value(1.0))
+    });
+    let array = array_new(vec![generator.clone()]);
+    let stored = array_get(&array, 0.0);
+    assert!(async_generator_ptr_eq(&generator, &stored));
+    drop(generator);
+    collect_cycles();
+    let first = async_generator_next(&stored, ());
+    assert!(matches!(promise_poll(&first), Some(Ok(AsyncGeneratorStep::Yielded(1.0)))));
+    let again = array_get(&array, 0.0);
+    assert!(async_generator_ptr_eq(&stored, &again));
+    let second = async_generator_next(&again, ());
+    assert!(matches!(promise_poll(&second), Some(Ok(AsyncGeneratorStep::Returned(Some(2.0))))));
 }
 
 #[test]

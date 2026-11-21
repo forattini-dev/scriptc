@@ -1,6 +1,33 @@
+#[derive(Clone)]
 pub struct FsDirent {
+    identity: Rc<()>,
     pub name: JsString,
     pub kind: f64,
+}
+
+impl FsDirent {
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.identity, &other.identity)
+    }
+}
+
+impl HeapValue for FsDirent {}
+impl ArrayElement for FsDirent {}
+
+pub fn fs_dirent_name(value: &FsDirent) -> JsString {
+    value.name.clone()
+}
+
+pub fn fs_dirent_is_file(value: &FsDirent) -> bool {
+    value.kind == 1.0
+}
+
+pub fn fs_dirent_is_directory(value: &FsDirent) -> bool {
+    value.kind == 2.0
+}
+
+pub fn fs_dirent_is_symlink(value: &FsDirent) -> bool {
+    value.kind == 3.0
 }
 
 pub fn fs_readdir_types(path: &JsString) -> Vec<FsDirent> {
@@ -21,9 +48,19 @@ pub fn fs_readdir_types(path: &JsString) -> Vec<FsDirent> {
             _ => 0.0,
         };
         rows.push(FsDirent {
+            identity: Rc::new(()),
             name: JsString::from(entry.file_name().to_string_lossy().as_ref()),
             kind,
         });
     }
     rows
+}
+
+pub fn fs_readdir_dirents(path: &JsString) -> JsArray<FsDirent> {
+    array_new(fs_readdir_types(path))
+}
+
+pub fn fs_readdir_dirents_promise(path: &JsString) -> JsPromise<JsArray<FsDirent>> {
+    let path = path.clone();
+    promise_from_sync(move || fs_readdir_dirents(&path))
 }

@@ -1176,7 +1176,8 @@
       "status": "static",
       "backends": [
         "c",
-        "llvm"
+        "llvm",
+        "rust"
       ]
     },
     {
@@ -1186,7 +1187,8 @@
       "status": "static",
       "backends": [
         "c",
-        "llvm"
+        "llvm",
+        "rust"
       ]
     },
     {
@@ -1249,7 +1251,8 @@
       "status": "static",
       "backends": [
         "c",
-        "llvm"
+        "llvm",
+        "rust"
       ]
     },
     {

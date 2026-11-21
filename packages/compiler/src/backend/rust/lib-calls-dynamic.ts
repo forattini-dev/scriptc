@@ -7,6 +7,16 @@ export function emitRustDynamicLibCall(
 ): string | null {
   const arg = expr.args[0];
   const secondArg = expr.args[1];
+  if (expr.fn === "dyn.hasSymbolKey") {
+    if (expr.args.length !== 2 || arg?.type.kind !== "dyn" || secondArg?.type.kind !== "dyn" || expr.type.kind !== "bool") context.unsupported("invalid symbol presence test", expr.loc);
+    const target = context.nextTemporary(), key = context.nextTemporary();
+    return `{ let ${target} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; sc_dyn_has_symbol_key(&${target}, &${key}) }`;
+  }
+  if (expr.fn === "dyn.copyEnumerableSymbols") {
+    if (expr.args.length !== 2 || arg?.type.kind !== "dyn" || secondArg?.type.kind !== "dyn" || expr.type.kind !== "void") context.unsupported("invalid symbol copy", expr.loc);
+    const target = context.nextTemporary(), source = context.nextTemporary();
+    return `{ let ${target} = ${context.emitExpr(arg)}; let ${source} = ${context.emitExpr(secondArg)}; sc_dyn_copy_enumerable_symbols(&${target}, &${source}); () }`;
+  }
   if (expr.fn === "dyn.proxyNew" && expr.args.length === 2 && arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn" && expr.type.kind === "dyn") {
     const target = context.nextTemporary(), handler = context.nextTemporary();
     return `{ let ${target} = ${context.emitExpr(arg)}; let ${handler} = ${context.emitExpr(secondArg)}; sc_dyn_proxy_new(${target}, ${handler}) }`;
@@ -156,6 +166,21 @@ export function emitRustDynamicLibCall(
   if (expr.fn === "dyn.keyDelete" && expr.args.length === 3 && arg?.type.kind === "dyn" && secondArg?.type.kind === "string" && expr.args[2]?.type.kind === "bool" && expr.type.kind === "bool") {
     const receiver = context.nextTemporary(), key = context.nextTemporary(), strict = context.nextTemporary();
     return `{ let ${receiver} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; let ${strict} = ${context.emitExpr(expr.args[2])}; runtime::native_delete_property(&${receiver}, &${key}, ${strict}) }`;
+  }
+  if (expr.fn === "dyn.keyDeleteComputed" && expr.args.length === 3 && arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn" && expr.args[2]?.type.kind === "bool" && expr.type.kind === "bool") {
+    const receiver = context.nextTemporary(), key = context.nextTemporary(), strict = context.nextTemporary();
+    return `{ let ${receiver} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; let ${strict} = ${context.emitExpr(expr.args[2])}; sc_dyn_delete_computed(&${receiver}, &${key}, ${strict}) }`;
+  }
+  if (expr.fn === "dyn.defineOrdinaryData" && expr.args.length === 3 && arg?.type.kind === "dyn" &&
+    secondArg?.type.kind === "dyn" && expr.args[2]?.type.kind === "dyn" && expr.type.kind === "dyn") {
+    const target = context.nextTemporary(), key = context.nextTemporary(), descriptor = context.nextTemporary();
+    return `{ let ${target} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; let ${descriptor} = ${context.emitExpr(expr.args[2])}; sc_dyn_define_ordinary_data(${target}, ${key}, ${descriptor}) }`;
+  }
+  if (expr.fn === "dyn.defineOrdinaryGetter") {
+    context.unsupported("ordinary getter descriptors in the reference Rust backend", expr.loc);
+  }
+  if (expr.fn === "dyn.mapKeysImmediate" && expr.args.length === 1 && arg?.type.kind === "dyn" && expr.type.kind === "array" && expr.type.elem.kind === "dyn") {
+    return `sc_dyn_map_keys_immediate(${context.emitExpr(arg)})`;
   }
   if (expr.fn === "dyn.keySetComputed" && expr.args.length === 3 && arg?.type.kind === "dyn" &&
     secondArg?.type.kind === "dyn" && expr.args[2]?.type.kind === "dyn" && expr.type.kind === "void") {

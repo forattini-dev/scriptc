@@ -29,4 +29,19 @@ erased("world", [3]);
 erased("zero", []);
 mutable();
 
+function assignedBeforeLoop(items: number[]): void {
+  let value: number;
+  try {
+    value = Number("2");
+  } catch {
+    return;
+  }
+  for (const item of items) {
+    console.log("assigned-loop", value + item);
+    value = value + item;
+  }
+  console.log("assigned-after", value);
+}
+assignedBeforeLoop([1, 2]);
+
 

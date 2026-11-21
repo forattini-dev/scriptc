@@ -6,7 +6,7 @@ console.log(String.raw`\n\t\\ stay three escapes`);
 console.log(String.raw`plain text`);
 console.log(String.raw``);
 
-// Substitutions splice exactly like an untagged template, over raw spans.
+// Substitutions are converted and spliced between raw spans.
 const dir = "Temp";
 console.log(String.raw`C:\Users\${dir}\file.txt`);
 console.log(String.raw`${1 + 1} = two A raw`);

@@ -10,3 +10,5 @@ function fixed(value: number, digits?: number): string { return value.toFixed(di
 console.log("defaults", fixed(7.5), fixed(7.5, undefined), fixed(7.5, 2), fixed(1.25, 1.9));
 const custom = { toFixed: (digits: number): string => "custom:" + digits };
 console.log("shadow", custom.toFixed(7));
+console.log("exponential", (12.5).toExponential(), (12.5).toExponential(2));
+console.log("to-precision", (12.5).toPrecision(), (12.5).toPrecision(3));

@@ -10,10 +10,49 @@ impl Lowerer<'_> {
         if receiver.ty() == Type::String {
             return Ok(receiver);
         }
+        if receiver.ty() == Type::Dyn {
+            let mut checked = self.ty(member.expression()).ok();
+            if matches!(checked, Some(Type::Dyn) | None) {
+                let checker = self.checker.get_type_at_location(member.expression());
+                checked = self.type_id(checker).or(checked);
+            }
+            if checked.as_ref().is_some_and(|ty| self.string_view(ty)) {
+                // A JavaScript local or a standard operation such as
+                // JSON.stringify can retain owning dynamic storage while the
+                // checker proves a string or string|nullish view. Method
+                // lookup itself performs the required brand/nullish check
+                // before any arguments are evaluated.
+                return self.coerce(receiver, Type::String, member);
+            }
+        }
+        if matches!(receiver.ty(), Type::Union { .. })
+            && member.expression().kind() == SyntaxKind::Identifier
+        {
+            let symbol = self.symbol(member.expression());
+            if symbol != 0
+                && !self.nested_assignment_symbols.contains(&symbol)
+                && self.ty(member.expression()).ok() == Some(Type::String)
+            {
+                // A read-only captured cell can retain its broad owning ABI
+                // across suspension even though control flow proves the
+                // current value is String. With no nested writer, selecting
+                // that exact arm is stable for method lookup and evaluation.
+                return self.coerce(receiver, Type::String, member);
+            }
+        }
         if !self.string_view(&receiver.ty()) {
+            let checked = self.checker.get_type_at_location(member.expression());
+            let checked = self.checker.type_to_string(checked);
+            let arms = match receiver.ty() {
+                Type::Union { union_id } => format!("{:?}", self.unions[union_id].arms),
+                _ => "n/a".into(),
+            };
             return Err(self.refuse(
                 member,
-                "standard string methods require a represented string receiver",
+                &format!(
+                    "standard string methods require a represented string receiver (checker: {checked}; IR: {:?}; arms: {arms})",
+                    receiver.ty()
+                ),
             ));
         }
         self.ensure_exception_classes(member)?;
@@ -135,7 +174,8 @@ impl Lowerer<'_> {
             if self.native_type_contains(&key, |ty| {
                 !matches!(
                     ty,
-                    Type::F64
+                    Type::Dyn
+                        | Type::F64
                         | Type::Bool
                         | Type::Bigint
                         | Type::Null

@@ -71,10 +71,11 @@ pub fn zlib_inflate_raw_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
 
 /// gzipSync: raw DEFLATE inside Node's gzip framing — the 10-byte header
 /// zlib itself writes at the default level (no name, no extra fields, an
-/// unset mtime, OS 3), then the CRC32 and the input length.
+/// unset mtime, platform OS byte), then the CRC32 and the input length.
 pub fn zlib_gzip_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
     let output = zlib_with_input(input, |source| {
-        let mut output = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3];
+        let os = if cfg!(windows) { 10 } else { 3 };
+        let mut output = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, os];
         output.extend_from_slice(&zlib_compress_bytes(source, false));
         let mut crc = Crc::new();
         crc.update(source);
@@ -82,7 +83,7 @@ pub fn zlib_gzip_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
         output.extend_from_slice(&(source.len() as u32).to_le_bytes());
         output
     });
-    bytes_from_elements(output)
+    zlib_buffer(output)
 }
 
 /// gunzipSync: the gzip member's header, body, and trailer checks. Every
@@ -90,7 +91,7 @@ pub fn zlib_gzip_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
 /// lane (zlib's own one-shot inflate) this decodes the FIRST member and
 /// ignores whatever follows it.
 pub fn zlib_gunzip_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
-    bytes_from_elements(gunzip_member(&bytes_u8_values(input)))
+    zlib_buffer(gunzip_member(&bytes_u8_values(input)))
 }
 
 /// unzipSync: Node's auto-detecting decompressor — the gzip magic picks the

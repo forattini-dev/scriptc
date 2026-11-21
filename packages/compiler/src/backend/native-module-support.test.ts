@@ -15,6 +15,25 @@ const mod: IrModule = {
     syncModuleCacheGlobal: "%g.cache", body: [], loc }],
 };
 
+test("checked Promise payload views validate in IR and remain explicit Rust-only conversions", () => {
+  const type = { kind: "promise", inner: STRING } as const;
+  const boxed: IrExpr = { kind: "dynFrom", type: DYN, loc, value: {
+    kind: "intrinsic", name: "promise.resolve", args: [{ kind: "strLit", value: "value", type: STRING, loc }], type, loc,
+  } };
+  const checked: IrExpr = { kind: "dynCheck", value: boxed, type, loc };
+  const module: IrModule = { irVersion: 13, sourceFile: loc.file, entry: "main", functions: [
+    { name: "main", params: [], locals: [], returnType: VOID, body: [{ kind: "exprStmt", expr: checked, loc }], loc },
+  ] };
+  expect(validateModule(module)).toEqual([]);
+  expect(rustEngineRequirement(module)).toBeNull();
+  expect(emitRustModule(module)).toContain("runtime::promise_view_map");
+  for (const backend of ["c", "llvm"] as const) {
+    expect(nativeModuleBackendDiagnostics(module, backend)).toContainEqual(expect.objectContaining({
+      code: "SC3001", message: expect.stringContaining("checked-native Promise payload views"),
+    }));
+  }
+});
+
 test("function arity metadata emits natively in Rust and stays fenced in C/LLVM", () => {
   const boxed: IrExpr = { kind: "dynFrom", fnLength: 0, type: DYN, loc,
     value: { kind: "closure", fnName: "target", captures: [], type: { kind: "func", params: [STRING], ret: VOID }, loc } };

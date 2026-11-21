@@ -1,0 +1,22 @@
+import { Box, Child, Override } from './box.js';
+const a = new Box('a');
+const b = new Child('b');
+const c = new Override('c');
+const read = a.read;
+const write = a.write;
+const invoke = a.invoke;
+console.log('identity', read === a.read, read === b.read, read === c.read, a.alias === read, b.alias === read, c.alias === c.read);
+console.log('aliases', a.alias(), b.alias(), c.alias());
+console.log('borrow', read.call({value:'plain'} as any), invoke.call({value:'plain',read:() => 'owned'} as any, '!'));
+let getterReads = 0;
+const getter: any = { get value() { getterReads++; return 43; } };
+console.log('getter', read.call(getter), getterReads);
+console.log('apply', read.apply({value:'applied'} as any, []));
+const bound = read.bind({value:'bound'} as any);
+console.log('bind', bound());
+const boundNumber = read.bind({value:42} as any);
+console.log('bind-number', typeof boundNumber(), boundNumber());
+const plain: any = {value:'old'};
+console.log('write', write.call(plain, 'new') === plain, plain.value);
+console.log('instance', write.call(b, 'changed') === b, b.value);
+try { read.call(null as any); } catch (error) { console.log('null', error instanceof TypeError); }

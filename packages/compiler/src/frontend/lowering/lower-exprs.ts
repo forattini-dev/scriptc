@@ -6838,7 +6838,8 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
       // contains undefined, so casts over parse results keep failing on
       // non-string values with the usual path-annotated TypeError.
       if (
-        (target.kind === "union" || target.kind === "effect" || target.kind === "array") &&
+        (target.kind === "union" || target.kind === "effect" || target.kind === "array" ||
+          lowerer.nativeDenseArrays && ["promise", "regex", "url"].includes(target.kind)) &&
         canDynCheckTo(target, (id) => lowerer.shapes.get(id), (id) => lowerer.unions.get(id))
       ) {
         return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };

@@ -3,26 +3,128 @@ use serde::Serialize;
 pub(crate) mod bigint;
 mod child_process;
 mod control_flow;
+mod filesystem_values;
+pub(crate) mod normalize;
+pub(crate) mod optimize;
 pub mod record_equivalence;
 pub mod record_views;
 pub(crate) mod regex_captures;
 mod symbol_methods;
 mod symbols;
 mod walk;
+pub(crate) mod walk_mut;
 use std::collections::HashMap;
 pub use symbol_methods::{SymbolMethod, SymbolMethodKey};
 pub(crate) use symbols::well_known_symbol;
 
 pub const VERSION: u32 = 13;
 
+/// Callable views can forward to a function whose owning signature differs
+/// from the projected one. Carry receiver requirements across those views.
+pub(crate) fn receiver_aware_function_types(
+    functions: &[Function],
+) -> std::collections::HashSet<Type> {
+    let mut result = functions
+        .iter()
+        .filter(|function| function.reads_receiver())
+        .map(|function| Type::Func {
+            rest: function.rest,
+            params: function
+                .params
+                .iter()
+                .map(|param| param.r#type.clone())
+                .collect(),
+            ret: Box::new(function.call_result()),
+        })
+        .collect::<std::collections::HashSet<_>>();
+    let mut views = Vec::new();
+    for function in functions {
+        function.visit_expressions(&mut |expression| {
+            if let Expr::DynCheck {
+                value,
+                r#type: target @ Type::Func { .. },
+                ..
+            } = expression
+            {
+                let source = match value.as_ref() {
+                    Expr::DynFrom { value, .. } if matches!(value.ty(), Type::Func { .. }) => {
+                        Some(value.ty())
+                    }
+                    Expr::LibCall { r#fn, args, .. } if r#fn == "callable.opaqueViewSource" => {
+                        args.first().map(Expr::ty)
+                    }
+                    _ => None,
+                };
+                views.push((source, target.clone()));
+            }
+        });
+    }
+    let any_receiver = !result.is_empty();
+    loop {
+        let before = result.len();
+        for (source, target) in &views {
+            if source
+                .as_ref()
+                .map_or(any_receiver, |source| result.contains(source))
+            {
+                result.insert(target.clone());
+            }
+        }
+        if result.len() == before {
+            break;
+        }
+    }
+    result
+}
+
+/// A function view may change dynamic slots, but never arity or rest ABI.
+/// Values crossing a dynamic slot are checked by the native call boundary.
+pub fn callable_view_compatible(source: &Type, target: &Type) -> bool {
+    let (
+        Type::Func {
+            params: a,
+            ret: ar,
+            rest: a_rest,
+        },
+        Type::Func {
+            params: b,
+            ret: br,
+            rest: b_rest,
+        },
+    ) = (source, target)
+    else {
+        return false;
+    };
+    let erased_rest = |rest: bool, params: &[Type]| {
+        rest && matches!(params, [Type::Array { elem }] if **elem == Type::Dyn)
+    };
+    let parameters = if erased_rest(*a_rest, a) || erased_rest(*b_rest, b) {
+        true
+    } else {
+        a_rest == b_rest
+            && a.len() == b.len()
+            && a.iter()
+                .zip(b)
+                .all(|(left, right)| left == right || *left == Type::Dyn || *right == Type::Dyn)
+    };
+    source != target
+        && parameters
+        && (ar == br
+            || (**ar != Type::Void
+                && **br != Type::Void
+                && (**ar == Type::Dyn
+                    || **br == Type::Dyn
+                    || matches!((ar.as_ref(), br.as_ref()),
+                        (Type::Promise { inner: left }, Type::Promise { inner: right })
+                            if **left != Type::Void
+                                && **right != Type::Void
+                                && (**left == Type::Dyn || **right == Type::Dyn)))))
+}
+
 /// Typed Sets have a portable reference ABI, but the shared dynamic value
 /// contract cannot box them (including inside a composite or callback ABI).
 pub fn contains_set(ty: &Type, records: &[Record], unions: &[Union]) -> bool {
     contains_type(ty, records, unions, |ty| matches!(ty, Type::Set { .. }))
-}
-
-pub fn contains_stats(ty: &Type, records: &[Record], unions: &[Union]) -> bool {
-    contains_type(ty, records, unions, |ty| *ty == Type::Stats)
 }
 
 fn contains_type(
@@ -47,6 +149,16 @@ fn contains_type(
         match ty {
             Type::Array { elem } | Type::Set { elem } | Type::Promise { inner: elem } => {
                 visit(elem, records, unions, seen, predicate)
+            }
+            Type::Generator {
+                yield_type,
+                return_type,
+                next_type,
+                ..
+            } => {
+                visit(yield_type, records, unions, seen, predicate)
+                    || visit(return_type, records, unions, seen, predicate)
+                    || visit(next_type, records, unions, seen, predicate)
             }
             Type::Map { key, value } => {
                 visit(key, records, unions, seen, predicate)
@@ -97,9 +209,12 @@ pub enum Type {
     String,
     Bool,
     Regex,
+    CryptoHash,
+    CryptoSign,
     Symbol,
     Child,
     Stats,
+    Dirent,
     Bytes {
         elem: String,
     },
@@ -123,6 +238,16 @@ pub enum Type {
     },
     Promise {
         inner: Box<Type>,
+    },
+    Generator {
+        #[serde(rename = "async", skip_serializing_if = "std::ops::Not::not")]
+        r#async: bool,
+        #[serde(rename = "yieldT")]
+        yield_type: Box<Type>,
+        #[serde(rename = "retT")]
+        return_type: Box<Type>,
+        #[serde(rename = "nextT")]
+        next_type: Box<Type>,
     },
     Map {
         key: Box<Type>,
@@ -232,11 +357,15 @@ pub struct Loc {
     pub end: i32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Module {
     pub ir_version: u32,
     pub source_file: String,
+    /// The executable source graph survives lowering so the backend can
+    /// partition code without reconstructing module ownership from symbols.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub source_modules: Vec<SourceModule>,
     pub functions: Vec<Function>,
     pub entry: String,
     pub records: Vec<Record>,
@@ -245,6 +374,22 @@ pub struct Module {
     pub globals: Vec<Global>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub classes: Vec<Class>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceModule {
+    pub file: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub static_dependencies: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dynamic_dependencies: Vec<String>,
+    /// Source bytes are a cheap, stable first estimate for generated-code
+    /// weight. The chunk emitter can replace this with measured Rust weight.
+    pub source_bytes: usize,
+    /// Eager controls initialization only. Lazy code may share a crate with
+    /// eager code without being evaluated before its dynamic import.
+    pub eager: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -258,12 +403,16 @@ pub struct Class {
     pub base: Option<String>,
     pub fields: Vec<Field>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub captures: Vec<Type>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub methods: Vec<String>,
     /// Full own non-data surface (methods/accessors), including undemanded bodies.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub method_names: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub symbol_methods: Vec<SymbolMethod>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol_brand: Option<String>,
     pub loc: Loc,
 }
 
@@ -275,6 +424,7 @@ pub struct Global {
     pub name: String,
     pub r#type: Type,
     pub mutable: bool,
+    pub loc: Loc,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -282,6 +432,8 @@ pub struct Global {
 pub struct Function {
     #[serde(rename = "async", skip_serializing_if = "std::ops::Not::not")]
     pub is_async: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generator: Option<GeneratorChannels>,
     #[serde(skip)]
     pub rest: bool,
     pub name: String,
@@ -297,7 +449,14 @@ pub struct Function {
 impl Function {
     /// Caller-visible result; return statements inside an async body still use T.
     pub fn call_result(&self) -> Type {
-        if self.is_async {
+        if let Some(channels) = &self.generator {
+            Type::Generator {
+                r#async: self.is_async,
+                yield_type: Box::new(channels.yield_type.clone()),
+                return_type: Box::new(self.return_type.clone()),
+                next_type: Box::new(channels.next_type.clone()),
+            }
+        } else if self.is_async {
             Type::Promise {
                 inner: Box::new(self.return_type.clone()),
             }
@@ -305,6 +464,13 @@ impl Function {
             self.return_type.clone()
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratorChannels {
+    pub yield_type: Type,
+    pub next_type: Type,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -332,6 +498,35 @@ pub struct Local {
     rename_all_fields = "camelCase"
 )]
 pub enum Expr {
+    #[serde(rename = "yieldExpr")]
+    Yield {
+        value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    YieldStar {
+        generator: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    GeneratorNext {
+        generator: Box<Expr>,
+        value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    GeneratorReturn {
+        generator: Box<Expr>,
+        value: Option<Box<Expr>>,
+        r#type: Type,
+        loc: Loc,
+    },
+    #[serde(rename = "awaitExpr")]
+    Await {
+        value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
     #[serde(rename = "seqExpr")]
     Sequence {
         stmts: Vec<Stmt>,
@@ -404,10 +599,20 @@ pub enum Expr {
         r#type: Type,
         loc: Loc,
     },
+    DynLooseEq {
+        left: Box<Expr>,
+        right: Box<Expr>,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        negated: bool,
+        r#type: Type,
+        loc: Loc,
+    },
     DynInvoke {
         recv: Box<Expr>,
         method: String,
         callee_name: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        optional: bool,
         args: Vec<Expr>,
         r#type: Type,
         loc: Loc,
@@ -421,6 +626,13 @@ pub enum Expr {
     },
     ClassRef {
         class_name: String,
+        r#type: Type,
+        loc: Loc,
+    },
+    ClassCreate {
+        class_name: String,
+        parent: Option<Box<Expr>>,
+        captures: Vec<Expr>,
         r#type: Type,
         loc: Loc,
     },
@@ -601,6 +813,8 @@ pub enum Expr {
     },
     RecordLit {
         fields: Vec<FieldInit>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        null_prototype: bool,
         r#type: Type,
         loc: Loc,
     },
@@ -621,6 +835,11 @@ pub enum Expr {
     UnionNarrow {
         union_id: String,
         tag: usize,
+        value: Box<Expr>,
+        r#type: Type,
+        loc: Loc,
+    },
+    UnionProject {
         value: Box<Expr>,
         r#type: Type,
         loc: Loc,
@@ -705,7 +924,12 @@ pub enum Expr {
 impl Expr {
     pub fn ty(&self) -> Type {
         match self {
-            Self::CaughtToDyn { r#type, .. }
+            Self::Yield { r#type, .. }
+            | Self::YieldStar { r#type, .. }
+            | Self::GeneratorNext { r#type, .. }
+            | Self::GeneratorReturn { r#type, .. }
+            | Self::Await { r#type, .. }
+            | Self::CaughtToDyn { r#type, .. }
             | Self::CaughtNarrow { r#type, .. }
             | Self::CaughtTest { r#type, .. } => r#type.clone(),
             Self::DynFrom { r#type, .. }
@@ -716,6 +940,7 @@ impl Expr {
             | Self::DynKeyGet { r#type, .. }
             | Self::DynTest { r#type, .. }
             | Self::DynScalarEq { r#type, .. }
+            | Self::DynLooseEq { r#type, .. }
             | Self::DynInvoke { r#type, .. }
             | Self::DynCall { r#type, .. }
             | Self::BytesNew { r#type, .. }
@@ -729,6 +954,7 @@ impl Expr {
             | Self::VirtualCall { r#type, .. }
             | Self::InstanceOf { r#type, .. }
             | Self::ClassRef { r#type, .. }
+            | Self::ClassCreate { r#type, .. }
             | Self::NewValue { r#type, .. }
             | Self::ArrayGet { r#type, .. }
             | Self::MapNew { r#type, .. }
@@ -751,6 +977,7 @@ impl Expr {
             | Self::RecordGet { r#type, .. }
             | Self::UnionWrap { r#type, .. }
             | Self::UnionNarrow { r#type, .. }
+            | Self::UnionProject { r#type, .. }
             | Self::UnionIsTag { r#type, .. }
             | Self::Ternary { r#type, .. }
             | Self::NumLit { r#type, .. }
@@ -767,10 +994,18 @@ impl Expr {
     }
 }
 
+pub fn walk_expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
+    walk::expression(value, visitor);
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SwitchCase {
     pub test: Option<Expr>,
     pub body: Vec<Stmt>,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -780,6 +1015,12 @@ pub struct SwitchCase {
     rename_all_fields = "camelCase"
 )]
 pub enum Stmt {
+    GeneratorForOf {
+        generator: Expr,
+        local_id: String,
+        body: Vec<Stmt>,
+        loc: Loc,
+    },
     Switch {
         disc: Expr,
         cases: Vec<SwitchCase>,
@@ -803,9 +1044,13 @@ pub enum Stmt {
         loc: Loc,
     },
     Break {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        target_depth: usize,
         loc: Loc,
     },
     Continue {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        target_depth: usize,
         loc: Loc,
     },
     Throw {
@@ -983,14 +1228,41 @@ pub fn validate(module: &Module) -> Result<(), String> {
                 .base
                 .as_ref()
                 .and_then(|base| module.method(base, name))
-                && (base.params.iter().skip(1).map(|p| &p.r#type).ne(method
-                    .params
-                    .iter()
-                    .skip(1)
-                    .map(|p| &p.r#type))
-                    || base.call_result() != method.call_result())
+                && ((method.params.len() > base.params.len()
+                    && method.params[base.params.len()..].iter().any(|parameter| {
+                        parameter.r#type != Type::Dyn
+                            && !matches!(&parameter.r#type, Type::Union { union_id }
+                                if module.unions.get(*union_id).is_some_and(|union| union.arms.contains(&Type::Undefined)))
+                    }))
+                    || method
+                        .params
+                        .iter()
+                        .skip(1)
+                        .zip(base.params.iter().skip(1))
+                        .any(|(method, base)| {
+                            method.r#type != base.r#type && method.r#type != Type::Dyn
+                        })
+                    || (base.call_result() != method.call_result()
+                        && base.call_result() != Type::Void))
             {
-                return Err("incompatible native method override".into());
+                return Err(format!(
+                    "incompatible native method override: class={} method={} base_params={:?} params={:?} base_result={:?} result={:?}",
+                    class.name,
+                    name,
+                    base.params
+                        .iter()
+                        .skip(1)
+                        .map(|p| &p.r#type)
+                        .collect::<Vec<_>>(),
+                    method
+                        .params
+                        .iter()
+                        .skip(1)
+                        .map(|p| &p.r#type)
+                        .collect::<Vec<_>>(),
+                    base.call_result(),
+                    method.call_result(),
+                ));
             }
         }
     }
@@ -998,23 +1270,47 @@ pub fn validate(module: &Module) -> Result<(), String> {
     let entry = functions
         .get(module.entry.as_str())
         .ok_or("missing entry")?;
-    if entry.is_async || entry.return_type != Type::Void || !entry.params.is_empty() {
+    if entry.return_type != Type::Void || !entry.params.is_empty() {
         return Err("invalid native entry".into());
     }
     let mut global_ids = std::collections::HashSet::new();
     for global in &module.globals {
-        if !global.id.starts_with("%g.")
-            || !global_ids.insert(&global.id)
-            || !module.valid_type(global.r#type.clone(), &mut vec![])
-            || module.initializer(&global.id).is_none()
-        {
-            return Err("invalid global storage/initializer".into());
+        if !global.id.starts_with("%g.") {
+            return Err(format!("invalid global id: {global:?}"));
+        }
+        if !global_ids.insert(&global.id) {
+            return Err(format!("duplicate global id: {}", global.id));
+        }
+        if !module.valid_type(global.r#type.clone(), &mut vec![]) {
+            return Err(format!("invalid global storage type: {global:?}"));
+        }
+        if module.initializer(&global.id).is_none() {
+            return Err(format!(
+                "missing global initializer: id={} name={} type={:?}",
+                global.id, global.name, global.r#type
+            ));
         }
     }
-    for function in &module.functions {
-        validate_function(function, &functions, module)?;
+    // Layouts and symbol tables must be sound before independent bodies can
+    // be checked. A body failure must not hide failures in other functions.
+    let errors = module
+        .functions
+        .iter()
+        .filter_map(|function| {
+            validate_function(function, &functions, module)
+                .err()
+                .map(|error| (function.name.as_str(), error))
+        })
+        .collect::<Vec<_>>();
+    match errors.len() {
+        0 => Ok(()),
+        1 => Err(errors.into_iter().next().unwrap().1),
+        _ => Err(errors
+            .into_iter()
+            .map(|(name, error)| format!("{name}: {error}"))
+            .collect::<Vec<_>>()
+            .join("\n")),
     }
-    Ok(())
 }
 
 impl Module {
@@ -1116,6 +1412,7 @@ impl Module {
                         | Type::Array { .. }
                         | Type::Map { .. }
                         | Type::Promise { .. }
+                        | Type::Generator { .. }
                 )
             });
         }
@@ -1123,7 +1420,7 @@ impl Module {
         active.push(ty.clone());
         let valid = match ty {
             Type::Object { class_name } => self.class(&class_name).is_some(),
-            Type::Classval { class_name } => self.class(&class_name).is_some_and(|c| !c.runtime),
+            Type::Classval { class_name } => self.class(&class_name).is_some(),
             Type::Func { params, ret, rest } => {
                 (!rest
                     || params
@@ -1136,20 +1433,34 @@ impl Module {
             }
             Type::Void | Type::Null | Type::Undefined | Type::Caught => false,
             Type::Array { elem } => {
-                !matches!(*elem, Type::Func { .. } | Type::Stats)
+                !matches!(*elem, Type::Stats)
                     && !matches!(&*elem, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|union| union.arms.contains(&Type::Stats)))
                     && self.valid_type_cached(*elem, active, proven)
             }
-            Type::Bytes { elem } => matches!(elem.as_str(), "u8" | "u32" | "i32" | "f32" | "f64"),
+            Type::Bytes { elem } => matches!(elem.as_str(), "u8" | "u16" | "u32" | "i32" | "f32" | "f64"),
             Type::Promise { inner } => {
                 *inner == Type::Void || self.valid_type_cached(*inner, active, proven)
+            }
+            Type::Generator {
+                yield_type,
+                return_type,
+                next_type,
+                ..
+            } => {
+                (*yield_type == Type::Void
+                    || self.valid_type_cached(*yield_type, active, proven))
+                    && (*return_type == Type::Void
+                        || self.valid_type_cached(*return_type, active, proven))
+                    && (*next_type == Type::Void
+                        || *next_type == Type::Undefined
+                        || self.valid_type_cached(*next_type, active, proven))
             }
             Type::Set { elem } => {
                 elem.set_element() && self.valid_type_cached(*elem, active, proven)
             }
             Type::Map { key, value } => {
                 matches!(*key, Type::F64 | Type::String | Type::Dyn)
-                    && !matches!(*value, Type::Func { .. } | Type::Map { .. } | Type::Stats)
+                    && !matches!(*value, Type::Func { .. } | Type::Stats)
                     && !matches!(&*value, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|union| union.arms.contains(&Type::Stats)))
                     && !matches!(*value, Type::Bytes { .. })
                     && self.valid_type_cached(*value, active, proven)
@@ -1157,8 +1468,7 @@ impl Module {
             Type::Record { shape_id } => self.records.get(shape_id).is_some_and(|r| {
                 r.id == shape_id
                     && r.index_value.as_ref().is_none_or(|v| {
-                        r.fields.is_empty()
-                            && !matches!(v, Type::Func { .. } | Type::Map { .. } | Type::Stats)
+                        !matches!(v, Type::Func { .. } | Type::Map { .. } | Type::Stats)
                             && !matches!(v, Type::Union { union_id } if self.unions.get(*union_id).is_some_and(|union| union.arms.contains(&Type::Stats)) )
                             && self.valid_type_cached(v.clone(), active, proven)
                     })
@@ -1179,6 +1489,16 @@ impl Module {
                             && u.arms.iter().all(|a| {
                                 matches!(a, Type::Set { .. } | Type::Null | Type::Undefined)
                             })))
+                    && (!u.arms.iter().any(|a| matches!(a, Type::Map { .. }))
+                        || (u
+                            .arms
+                            .iter()
+                            .filter(|a| matches!(a, Type::Map { .. }))
+                            .count()
+                            == 1
+                            && u.arms.iter().all(|a| {
+                                matches!(a, Type::Map { .. } | Type::Null | Type::Undefined)
+                            })))
                     && u.arms
                         .iter()
                         .filter(|a| matches!(a, Type::Object { .. }))
@@ -1188,7 +1508,7 @@ impl Module {
                         || u.arms.iter().all(|a| matches!(a, Type::Stats | Type::Null | Type::Undefined)))
                     && u.arms.iter().all(|arm| {
                         matches!(arm, Type::Null | Type::Undefined)
-                            || (!matches!(arm, Type::Union { .. } | Type::Map { .. })
+                            || (!matches!(arm, Type::Union { .. })
                                 && self.valid_type_cached(arm.clone(), active, proven))
                     })
             }),
@@ -1216,11 +1536,11 @@ impl Module {
             if !names.insert(&class.name) {
                 return Err("duplicate class".into());
             }
+            if class.runtime && class.symbol_brand.is_some() {
+                return Err("runtime class cannot declare a registry symbol brand".into());
+            }
             let header = error_fields();
-            let builtin = matches!(
-                class.name.as_str(),
-                "%Error" | "%TypeError" | "%RangeError" | "%SyntaxError"
-            );
+            let builtin = builtin_error_class(&class.name);
             let header_len = self.class_header_len(class);
             if (header_len != 0 && !class.fields.starts_with(&header)) || class.runtime != builtin
                 || (class.name == "%Error" && class.base.is_some())
@@ -1233,20 +1553,13 @@ impl Module {
                 let base = self.class(base).ok_or("unknown class base")?;
                 if self.subclass(&base.name, &class.name) || !class.fields.starts_with(&base.fields)
                 {
-                    return Err("invalid class inheritance/prefix".into());
+                    return Err(format!(
+                        "invalid class inheritance/prefix: class={} base={} fields={:?} base_fields={:?}",
+                        class.name, base.name, class.fields, base.fields
+                    ));
                 }
             }
             let mut fields = std::collections::HashSet::new();
-            for field in &class.fields {
-                let mut current = Some(class);
-                for _ in 0..=self.classes.len() {
-                    let Some(owner) = current else { break };
-                    if owner.method_names.contains(&field.name) {
-                        return Err("native field shadows a method surface".into());
-                    }
-                    current = owner.base.as_deref().and_then(|base| self.class(base));
-                }
-            }
             if !class.fields.iter().enumerate().all(|(i, field)| {
                 fields.insert(&field.name)
                     && (i < header_len
@@ -1267,7 +1580,17 @@ impl Module {
                 || !names.windows(2).all(|pair| pair[0] < pair[1])
                 || !self.valid_type_cached(Type::Record { shape_id: id }, &mut vec![], &mut proven)
             {
-                return Err(format!("invalid/recursive record layout r{id}: {r:?}"));
+                let invalid = r
+                    .fields
+                    .iter()
+                    .filter(|field| {
+                        !self.valid_type_cached(field.r#type.clone(), &mut vec![], &mut proven)
+                    })
+                    .map(|field| format!("{}: {:?}", field.name, field.r#type))
+                    .collect::<Vec<_>>();
+                return Err(format!(
+                    "invalid/recursive record layout r{id}: {r:?} (invalid fields: {invalid:?})"
+                ));
             }
             if r.tuple
                 && (r.index_value.is_some()
@@ -1293,17 +1616,37 @@ impl Module {
                 || !u.arms.iter().all(|a| seen.insert(a.clone()))
                 || !self.valid_type_cached(Type::Union { union_id: id }, &mut vec![], &mut proven)
             {
-                return Err("invalid/recursive union layout".into());
+                return Err(format!("invalid/recursive union layout u{id}: {u:?}"));
             }
         }
         Ok(())
     }
 }
 
+pub fn builtin_error_class(name: &str) -> bool {
+    matches!(
+        name,
+        "%Error"
+            | "%EvalError"
+            | "%RangeError"
+            | "%ReferenceError"
+            | "%SyntaxError"
+            | "%TypeError"
+            | "%URIError"
+            | "%DOMException"
+            | "%AggregateError"
+    )
+}
+
 pub fn error_fields() -> Vec<Field> {
     [
-        ("name", Type::String),
-        ("message", Type::String),
+        // Error subclasses can use public field declarations (`name;` or
+        // `message;`), whose DefineField step stores JavaScript undefined
+        // before the constructor body runs. Keep the owning slots dynamic;
+        // typed reads install String views where their declaration requires
+        // one, while Error.prototype.toString handles arbitrary live values.
+        ("name", Type::Dyn),
+        ("message", Type::Dyn),
         ("%code", Type::String),
         ("%hasCause", Type::Bool),
         ("%cause", Type::Dyn),
@@ -1321,6 +1664,40 @@ fn validate_function(
     functions: &HashMap<&str, &Function>,
     module: &Module,
 ) -> Result<(), String> {
+    let mut await_outside_async = false;
+    let mut invalid_yield = false;
+    f.visit_expressions(&mut |expr| {
+        if matches!(expr, Expr::Await { .. }) && !f.is_async {
+            await_outside_async = true;
+        }
+        if let Expr::Yield { value, r#type, .. } = expr {
+            invalid_yield |= !f.generator.as_ref().is_some_and(|channels| {
+                value.ty() == channels.yield_type
+                    && (*r#type == channels.next_type
+                        || (*r#type == Type::Void && channels.next_type == Type::Undefined))
+            });
+        }
+        if let Expr::YieldStar { generator, .. } = expr {
+            invalid_yield |= !f.generator.as_ref().is_some_and(|channels| {
+                matches!(generator.ty(), Type::Generator { r#async: false, yield_type, next_type, .. }
+                    if (*yield_type == channels.yield_type
+                        || channels.yield_type == Type::Dyn
+                        || *yield_type == Type::Dyn
+                        || (matches!(*yield_type, Type::Void | Type::Undefined)
+                            && matches!(channels.yield_type, Type::Void | Type::Undefined)))
+                    && (matches!(*next_type, Type::Void | Type::Undefined)
+                        || *next_type == channels.next_type
+                        || (matches!(*next_type, Type::Void | Type::Undefined)
+                            && matches!(channels.next_type, Type::Void | Type::Undefined))))
+            });
+        }
+    });
+    if await_outside_async {
+        return Err("await outside an async function".into());
+    }
+    if invalid_yield {
+        return Err("yield outside a matching generator channel".into());
+    }
     if f.rest
         && !f
             .params
@@ -1339,11 +1716,23 @@ fn validate_function(
     for local in &f.locals {
         let supported =
             local.r#type == Type::Caught || module.valid_type(local.r#type.clone(), &mut vec![]);
-        if !supported
-            || module.global(&local.id).is_some()
-            || locals.insert(local.id.as_str(), local).is_some()
-        {
-            return Err("duplicate/void local".into());
+        if !supported {
+            return Err(format!(
+                "invalid local layout in function {:?} at {}:{}..{}: {:?} ({}) has type {:?}",
+                f.name, f.loc.file, f.loc.start, f.loc.end, local.name, local.id, local.r#type
+            ));
+        }
+        if module.global(&local.id).is_some() {
+            return Err(format!(
+                "local/global id collision in function {:?}: {:?} ({})",
+                f.name, local.name, local.id
+            ));
+        }
+        if locals.insert(local.id.as_str(), local).is_some() {
+            return Err(format!(
+                "duplicate local id in function {:?}: {:?} ({})",
+                f.name, local.name, local.id
+            ));
         }
     }
     let mut parameter_ids = std::collections::HashSet::new();
@@ -1372,16 +1761,132 @@ fn validate_function(
         module: &Module,
     ) -> Result<(), String> {
         match e {
+            Expr::Yield { value, .. } => expr(value, locals, initialized, functions, module),
+            Expr::YieldStar {
+                generator, r#type, ..
+            } => {
+                expr(generator, locals, initialized, functions, module)?;
+                let Type::Generator {
+                    r#async: false,
+                    return_type,
+                    ..
+                } = generator.ty()
+                else {
+                    return Err("yield* requires a synchronous represented generator".into());
+                };
+                if *return_type == *r#type
+                    || (matches!(*return_type, Type::Void | Type::Undefined)
+                        && matches!(r#type, Type::Void | Type::Undefined))
+                {
+                    Ok(())
+                } else {
+                    Err("invalid yield* result channel".into())
+                }
+            }
+            Expr::GeneratorNext {
+                generator,
+                value,
+                r#type,
+                ..
+            } => {
+                expr(generator, locals, initialized, functions, module)?;
+                let Type::Generator {
+                    r#async, next_type, ..
+                } = generator.ty()
+                else {
+                    return Err("generator next requires a represented generator".into());
+                };
+                if !(matches!(*next_type, Type::Void | Type::Undefined)
+                    && matches!(value.as_ref(), Expr::UnitLit { .. }))
+                {
+                    expr(value, locals, initialized, functions, module)?;
+                }
+                let result_ok = if r#async {
+                    matches!(r#type, Type::Promise { inner } if **inner == Type::Dyn)
+                } else {
+                    *r#type == Type::Dyn
+                };
+                if *next_type != value.ty() || !result_ok {
+                    return Err("invalid generator next ABI".into());
+                }
+                Ok(())
+            }
+            Expr::GeneratorReturn {
+                generator,
+                value,
+                r#type,
+                ..
+            } => {
+                expr(generator, locals, initialized, functions, module)?;
+                if let Some(value) = value {
+                    let unit_channel = matches!(generator.ty(), Type::Generator { return_type, .. } if matches!(*return_type, Type::Void | Type::Undefined));
+                    if !(unit_channel && matches!(value.as_ref(), Expr::UnitLit { .. })) {
+                        expr(value, locals, initialized, functions, module)?;
+                    }
+                }
+                let Type::Generator {
+                    r#async,
+                    return_type,
+                    ..
+                } = generator.ty()
+                else {
+                    return Err("generator return requires a represented generator".into());
+                };
+                let value_ok = value.as_ref().is_none_or(|value| {
+                    value.ty() == *return_type
+                        || (matches!(*return_type, Type::Void | Type::Undefined)
+                            && matches!(value.ty(), Type::Void | Type::Undefined))
+                });
+                let result_ok = if r#async {
+                    matches!(r#type, Type::Promise { inner } if **inner == Type::Dyn)
+                } else {
+                    *r#type == Type::Dyn
+                };
+                if !value_ok || !result_ok {
+                    return Err("invalid generator return ABI".into());
+                }
+                Ok(())
+            }
+            Expr::Await { value, r#type, .. } => {
+                expr(value, locals, initialized, functions, module)?;
+                let compatible = match value.ty() {
+                    Type::Promise { inner } => {
+                        *inner == *r#type
+                            || *inner == Type::Dyn
+                            || *r#type == Type::Dyn
+                            || matches!(
+                                (inner.as_ref(), r#type),
+                                (Type::Void, Type::Undefined) | (Type::Undefined, Type::Void)
+                            )
+                            || record_views::view_pairs(
+                                &inner,
+                                r#type,
+                                &module.records,
+                                &module.unions,
+                            )
+                            .is_some()
+                    }
+                    _ => false,
+                };
+                if !compatible {
+                    return Err("await requires a Promise with the same result type".into());
+                }
+                Ok(())
+            }
             Expr::Sequence {
                 stmts,
                 result,
                 r#type,
-                ..
+                loc,
             } => {
                 fn allowed(stmts: &[Stmt]) -> bool {
                     stmts.iter().all(|stmt| match stmt {
                         Stmt::VarDecl { .. }
+                        | Stmt::ArraySet { .. }
+                        | Stmt::ArraySetLength { .. }
                         | Stmt::RecordSet { .. }
+                        | Stmt::RecordKeySet { .. }
+                        | Stmt::FieldSet { .. }
                         | Stmt::BytesSet { .. }
                         | Stmt::Expression { .. } => true,
                         Stmt::If { then, else_, .. } => {
@@ -1397,7 +1902,10 @@ fn validate_function(
                     })
                 }
                 if !allowed(stmts) {
-                    return Err("invalid expression sequence statement".into());
+                    return Err(format!(
+                        "invalid expression sequence statement at {:?}: {stmts:?}",
+                        loc
+                    ));
                 }
                 let mut scope = initialized.clone();
                 body(
@@ -1456,16 +1964,10 @@ fn validate_function(
                 Ok(())
             }
             Expr::DynFrom { value, r#type, .. } => {
-                if contains_stats(&value.ty(), &module.records, &module.unions) {
-                    return Err("Stats erasure is not in the shared native value contract".into());
-                }
                 if symbol_methods::contains_symbol_methods(&value.ty(), module) {
                     return Err(
                         "erasing symbol methods requires a native descriptor contract".into(),
                     );
-                }
-                if contains_set(&value.ty(), &module.records, &module.unions) {
-                    return Err("Set erasure is not in the shared native value contract".into());
                 }
                 if let Expr::UnitLit { unit, r#type, .. } = &**value
                     && !matches!(
@@ -1493,11 +1995,6 @@ fn validate_function(
                 }
             }
             Expr::DynCheck { value, r#type, .. } => {
-                if contains_stats(r#type, &module.records, &module.unions) {
-                    return Err(
-                        "Stats extraction is not in the shared native value contract".into(),
-                    );
-                }
                 expr(value, locals, initialized, functions, module)?;
                 if value.ty() == Type::Dyn
                     && *r#type != Type::Dyn
@@ -1505,7 +2002,11 @@ fn validate_function(
                 {
                     Ok(())
                 } else {
-                    Err("invalid native value check".into())
+                    Err(format!(
+                        "invalid native value check: {:?} -> {:?}",
+                        value.ty(),
+                        r#type
+                    ))
                 }
             }
             Expr::DynObjLit { fields, r#type, .. } => {
@@ -1514,9 +2015,10 @@ fn validate_function(
                     expr(&f.value, locals, initialized, functions, module)?;
                 }
                 if *r#type == Type::Dyn
-                    && fields
-                        .iter()
-                        .all(|f| f.key.ty() == Type::String && f.value.ty() == Type::Dyn)
+                    && fields.iter().all(|f| {
+                        matches!(f.key.ty(), Type::String | Type::Symbol)
+                            && f.value.ty() == Type::Dyn
+                    })
                 {
                     Ok(())
                 } else {
@@ -1539,12 +2041,12 @@ fn validate_function(
                 expr(value, locals, initialized, functions, module)?;
                 expr(key, locals, initialized, functions, module)?;
                 if value.ty() == Type::Dyn
-                    && matches!(key.ty(), Type::String | Type::Symbol)
+                    && matches!(key.ty(), Type::Dyn | Type::String | Type::Symbol)
                     && *r#type == Type::Dyn
                 {
                     Ok(())
                 } else {
-                    Err("invalid native value member read".into())
+                    Err(format!("invalid native value member read: {e:?}"))
                 }
             }
             Expr::DynTest {
@@ -1567,10 +2069,22 @@ fn validate_function(
                             | "null"
                             | "nullish"
                             | "object"
+                            | "objectInstance"
                             | "array"
                             | "bytes"
+                            | "bytes.u8"
+                            | "bytes.f32"
+                            | "bytes.f64"
                             | "map"
+                            | "mapValuesIterator"
+                            | "syncGenerator"
+                            | "classIterable"
                             | "set"
+                            | "date"
+                            | "regex"
+                            | "url"
+                            | "promise"
+                            | "arrayBuffer"
                             | "function"
                             | "truthy"
                     )
@@ -1592,6 +2106,20 @@ fn validate_function(
                     Ok(())
                 } else {
                     Err("invalid native value equality".into())
+                }
+            }
+            Expr::DynLooseEq {
+                left,
+                right,
+                r#type,
+                ..
+            } => {
+                expr(left, locals, initialized, functions, module)?;
+                expr(right, locals, initialized, functions, module)?;
+                if left.ty() == Type::Dyn && right.ty() == Type::Dyn && *r#type == Type::Bool {
+                    Ok(())
+                } else {
+                    Err("invalid native abstract equality".into())
                 }
             }
             Expr::DynInvoke {
@@ -1632,6 +2160,79 @@ fn validate_function(
 
             Expr::LibCall {
                 r#fn, args, r#type, ..
+            } if r#fn == "array.toString" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::Dyn {
+                    Ok(())
+                } else {
+                    Err("invalid native array toString operation".into())
+                }
+            }
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if r#fn == "class.setParent" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if args.len() == 2
+                    && args
+                        .iter()
+                        .all(|arg| matches!(arg.ty(), Type::Classval { .. }))
+                    && *r#type == Type::Void
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native class parent assignment".into())
+                }
+            }
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if r#fn == "class.staticSymbolDefine" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if args.len() == 3
+                    && matches!(args[0].ty(), Type::Classval { .. })
+                    && args[1].ty() == Type::Symbol
+                    && args[2].ty() == Type::Dyn
+                    && *r#type == Type::Void
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native static symbol descriptor".into())
+                }
+            }
+
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if r#fn.starts_with("class.symbolDefine:") => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let name = r#fn.trim_start_matches("class.symbolDefine:");
+                let function = functions
+                    .get(name)
+                    .ok_or("missing native class symbol descriptor function")?;
+                let class_name = match args.first().map(Expr::ty) {
+                    Some(Type::Classval { class_name }) => class_name,
+                    _ => return Err("invalid native class symbol descriptor owner".into()),
+                };
+                let receiver = function.params.first().map(|param| &param.r#type);
+                if args.len() == 2
+                    && args[1].ty() == Type::Symbol
+                    && *r#type == Type::Void
+                    && receiver == Some(&Type::Object { class_name })
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native class symbol descriptor".into())
+                }
+            }
+
+            Expr::LibCall {
+                r#fn, args, r#type, ..
             } if r#fn.starts_with("bigint.") => {
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
@@ -1648,7 +2249,16 @@ fn validate_function(
             Expr::LibCall {
                 r#fn, args, r#type, ..
             } if r#fn.starts_with("sym.")
-                || matches!(r#fn.as_str(), "dyn.typeof" | "dyn.stringConstructor") =>
+                || matches!(
+                    r#fn.as_str(),
+                    "dyn.typeof"
+                        | "dyn.stringConstructor"
+                        | "dyn.objectValue"
+                        | "dyn.objectPrototype"
+                        | "dyn.getPrototypeOf"
+                        | "dyn.asyncIterator"
+                        | "util.promisify"
+                ) =>
             {
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
@@ -1664,6 +2274,11 @@ fn validate_function(
                     "dyn.typeof" | "dyn.stringConstructor" => {
                         arg_types == [Type::Dyn] && *r#type == Type::String
                     }
+                    "dyn.objectValue" => arg_types == [Type::Dyn] && *r#type == Type::Dyn,
+                    "dyn.objectPrototype" => arg_types.is_empty() && *r#type == Type::Dyn,
+                    "dyn.getPrototypeOf" => arg_types == [Type::Dyn] && *r#type == Type::Dyn,
+                    "dyn.asyncIterator" => arg_types == [Type::Dyn] && *r#type == Type::Dyn,
+                    "util.promisify" => arg_types == [Type::Dyn] && *r#type == Type::Dyn,
                     "sym.desc" | "sym.keyFor" => {
                         arg_types == [Type::Symbol]
                             && matches!(r#type, Type::Union { union_id } if module.unions.get(*union_id).is_some_and(|u| u.arms.len()==2 && u.arms.contains(&Type::String) && u.arms.contains(&Type::Undefined)))
@@ -1725,10 +2340,16 @@ fn validate_function(
                 let valid = matches!(receiver.ty(), Type::Bytes { .. })
                     && match method.as_str() {
                         "length" | "byteLength" => args.is_empty() && *r#type == Type::F64,
+                        "buffer" => args.is_empty() && *r#type == Type::Dyn,
                         "byteOffset" => {
                             receiver.ty() == Type::bytes()
                                 && args.is_empty()
                                 && *r#type == Type::F64
+                        }
+                        "windowView" => {
+                            receiver.ty() == Type::bytes()
+                                && args.is_empty()
+                                && *r#type == Type::bytes()
                         }
                         "dataViewNew" => {
                             args.len() <= 2
@@ -1761,10 +2382,23 @@ fn validate_function(
                                 && args[0].ty() == Type::String
                                 && *r#type == Type::String
                         }
+                        "toStringRange" => {
+                            receiver.ty() == Type::bytes()
+                                && args.len() == 3
+                                && args[0].ty() == Type::String
+                                && args[1..].iter().all(|arg| arg.ty() == Type::F64)
+                                && *r#type == Type::String
+                        }
                         "join" => {
                             args.len() == 1
                                 && args[0].ty() == Type::String
                                 && *r#type == Type::String
+                        }
+                        "equals" => {
+                            receiver.ty() == Type::bytes()
+                                && args.len() == 1
+                                && args[0].ty() == Type::bytes()
+                                && *r#type == Type::Bool
                         }
                         "slice" | "subarray" => {
                             args.len() <= 2
@@ -1776,6 +2410,40 @@ fn validate_function(
                                 && args[0].ty() == receiver.ty()
                                 && args.get(1).is_none_or(|a| a.ty() == Type::F64)
                                 && *r#type == Type::Void
+                        }
+                        "setFromArray" => {
+                            (args.len() == 1 || args.len() == 2)
+                                && args[0].ty()
+                                    == (Type::Array {
+                                        elem: Box::new(Type::F64),
+                                    })
+                                && args.get(1).is_none_or(|a| a.ty() == Type::F64)
+                                && *r#type == Type::Void
+                        }
+                        "writeString" => {
+                            receiver.ty() == Type::bytes()
+                                && (1..=4).contains(&args.len())
+                                && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                                && *r#type == Type::F64
+                        }
+                        "writeUIntBE" => {
+                            receiver.ty() == Type::bytes()
+                                && args.len() == 3
+                                && args.iter().all(|a| a.ty() == Type::F64)
+                                && *r#type == Type::F64
+                        }
+                        "readUIntBE" => {
+                            receiver.ty() == Type::bytes()
+                                && args.len() == 2
+                                && args.iter().all(|a| a.ty() == Type::F64)
+                                && *r#type == Type::F64
+                        }
+                        "copy" => {
+                            receiver.ty() == Type::bytes()
+                                && (1..=4).contains(&args.len())
+                                && args[0].ty() == Type::bytes()
+                                && args.iter().skip(1).all(|a| a.ty() == Type::F64)
+                                && *r#type == Type::F64
                         }
                         _ => false,
                     };
@@ -1816,12 +2484,20 @@ fn validate_function(
                         && args.len() == 1
                         && args[0].ty() == Type::Regex
                         && regex_captures::exec_layout(module, r#type).is_some()
+                } else if method == "matchAll" {
+                    receiver.ty() == Type::String
+                        && args.len() == 1
+                        && args[0].ty() == Type::Regex
+                        && regex_captures::match_all_layout(module, r#type).is_some()
                 } else if method == "split" {
                     receiver.ty() == Type::String
                         && args.len() == 2
                         && args[0].ty() == Type::Regex
                         && args[1].ty() == Type::F64
-                        && *r#type == (Type::Array { elem: Box::new(Type::String) })
+                        && *r#type
+                            == (Type::Array {
+                                elem: Box::new(Type::String),
+                            })
                 } else if matches!(method.as_str(), "replace" | "replaceAll") {
                     receiver.ty() == Type::String
                         && args.len() == 2
@@ -1859,24 +2535,59 @@ fn validate_function(
                 class_name, r#type, ..
             } => {
                 let ctor = functions.get(format!("%{class_name}.constructor").as_str());
+                let class = module.class(class_name);
                 if *r#type
                     != (Type::Classval {
                         class_name: class_name.clone(),
                     })
-                    || !module
-                        .class(class_name)
-                        .is_some_and(|c| !c.runtime && !c.js_name.is_empty())
-                    || !ctor.is_some_and(|f| {
-                        !f.is_async
-                            && f.return_type == Type::Void
-                            && f.captures.is_none()
-                            && f.params.first().map(|p| &p.r#type)
-                                == Some(&Type::Object {
-                                    class_name: class_name.clone(),
-                                })
+                    || !class.is_some_and(|class| {
+                        !class.js_name.is_empty()
+                            && (class.runtime
+                                || ctor.is_some_and(|f| {
+                                    !f.is_async
+                                        && f.return_type == Type::Void
+                                        && f.captures.is_none()
+                                        && f.params.first().map(|p| &p.r#type)
+                                            == Some(&Type::Object {
+                                                class_name: class_name.clone(),
+                                            })
+                                }))
                     })
                 {
                     return Err("invalid native class value".into());
+                }
+                Ok(())
+            }
+            Expr::ClassCreate {
+                class_name,
+                parent,
+                captures,
+                r#type,
+                ..
+            } => {
+                let class = module
+                    .class(class_name)
+                    .ok_or("dynamic class layout is missing")?;
+                if *r#type
+                    != (Type::Classval {
+                        class_name: class_name.clone(),
+                    })
+                    || captures.len() != class.captures.len()
+                    || captures
+                        .iter()
+                        .zip(&class.captures)
+                        .any(|(value, expected)| value.ty() != *expected)
+                {
+                    return Err("invalid dynamic class creation".into());
+                }
+                if let Some(parent) = parent {
+                    expr(parent, locals, initialized, functions, module)?;
+                    if !matches!(parent.ty(), Type::Classval { .. }) {
+                        return Err("dynamic class parent is not a class value".into());
+                    }
+                }
+                for capture in captures {
+                    expr(capture, locals, initialized, functions, module)?;
                 }
                 Ok(())
             }
@@ -1911,7 +2622,8 @@ fn validate_function(
                     || ctor.is_async
                     || ctor.return_type != Type::Void
                     || ctor.captures.is_some()
-                    || ctor.params.len() != args.len() + 1
+                    || ctor.params.len()
+                        != args.len() + 1 + module.class(class_name).unwrap().captures.len()
                     || ctor.params.first().map(|p| &p.r#type) != Some(&object)
                 {
                     return Err("invalid native constructor ABI".into());
@@ -1989,7 +2701,8 @@ fn validate_function(
                         class_name: class_name.clone(),
                     })
                     || args.len() != target.params.len()
-                    || *r#type != target.call_result()
+                    || (*r#type != target.call_result()
+                        && !(*r#type == Type::Dyn && target.call_result() == Type::Void))
                     || args.iter().skip(1).map(Expr::ty).ne(target
                         .params
                         .iter()
@@ -2035,20 +2748,157 @@ fn validate_function(
             }
             Expr::LibCall {
                 r#fn, args, r#type, ..
+            } if r#fn == "dyn.valueInstanceof" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if *r#type != Type::Bool
+                    || args.len() != 2
+                    || args.iter().any(|arg| arg.ty() != Type::Dyn)
+                {
+                    return Err("invalid native dynamic instanceof".into());
+                }
+                Ok(())
+            }
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if matches!(
+                r#fn.as_str(),
+                "map.constructorValue"
+                    | "promise.constructorValue"
+                    | "regex.constructorValue"
+                    | "regex.globalValue"
+                    | "legacy.unescapeGlobal"
+                    | "array.spliceMethodValue"
+            ) =>
+            {
+                if !args.is_empty() || *r#type != Type::Dyn {
+                    return Err("invalid native intrinsic function value".into());
+                }
+                Ok(())
+            }
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if r#fn == "class.capture" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let valid = match args.as_slice() {
+                    [
+                        object,
+                        Expr::NumLit { value, .. },
+                        Expr::StrLit { value: owner, .. },
+                    ] if value.is_finite() && *value >= 0.0 && value.fract() == 0.0 => {
+                        let receiver = match object.ty() {
+                            Type::Object { class_name } => Some(class_name),
+                            _ => None,
+                        };
+                        module.class(owner).is_some_and(|class| {
+                            receiver.is_some_and(|receiver| module.subclass(&receiver, owner))
+                                && class.captures.get(*value as usize) == Some(r#type)
+                        })
+                    }
+                    _ => false,
+                };
+                if valid {
+                    Ok(())
+                } else {
+                    Err("invalid native class capture read".into())
+                }
+            }
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if r#fn == "class.captureSet" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let valid = match args.as_slice() {
+                    [
+                        object,
+                        Expr::NumLit { value, .. },
+                        Expr::StrLit { value: owner, .. },
+                        assigned,
+                    ] if value.is_finite() && *value >= 0.0 && value.fract() == 0.0 => {
+                        let receiver = match object.ty() {
+                            Type::Object { class_name } => Some(class_name),
+                            _ => None,
+                        };
+                        module.class(owner).is_some_and(|class| {
+                            receiver.is_some_and(|receiver| module.subclass(&receiver, owner))
+                                && class.captures.get(*value as usize) == Some(r#type)
+                                && assigned.ty() == *r#type
+                        })
+                    }
+                    _ => false,
+                };
+                if valid {
+                    Ok(())
+                } else {
+                    Err("invalid native class capture write".into())
+                }
+            }
+            Expr::LibCall {
+                r#fn, args, r#type, ..
+            } if matches!(
+                r#fn.as_str(),
+                "class.instanceConstructor" | "class.lexicalConstructor"
+            ) =>
+            {
+                if args.len() != 1
+                    || !matches!(
+                        (&args[0].ty(), r#type),
+                        (
+                            Type::Object { class_name: object },
+                            Type::Classval { class_name: constructor }
+                        ) if r#fn == "class.lexicalConstructor"
+                            || object == constructor
+                    )
+                {
+                    return Err("invalid native instance constructor read".into());
+                }
+                Ok(())
+            }
+            Expr::LibCall {
+                r#fn, args, r#type, ..
             } if r#fn.starts_with("error.") => {
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
                 }
-                let builtin = |ty: Type| matches!(ty, Type::Object { class_name } if matches!(class_name.as_str(), "%Error" | "%TypeError" | "%RangeError" | "%SyntaxError") && module.class(&class_name).is_some_and(|c| c.runtime));
+                let builtin = |ty: Type| matches!(ty, Type::Object { class_name } if builtin_error_class(&class_name) && module.class(&class_name).is_some_and(|c| c.runtime));
                 let valid = match r#fn.as_str() {
                     "error.new" => {
-                        args.len() == 1 && args[0].ty() == Type::String && builtin(r#type.clone())
+                        (args.len() == 1 || (args.len() == 2 && args[1].ty() == Type::Dyn))
+                            && args[0].ty() == Type::String
+                            && builtin(r#type.clone())
                     }
                     "error.ctor" => {
-                        args.len() == 2
+                        (args.len() == 2 || (args.len() == 3 && args[2].ty() == Type::Dyn))
                             && builtin(args[0].ty())
                             && args[1].ty() == Type::String
                             && *r#type == Type::Void
+                    }
+                    "error.domException" => {
+                        args.len() == 2
+                            && args.iter().all(|arg| arg.ty() == Type::String)
+                            && matches!(r#type, Type::Object { class_name } if class_name == "%DOMException")
+                            && builtin(r#type.clone())
+                    }
+                    "error.domExceptionCtor" => {
+                        args.len() == 3
+                            && builtin(args[0].ty())
+                            && args[1].ty() == Type::String
+                            && args[2].ty() == Type::String
+                            && *r#type == Type::Void
+                    }
+                    "error.aggregate" => {
+                        (args.len() == 2 || (args.len() == 3 && args[2].ty() == Type::Dyn))
+                            && args[0].ty() == Type::Dyn
+                            && args[1].ty() == Type::String
+                            && matches!(r#type, Type::Object { class_name } if class_name == "%AggregateError")
+                            && builtin(r#type.clone())
+                    }
+                    "error.captureStackTrace" => {
+                        (args.len() == 1 || args.len() == 2) && *r#type == Type::Void
                     }
                     "error.toString" => {
                         args.len() == 1
@@ -2063,7 +2913,12 @@ fn validate_function(
                 if valid {
                     Ok(())
                 } else {
-                    Err("invalid native Error operation".into())
+                    Err(format!(
+                        "invalid native Error operation {}({:?}) -> {:?}",
+                        r#fn,
+                        args.iter().map(Expr::ty).collect::<Vec<_>>(),
+                        r#type
+                    ))
                 }
             }
             Expr::ArrayGet {
@@ -2124,7 +2979,63 @@ fn validate_function(
                             && args[1].ty() == *value
                             && *r#type == Type::Void
                     }
+                    "forEach" => {
+                        args.len() == 2
+                            && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                            && *r#type == Type::Void
+                    }
                     "size" => args.is_empty() && *r#type == Type::F64,
+                    "keysToArray" => {
+                        args.is_empty() && *r#type == (Type::Array { elem: key.clone() })
+                    }
+                    "valuesToArray" => {
+                        args.is_empty()
+                            && *r#type
+                                == (Type::Array {
+                                    elem: value.clone(),
+                                })
+                    }
+                    "valuesIterator" => {
+                        args.is_empty()
+                            && *r#type
+                                == (Type::Generator {
+                                    r#async: false,
+                                    yield_type: Box::new(Type::Dyn),
+                                    return_type: Box::new(Type::Void),
+                                    next_type: Box::new(Type::Undefined),
+                                })
+                    }
+                    "valuesIteratorObject" => args.is_empty() && *r#type == Type::Dyn,
+                    "entriesToArray" => {
+                        let Type::Array { elem } = r#type else {
+                            return Err("invalid Map entries result".into());
+                        };
+                        if let Type::Array { elem: item } = elem.as_ref() {
+                            return if **item == *key && **item == *value {
+                                Ok(())
+                            } else {
+                                Err("invalid homogeneous Map entry array".into())
+                            };
+                        }
+                        let Type::Record { shape_id } = elem.as_ref() else {
+                            return Err("invalid Map entry tuple".into());
+                        };
+                        let record = module
+                            .records
+                            .get(*shape_id)
+                            .ok_or("unknown Map entry tuple")?;
+                        args.is_empty()
+                            && record.tuple
+                            && record.fields.len() == 2
+                            && record
+                                .fields
+                                .iter()
+                                .any(|field| field.name == "0" && field.r#type == *key)
+                            && record
+                                .fields
+                                .iter()
+                                .any(|field| field.name == "1" && field.r#type == *value)
+                    }
                     "clear" => args.is_empty() && *r#type == Type::Void,
                     _ => false,
                 };
@@ -2167,7 +3078,7 @@ fn validate_function(
                 }
                 if let Some(seed) = seed {
                     expr(seed, locals, initialized, functions, module)?;
-                    if seed.ty() != (Type::Array { elem: elem.clone() }) {
+                    if seed.ty() != (Type::Array { elem: elem.clone() }) && seed.ty() != Type::Dyn {
                         return Err("invalid Set seed".into());
                     }
                 }
@@ -2188,14 +3099,40 @@ fn validate_function(
                     expr(arg, locals, initialized, functions, module)?;
                 }
                 let (arity, result) = match method.as_str() {
-                    "add" => (1, Type::Void),
-                    "has" | "delete" => (1, Type::Bool),
+                    "add" | "addValue" => (1, Type::Void),
+                    "has" | "delete" | "hasValue" | "deleteValue" => (1, Type::Bool),
                     "clear" => (0, Type::Void),
                     "size" => (0, Type::F64),
                     "toArray" => (0, Type::Array { elem: elem.clone() }),
+                    "iterator" => (
+                        0,
+                        Type::Generator {
+                            r#async: false,
+                            yield_type: elem.clone(),
+                            return_type: Box::new(Type::Void),
+                            next_type: Box::new(Type::Undefined),
+                        },
+                    ),
+                    "dynamicIterator" => (
+                        0,
+                        Type::Generator {
+                            r#async: false,
+                            yield_type: Box::new(Type::Dyn),
+                            return_type: Box::new(Type::Void),
+                            next_type: Box::new(Type::Undefined),
+                        },
+                    ),
                     _ => return Err("invalid Set operation".into()),
                 };
-                if args.len() != arity || *r#type != result || args.iter().any(|a| a.ty() != *elem)
+                let arg_type = if matches!(method.as_str(), "addValue" | "hasValue" | "deleteValue")
+                {
+                    Type::Dyn
+                } else {
+                    *elem
+                };
+                if args.len() != arity
+                    || *r#type != result
+                    || args.iter().any(|a| a.ty() != arg_type)
                 {
                     return Err("invalid Set operation".into());
                 }
@@ -2220,6 +3157,17 @@ fn validate_function(
                         == (Type::Array {
                             elem: Box::new(Type::String),
                         }))
+                    || (matches!(
+                        method.as_str(),
+                        "decodeURIComponent"
+                            | "decodeURI"
+                            | "encodeURIComponent"
+                            | "encodeURI"
+                            | "unescape"
+                            | "atob"
+                            | "btoa"
+                    ) && args.is_empty()
+                        && *r#type == Type::String)
                     || crate::string_builtins::by_method(method).is_some_and(|operation| {
                         args.len() == operation.args.len()
                             && *r#type == operation.result
@@ -2279,13 +3227,17 @@ fn validate_function(
                 }
                 let valid = match method.as_str() {
                     "length" => *r#type == Type::F64 && args.is_empty(),
+                    "freeze" => *r#type == receiver.ty() && args.is_empty(),
+                    "hasStoredValue" => {
+                        *r#type == Type::Bool && args.len() == 1 && args[0].ty() == Type::F64
+                    }
                     "join" => {
                         *elem == Type::String
                             && *r#type == Type::String
                             && args.len() == 1
                             && args[0].ty() == Type::String
                     }
-                    "nextPresent" => {
+                    "nextPresent" | "previousPresent" => {
                         *r#type == Type::F64 && args.len() == 1 && args[0].ty() == Type::F64
                     }
                     "slice" => {
@@ -2293,27 +3245,92 @@ fn validate_function(
                             && args.len() <= 2
                             && args.iter().all(|arg| arg.ty() == Type::F64)
                     }
-                    "push" => *r#type == Type::F64 && args.iter().all(|arg| arg.ty() == *elem),
-                    "pop" => {
+                    "fill" => {
+                        *r#type == receiver.ty()
+                            && (1..=3).contains(&args.len())
+                            && args[0].ty() == *elem
+                            && args[1..].iter().all(|arg| arg.ty() == Type::F64)
+                    }
+                    "reverse" => *r#type == receiver.ty() && args.is_empty(),
+                    "splice" => {
+                        *r#type == receiver.ty()
+                            && args.len() >= 2
+                            && args[0].ty() == Type::F64
+                            && args[1].ty() == Type::F64
+                            && args[2..].iter().all(|arg| arg.ty() == *elem)
+                    }
+                    "indexOf" => {
+                        *r#type == Type::F64
+                            && (1..=2).contains(&args.len())
+                            && args[0].ty() == *elem
+                            && args.get(1).is_none_or(|arg| arg.ty() == Type::F64)
+                    }
+                    "entriesToArray" => {
+                        let Type::Array { elem: pair } = r#type else {
+                            return Err("invalid array entries result".into());
+                        };
+                        let Type::Record { shape_id } = pair.as_ref() else {
+                            return Err("invalid array entry tuple".into());
+                        };
+                        let record = module
+                            .records
+                            .get(*shape_id)
+                            .ok_or("unknown array entry tuple")?;
                         args.is_empty()
-                            && match r#type {
-                                Type::Union { union_id } => {
-                                    module.unions.get(*union_id).is_some_and(|union| {
-                                        union.arms.contains(&Type::Undefined)
-                                            && if matches!(*elem, Type::Union { .. }) {
-                                                *r#type == *elem
-                                            } else {
-                                                union.arms.len() == 2 && union.arms.contains(&elem)
-                                            }
-                                    })
-                                }
-                                _ => false,
-                            }
+                            && record.tuple
+                            && record.fields.len() == 2
+                            && record
+                                .fields
+                                .iter()
+                                .any(|field| field.name == "0" && field.r#type == Type::F64)
+                            && record
+                                .fields
+                                .iter()
+                                .any(|field| field.name == "1" && field.r#type == *elem)
+                    }
+                    "push" | "unshift" => {
+                        *r#type == Type::F64 && args.iter().all(|arg| arg.ty() == *elem)
+                    }
+                    "unshiftFrom" => {
+                        *r#type == Type::F64 && args.len() == 1 && args[0].ty() == receiver.ty()
+                    }
+                    "concat" => {
+                        *r#type == receiver.ty()
+                            && args
+                                .iter()
+                                .all(|arg| arg.ty() == *elem || arg.ty() == receiver.ty())
+                    }
+                    "concatFrom" => {
+                        *r#type == Type::F64 && args.len() == 1 && args[0].ty() == receiver.ty()
+                    }
+                    "pop" | "shift" => {
+                        args.is_empty()
+                            && ((*elem == Type::Dyn && *r#type == Type::Dyn)
+                                || match r#type {
+                                    Type::Union { union_id } => {
+                                        module.unions.get(*union_id).is_some_and(|union| {
+                                            union.arms.contains(&Type::Undefined)
+                                                && if matches!(*elem, Type::Union { .. }) {
+                                                    *r#type == *elem
+                                                } else {
+                                                    union.arms.len() == 2
+                                                        && union.arms.contains(&elem)
+                                                }
+                                        })
+                                    }
+                                    _ => false,
+                                })
                     }
                     _ => false,
                 };
                 if !valid {
-                    return Err("invalid array operation".into());
+                    return Err(format!(
+                        "invalid array operation: method={} receiver={:?} args={:?} result={:?}",
+                        method,
+                        receiver.ty(),
+                        args.iter().map(Expr::ty).collect::<Vec<_>>(),
+                        r#type,
+                    ));
                 }
                 Ok(())
             }
@@ -2333,6 +3350,15 @@ fn validate_function(
                 };
                 let want = target.captures.as_deref().unwrap_or(&[]);
                 if *r#type != expected || captures.len() != want.len() {
+                    if std::env::var_os("SCRIPTC_TRACE_CLOSURES").is_some() {
+                        eprintln!(
+                            "scriptc: closure {fn_name} typed {:?}, function {:?}, captures {} vs {}",
+                            r#type,
+                            expected,
+                            captures.len(),
+                            want.len()
+                        );
+                    }
                     return Err("invalid closure signature".into());
                 }
                 for (id, want) in captures.iter().zip(want) {
@@ -2443,6 +3469,7 @@ fn validate_function(
                     }
                     if f.absent
                         && !matches!(&f.value, Expr::UnionWrap { value, .. } if value.ty() == Type::Undefined)
+                        && !matches!(&f.value, Expr::DynFrom { value, .. } if value.ty() == Type::Undefined)
                         && f.value.ty() != Type::Undefined
                     {
                         return Err("invalid absent field".into());
@@ -2477,19 +3504,56 @@ fn validate_function(
                 ..
             } => {
                 if matches!(value.ty(), Type::Null | Type::Undefined) {
-                    if !matches!(
-                        value.as_ref(),
+                    match value.as_ref() {
                         Expr::UnitLit {
                             unit: "null",
                             r#type: Type::Null,
                             ..
-                        } | Expr::UnitLit {
+                        }
+                        | Expr::UnitLit {
                             unit: "undefined",
                             r#type: Type::Undefined,
                             ..
+                        } => {}
+                        Expr::UnionNarrow {
+                            union_id: source_union_id,
+                            tag: source_tag,
+                            value: source,
+                            r#type: source_type,
+                            ..
+                        } => {
+                            // A nullish arm can move between union layouts without
+                            // materializing a new value. Validate the extraction here:
+                            // standalone unit narrowing remains invalid, while this
+                            // immediately consumed form preserves the source check.
+                            expr(source, locals, initialized, functions, module)?;
+                            let Type::Union {
+                                union_id: source_id,
+                            } = source.ty()
+                            else {
+                                return Err("non-union unit extraction".into());
+                            };
+                            let source_union = module
+                                .unions
+                                .get(source_id)
+                                .ok_or("unknown unit source union")?;
+                            let source_arm = source_union
+                                .arms
+                                .get(*source_tag)
+                                .ok_or("invalid unit source tag")?;
+                            if *source_union_id != format!("u{source_id}")
+                                || source_type != source_arm
+                                || !matches!(source_arm, Type::Null | Type::Undefined)
+                            {
+                                return Err("invalid unit union extraction".into());
+                            }
                         }
-                    ) {
-                        return Err("unit union payload must be a unit literal".into());
+                        _ => {
+                            return Err(format!(
+                                "unit union payload must be a literal or checked extraction: union={union_id} tag={tag} arm={:?} payload={value:?}",
+                                value.ty(),
+                            ));
+                        }
                     }
                 } else {
                     expr(value, locals, initialized, functions, module)?;
@@ -2508,13 +3572,14 @@ fn validate_function(
                 tag,
                 value,
                 r#type,
-                ..
+                loc,
             }
             | Expr::UnionIsTag {
                 union_id,
                 tag,
                 value,
                 r#type,
+                loc,
                 ..
             } => {
                 expr(value, locals, initialized, functions, module)?;
@@ -2526,7 +3591,10 @@ fn validate_function(
                 if matches!(e, Expr::UnionNarrow { .. })
                     && matches!(arm, Type::Null | Type::Undefined)
                 {
-                    return Err("standalone unit narrowing".into());
+                    return Err(format!(
+                        "standalone unit narrowing at {}:{}..{}: union {:?}, tag {}, arm {:?}",
+                        loc.file, loc.start, loc.end, union.arms, tag, arm
+                    ));
                 }
                 if *union_id != format!("u{id}")
                     || *r#type
@@ -2537,6 +3605,23 @@ fn validate_function(
                         }
                 {
                     return Err("invalid union extraction type".into());
+                }
+                Ok(())
+            }
+            Expr::UnionProject { value, r#type, .. } => {
+                expr(value, locals, initialized, functions, module)?;
+                let Type::Union { union_id: source } = value.ty() else {
+                    return Err("non-union projection source".into());
+                };
+                let Type::Union { union_id: target } = r#type else {
+                    return Err("non-union projection target".into());
+                };
+                let source = module.unions.get(source).ok_or("unknown source union")?;
+                let target = module.unions.get(*target).ok_or("unknown target union")?;
+                if target.arms.len() >= source.arms.len()
+                    || target.arms.iter().any(|arm| !source.arms.contains(arm))
+                {
+                    return Err("invalid narrowed union projection".into());
                 }
                 Ok(())
             }
@@ -2569,8 +3654,281 @@ fn validate_function(
                 Ok(())
             }
             Expr::LibCall {
-                r#fn, args, r#type, ..
+                r#fn,
+                args,
+                r#type,
+                loc,
+                ..
             } => {
+                if r#fn == "template.object" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let dynamic_array = Type::Array {
+                        elem: Box::new(Type::Dyn),
+                    };
+                    let string_entry = |entry: &Expr| {
+                        matches!(entry,
+                        Expr::DynFrom { value, .. } if matches!(value.as_ref(), Expr::StrLit { .. }))
+                    };
+                    let undefined_entry = |entry: &Expr| {
+                        matches!(entry,
+                        Expr::DynFrom { value, .. } if matches!(value.as_ref(), Expr::UnitLit { unit, r#type: Type::Undefined, .. } if *unit == "undefined"))
+                    };
+                    let valid = matches!(args.as_slice(), [Expr::StrLit { value: site, .. }, Expr::ArrayLit { elems: cooked, r#type: cooked_type, .. }, Expr::ArrayLit { elems: raw, r#type: raw_type, .. }]
+                        if !cooked.is_empty() && cooked.len() == raw.len()
+                            && !site.is_empty()
+                            && *cooked_type == dynamic_array && *raw_type == dynamic_array
+                            && cooked.iter().all(|entry| string_entry(entry) || undefined_entry(entry))
+                            && raw.iter().all(string_entry))
+                        && *r#type == dynamic_array;
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native template object".into())
+                    };
+                }
+                if r#fn == "regex.constructDynamic" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.iter().all(|arg| arg.ty() == Type::Dyn) && *r#type == Type::Dyn {
+                        Ok(())
+                    } else {
+                        Err("invalid dynamic RegExp construction".into())
+                    };
+                }
+                if r#fn == "regex.requireGlobal" {
+                    return if args.is_empty() && *r#type == Type::Void {
+                        Ok(())
+                    } else {
+                        Err("invalid RegExp global constructor guard".into())
+                    };
+                }
+                if r#fn == "legacy.requireUnescape" {
+                    return if args.is_empty() && *r#type == Type::Void {
+                        Ok(())
+                    } else {
+                        Err("invalid unescape global binding guard".into())
+                    };
+                }
+                if matches!(r#fn.as_str(), "array.setSloppy" | "array.setLengthSloppy") {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = match args.as_slice() {
+                        [array, index, value] if r#fn == "array.setSloppy" => {
+                            matches!(array.ty(), Type::Array { elem } if *elem == value.ty())
+                                && index.ty() == Type::F64
+                        }
+                        [array, length] if r#fn == "array.setLengthSloppy" => {
+                            matches!(array.ty(), Type::Array { .. }) && length.ty() == Type::F64
+                        }
+                        _ => false,
+                    };
+                    return if valid && *r#type == Type::Void {
+                        Ok(())
+                    } else {
+                        Err("invalid sloppy native array write".into())
+                    };
+                }
+                if r#fn == "map.valueView" {
+                    let valid = if let [source] = args.as_slice()
+                        && let Type::Map {
+                            key: source_key,
+                            value: source_value,
+                        } = source.ty()
+                        && let Type::Map {
+                            key: target_key,
+                            value: target_value,
+                        } = r#type
+                    {
+                        source_key == *target_key && source_value != *target_value
+                    } else {
+                        false
+                    };
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid Map value view".into())
+                    };
+                }
+                if r#fn == "map.sameIdentity" {
+                    let valid = if let [left, right] = args.as_slice()
+                        && let Type::Map { key: left_key, .. } = left.ty()
+                        && let Type::Map { key: right_key, .. } = right.ty()
+                    {
+                        left_key == right_key && *r#type == Type::Bool
+                    } else {
+                        false
+                    };
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid Map identity comparison".into())
+                    };
+                }
+                if r#fn == "abort.controllerNew" {
+                    return if args.is_empty() && *r#type == Type::Dyn {
+                        Ok(())
+                    } else {
+                        Err("invalid AbortController constructor".into())
+                    };
+                }
+                if r#fn == "web.transformStreamNew" {
+                    return if args.is_empty() && *r#type == Type::Dyn {
+                        Ok(())
+                    } else {
+                        Err("invalid TransformStream constructor".into())
+                    };
+                }
+                if r#fn == "web.textDecoderStreamNew" {
+                    return if args.is_empty() && *r#type == Type::Dyn {
+                        Ok(())
+                    } else {
+                        Err("invalid TextDecoderStream constructor".into())
+                    };
+                }
+                if r#fn == "web.readableStreamNew" {
+                    return if args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::Dyn {
+                        Ok(())
+                    } else {
+                        Err("invalid ReadableStream constructor".into())
+                    };
+                }
+                if r#fn == "fetch.headersNew" {
+                    return if args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::Dyn {
+                        Ok(())
+                    } else {
+                        Err("invalid Headers constructor".into())
+                    };
+                }
+                if r#fn == "array.fromTyped" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1
+                        && args[0].ty() == Type::Dyn
+                        && *r#type
+                            == (Type::Array {
+                                elem: Box::new(Type::F64),
+                            })
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid Array.from typed array conversion".into())
+                    };
+                }
+                if r#fn == "array.pushApplyDynamic" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 2
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::F64
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid dynamic Array.prototype.push.apply".into())
+                    };
+                }
+                if r#fn == "dyn.callSpread" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if matches!(args.as_slice(), [callee, values]
+                        if callee.ty() == Type::Dyn
+                            && matches!(values.ty(), Type::Array { elem } if *elem == Type::Dyn))
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid dynamic spread call".into())
+                    };
+                }
+                if r#fn == "dyn.callWithThisSpread" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if matches!(args.as_slice(), [callee, receiver, values]
+                        if callee.ty() == Type::Dyn && receiver.ty() == Type::Dyn
+                            && matches!(values.ty(), Type::Array { elem } if *elem == Type::Dyn))
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid prepared dynamic spread method call".into())
+                    };
+                }
+                if r#fn == "dyn.invokeSpread" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if matches!(args.as_slice(), [receiver, method, values]
+                        if receiver.ty() == Type::Dyn
+                            && method.ty() == Type::String
+                            && matches!(values.ty(), Type::Array { elem } if *elem == Type::Dyn))
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid dynamic spread method call".into())
+                    };
+                }
+                if matches!(r#fn.as_str(), "url.newValue" | "url.newValueBase") {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let arity = if r#fn == "url.newValue" { 1 } else { 2 };
+                    return if args.len() == arity
+                        && args.iter().all(|arg| arg.ty() == Type::String)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native URL construction".into())
+                    };
+                }
+                if matches!(
+                    r#fn.as_str(),
+                    "searchParams.newValue"
+                        | "searchParams.parseValue"
+                        | "searchParams.keysArray"
+                        | "searchParams.valuesArray"
+                        | "searchParams.entriesArray"
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if (*r#type == Type::Dyn
+                        && ((r#fn == "searchParams.newValue" && args.is_empty())
+                            || (r#fn == "searchParams.parseValue"
+                                && args.len() == 1
+                                && args[0].ty() == Type::String)))
+                        || (matches!(
+                            r#fn.as_str(),
+                            "searchParams.keysArray" | "searchParams.valuesArray"
+                        ) && args.len() == 1
+                            && args[0].ty() == Type::Dyn
+                            && *r#type
+                                == (Type::Array {
+                                    elem: Box::new(Type::String),
+                                }))
+                        || (r#fn == "searchParams.entriesArray"
+                            && args.len() == 1
+                            && args[0].ty() == Type::Dyn
+                            && *r#type
+                                == (Type::Array {
+                                    elem: Box::new(Type::Array {
+                                        elem: Box::new(Type::String),
+                                    }),
+                                }))
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native URLSearchParams operation".into())
+                    };
+                }
                 if let Some(operation) = r#fn.strip_prefix("weakmap.") {
                     for (index, arg) in args.iter().enumerate() {
                         // Direct typed keys are opaque GC identities, never
@@ -2594,8 +3952,131 @@ fn validate_function(
                         "set" => Some((3, Type::Void)),
                         _ => None,
                     };
-                    if !expected.is_some_and(|(arity, result)| args.len() == arity && *r#type == result && matches!(args[0].ty(), Type::Object { class_name } if class_name == "native_builtin_WeakMap") && args[1..].iter().all(|arg| arg.ty() == Type::Dyn)) { return Err("invalid native weak map operation".into()); }
+                    if !expected.is_some_and(|(arity, result)| {
+                        args.len() == arity
+                            && *r#type == result
+                            && matches!(args[0].ty(), Type::Object { class_name } if class_name == "native_builtin_WeakMap")
+                            && matches!(args[1].ty(), Type::Dyn | Type::Object { .. })
+                            && args[2..].iter().all(|arg| arg.ty() == Type::Dyn)
+                    }) { return Err("invalid native weak map operation".into()); }
                     return Ok(());
+                }
+                if matches!(r#fn.as_str(), "nodeStream.destroy" | "nodeStream.destroyed") {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let owner = args.first().is_some_and(|arg| matches!(arg.ty(), Type::Object { ref class_name } if matches!(class_name.as_str(), "native_builtin_Transform" | "native_builtin_Duplex" | "native_builtin_Readable" | "native_builtin_Writable")));
+                    let valid = owner
+                        && if r#fn == "nodeStream.destroy" {
+                            (args.len() == 1 || (args.len() == 2 && args[1].ty() == Type::Dyn))
+                                && args[0].ty() == *r#type
+                        } else {
+                            args.len() == 1 && *r#type == Type::Bool
+                        };
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native stream state operation".into())
+                    };
+                }
+                if r#fn == "timers.methodValue" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = args.len() == 2
+                        && args[0].ty() == Type::F64
+                        && matches!(&args[1], Expr::StrLit { value, .. } if matches!(value.as_str(), "refresh" | "ref" | "unref" | "hasRef"))
+                        && *r#type == Type::Dyn;
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native timer method value".into())
+                    };
+                }
+                if matches!(
+                    r#fn.as_str(),
+                    "dom.targetAdd" | "dom.targetRemove" | "dom.targetDispatch"
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let owner = matches!(args.first().map(Expr::ty), Some(Type::Object { class_name }) if module.subclass(&class_name, "native_builtin_EventTarget"));
+                    let valid = match r#fn.as_str() {
+                        "dom.targetAdd" | "dom.targetRemove" => {
+                            args.len() == 4
+                                && args[1].ty() == Type::String
+                                && args[2].ty() == Type::Dyn
+                                && args[3].ty() == Type::Dyn
+                                && *r#type == Type::Void
+                        }
+                        "dom.targetDispatch" => {
+                            args.len() == 2 && args[1].ty() == Type::Dyn && *r#type == Type::Bool
+                        }
+                        _ => false,
+                    };
+                    return if owner && valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native EventTarget operation".into())
+                    };
+                }
+                if matches!(
+                    r#fn.as_str(),
+                    "dom.eventNew" | "dom.eventGet" | "dom.eventAction"
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = match r#fn.as_str() {
+                        "dom.eventNew" => {
+                            args.len() == 2
+                                && args[0].ty() == Type::String
+                                && args[1].ty() == Type::Dyn
+                                && matches!(r#type, Type::Object { class_name } if class_name == "native_builtin_Event" && module.class(class_name).is_some())
+                        }
+                        "dom.eventGet" => {
+                            args.len() == 2
+                                && matches!(args[0].ty(), Type::Object { class_name } if module.subclass(&class_name, "native_builtin_Event"))
+                                && matches!(&args[1], Expr::StrLit { value, .. } if matches!(value.as_str(), "type" | "bubbles" | "cancelable" | "composed" | "defaultPrevented" | "isTrusted" | "cancelBubble" | "eventPhase" | "target" | "currentTarget" | "srcElement"))
+                                && *r#type == Type::Dyn
+                        }
+                        "dom.eventAction" => {
+                            args.len() == 2
+                                && matches!(args[0].ty(), Type::Object { class_name } if module.subclass(&class_name, "native_builtin_Event"))
+                                && matches!(&args[1], Expr::StrLit { value, .. } if matches!(value.as_str(), "preventDefault" | "stopPropagation" | "stopImmediatePropagation"))
+                                && *r#type == Type::Void
+                        }
+                        _ => false,
+                    };
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native DOM Event operation".into())
+                    };
+                }
+                if let Some(operation) = r#fn.strip_prefix("events.instance") {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let owner = matches!(args.first().map(Expr::ty), Some(Type::Object { class_name })
+                        if module.subclass(&class_name, "native_builtin_EventEmitter"));
+                    let event = args.get(1).is_some_and(|arg| arg.ty() == Type::String);
+                    let valid = match operation {
+                        "On" | "Prepend" | "Once" | "PrependOnce" | "Off" => {
+                            args.len() == 3 && args[2].ty() == Type::Dyn && *r#type == args[0].ty()
+                        }
+                        "Emit" => {
+                            args.len() >= 2
+                                && args[2..].iter().all(|arg| arg.ty() == Type::Dyn)
+                                && *r#type == Type::Bool
+                        }
+                        _ => false,
+                    };
+                    return if owner && event && valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native EventEmitter operation".into())
+                    };
                 }
                 if matches!(r#fn.as_str(), "als.new" | "als.get" | "als.run") {
                     for arg in args {
@@ -2632,25 +4113,96 @@ fn validate_function(
                     {
                         Ok(())
                     } else {
-                        Err("invalid native record own-value write".into())
+                        Err(format!(
+                            "invalid native record own-value write: args={:?}, result={:?}",
+                            args.iter().map(Expr::ty).collect::<Vec<_>>(),
+                            r#type
+                        ))
                     };
                 }
-                if r#fn == "record.view" {
+                if r#fn == "record.view" || r#fn == "record.checkedView" {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
                     }
-                    return if args.len() == 1
-                        && record_views::view_pairs(
+                    let pairs = if r#fn == "record.checkedView" {
+                        record_views::dynamic_view_pairs(
                             &args[0].ty(),
                             r#type,
                             &module.records,
                             &module.unions,
                         )
-                        .is_some()
-                    {
+                    } else {
+                        record_views::view_pairs(
+                            &args[0].ty(),
+                            r#type,
+                            &module.records,
+                            &module.unions,
+                        )
+                    };
+                    return if args.len() == 1 && pairs.is_some() {
                         Ok(())
                     } else {
                         Err("invalid or ambiguous native record view".into())
+                    };
+                }
+                if r#fn == "record.mutableDynView" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if matches!(args.as_slice(), [source]
+                        if matches!(source.ty(), Type::Record { .. }))
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid mutable native record view".into())
+                    };
+                }
+                if r#fn == "array.view" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = matches!(args.as_slice(), [source]
+                        if matches!((source.ty(), r#type),
+                            (Type::Array { elem: source }, Type::Array { elem: target })
+                                if source != *target));
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native array view".into())
+                    };
+                }
+                if r#fn == "array.generator" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = matches!(args.as_slice(), [source]
+                        if matches!((source.ty(), r#type),
+                            (Type::Array { elem: source }, Type::Generator {
+                                r#async: false,
+                                yield_type,
+                                return_type,
+                                next_type,
+                            }) if source == *yield_type
+                                && matches!(**return_type, Type::Void | Type::Undefined)
+                                && matches!(**next_type, Type::Void | Type::Undefined | Type::Dyn)));
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native array generator".into())
+                    };
+                }
+                if r#fn == "callable.view" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1
+                        && matches!(r#type, Type::Record { shape_id } if module.records.get(*shape_id).is_some_and(|record| !record.tuple && record.index_value.is_none() && record.fields.iter().any(|field| field.name == "\0scriptc.call" && (field.r#type == args[0].ty() || matches!(args[0].ty(), Type::Classval { .. })))))
+                        && matches!(args[0].ty(), Type::Func { .. } | Type::Classval { .. })
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native callable view".into())
                     };
                 }
                 if r#fn == "record.fromOwn" {
@@ -2697,7 +4249,186 @@ fn validate_function(
                         Err("invalid native relational comparison".into())
                     };
                 }
-                if r#fn == "dyn.objectRestCheck" {
+                if r#fn == "dyn.proxyNew" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 2
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native Proxy construction".into())
+                    };
+                }
+                if r#fn == "dyn.reflectGet" || r#fn == "dyn.reflectSet" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = if r#fn == "dyn.reflectGet" {
+                        args.len() == 3 && *r#type == Type::Dyn
+                    } else {
+                        args.len() == 4 && *r#type == Type::Bool
+                    };
+                    return if valid && args.iter().all(|arg| arg.ty() == Type::Dyn) {
+                        Ok(())
+                    } else {
+                        Err("invalid native Reflect.get/set operation".into())
+                    };
+                }
+                if r#fn == "dyn.reflectApply" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 3
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native Reflect.apply operation".into())
+                    };
+                }
+                if r#fn == "dyn.classLayoutIs" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 2
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Bool
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native class layout test".into())
+                    };
+                }
+                if r#fn == "dyn.constructCallable" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if !args.is_empty()
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native callable construction".into())
+                    };
+                }
+                if r#fn == "dyn.reflectOwnKeys" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1
+                        && args[0].ty() == Type::Dyn
+                        && *r#type
+                            == (Type::Array {
+                                elem: Box::new(Type::Dyn),
+                            })
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native Reflect.ownKeys operation".into())
+                    };
+                }
+                if r#fn == "dyn.objectOwnSymbols" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1
+                        && args[0].ty() == Type::Dyn
+                        && *r#type
+                            == (Type::Array {
+                                elem: Box::new(Type::Symbol),
+                            })
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native Object.getOwnPropertySymbols operation".into())
+                    };
+                }
+                if r#fn == "dyn.objectOwnNames" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1
+                        && args[0].ty() == Type::Dyn
+                        && *r#type
+                            == (Type::Array {
+                                elem: Box::new(Type::String),
+                            })
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native Object.getOwnPropertyNames operation".into())
+                    };
+                }
+                if r#fn == "promise.construct" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid_executor = matches!(
+                        args.as_slice(),
+                        [executor]
+                            if executor.ty() == Type::Dyn
+                                || matches!(executor.ty(), Type::Func { rest: false, params, ret }
+                                    if params == vec![Type::Dyn, Type::Dyn]
+                                        && (*ret == Type::Void
+                                            || matches!(ret.as_ref(), Type::Promise { inner }
+                                                if inner.as_ref() == &Type::Void)))
+                    );
+                    return if valid_executor && matches!(r#type, Type::Promise { .. }) {
+                        Ok(())
+                    } else {
+                        Err(format!(
+                            "invalid native Promise construction at {}:{}..{}: executor {:?}, result {:?}",
+                            loc.file,
+                            loc.start,
+                            loc.end,
+                            args.first().map(Expr::ty),
+                            r#type
+                        ))
+                    };
+                }
+                if r#fn == "dyn.freezeValue" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::Dyn {
+                        Ok(())
+                    } else {
+                        Err("invalid native freeze value".into())
+                    };
+                }
+                if r#fn == "dyn.isFrozenValue" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::Bool
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native frozen-state query".into())
+                    };
+                }
+                if r#fn == "dyn.sameValue" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 2
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Bool
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native SameValue comparison".into())
+                    };
+                }
+                if matches!(
+                    r#fn.as_str(),
+                    "dyn.objectRestCheck" | "dyn.objectAssignSourceCheck"
+                ) {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
                     }
@@ -2708,11 +4439,218 @@ fn validate_function(
                         Err("invalid native object binding source check".into())
                     };
                 }
-                if matches!(r#fn.as_str(), "dyn.hasOwn" | "dyn.hasKey" | "dyn.objKeys") {
+                if matches!(
+                    r#fn.as_str(),
+                    "dyn.copyEnumerableSymbols" | "dyn.objectAssignCopy"
+                ) {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
                     }
-                    let valid = if r#fn != "dyn.objKeys" {
+                    return if args.len() == 2
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Void
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native symbol copy".into())
+                    };
+                }
+                if r#fn == "dyn.hasSymbolKey" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 2
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Bool
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native symbol presence".into())
+                    };
+                }
+                if r#fn == "dyn.defineOrdinaryData" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 3
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native ordinary data descriptor".into())
+                    };
+                }
+                if r#fn == "dyn.defineProperties" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 2
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native Object.defineProperties operation".into())
+                    };
+                }
+                if r#fn == "dyn.getOwnPropertyDescriptor" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 2
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native own-property descriptor read".into())
+                    };
+                }
+                if matches!(
+                    r#fn.as_str(),
+                    "dyn.defineOrdinaryGetter" | "dyn.defineOrdinarySetter"
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 5
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native accessor descriptor".into())
+                    };
+                }
+                if r#fn == "dyn.defineOrdinaryAccessor" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 6
+                        && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native combined accessor descriptor".into())
+                    };
+                }
+                if r#fn == "dyn.keyDeleteComputed" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 3
+                        && args[0].ty() == Type::Dyn
+                        && args[1].ty() == Type::Dyn
+                        && args[2].ty() == Type::Bool
+                        && *r#type == Type::Bool
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native computed property deletion".into())
+                    };
+                }
+                if r#fn == "dyn.mapKeysImmediate" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1
+                        && args[0].ty() == Type::Dyn
+                        && *r#type
+                            == (Type::Array {
+                                elem: Box::new(Type::Dyn),
+                            })
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid dynamic immediate Map keys".into())
+                    };
+                }
+                if r#fn == "dyn.arrayIteratorFirstResult" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::Dyn {
+                        Ok(())
+                    } else {
+                        Err("invalid immediate array iterator result".into())
+                    };
+                }
+                if r#fn == "dyn.arrayIteratorNextResult" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::Dyn {
+                        Ok(())
+                    } else {
+                        Err("invalid stateful array iterator result".into())
+                    };
+                }
+                if r#fn == "dyn.typedArrayNumericIndex" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::F64 {
+                        Ok(())
+                    } else {
+                        Err("invalid dynamic typed array numeric index".into())
+                    };
+                }
+                if r#fn == "dyn.fromEntries" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = args.len() == 1
+                        && (matches!(args[0].ty(), Type::Array { elem }
+                            if matches!(*elem, Type::Array { .. } | Type::Dyn)
+                                || matches!(*elem, Type::Record { shape_id }
+                                    if module.records.get(shape_id).is_some_and(|record| record.tuple && record.fields.len() == 2)))
+                            || matches!(args[0].ty(), Type::Map { key, .. }
+                                if *key == Type::String))
+                        && *r#type == Type::Dyn;
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native Object.fromEntries".into())
+                    };
+                }
+                if r#fn == "dyn.fromSearchParams" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if matches!(args.as_slice(), [value] if value.ty() == Type::Dyn)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native Object.fromEntries URLSearchParams input".into())
+                    };
+                }
+                if r#fn == "dyn.fromHeaders" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if matches!(args.as_slice(), [value] if value.ty() == Type::Dyn)
+                        && *r#type == Type::Dyn
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native Object.fromEntries Headers input".into())
+                    };
+                }
+                if matches!(
+                    r#fn.as_str(),
+                    "dyn.hasOwn" | "dyn.hasOwnKey" | "dyn.hasKey" | "dyn.objKeys"
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid = if r#fn == "dyn.hasOwnKey" {
+                        args.len() == 2
+                            && args.iter().all(|arg| arg.ty() == Type::Dyn)
+                            && *r#type == Type::Bool
+                    } else if r#fn != "dyn.objKeys" {
                         args.len() == 2
                             && args[0].ty() == Type::Dyn
                             && args[1].ty() == Type::String
@@ -2728,12 +4666,31 @@ fn validate_function(
                 }
                 if matches!(
                     r#fn.as_str(),
-                    "buffer.fromStr" | "buffer.fromDyn" | "text.decode"
+                    "buffer.fromStr"
+                        | "buffer.fromDyn"
+                        | "bytes.fromDyn"
+                        | "text.decode"
+                        | "text.decodeFatal"
+                        | "text.decoderNew"
+                        | "text.decodeStream"
+                        | "text.decodeSelected"
                 ) {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
                     }
-                    let valid = if r#fn == "buffer.fromDyn" {
+                    let valid = if r#fn == "text.decoderNew" {
+                        args.is_empty() && *r#type == Type::F64
+                    } else if matches!(r#fn.as_str(), "text.decodeStream" | "text.decodeSelected") {
+                        args.len() == if r#fn == "text.decodeSelected" { 5 } else { 4 }
+                            && args[0].ty() == Type::F64
+                            && args[1].ty() == Type::bytes()
+                            && args[2].ty() == Type::Bool
+                            && args[3].ty() == Type::Bool
+                            && (r#fn != "text.decodeSelected" || args[4].ty() == Type::F64)
+                            && *r#type == Type::String
+                    } else if r#fn == "bytes.fromDyn" {
+                        args.len() == 1 && args[0].ty() == Type::Dyn && *r#type == Type::bytes()
+                    } else if r#fn == "buffer.fromDyn" {
                         args.len() == 2
                             && args[0].ty() == Type::Dyn
                             && args[1].ty() == Type::String
@@ -2742,8 +4699,13 @@ fn validate_function(
                         args.len() == 2
                             && args.iter().all(|a| a.ty() == Type::String)
                             && *r#type == Type::bytes()
-                    } else {
+                    } else if r#fn == "text.decode" {
                         args.len() == 1 && args[0].ty() == Type::bytes() && *r#type == Type::String
+                    } else {
+                        args.len() == 2
+                            && args[0].ty() == Type::bytes()
+                            && args[1].ty() == Type::Bool
+                            && *r#type == Type::String
                     };
                     return if valid {
                         Ok(())
@@ -2791,17 +4753,105 @@ fn validate_function(
                     }
                     return Ok(());
                 }
-                if r#fn == "dyn.keySet" {
+                if matches!(
+                    r#fn.as_str(),
+                    "dyn.keySet"
+                        | "dyn.keySetComputed"
+                        | "dyn.keySetSloppy"
+                        | "dyn.keySetComputedSloppy"
+                ) {
                     for arg in args {
                         expr(arg, locals, initialized, functions, module)?;
                     }
                     if args.len() != 3
                         || args[0].ty() != Type::Dyn
-                        || args[1].ty() != Type::String
+                        || args[1].ty()
+                            != if matches!(r#fn.as_str(), "dyn.keySet" | "dyn.keySetSloppy") {
+                                Type::String
+                            } else {
+                                Type::Dyn
+                            }
                         || args[2].ty() != Type::Dyn
                         || *r#type != Type::Void
                     {
                         return Err("invalid native dynamic property write".into());
+                    }
+                    return Ok(());
+                }
+                if matches!(
+                    r#fn.as_str(),
+                    "process.onUnhandledRejection" | "process.onUncaughtException"
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let unary_listener = matches!(args.first(), Some(Expr::DynFrom { value, .. })
+                        if matches!(value.ty(), Type::Func { params, ret, rest: false } if params == vec![Type::Dyn] && *ret == Type::Void));
+                    if args.len() != 2
+                        || !unary_listener
+                        || !matches!(&args[1], Expr::BoolLit { value: false, .. })
+                        || *r#type != Type::Void
+                        || !module.classes.iter().any(|class| class.name == "%Error")
+                    {
+                        return Err("invalid native process exception listener".into());
+                    }
+                    return Ok(());
+                }
+                if matches!(
+                    r#fn.as_str(),
+                    "process.onExit"
+                        | "process.offExit"
+                        | "process.onUncaughtMonitor"
+                        | "process.offUncaughtMonitor"
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    if args.len() != 1 || args[0].ty() != Type::Dyn || *r#type != Type::Void {
+                        return Err("invalid native process lifecycle listener".into());
+                    }
+                    return Ok(());
+                }
+                if matches!(
+                    r#fn.as_str(),
+                    "process.onSignal"
+                        | "process.offSignal"
+                        | "process.onNamedSignal"
+                        | "process.offNamedSignal"
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let callback = matches!(args.get(1).map(Expr::ty), Some(Type::Func { rest: false, params, ret }) if params.is_empty() && *ret == Type::Void);
+                    let named = matches!(
+                        r#fn.as_str(),
+                        "process.onNamedSignal" | "process.offNamedSignal"
+                    );
+                    let registering =
+                        matches!(r#fn.as_str(), "process.onSignal" | "process.onNamedSignal");
+                    let valid = args.first().is_some_and(|arg| {
+                        arg.ty() == if named { Type::String } else { Type::F64 }
+                    }) && callback
+                        && *r#type == Type::Void
+                        && if registering {
+                            args.len() == 3 && args[2].ty() == Type::Bool
+                        } else {
+                            args.len() == 2
+                        };
+                    if !valid {
+                        return Err("invalid native process signal listener".into());
+                    }
+                    return Ok(());
+                }
+                if r#fn == "process.envSet" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    if args.len() != 2
+                        || args.iter().any(|arg| arg.ty() != Type::String)
+                        || *r#type != Type::Void
+                    {
+                        return Err("invalid native environment write".into());
                     }
                     return Ok(());
                 }
@@ -2817,6 +4867,82 @@ fn validate_function(
                     }
                     return Ok(());
                 }
+                if r#fn == "bun.which" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid_result = matches!(r#type, Type::Union { union_id }
+                    if module.unions.get(*union_id).is_some_and(|union| {
+                        union.arms.len() == 2
+                            && union.arms.contains(&Type::String)
+                            && union.arms.contains(&Type::Null)
+                    }));
+                    if args.len() != 3
+                        || args[0].ty() != Type::String
+                        || !matches!(args[1].ty(), Type::String | Type::Null)
+                        || !matches!(args[2].ty(), Type::String | Type::Null)
+                        || !valid_result
+                    {
+                        return Err("invalid native Bun.which call".into());
+                    }
+                    return Ok(());
+                }
+                if matches!(
+                    r#fn.as_str(),
+                    "timers.setTimeout"
+                        | "timers.setInterval"
+                        | "timers.setImmediate"
+                        | "timers.clearTimeout"
+                        | "timers.clearInterval"
+                        | "timers.clearImmediate"
+                        | "timers.setRef"
+                        | "timers.hasRef"
+                        | "timers.refresh"
+                        | "timers.queueMicrotask"
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    let valid =
+                        if matches!(r#fn.as_str(), "timers.setTimeout" | "timers.setInterval") {
+                            args.len() == 2
+                                && matches!(&args[0].ty(), Type::Func { params, ret, rest: false }
+                                if params.is_empty() && **ret == Type::Void)
+                                && args[1].ty() == Type::F64
+                                && *r#type == Type::F64
+                        } else if r#fn == "timers.setImmediate" {
+                            args.len() == 1
+                                && matches!(&args[0].ty(), Type::Func { params, ret, rest: false }
+                                if params.is_empty() && **ret == Type::Void)
+                                && *r#type == Type::F64
+                        } else if matches!(
+                            r#fn.as_str(),
+                            "timers.clearTimeout"
+                                | "timers.clearInterval"
+                                | "timers.clearImmediate"
+                        ) {
+                            args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::Void
+                        } else if r#fn == "timers.setRef" {
+                            args.len() == 2
+                                && args[0].ty() == Type::F64
+                                && args[1].ty() == Type::Bool
+                                && *r#type == Type::F64
+                        } else if r#fn == "timers.hasRef" {
+                            args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::Bool
+                        } else if r#fn == "timers.queueMicrotask" {
+                            args.len() == 1
+                                && matches!(&args[0].ty(), Type::Func { params, ret, rest: false }
+                                if params.is_empty() && **ret == Type::Void)
+                                && *r#type == Type::Void
+                        } else {
+                            args.len() == 1 && args[0].ty() == Type::F64 && *r#type == Type::F64
+                        };
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native timer call".into())
+                    };
+                }
                 if let Some(valid) = child_process::signature(
                     r#fn,
                     &args.iter().map(Expr::ty).collect::<Vec<_>>(),
@@ -2830,6 +4956,39 @@ fn validate_function(
                         Ok(())
                     } else {
                         Err("invalid native child process signature".into())
+                    };
+                }
+                if r#fn == "dns.lookupPromisified" {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if args.len() == 1
+                        && args[0].ty()
+                            == (Type::Array {
+                                elem: Box::new(Type::Dyn),
+                            })
+                        && *r#type
+                            == (Type::Promise {
+                                inner: Box::new(Type::Dyn),
+                            })
+                    {
+                        Ok(())
+                    } else {
+                        Err("invalid native DNS lookup signature".into())
+                    };
+                }
+                if let Some(valid) = filesystem_values::signature(
+                    r#fn,
+                    &args.iter().map(Expr::ty).collect::<Vec<_>>(),
+                    r#type,
+                ) {
+                    for arg in args {
+                        expr(arg, locals, initialized, functions, module)?;
+                    }
+                    return if valid {
+                        Ok(())
+                    } else {
+                        Err("invalid native filesystem namespace signature".into())
                     };
                 }
                 if matches!(
@@ -2861,14 +5020,22 @@ fn validate_function(
                         Err("invalid native receiver signature".into())
                     };
                 }
-                let builtin = crate::builtins::by_ir(r#fn).ok_or("unknown native library call")?;
+                let builtin = crate::builtins::by_ir(r#fn)
+                    .ok_or_else(|| format!("unknown native library call: {}", r#fn))?;
                 if *r#type != builtin.result || args.len() != builtin.args.len() {
                     return Err("invalid native library signature".into());
                 }
-                for (arg, expected) in args.iter().zip(&builtin.args) {
+                for (index, (arg, expected)) in args.iter().zip(&builtin.args).enumerate() {
                     expr(arg, locals, initialized, functions, module)?;
                     if arg.ty() != *expected {
-                        return Err("invalid native library argument".into());
+                        return Err(format!(
+                            "invalid native library argument: call={} index={index} expected={expected:?} actual={:?} at {}:{}..{}",
+                            r#fn,
+                            arg.ty(),
+                            loc.file,
+                            loc.start,
+                            loc.end
+                        ));
                     }
                 }
                 Ok(())
@@ -2883,6 +5050,14 @@ fn validate_function(
             | Expr::BoolLit {
                 r#type: Type::Bool, ..
             } => Ok(()),
+            Expr::UnitLit { unit, r#type, .. }
+                if matches!(
+                    (*unit, r#type),
+                    ("void", Type::Void) | ("undefined", Type::Undefined) | ("null", Type::Null)
+                ) =>
+            {
+                Ok(())
+            }
             Expr::VarRef {
                 local_id, r#type, ..
             } if module.global(local_id).is_some_and(|g| g.r#type == *r#type)
@@ -2921,8 +5096,10 @@ fn validate_function(
                                 | Type::Map { .. }
                                 | Type::Set { .. }
                                 | Type::Object { .. }
+                                | Type::Classval { .. }
                                 | Type::Bytes { .. }
                                 | Type::Promise { .. }
+                                | Type::CryptoSign
                                 | Type::Child
                         )
                 } else {
@@ -2951,15 +5128,241 @@ fn validate_function(
                 }
             }
             Expr::Intrinsic {
+                name, args, r#type, ..
+            } if name == "promise.block" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if matches!(args.as_slice(), [value] if matches!(value.ty(), Type::Promise { inner } if *inner == *r#type && *r#type != Type::Void))
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native blocking await".into())
+                }
+            }
+            Expr::Intrinsic { name, args, .. } if name == "global.intlSegmenterUnavailable" => {
+                if args.is_empty() {
+                    Ok(())
+                } else {
+                    Err("invalid unavailable Intl.Segmenter intrinsic".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if name == "arrayBuffer.new" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if matches!(args.as_slice(), [length] if length.ty() == Type::F64) {
+                    Ok(())
+                } else {
+                    Err("invalid native ArrayBuffer constructor".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if matches!(
+                name.as_str(),
+                "object.nullConstructor"
+                    | "object.createNull"
+                    | "global.object"
+                    | "global.navigator"
+                    | "global.process"
+                    | "global.fetch"
+                    | "global.abortSignal"
+                    | "global.readableStreamConstructor"
+                    | "global.blobConstructor"
+                    | "global.urlSearchParamsConstructor"
+                    | "global.fileConstructor"
+                    | "global.urlConstructor"
+                    | "global.messagePortConstructor"
+                    | "global.responseConstructor"
+                    | "global.headersConstructor"
+                    | "global.formDataConstructor"
+                    | "global.intl"
+                    | "inspector.session.new"
+                    | "function.call.value"
+                    | "function.hasInstance.value"
+            ) =>
+            {
+                if args.is_empty() {
+                    Ok(())
+                } else {
+                    Err("invalid null-object intrinsic".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if name == "blob.new" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if args.len() == 2 && args.iter().all(|arg| arg.ty() == Type::Dyn) {
+                    Ok(())
+                } else {
+                    Err("invalid native Blob constructor".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if name == "file.new" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if args.len() == 3 && args.iter().all(|arg| arg.ty() == Type::Dyn) {
+                    Ok(())
+                } else {
+                    Err("invalid native File constructor".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if name == "web.writableStreamNew" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if matches!(args.as_slice(), [source] if source.ty() == Type::Dyn) {
+                    Ok(())
+                } else {
+                    Err("invalid native WritableStream constructor".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if name == "object.constructNull" => {
+                if matches!(args.as_slice(), [arg] if arg.ty() == Type::Dyn) {
+                    expr(&args[0], locals, initialized, functions, module)
+                } else {
+                    Err("invalid null-object construction".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if name == "object.setPrototypeNull" => {
+                if matches!(args.as_slice(), [arg] if arg.ty() == Type::Dyn) {
+                    expr(&args[0], locals, initialized, functions, module)
+                } else {
+                    Err("invalid null-prototype mutation".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if name == "object.setPrototype" => {
+                if matches!(args.as_slice(), [target, prototype] if target.ty() == Type::Dyn && prototype.ty() == Type::Dyn)
+                {
+                    expr(&args[0], locals, initialized, functions, module)?;
+                    expr(&args[1], locals, initialized, functions, module)
+                } else {
+                    Err("invalid prototype mutation".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if matches!(name.as_str(), "weakRef.new" | "finalizationRegistry.new") => {
+                if matches!(args.as_slice(), [arg] if arg.ty() == Type::Dyn) {
+                    expr(&args[0], locals, initialized, functions, module)
+                } else {
+                    Err("invalid weak-reference construction".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if name == "global.unbound" => {
+                if matches!(args.as_slice(), [arg] if arg.ty() == Type::String) {
+                    expr(&args[0], locals, initialized, functions, module)
+                } else {
+                    Err("invalid unbound-global intrinsic".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Dyn,
+                ..
+            } if name == "module.require.missing" => {
+                if matches!(args.as_slice(), [arg] if arg.ty() == Type::String) {
+                    expr(&args[0], locals, initialized, functions, module)
+                } else {
+                    Err("invalid missing CommonJS module intrinsic".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Void,
+                ..
+            } if matches!(
+                name.as_str(),
+                "inspector.session.connect" | "inspector.session.disconnect"
+            ) =>
+            {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if matches!(args.as_slice(), [receiver] if receiver.ty() == Type::Dyn) {
+                    Ok(())
+                } else {
+                    Err("invalid inspector session lifecycle intrinsic".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Void,
+                ..
+            } if name == "inspector.session.post" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if matches!(args.as_slice(), [receiver, method, params, callback]
+                    if receiver.ty() == Type::Dyn && method.ty() == Type::String
+                        && params.ty() == Type::Dyn && callback.ty() == Type::Dyn)
+                {
+                    Ok(())
+                } else {
+                    Err("invalid inspector session post intrinsic".into())
+                }
+            }
+            Expr::Intrinsic {
                 name,
                 args,
                 r#type: Type::Promise { inner },
                 ..
-            } if name == "promise.resolve" => {
+            } if name == "promise.resolve" || name == "module.import.inert" => {
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
                 }
-                if (args.is_empty() && **inner == Type::Void)
+                if (name == "promise.resolve" && args.is_empty() && **inner == Type::Void)
                     || (args.len() == 1 && args[0].ty() == **inner && **inner != Type::Void)
                 {
                     Ok(())
@@ -2970,39 +5373,334 @@ fn validate_function(
             Expr::Intrinsic {
                 name,
                 args,
-                r#type: Type::Void,
+                r#type: Type::Promise { .. },
                 ..
-            } if name == "console.log" || name == "console.error" => {
+            } if name == "promise.reject" => {
+                for arg in args.iter() {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if args.len() == 1 && args[0].ty() == Type::Dyn {
+                    Ok(())
+                } else {
+                    Err("invalid native Promise.reject".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { .. },
+                ..
+            } if name == "module.import.missing" => {
+                for arg in args.iter() {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if matches!(args.as_slice(), [specifier] if specifier.ty() == Type::String) {
+                    Ok(())
+                } else {
+                    Err("invalid missing dynamic module import".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { inner },
+                ..
+            } if name == "module.import.lazy" => {
                 for arg in args {
                     expr(arg, locals, initialized, functions, module)?;
-                    if !matches!(arg.ty(), Type::F64 | Type::String | Type::Bool) {
+                }
+                let valid = matches!(args.as_slice(), [namespace, Expr::Closure { fn_name, captures, r#type: Type::Func { rest: false, params, ret }, .. }]
+                    if fn_name.starts_with("%lazy_module_") && namespace.ty() == **inner && captures.is_empty() && params.is_empty() && **ret == Type::Void);
+                if valid {
+                    Ok(())
+                } else {
+                    Err("invalid lazy native module import".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { inner },
+                ..
+            } if name == "module.import.cjs" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let valid = matches!(args.as_slice(), [namespace, Expr::Closure { fn_name, captures, r#type: Type::Func { rest: false, params, ret }, .. }]
+                    if fn_name.starts_with("cjs") && namespace.ty() == **inner && captures.is_empty() && params.is_empty() && **ret == Type::Dyn);
+                if valid {
+                    Ok(())
+                } else {
+                    Err("invalid dynamic CommonJS module import".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { inner },
+                ..
+            } if name == "promise.valueView" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if **inner == Type::Dyn
+                    && matches!(args.as_slice(), [source] if matches!(source.ty(), Type::Promise { inner } if *inner != Type::Dyn))
+                {
+                    Ok(())
+                } else {
+                    Err("invalid Promise value view".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { inner },
+                ..
+            } if name == "promise.allInput" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let Type::Array { elem: result_elem } = inner.as_ref() else {
+                    return Err("Promise.all dynamic result is not an array".into());
+                };
+                let [input] = args.as_slice() else {
+                    return Err("Promise.all dynamic input arity is invalid".into());
+                };
+                let Type::Array { elem } = input.ty() else {
+                    return Err("Promise.all dynamic input is not an array".into());
+                };
+                let Type::Promise { inner: source_elem } = elem.as_ref() else {
+                    return Err("Promise.all dynamic input elements are not promises".into());
+                };
+                if source_elem.as_ref() == result_elem.as_ref()
+                    || result_elem.as_ref() == &Type::Dyn
+                    || matches!(
+                        (source_elem.as_ref(), result_elem.as_ref()),
+                        (Type::Void, Type::Undefined) | (Type::Undefined, Type::Void)
+                    )
+                {
+                    Ok(())
+                } else {
+                    Err("Promise.all dynamic input/result element layouts differ".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { inner },
+                ..
+            } if name == "promise.allValuesInput" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let Type::Array { .. } = inner.as_ref() else {
+                    return Err("Promise.all value result is not an array".into());
+                };
+                if matches!(args.as_slice(), [input] if matches!(input.ty(), Type::Array { .. })) {
+                    Ok(())
+                } else {
+                    Err("Promise.all value input is not an array".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { inner },
+                ..
+            } if name == "promise.allDiscard" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if **inner == Type::Dyn
+                    && args
+                        .iter()
+                        .all(|arg| matches!(arg.ty(), Type::Promise { .. }))
+                {
+                    Ok(())
+                } else {
+                    Err("invalid discarded Promise.all".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { .. },
+                ..
+            } if name == "promise.raceArray" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if !args.is_empty()
+                    && args
+                        .iter()
+                        .all(|arg| matches!(arg.ty(), Type::Promise { .. }))
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native Promise.race array".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { inner },
+                ..
+            } if name == "promise.allArray" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let Type::Array { elem } = inner.as_ref() else {
+                    return Err("Promise.all array result is not an array".into());
+                };
+                if args
+                    .iter()
+                    .all(|arg| matches!(arg.ty(), Type::Promise { inner } if *inner == **elem))
+                {
+                    Ok(())
+                } else {
+                    Err("invalid homogeneous Promise.all array".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Promise { inner },
+                ..
+            } if name == "promise.allTuple" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                let Type::Record { shape_id } = inner.as_ref() else {
+                    return Err("Promise.all tuple result is not a record".into());
+                };
+                let Some(tuple) = module.records.get(*shape_id) else {
+                    return Err("Promise.all tuple result shape is missing".into());
+                };
+                let valid = tuple.tuple
+                    && tuple.declared_order.len() == args.len()
+                    && tuple.declared_order.iter().zip(args).all(|(name, arg)| {
+                        let Some(field) = tuple.fields.iter().find(|field| &field.name == name)
+                        else {
+                            return false;
+                        };
+                        matches!(arg.ty(), Type::Promise { inner } if *inner == field.r#type)
+                    });
+                if valid {
+                    Ok(())
+                } else {
+                    Err("invalid heterogeneous Promise.all tuple".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::String,
+                ..
+            } if name == "caught.toString" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if args.len() == 1 && args[0].ty() == Type::Caught {
+                    Ok(())
+                } else {
+                    Err("invalid caught string conversion".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Void,
+                ..
+            } if matches!(name.as_str(), "console.log.spread" | "console.error.spread") => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if matches!(args.as_slice(), [arg] if matches!(arg.ty(), Type::Array { elem } if *elem == Type::Dyn))
+                {
+                    Ok(())
+                } else {
+                    Err("invalid native console spread".into())
+                }
+            }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Void,
+                ..
+            } if matches!(
+                name.as_str(),
+                "console.log" | "console.error" | "console.log.format" | "console.error.format"
+            ) =>
+            {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                    if !matches!(arg.ty(), Type::F64 | Type::String | Type::Bool | Type::Dyn) {
                         return Err("non-primitive console argument".into());
                     }
                 }
                 Ok(())
             }
+            Expr::Intrinsic {
+                name,
+                args,
+                r#type: Type::Void,
+                ..
+            } if name == "console.dir" => {
+                for arg in args {
+                    expr(arg, locals, initialized, functions, module)?;
+                }
+                if args.len() == 1 && args[0].ty() == Type::Dyn {
+                    Ok(())
+                } else {
+                    Err("invalid native console.dir".into())
+                }
+            }
             Expr::Call {
                 callee,
                 args,
                 r#type,
-                ..
+                loc,
             } => {
                 let target = functions.get(callee.as_str()).ok_or("unknown callee")?;
-                if target.captures.is_some()
-                    || args.len() != target.params.len()
-                    || *r#type != target.call_result()
-                {
-                    return Err("invalid call signature".into());
+                if target.captures.is_some() {
+                    return Err(format!(
+                        "invalid call signature for {callee} at {}:{}..{}: direct call targets a capturing function",
+                        loc.file, loc.start, loc.end
+                    ));
                 }
-                for (arg, param) in args.iter().zip(&target.params) {
+                if args.len() != target.params.len() {
+                    return Err(format!(
+                        "invalid call signature for {callee} at {}:{}..{}: expected {} arguments, got {}",
+                        loc.file,
+                        loc.start,
+                        loc.end,
+                        target.params.len(),
+                        args.len()
+                    ));
+                }
+                let call_result = target.call_result();
+                if *r#type != call_result {
+                    return Err(format!(
+                        "invalid call signature for {callee} at {}:{}..{}: expected result {call_result:?}, got {:?}",
+                        loc.file, loc.start, loc.end, r#type
+                    ));
+                }
+                for (index, (arg, param)) in args.iter().zip(&target.params).enumerate() {
                     expr(arg, locals, initialized, functions, module)?;
                     if arg.ty() != param.r#type {
-                        return Err("invalid call argument".into());
+                        return Err(format!(
+                            "invalid call argument {index} for {callee} at {}:{}..{}: expected {:?}, got {:?}",
+                            loc.file,
+                            loc.start,
+                            loc.end,
+                            param.r#type,
+                            arg.ty()
+                        ));
                     }
                 }
                 Ok(())
             }
-            _ => Err("invalid native expression".into()),
+            _ => Err(format!("invalid native expression: {e:?}")),
         }
     }
     fn body(
@@ -3171,13 +5869,31 @@ fn validate_function(
                     }
                 }
                 Stmt::VarDecl { local_id, init, .. } => {
-                    expr(init, locals, initialized, functions, module)?;
-                    if initialized.contains(local_id)
-                        || !locals
-                            .get(local_id.as_str())
-                            .is_some_and(|l| l.r#type == init.ty())
+                    if let Expr::LibCall {
+                        r#fn, args, r#type, ..
+                    } = init
+                        && r#fn == "lexical.empty"
                     {
-                        return Err("invalid initialization".into());
+                        if !args.is_empty()
+                            || *r#type != Type::Dyn
+                            || !locals
+                                .get(local_id.as_str())
+                                .is_some_and(|local| local.boxed && local.r#type == Type::Dyn)
+                        {
+                            return Err("invalid native lexical cell declaration".into());
+                        }
+                    } else {
+                        expr(init, locals, initialized, functions, module)?;
+                    }
+                    if initialized.contains(local_id) {
+                        return Err(format!("duplicate local initialization: {local_id}"));
+                    }
+                    let expected = locals.get(local_id.as_str()).map(|local| &local.r#type);
+                    if expected != Some(&init.ty()) {
+                        return Err(format!(
+                            "invalid local initialization: id={local_id} expected={expected:?} actual={:?}",
+                            init.ty()
+                        ));
                     }
                     initialized.insert(local_id.clone());
                 }
@@ -3187,7 +5903,24 @@ fn validate_function(
                     initializes_global,
                     ..
                 } => {
-                    expr(value, locals, initialized, functions, module)?;
+                    if let Expr::LibCall {
+                        r#fn, args, r#type, ..
+                    } = value
+                        && r#fn == "lexical.initialize"
+                    {
+                        if args.len() != 1
+                            || *r#type != Type::Dyn
+                            || args[0].ty() != Type::Dyn
+                            || !locals
+                                .get(local_id.as_str())
+                                .is_some_and(|local| local.boxed && local.r#type == Type::Dyn)
+                        {
+                            return Err("invalid native lexical cell initialization".into());
+                        }
+                        expr(&args[0], locals, initialized, functions, module)?;
+                    } else {
+                        expr(value, locals, initialized, functions, module)?;
+                    }
                     if let Some(global) = module.global(local_id) {
                         if global.r#type != value.ty()
                             || (*initializes_global
@@ -3195,7 +5928,15 @@ fn validate_function(
                             || (!global.mutable
                                 && !function.is_some_and(|f| module.initializes(stmt, f, local_id)))
                         {
-                            return Err("invalid global assignment".into());
+                            return Err(format!(
+                                "invalid global assignment: id={local_id} name={} mutable={} initializes={} first_initializer={} expected={:?} actual={:?}",
+                                global.name,
+                                global.mutable,
+                                initializes_global,
+                                function.is_some_and(|f| module.initializes(stmt, f, local_id)),
+                                global.r#type,
+                                value.ty()
+                            ));
                         }
                         continue;
                     }
@@ -3297,6 +6038,44 @@ fn validate_function(
                         function,
                     )?;
                 }
+                Stmt::GeneratorForOf {
+                    generator,
+                    local_id,
+                    body: stmts,
+                    ..
+                } => {
+                    expr(generator, locals, initialized, functions, module)?;
+                    let Type::Generator {
+                        r#async: false,
+                        yield_type,
+                        next_type,
+                        ..
+                    } = generator.ty()
+                    else {
+                        return Err(
+                            "native generator for-of requires a synchronous generator".into()
+                        );
+                    };
+                    if !matches!(*next_type, Type::Void | Type::Undefined | Type::Dyn)
+                        || initialized.contains(local_id)
+                        || !locals
+                            .get(local_id.as_str())
+                            .is_some_and(|local| local.r#type == *yield_type)
+                    {
+                        return Err("invalid native generator for-of channels".into());
+                    }
+                    let mut loop_initialized = initialized.clone();
+                    loop_initialized.insert(local_id.clone());
+                    body(
+                        stmts,
+                        locals,
+                        &mut loop_initialized,
+                        functions,
+                        return_type.clone(),
+                        module,
+                        function,
+                    )?;
+                }
                 Stmt::Block { body: stmts, .. } => body(
                     stmts,
                     locals,
@@ -3346,14 +6125,182 @@ mod tests {
     use super::*;
 
     #[test]
+    fn await_uses_shared_wire_contract_and_supports_conditional_continuations() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let promise = Type::Promise {
+            inner: Box::new(Type::F64),
+        };
+        module.functions[1].is_async = true;
+        if let Stmt::Expression {
+            expr: Expr::Call { r#type, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        {
+            *r#type = promise.clone();
+        } else {
+            unreachable!()
+        }
+        module.functions[1].body = vec![Stmt::Return {
+            value: Some(Expr::Await {
+                value: Box::new(Expr::Intrinsic {
+                    name: "promise.resolve".into(),
+                    args: vec![Expr::NumLit {
+                        value: 1.0,
+                        spelling: None,
+                        r#type: Type::F64,
+                        loc: loc.clone(),
+                    }],
+                    r#type: promise,
+                    loc: loc.clone(),
+                }),
+                r#type: Type::F64,
+                loc: loc.clone(),
+            }),
+            loc: loc.clone(),
+        }];
+        validate(&module).unwrap();
+        let json = serde_json::to_value(&module).unwrap();
+        assert_eq!(
+            json["functions"][1]["body"][0]["value"]["kind"],
+            "awaitExpr"
+        );
+        let mut visited = 0;
+        module.visit_expressions(&mut |expr| {
+            if matches!(expr, Expr::Intrinsic { .. }) {
+                visited += 1;
+            }
+        });
+        assert_eq!(visited, 1);
+        let rust = crate::emit::rust(&module).unwrap();
+        assert!(rust.contains("runtime::promise_then(&source"));
+        module.functions[1].body.insert(
+            0,
+            Stmt::If {
+                cond: Expr::BoolLit {
+                    value: true,
+                    r#type: Type::Bool,
+                    loc: loc.clone(),
+                },
+                then: vec![],
+                else_: None,
+                loc: loc.clone(),
+            },
+        );
+        assert!(
+            crate::emit::rust(&module)
+                .unwrap()
+                .contains("runtime::promise_then(&source")
+        );
+        if let Stmt::If { then, .. } = &mut module.functions[1].body[0] {
+            then.push(Stmt::Return {
+                value: Some(Expr::NumLit {
+                    value: 2.0,
+                    spelling: None,
+                    r#type: Type::F64,
+                    loc: loc.clone(),
+                }),
+                loc: loc.clone(),
+            });
+        }
+        let rust = crate::emit::rust(&module).unwrap();
+        assert!(rust.contains("runtime::promise_then(&source"));
+        assert!(rust.contains("runtime::promise_fulfill(&target"));
+        module.functions[1].body.remove(0);
+        if let Stmt::Return {
+            value: Some(Expr::Await { r#type, .. }),
+            ..
+        } = &mut module.functions[1].body[0]
+        {
+            *r#type = Type::String;
+        } else {
+            unreachable!()
+        }
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "await requires a Promise with the same result type"
+        );
+        module.functions[1].is_async = false;
+        if let Stmt::Expression {
+            expr: Expr::Call { r#type, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        {
+            *r#type = Type::F64;
+        }
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "await outside an async function"
+        );
+    }
+
+    #[test]
+    fn callable_views_only_change_dynamic_slots_and_preserve_arity() {
+        let signature = |param, ret, rest| Type::Func {
+            params: vec![param],
+            ret: Box::new(ret),
+            rest,
+        };
+        let typed = signature(Type::String, Type::String, false);
+        let erased_input = signature(Type::Dyn, Type::String, false);
+        let erased = signature(Type::Dyn, Type::Dyn, false);
+        assert!(callable_view_compatible(&typed, &erased_input));
+        assert!(callable_view_compatible(&erased, &typed));
+        assert!(!callable_view_compatible(
+            &typed,
+            &signature(Type::F64, Type::String, false)
+        ));
+        assert!(!callable_view_compatible(
+            &typed,
+            &signature(Type::Dyn, Type::Void, false)
+        ));
+        assert!(!callable_view_compatible(
+            &typed,
+            &signature(Type::Dyn, Type::String, true)
+        ));
+        let promise = |inner| Type::Promise {
+            inner: Box::new(inner),
+        };
+        let broad = signature(Type::Dyn, promise(Type::Dyn), false);
+        let narrow = signature(Type::String, promise(Type::Record { shape_id: 0 }), false);
+        assert!(callable_view_compatible(&broad, &narrow));
+        assert!(callable_view_compatible(&narrow, &broad));
+        assert!(!callable_view_compatible(
+            &broad,
+            &signature(Type::String, promise(Type::Void), false)
+        ));
+        assert!(!callable_view_compatible(
+            &narrow,
+            &signature(Type::String, promise(Type::F64), false)
+        ));
+    }
+
+    #[test]
     fn nullable_stats_preserve_nominal_container_boundaries() {
         let mut module = callable_module();
-        module.unions.push(Union { id: 0, arms: vec![Type::Stats, Type::Null, Type::Undefined] });
+        module.unions.push(Union {
+            id: 0,
+            arms: vec![Type::Stats, Type::Null, Type::Undefined],
+        });
         let optional = Type::Union { union_id: 0 };
         assert!(module.valid_type(optional.clone(), &mut vec![]));
-        assert!(!module.valid_type(Type::Array { elem: Box::new(optional.clone()) }, &mut vec![]));
-        assert!(!module.valid_type(Type::Map { key: Box::new(Type::String), value: Box::new(optional) }, &mut vec![]));
-        module.unions.push(Union { id: 1, arms: vec![Type::Stats, Type::String] });
+        assert!(!module.valid_type(
+            Type::Array {
+                elem: Box::new(optional.clone())
+            },
+            &mut vec![]
+        ));
+        assert!(!module.valid_type(
+            Type::Map {
+                key: Box::new(Type::String),
+                value: Box::new(optional)
+            },
+            &mut vec![]
+        ));
+        module.unions.push(Union {
+            id: 1,
+            arms: vec![Type::Stats, Type::String],
+        });
         assert!(!module.valid_type(Type::Union { union_id: 1 }, &mut vec![]));
     }
 
@@ -3382,18 +6329,20 @@ mod tests {
             loc: loc.clone(),
         }];
         assert!(validate(&module).is_ok());
+        let erased = Expr::DynFrom {
+            value: Box::new(stat),
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
         module.functions[0].body = vec![Stmt::Expression {
-            expr: Expr::DynFrom {
-                value: Box::new(stat),
-                r#type: Type::Dyn,
+            expr: Expr::DynCheck {
+                value: Box::new(erased),
+                r#type: Type::Stats,
                 loc: loc.clone(),
             },
             loc: loc.clone(),
         }];
-        assert_eq!(
-            validate(&module).unwrap_err(),
-            "Stats erasure is not in the shared native value contract"
-        );
+        assert!(validate(&module).is_ok());
         module.functions[0].body = vec![Stmt::Expression {
             expr: Expr::LibCall {
                 r#fn: "stats.size".into(),
@@ -3418,7 +6367,6 @@ mod tests {
             tuple: false,
             index_value: None,
         }];
-        assert!(contains_stats(&Type::Record { shape_id: 0 }, &records, &[]));
         assert!(!contains_set(&Type::Record { shape_id: 0 }, &records, &[]));
     }
 
@@ -3546,6 +6494,103 @@ mod tests {
                 loc: loc.clone(),
             }];
             assert_eq!(validate(&module).is_ok(), valid, "{name}");
+        }
+    }
+
+    #[test]
+    fn template_object_requires_paired_nonempty_dynamic_literals() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let array_type = Type::Array {
+            elem: Box::new(Type::Dyn),
+        };
+        let text = |value: &str| Expr::StrLit {
+            value: value.into(),
+            r#type: Type::String,
+            loc: loc.clone(),
+        };
+        let entry = || Expr::DynFrom {
+            value: Box::new(text("segment")),
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        let undefined = || Expr::DynFrom {
+            value: Box::new(Expr::UnitLit {
+                unit: "undefined",
+                r#type: Type::Undefined,
+                loc: loc.clone(),
+            }),
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        let array = |elems| Expr::ArrayLit {
+            elems,
+            r#type: array_type.clone(),
+            loc: loc.clone(),
+        };
+        let cases = [
+            (
+                vec![text("site"), array(vec![entry()]), array(vec![entry()])],
+                array_type.clone(),
+                true,
+            ),
+            (
+                vec![text("site"), array(vec![undefined()]), array(vec![entry()])],
+                array_type.clone(),
+                true,
+            ),
+            (
+                vec![text("site"), array(vec![entry()]), array(vec![undefined()])],
+                array_type.clone(),
+                false,
+            ),
+            (
+                vec![text(""), array(vec![entry()]), array(vec![entry()])],
+                array_type.clone(),
+                false,
+            ),
+            (
+                vec![text("site"), array(vec![]), array(vec![])],
+                array_type.clone(),
+                false,
+            ),
+            (
+                vec![text("site"), array(vec![entry()]), array(vec![])],
+                array_type.clone(),
+                false,
+            ),
+            (
+                vec![text("site"), array(vec![entry()])],
+                array_type.clone(),
+                false,
+            ),
+            (
+                vec![text("site"), array(vec![entry()]), array(vec![entry()])],
+                Type::Dyn,
+                false,
+            ),
+            (
+                vec![entry(), array(vec![entry()]), array(vec![entry()])],
+                array_type,
+                false,
+            ),
+        ];
+        for (args, result, valid) in cases {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: "template.object".into(),
+                    args,
+                    r#type: result,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid);
+            if valid {
+                let rust = crate::emit::rust(&module).unwrap();
+                assert!(rust.contains("runtime::template_object_storage(\"site\""));
+                assert!(rust.contains("runtime::array_values(&cooked)"));
+            }
         }
     }
 
@@ -3900,7 +6945,11 @@ mod tests {
             inner: Box::new(Type::F64),
         };
         assert_eq!(m.functions[1].call_result(), promise);
-        assert_eq!(validate(&m).unwrap_err(), "invalid call signature");
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid call signature")
+        );
         let Stmt::Expression {
             expr: Expr::Call { r#type, .. },
             ..
@@ -3943,7 +6992,7 @@ mod tests {
         **ret = Type::F64;
         assert_eq!(validate(&m).unwrap_err(), "invalid closure signature");
         m.functions[0].is_async = true;
-        assert_eq!(validate(&m).unwrap_err(), "invalid native entry");
+        assert_eq!(validate(&m).unwrap_err(), "invalid closure signature");
     }
 
     #[test]
@@ -4468,28 +7517,48 @@ mod tests {
             Union {
                 id: 1,
                 arms: vec![
-                    Type::Array { elem: Box::new(Type::Union { union_id: 0 }) },
+                    Type::Array {
+                        elem: Box::new(Type::Union { union_id: 0 }),
+                    },
                     Type::Null,
                 ],
             },
         ];
         let loc = module.functions[0].loc.clone();
         let text = Expr::StrLit {
-            value: "x".into(), r#type: Type::String, loc: loc.clone(),
+            value: "x".into(),
+            r#type: Type::String,
+            loc: loc.clone(),
         };
         let regex = Expr::RegexLit {
-            pattern: "x".into(), flags: "".into(), r#type: Type::Regex, loc: loc.clone(),
+            pattern: "x".into(),
+            flags: "".into(),
+            r#type: Type::Regex,
+            loc: loc.clone(),
         };
         for (receiver, args, result, valid) in [
-            (text.clone(), vec![regex.clone()], Type::Union { union_id: 1 }, true),
-            (regex.clone(), vec![text.clone()], Type::Union { union_id: 1 }, false),
+            (
+                text.clone(),
+                vec![regex.clone()],
+                Type::Union { union_id: 1 },
+                true,
+            ),
+            (
+                regex.clone(),
+                vec![text.clone()],
+                Type::Union { union_id: 1 },
+                false,
+            ),
             (text.clone(), vec![], Type::Union { union_id: 1 }, false),
             (text.clone(), vec![regex.clone()], Type::String, false),
         ] {
             module.functions[0].body = vec![Stmt::Expression {
                 expr: Expr::RegexIntrinsic {
-                    method: "match".into(), receiver: Box::new(receiver), args,
-                    r#type: result, loc: loc.clone(),
+                    method: "match".into(),
+                    receiver: Box::new(receiver),
+                    args,
+                    r#type: result,
+                    loc: loc.clone(),
                 },
                 loc: loc.clone(),
             }];
@@ -4501,22 +7570,126 @@ mod tests {
     fn regex_split_contract_rejects_malformed_operands() {
         let mut module = callable_module();
         let loc = module.functions[0].loc.clone();
-        let text = Expr::StrLit { value: "x".into(), r#type: Type::String, loc: loc.clone() };
-        let regex = Expr::RegexLit { pattern: "x".into(), flags: "".into(), r#type: Type::Regex, loc: loc.clone() };
-        let limit = Expr::NumLit { value: 2.0, spelling: None, r#type: Type::F64, loc: loc.clone() };
-        let result = Type::Array { elem: Box::new(Type::String) };
+        let text = Expr::StrLit {
+            value: "x".into(),
+            r#type: Type::String,
+            loc: loc.clone(),
+        };
+        let regex = Expr::RegexLit {
+            pattern: "x".into(),
+            flags: "".into(),
+            r#type: Type::Regex,
+            loc: loc.clone(),
+        };
+        let limit = Expr::NumLit {
+            value: 2.0,
+            spelling: None,
+            r#type: Type::F64,
+            loc: loc.clone(),
+        };
+        let result = Type::Array {
+            elem: Box::new(Type::String),
+        };
         for (receiver, args, ty, valid) in [
-            (text.clone(), vec![regex.clone(), limit.clone()], result.clone(), true),
-            (regex.clone(), vec![regex.clone(), limit.clone()], result.clone(), false),
-            (text.clone(), vec![text.clone(), limit.clone()], result.clone(), false),
+            (
+                text.clone(),
+                vec![regex.clone(), limit.clone()],
+                result.clone(),
+                true,
+            ),
+            (
+                regex.clone(),
+                vec![regex.clone(), limit.clone()],
+                result.clone(),
+                false,
+            ),
+            (
+                text.clone(),
+                vec![text.clone(), limit.clone()],
+                result.clone(),
+                false,
+            ),
             (text.clone(), vec![regex.clone()], result.clone(), false),
-            (text.clone(), vec![regex.clone(), limit.clone()], Type::String, false),
+            (
+                text.clone(),
+                vec![regex.clone(), limit.clone()],
+                Type::String,
+                false,
+            ),
         ] {
             module.functions[0].body = vec![Stmt::Expression {
-                expr: Expr::RegexIntrinsic { method: "split".into(), receiver: Box::new(receiver), args, r#type: ty, loc: loc.clone() },
+                expr: Expr::RegexIntrinsic {
+                    method: "split".into(),
+                    receiver: Box::new(receiver),
+                    args,
+                    r#type: ty,
+                    loc: loc.clone(),
+                },
                 loc: loc.clone(),
             }];
             assert_eq!(validate(&module).is_ok(), valid);
+        }
+    }
+
+    #[test]
+    fn dom_event_operations_validate_owner_field_and_action() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        module.classes.push(Class {
+            name: "native_builtin_Event".into(),
+            js_name: "Event".into(),
+            runtime: false,
+            base: None,
+            fields: vec![],
+            captures: vec![],
+            methods: vec![],
+            symbol_methods: vec![],
+            symbol_brand: None,
+            method_names: vec![],
+            loc: loc.clone(),
+        });
+        let name = |value: &str| Expr::StrLit {
+            value: value.into(),
+            r#type: Type::String,
+            loc: loc.clone(),
+        };
+        let event = || Expr::LibCall {
+            r#fn: "dom.eventNew".into(),
+            args: vec![
+                name("x"),
+                Expr::DynFrom {
+                    value: Box::new(Expr::UnitLit {
+                        unit: "undefined",
+                        r#type: Type::Undefined,
+                        loc: loc.clone(),
+                    }),
+                    r#type: Type::Dyn,
+                    loc: loc.clone(),
+                },
+            ],
+            r#type: Type::Object {
+                class_name: "native_builtin_Event".into(),
+            },
+            loc: loc.clone(),
+        };
+        for (operation, field, ty, valid) in [
+            ("dom.eventGet", "type", Type::Dyn, true),
+            ("dom.eventGet", "unknown", Type::Dyn, false),
+            ("dom.eventGet", "type", Type::String, false),
+            ("dom.eventAction", "preventDefault", Type::Void, true),
+            ("dom.eventAction", "unknown", Type::Void, false),
+            ("dom.eventAction", "preventDefault", Type::Dyn, false),
+        ] {
+            module.functions[0].body = vec![Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: operation.into(),
+                    args: vec![event(), name(field)],
+                    r#type: ty,
+                    loc: loc.clone(),
+                },
+                loc: loc.clone(),
+            }];
+            assert_eq!(validate(&module).is_ok(), valid, "{operation} {field}");
         }
     }
 
@@ -4529,8 +7702,10 @@ mod tests {
             runtime: true,
             base: None,
             fields: error_fields(),
+            captures: vec![],
             methods: vec![],
             symbol_methods: vec![],
+            symbol_brand: None,
             method_names: vec![],
             loc: loc.clone(),
         });
@@ -4540,8 +7715,10 @@ mod tests {
             runtime: false,
             base: Some("%Error".into()),
             fields: error_fields(),
+            captures: vec![],
             methods: vec![],
             symbol_methods: vec![],
+            symbol_brand: None,
             method_names: vec![],
             loc: loc.clone(),
         });
@@ -4561,7 +7738,7 @@ mod tests {
                 }),
                 class_name: "%Error".into(),
                 field: "message".into(),
-                r#type: Type::String,
+                r#type: Type::Dyn,
                 loc: loc.clone(),
             },
             loc,
@@ -4624,9 +7801,10 @@ mod tests {
             r#type: Type::Bool,
             loc: loc.clone(),
         };
-        assert_eq!(
-            validate(&m).unwrap_err(),
-            "invalid native value member read"
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid native value member read:")
         );
         m.functions[0].body = vec![Stmt::Expression {
             expr: Expr::DynFrom {
@@ -4858,6 +8036,7 @@ mod tests {
             recv: Box::new(value()),
             method: "get".into(),
             callee_name: "map.get".into(),
+            optional: false,
             args: vec![value()],
             r#type: Type::Dyn,
             loc: loc.clone(),
@@ -4938,13 +8117,16 @@ mod tests {
                 runtime: false,
                 base: base.map(String::from),
                 fields: vec![],
+                captures: vec![],
                 methods: vec!["value".into()],
                 symbol_methods: vec![],
+                symbol_brand: None,
                 method_names: vec!["value".into()],
                 loc: loc.clone(),
             });
             m.functions.push(Function {
                 is_async: false,
+                generator: None,
                 rest: false,
                 name: format!("%{name}.value"),
                 captures: None,
@@ -4975,6 +8157,7 @@ mod tests {
         }
         m.functions.push(Function {
             is_async: false,
+            generator: None,
             rest: false,
             name: "dispatch".into(),
             captures: None,
@@ -5005,7 +8188,7 @@ mod tests {
                 }),
                 loc: loc.clone(),
             }],
-            loc,
+            loc: loc.clone(),
         });
         validate(&m).unwrap();
         let mut dispatches = 0;
@@ -5034,10 +8217,51 @@ mod tests {
             wire["functions"][4]["body"][0]["value"]["kind"],
             "virtualCall"
         );
+        let mut discarded = m.clone();
+        discarded.functions[2].return_type = Type::Void;
+        discarded.functions[2].body = vec![Stmt::Return {
+            value: None,
+            loc: loc.clone(),
+        }];
+        discarded.functions[4].return_type = Type::Void;
+        let Stmt::Return {
+            value: Some(call), ..
+        } = &discarded.functions[4].body[0]
+        else {
+            unreachable!()
+        };
+        let mut call = call.clone();
+        let Expr::VirtualCall { r#type, .. } = &mut call else {
+            unreachable!()
+        };
+        *r#type = Type::Void;
+        discarded.functions[4].body = vec![Stmt::Expression {
+            expr: call,
+            loc: loc.clone(),
+        }];
+        validate(&discarded).unwrap();
+        let mut observed = discarded.clone();
+        observed.functions[4].return_type = Type::Dyn;
+        let Stmt::Expression { expr: call, .. } = &mut observed.functions[4].body[0] else {
+            unreachable!()
+        };
+        let Expr::VirtualCall { r#type, .. } = call else {
+            unreachable!()
+        };
+        *r#type = Type::Dyn;
+        let Stmt::Expression { expr: call, .. } = observed.functions[4].body.remove(0) else {
+            unreachable!()
+        };
+        observed.functions[4].body.push(Stmt::Return {
+            value: Some(call),
+            loc: loc.clone(),
+        });
+        validate(&observed).unwrap();
         m.functions[3].return_type = Type::String;
-        assert_eq!(
-            validate(&m).unwrap_err(),
-            "incompatible native method override"
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("incompatible native method override:")
         );
         m.functions[3].return_type = Type::F64;
         m.functions[3].params[0].r#type = receiver("Base");
@@ -5079,8 +8303,10 @@ mod tests {
                 name: "name".into(),
                 r#type: Type::Union { union_id: 0 },
             }],
+            captures: vec![],
             methods: vec![],
             symbol_methods: vec![],
+            symbol_brand: None,
             method_names: vec![],
             loc: loc.clone(),
         };
@@ -5166,7 +8392,7 @@ mod tests {
     #[test]
     fn error_layouts_validate_prefixes_roots_and_reserved_metadata() {
         let mut m = error_module();
-        assert!(validate(&m).is_ok());
+        validate(&m).unwrap();
         m.classes[1].fields[0].r#type = Type::Bool;
         assert!(validate(&m).unwrap_err().contains("class/header"));
         m = error_module();
@@ -5186,7 +8412,11 @@ mod tests {
             mutable: false,
             boxed: false,
         });
-        assert_eq!(validate(&m).unwrap_err(), "duplicate/void local");
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .contains("invalid local layout in function")
+        );
         m = error_module();
         m.unions.push(Union {
             id: 0,
@@ -5199,7 +8429,11 @@ mod tests {
                 },
             ],
         });
-        assert_eq!(validate(&m).unwrap_err(), "invalid/recursive union layout");
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid/recursive union layout u0:")
+        );
     }
 
     #[test]
@@ -5224,6 +8458,7 @@ mod tests {
         assert_eq!(validate(&m).unwrap_err(), "invalid native class value");
         m.functions.push(Function {
             is_async: false,
+            generator: None,
             rest: false,
             name: "%Detail.constructor".into(),
             params: vec![Param {
@@ -5348,7 +8583,10 @@ mod tests {
             disc: disc.clone(),
             cases: vec![SwitchCase {
                 test: None,
-                body: vec![Stmt::Break { loc: loc.clone() }],
+                body: vec![Stmt::Break {
+                    target_depth: 0,
+                    loc: loc.clone(),
+                }],
             }],
             loc: loc.clone(),
         };
@@ -5379,7 +8617,10 @@ mod tests {
         );
         let mut continued = switch;
         if let Stmt::Switch { cases, .. } = &mut continued {
-            cases[0].body = vec![Stmt::Continue { loc: loc.clone() }];
+            cases[0].body = vec![Stmt::Continue {
+                target_depth: 0,
+                loc: loc.clone(),
+            }];
         }
         m.functions[0].body = vec![continued.clone()];
         assert_eq!(validate(&m).unwrap_err(), "loop jump has no enclosing loop");
@@ -5644,7 +8885,11 @@ mod tests {
             },
             loc,
         }];
-        assert_eq!(validate(&m).unwrap_err(), "invalid array operation");
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid array operation:")
+        );
         if let Stmt::Expression {
             expr: Expr::ArrayIntrinsic { args, .. },
             ..
@@ -5689,7 +8934,11 @@ mod tests {
         {
             *r#type = Type::F64;
         }
-        assert_eq!(validate(&m).unwrap_err(), "invalid array operation");
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid array operation:")
+        );
         if let Stmt::Expression {
             expr: Expr::ArrayIntrinsic { r#type, args, .. },
             ..
@@ -5703,7 +8952,11 @@ mod tests {
                 loc: loc.clone(),
             });
         }
-        assert_eq!(validate(&m).unwrap_err(), "invalid array operation");
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid array operation:")
+        );
         if let Stmt::Expression {
             expr: Expr::ArrayIntrinsic { receiver, args, .. },
             ..
@@ -5738,7 +8991,7 @@ mod tests {
             m.valid_type(array, &mut vec![]),
             "array and record handles guard recursive element storage"
         );
-        assert!(!m.valid_type(
+        assert!(m.valid_type(
             Type::Array {
                 elem: Box::new(Type::Func {
                     rest: false,
@@ -5759,8 +9012,13 @@ mod tests {
             name: "answer".into(),
             r#type: Type::F64,
             mutable: false,
+            loc: loc.clone(),
         });
-        assert!(validate(&m).unwrap_err().contains("global storage"));
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("missing global initializer:")
+        );
         let write = || Stmt::Assign {
             local_id: "%g.0".into(),
             initializes_global: true,
@@ -5775,18 +9033,30 @@ mod tests {
         m.functions[0].body.insert(0, write());
         validate(&m).unwrap();
         m.functions[0].body.push(write());
-        assert_eq!(validate(&m).unwrap_err(), "invalid global assignment");
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid global assignment:")
+        );
         if let Stmt::Assign {
             initializes_global, ..
         } = m.functions[0].body.last_mut().unwrap()
         {
             *initializes_global = false;
         }
-        assert_eq!(validate(&m).unwrap_err(), "invalid global assignment");
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid global assignment:")
+        );
         m.globals[0].mutable = true;
         validate(&m).unwrap();
         m.globals.push(m.globals[0].clone());
-        assert!(validate(&m).unwrap_err().contains("global storage"));
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("duplicate global id:")
+        );
     }
 
     #[test]
@@ -5965,6 +9235,85 @@ mod tests {
     }
 
     #[test]
+    fn callable_view_requires_the_exact_callable_record_signature() {
+        let mut module = callable_module();
+        let loc = module.functions[0].loc.clone();
+        let function_type = Type::Func {
+            rest: false,
+            params: vec![Type::F64],
+            ret: Box::new(Type::F64),
+        };
+        module.records.push(Record {
+            id: 0,
+            fields: vec![Field {
+                name: "\0scriptc.call".into(),
+                r#type: function_type.clone(),
+            }],
+            declared_order: vec!["\0scriptc.call".into()],
+            tuple: false,
+            index_value: None,
+        });
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "callable.view".into(),
+                args: vec![Expr::Closure {
+                    fn_name: "f0".into(),
+                    captures: vec![],
+                    r#type: function_type,
+                    loc: loc.clone(),
+                }],
+                r#type: Type::Record { shape_id: 0 },
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        validate(&module).unwrap();
+        module.records[0].fields[0].r#type = Type::String;
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "invalid native callable view"
+        );
+    }
+
+    #[test]
+    fn getter_descriptor_requires_dynamic_operands_and_attributes() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        let dynamic = || Expr::DynObjLit {
+            fields: vec![],
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        let flag = || Expr::BoolLit {
+            value: false,
+            r#type: Type::Bool,
+            loc: loc.clone(),
+        };
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::LibCall {
+                r#fn: "dyn.defineOrdinaryGetter".into(),
+                args: vec![dynamic(), dynamic(), dynamic(), dynamic(), dynamic()],
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        validate(&module).unwrap();
+        if let Stmt::Expression {
+            expr: Expr::LibCall { args, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        {
+            args[3] = flag();
+        }
+        assert_eq!(
+            validate(&module).unwrap_err(),
+            "invalid native accessor descriptor"
+        );
+    }
+
+    #[test]
     fn dynamic_property_writes_keep_the_shared_void_signature() {
         let mut m = callable_module();
         m.functions.truncate(1);
@@ -6030,6 +9379,7 @@ mod tests {
             name: "exports".into(),
             r#type: Type::Dyn,
             mutable: true,
+            loc: loc.clone(),
         });
         let initializer = Stmt::Assign {
             local_id: "%g.0".into(),
@@ -6043,6 +9393,7 @@ mod tests {
         };
         m.functions.push(Function {
             is_async: false,
+            generator: None,
             rest: false,
             name: "module_thunk".into(),
             params: vec![],
@@ -6069,7 +9420,11 @@ mod tests {
             loc: m.functions[0].loc.clone(),
         };
         m.functions[0].body.push(bad);
-        assert_eq!(validate(&m).unwrap_err(), "invalid global assignment");
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid global assignment:")
+        );
     }
 
     #[test]
@@ -6243,6 +9598,7 @@ mod tests {
                     absent: false,
                     overflow: true,
                 }],
+                null_prototype: false,
                 r#type: Type::Record { shape_id: 0 },
                 loc: loc.clone(),
             },
@@ -6465,6 +9821,7 @@ mod tests {
                     absent: false,
                     overflow: false,
                 }],
+                null_prototype: false,
                 r#type: Type::Record { shape_id: 0 },
                 loc: loc.clone(),
             },
@@ -6662,7 +10019,64 @@ mod tests {
         }
         assert_eq!(validate(&m).unwrap_err(), "invalid union wrap");
         m.unions[0].arms.push(Type::Null);
-        assert_eq!(validate(&m).unwrap_err(), "invalid/recursive union layout");
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid/recursive union layout u0:")
+        );
+    }
+
+    #[test]
+    fn nullish_union_payload_can_be_a_checked_extraction() {
+        let mut m = record_module();
+        m.unions.push(Union {
+            id: 0,
+            arms: vec![Type::Null, Type::F64],
+        });
+        m.unions.push(Union {
+            id: 1,
+            arms: vec![Type::Null, Type::Undefined],
+        });
+        let loc = m.functions[0].loc.clone();
+        let source = Expr::UnionWrap {
+            union_id: "u0".into(),
+            tag: 0,
+            value: Box::new(Expr::UnitLit {
+                unit: "null",
+                r#type: Type::Null,
+                loc: loc.clone(),
+            }),
+            r#type: Type::Union { union_id: 0 },
+            loc: loc.clone(),
+        };
+        let narrowed = Expr::UnionNarrow {
+            union_id: "u0".into(),
+            tag: 0,
+            value: Box::new(source),
+            r#type: Type::Null,
+            loc: loc.clone(),
+        };
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::UnionWrap {
+                union_id: "u1".into(),
+                tag: 0,
+                value: Box::new(narrowed.clone()),
+                r#type: Type::Union { union_id: 1 },
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert!(validate(&m).is_ok());
+
+        m.functions[0].body = vec![Stmt::Expression {
+            expr: narrowed,
+            loc,
+        }];
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("standalone unit narrowing")
+        );
     }
 
     #[test]
@@ -6677,7 +10091,19 @@ mod tests {
             },
             loc: loc.clone(),
         }];
-        assert_eq!(validate(&m).unwrap_err(), "invalid native expression");
+        validate(&m).unwrap();
+        if let Stmt::Expression {
+            expr: Expr::UnitLit { r#type, .. },
+            ..
+        } = &mut m.functions[0].body[0]
+        {
+            *r#type = Type::Undefined;
+        }
+        assert!(
+            validate(&m)
+                .unwrap_err()
+                .starts_with("invalid native expression:")
+        );
         let make_bool = || {
             Box::new(Expr::BoolLit {
                 value: true,
@@ -6707,6 +10133,7 @@ mod tests {
         Module {
             ir_version: VERSION,
             source_file: loc.file.clone(),
+            source_modules: vec![],
             entry: "__main".into(),
             records: vec![],
             unions: vec![],
@@ -6715,6 +10142,7 @@ mod tests {
             functions: vec![
                 Function {
                     is_async: false,
+                    generator: None,
                     rest: false,
                     captures: None,
                     name: "__main".into(),
@@ -6739,6 +10167,7 @@ mod tests {
                 },
                 Function {
                     is_async: false,
+                    generator: None,
                     rest: false,
                     captures: None,
                     name: "f0".into(),
@@ -6816,8 +10245,10 @@ mod tests {
             runtime: false,
             base: None,
             fields: vec![],
+            captures: vec![],
             methods: vec![],
             symbol_methods: vec![],
+            symbol_brand: None,
             method_names: vec![],
             loc: loc.clone(),
         });
@@ -6843,6 +10274,7 @@ mod tests {
             captures: None,
             rest: false,
             is_async: false,
+            generator: None,
             loc: loc.clone(),
         });
         for operation in ["get", "has", "delete", "set"] {
@@ -6968,9 +10400,63 @@ mod tests {
                     },
                     loc: loc.clone(),
                 }];
-                assert!(validate(&module).is_err());
+                assert!(validate(&module).is_ok());
             }
         }
+    }
+
+    #[test]
+    fn set_dynamic_seed_and_membership_require_owned_dynamic_values() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        let seed = Expr::DynArrLit {
+            elems: vec![],
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        let set = Expr::SetNew {
+            seed: Some(Box::new(seed)),
+            r#type: Type::Set {
+                elem: Box::new(Type::F64),
+            },
+            loc: loc.clone(),
+        };
+        let key = Expr::DynFrom {
+            value: Box::new(Expr::NumLit {
+                value: 1.0,
+                spelling: None,
+                r#type: Type::F64,
+                loc: loc.clone(),
+            }),
+            r#type: Type::Dyn,
+            loc: loc.clone(),
+        };
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::SetIntrinsic {
+                method: "hasValue".into(),
+                receiver: Box::new(set),
+                args: vec![key],
+                r#type: Type::Bool,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        assert!(validate(&module).is_ok());
+        let Stmt::Expression {
+            expr: Expr::SetIntrinsic { args, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        else {
+            unreachable!()
+        };
+        args[0] = Expr::NumLit {
+            value: 1.0,
+            spelling: None,
+            r#type: Type::F64,
+            loc,
+        };
+        assert_eq!(validate(&module).unwrap_err(), "invalid Set operation");
     }
 
     #[test]
@@ -7047,6 +10533,159 @@ mod tests {
             };
         }
         assert_eq!(validate(&module).unwrap_err(), "invalid Set operation");
+    }
+
+    #[test]
+    fn map_values_iterator_requires_dynamic_generator_channels() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::MapIntrinsic {
+                method: "valuesIterator".into(),
+                receiver: Box::new(Expr::MapNew {
+                    seed: vec![],
+                    r#type: Type::Map {
+                        key: Box::new(Type::String),
+                        value: Box::new(Type::F64),
+                    },
+                    loc: loc.clone(),
+                }),
+                args: vec![],
+                r#type: Type::Generator {
+                    r#async: false,
+                    yield_type: Box::new(Type::Dyn),
+                    return_type: Box::new(Type::Void),
+                    next_type: Box::new(Type::Undefined),
+                },
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        validate(&module).unwrap();
+        let Stmt::Expression {
+            expr: Expr::MapIntrinsic { r#type, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        else {
+            unreachable!()
+        };
+        *r#type = Type::Generator {
+            r#async: false,
+            yield_type: Box::new(Type::F64),
+            return_type: Box::new(Type::Void),
+            next_type: Box::new(Type::Undefined),
+        };
+        assert_eq!(validate(&module).unwrap_err(), "invalid Map operation");
+    }
+
+    #[test]
+    fn map_values_iterator_object_requires_dynamic_result_and_no_arguments() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::MapIntrinsic {
+                method: "valuesIteratorObject".into(),
+                receiver: Box::new(Expr::MapNew {
+                    seed: vec![],
+                    r#type: Type::Map {
+                        key: Box::new(Type::String),
+                        value: Box::new(Type::F64),
+                    },
+                    loc: loc.clone(),
+                }),
+                args: vec![],
+                r#type: Type::Dyn,
+                loc: loc.clone(),
+            },
+            loc: loc.clone(),
+        }];
+        validate(&module).unwrap();
+        let Stmt::Expression {
+            expr: Expr::MapIntrinsic { r#type, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        else {
+            unreachable!()
+        };
+        *r#type = Type::String;
+        assert_eq!(validate(&module).unwrap_err(), "invalid Map operation");
+        let Stmt::Expression {
+            expr: Expr::MapIntrinsic { r#type, args, .. },
+            ..
+        } = &mut module.functions[0].body[0]
+        else {
+            unreachable!()
+        };
+        *r#type = Type::Dyn;
+        args.push(Expr::NumLit {
+            value: 1.0,
+            spelling: None,
+            r#type: Type::F64,
+            loc,
+        });
+        assert_eq!(validate(&module).unwrap_err(), "invalid Map operation");
+    }
+
+    #[test]
+    fn set_iterator_requires_matching_generator_channels() {
+        let mut module = callable_module();
+        module.functions.truncate(1);
+        let loc = module.functions[0].loc.clone();
+        let generator = Type::Generator {
+            r#async: false,
+            yield_type: Box::new(Type::String),
+            return_type: Box::new(Type::Void),
+            next_type: Box::new(Type::Undefined),
+        };
+        module.functions[0].body = vec![Stmt::Expression {
+            expr: Expr::SetIntrinsic {
+                method: "iterator".into(),
+                receiver: Box::new(Expr::SetNew {
+                    seed: None,
+                    r#type: Type::Set {
+                        elem: Box::new(Type::String),
+                    },
+                    loc: loc.clone(),
+                }),
+                args: vec![],
+                r#type: generator.clone(),
+                loc: loc.clone(),
+            },
+            loc,
+        }];
+        validate(&module).unwrap();
+        for invalid in [
+            Type::Generator {
+                r#async: false,
+                yield_type: Box::new(Type::F64),
+                return_type: Box::new(Type::Void),
+                next_type: Box::new(Type::Undefined),
+            },
+            Type::Generator {
+                r#async: true,
+                yield_type: Box::new(Type::String),
+                return_type: Box::new(Type::Void),
+                next_type: Box::new(Type::Undefined),
+            },
+            Type::Generator {
+                r#async: false,
+                yield_type: Box::new(Type::String),
+                return_type: Box::new(Type::Void),
+                next_type: Box::new(Type::Dyn),
+            },
+        ] {
+            let Stmt::Expression {
+                expr: Expr::SetIntrinsic { r#type, .. },
+                ..
+            } = &mut module.functions[0].body[0]
+            else {
+                unreachable!()
+            };
+            *r#type = invalid;
+            assert_eq!(validate(&module).unwrap_err(), "invalid Set operation");
+        }
     }
 
     #[test]
@@ -7227,7 +10866,11 @@ mod tests {
         {
             args.clear();
         }
-        assert_eq!(validate(&module).unwrap_err(), "invalid call signature");
+        assert!(
+            validate(&module)
+                .unwrap_err()
+                .starts_with("invalid call signature")
+        );
         let mut module = callable_module();
         if let Stmt::Return { value, .. } = &mut module.functions[1].body[0] {
             *value = None;
@@ -7275,9 +10918,11 @@ mod tests {
             classes: vec![],
             ir_version: VERSION,
             source_file: loc.file.clone(),
+            source_modules: vec![],
             entry: "main".into(),
             functions: vec![Function {
                 is_async: false,
+                generator: None,
                 rest: false,
                 captures: None,
                 name: "main".into(),
@@ -7344,6 +10989,7 @@ mod tests {
         assert!(validate(&m).is_ok());
         m.functions.push(Function {
             is_async: false,
+            generator: None,
             rest: false,
             name: "invalid_caught_abi".into(),
             params: vec![Param {
@@ -7807,12 +11453,15 @@ mod tests {
                 "console.log(Number(view.{js_method}(0, true)));\n"
             ));
         }
-        let rust = crate::emit::rust(&module).unwrap();
+        let rust = crate::emit::rust_with_metrics(&module).unwrap();
+        let partition = crate::emit::chunks::plan_abi(&module, 4 * 1024 * 1024)
+            .unwrap()
+            .partition;
         let work = tempfile::Builder::new()
             .prefix("scriptc_dataview_")
             .tempdir()
             .unwrap();
-        let binary = crate::compile(&rust, work.path(), true).unwrap();
+        let binary = crate::compile(&rust, &partition, work.path(), true, false).unwrap();
         let native = std::process::Command::new(binary).output().unwrap();
         let node = std::process::Command::new("node")
             .args(["-e", &script])
@@ -7869,6 +11518,26 @@ mod tests {
             loc,
         }];
         assert!(validate(&module).is_err());
-        assert!(!module.valid_type(Type::Bytes { elem: "u16".into() }, &mut vec![]));
+        assert!(module.valid_type(Type::Bytes { elem: "u16".into() }, &mut vec![]));
+    }
+    #[test]
+    fn validation_reports_independent_body_failures() {
+        let mut module = callable_module();
+        let mut broken = module.functions[0].clone();
+        broken.name = "broken_a".into();
+        broken.body = vec![Stmt::Expression {
+            expr: Expr::VarRef {
+                local_id: "missing".into(),
+                r#type: Type::String,
+                loc: broken.loc.clone(),
+            },
+            loc: broken.loc.clone(),
+        }];
+        module.functions.push(broken.clone());
+        broken.name = "broken_b".into();
+        module.functions.push(broken);
+        let errors = validate(&module).unwrap_err();
+        assert!(errors.contains("broken_a:"), "{errors}");
+        assert!(errors.contains("broken_b:"), "{errors}");
     }
 }

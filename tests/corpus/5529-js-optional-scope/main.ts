@@ -1,0 +1,10 @@
+import { createRuntimeScope, setActiveRuntimeScope } from './scope.mjs';
+import { getAppContext, useActiveContext, hasActiveContext } from './context.mjs';
+console.log('default', getAppContext(), useActiveContext(), hasActiveContext());
+const scope = createRuntimeScope(42);
+setActiveRuntimeScope(scope);
+console.log('active', getAppContext(scope), useActiveContext(), hasActiveContext());
+scope.id = 73;
+console.log('mutated', useActiveContext());
+setActiveRuntimeScope(null);
+console.log('reset', useActiveContext(), hasActiveContext());

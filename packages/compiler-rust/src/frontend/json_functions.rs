@@ -179,6 +179,21 @@ impl Lowerer<'_> {
             ret: Box::new(Type::Dyn),
         })
     }
+
+    pub(super) fn json_stringify_result(&mut self, node: Node) -> bool {
+        let node = primitives::primitive_source(node);
+        if node.kind() != SyntaxKind::CallExpression {
+            return false;
+        }
+        if self.json_function_origin(node.expression(), &mut HashSet::new()) == Some("stringify") {
+            return true;
+        }
+        let callee = self.checker.get_type_at_location(node.expression());
+        let symbol = self.checker.ty(callee).symbol();
+        symbol.0 != 0
+            && self.checker.sym(symbol).name.as_ref() == "stringify"
+            && self.json_callable_type(callee).is_some()
+    }
     pub(super) fn json_function_value(&mut self, node: Node) -> Result<Option<Expr>, String> {
         let Some(member) = self.standard_json_member(node) else {
             return Ok(None);

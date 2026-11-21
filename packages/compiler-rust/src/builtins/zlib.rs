@@ -4,6 +4,32 @@ pub(super) fn apis() -> Vec<Api> {
     vec![
         Api::native(
             "zlib",
+            "gzipSync",
+            Lowering::Zlib,
+            vec![call!(
+                "zlib.gzipSync",
+                [Type::bytes()],
+                Type::bytes(),
+                "zlib_gzip_sync"
+            )],
+            "One Uint8Array or Buffer input; options and other overloads are refused",
+            &["tests/corpus/rust-native-zlib/gzip.ts"],
+        ),
+        Api::native(
+            "zlib",
+            "gunzipSync",
+            Lowering::Zlib,
+            vec![call!(
+                "zlib.gunzipSync",
+                [Type::bytes()],
+                Type::bytes(),
+                "zlib_gunzip_sync"
+            )],
+            "One Uint8Array or Buffer input; options and other overloads are refused",
+            &["tests/corpus/rust-native-zlib/gzip.ts"],
+        ),
+        Api::native(
+            "zlib",
             "inflateSync",
             Lowering::Zlib,
             vec![call!(

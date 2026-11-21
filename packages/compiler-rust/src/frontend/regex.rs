@@ -2,12 +2,91 @@
 use super::*;
 use source_frontend::prelude::{SymbolId, get_source_file_of_node};
 
+// Recognize capture-free groups without confusing assertions, escaped
+// parentheses, character classes or nested Unicode-set classes with captures.
+fn split_pattern_without_captures(pattern: &[u8], unicode_sets: bool) -> bool {
+    let mut class_depth = 0usize;
+    let mut group_depth = 0usize;
+    let mut escaped = false;
+    for (index, byte) in pattern.iter().copied().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if byte == b'\\' {
+            escaped = true;
+        } else if byte == b'[' && (class_depth == 0 || unicode_sets) {
+            class_depth += 1;
+        } else if byte == b']' && class_depth != 0 {
+            class_depth -= 1;
+        } else if class_depth == 0 && byte == b'(' {
+            if pattern.get(index + 1) != Some(&b'?')
+                || !matches!(
+                    (pattern.get(index + 2), pattern.get(index + 3)),
+                    (Some(b':' | b'=' | b'!'), _) | (Some(b'<'), Some(b'=' | b'!'))
+                )
+            {
+                return false;
+            }
+            group_depth += 1;
+        } else if class_depth == 0 && byte == b')' {
+            let Some(depth) = group_depth.checked_sub(1) else {
+                return false;
+            };
+            group_depth = depth;
+        }
+    }
+    !escaped && class_depth == 0 && group_depth == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_pattern_without_captures;
+
+    #[test]
+    fn split_pattern_distinguishes_assertions_from_captures() {
+        for pattern in [
+            r",(?=\s*[a-zA-Z0-9_-]+=)",
+            r"(?:a|(?=b)c)",
+            r"(?<!x)(?:y)(?!z)",
+            r"[()]+\(x\)",
+        ] {
+            assert!(
+                split_pattern_without_captures(pattern.as_bytes(), false),
+                "{pattern}"
+            );
+        }
+        for pattern in [
+            r"(a)",
+            r"(?:a(b))",
+            r"(?=(a))",
+            r"(?<name>a)",
+            r"(?:a",
+            r"(?:a))",
+        ] {
+            assert!(
+                !split_pattern_without_captures(pattern.as_bytes(), false),
+                "{pattern}"
+            );
+        }
+        assert!(split_pattern_without_captures(br"[[a-z]--[()]]", true));
+        assert!(!split_pattern_without_captures(br"[[a-z]--[()]](x)", true));
+    }
+}
+
 impl Lowerer<'_> {
     // The current split ABI contains strings only. Accept a capture only when
     // its enclosing group necessarily participates in every match.
     pub(super) fn regex_split_strings_only(&mut self, node: Node) -> bool {
+        self.regex_split_strings_only_inner(node, &mut std::collections::HashSet::new())
+    }
+
+    fn regex_split_strings_only_inner(
+        &mut self,
+        node: Node,
+        seen: &mut std::collections::HashSet<u32>,
+    ) -> bool {
         let mut node = primitives::primitive_source(node);
-        let mut seen = std::collections::HashSet::new();
         while node.kind() == SyntaxKind::Identifier {
             let symbol = self.symbol(node);
             if symbol == 0 || !seen.insert(symbol) {
@@ -23,6 +102,10 @@ impl Lowerer<'_> {
             }
             node = primitives::primitive_source(declaration.initializer());
         }
+        if node.kind() == SyntaxKind::ConditionalExpression {
+            return self.regex_split_strings_only_inner(node.when_true(), &mut seen.clone())
+                && self.regex_split_strings_only_inner(node.when_false(), seen);
+        }
         if node.kind() != SyntaxKind::RegularExpressionLiteral {
             return false;
         }
@@ -31,6 +114,11 @@ impl Lowerer<'_> {
             return false;
         };
         let pattern = &text.as_bytes()[1..end];
+        // Unicode-set string disjunctions can contain class delimiters that
+        // need a full v-mode parser. Keep the existing v-mode boundary.
+        if !text[end + 1..].contains('v') && split_pattern_without_captures(pattern, false) {
+            return true;
+        }
         let outer = pattern.first() == Some(&b'(') && pattern.get(1) != Some(&b'?');
         let mut class = false;
         let mut escaped = false;
@@ -61,7 +149,15 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn regex_callable_type(&self, id: TypeId) -> Option<Type> {
-        self.primitive_symbol(self.checker.ty(id).symbol().0, "test", Some("RegExp"))
+        let symbol = self.checker.ty(id).symbol().0;
+        if symbol == 0 {
+            return None;
+        }
+        // Instantiated and indexed-access forms of `RegExp["test"]` can carry
+        // a synthetic value_declaration sentinel in the checker. Its
+        // declarations and parent symbol remain authoritative, while asking
+        // the sentinel for its kind panics inside the checker port.
+        self.primitive_symbol(symbol, "test", Some("RegExp"))
             .then(|| Type::Func {
                 rest: false,
                 params: vec![Type::Dyn],
@@ -136,7 +232,7 @@ impl Lowerer<'_> {
         })
     }
 
-    fn regex_symbol(&self, symbol: u32) -> bool {
+    pub(super) fn regex_symbol(&self, symbol: u32) -> bool {
         symbol != 0 && {
             let symbol = self.checker.sym(SymbolId(symbol));
             symbol.name.as_ref() == "RegExp"
@@ -204,9 +300,22 @@ impl Lowerer<'_> {
                 }
             });
         }
-        Ok(Some(Expr::LibCall {
-            r#fn: "regex.new".into(),
-            args: values,
+        Ok(Some(Expr::Sequence {
+            stmts: vec![Stmt::Expression {
+                expr: Expr::LibCall {
+                    r#fn: "regex.requireGlobal".into(),
+                    args: vec![],
+                    r#type: Type::Void,
+                    loc: self.loc(node),
+                },
+                loc: self.loc(node),
+            }],
+            result: Box::new(Expr::LibCall {
+                r#fn: "regex.new".into(),
+                args: values,
+                r#type: Type::Regex,
+                loc: self.loc(node),
+            }),
             r#type: Type::Regex,
             loc: self.loc(node),
         }))
@@ -224,7 +333,16 @@ impl Lowerer<'_> {
                 "RegExp.test/exec require one represented string argument",
             ));
         }
-        let receiver = self.expression(member.expression())?;
+        let receiver_node = member.expression();
+        let mut receiver = self.expression(receiver_node)?;
+        if receiver.ty() != Type::Regex {
+            // A hoisted `var` keeps an undefined-aware owning ABI even when
+            // the checker exposes RegExp at this use site. Narrow the live
+            // value here: calls before initialization fail at runtime, while
+            // ordinary module calls after initialization retain the regex
+            // identity and mutable lastIndex state.
+            receiver = self.coerce(receiver, Type::Regex, receiver_node)?;
+        }
         if receiver.ty() != Type::Regex {
             return Err(self.refuse(
                 node,
@@ -253,7 +371,47 @@ impl Lowerer<'_> {
             return Ok(None);
         }
         let method = node.name().text();
-        let receiver = self.expression(node.expression())?;
+        let receiver_node = node.expression();
+        let prototype_owner = if receiver_node.kind() == SyntaxKind::PropertyAccessExpression
+            && receiver_node.name().text() == "prototype"
+            && receiver_node.expression().kind() == SyntaxKind::Identifier
+        {
+            self.symbol(receiver_node.expression())
+        } else {
+            0
+        };
+        let standard_prototype = receiver_node.kind() == SyntaxKind::PropertyAccessExpression
+            && receiver_node.name().text() == "prototype"
+            && receiver_node.expression().kind() == SyntaxKind::Identifier
+            && self.regex_symbol(prototype_owner);
+        let mut receiver = if standard_prototype {
+            // The prototype object is itself a RegExp instance. Materialize a
+            // side-effect-free native representative so prototype method
+            // extraction can preserve its standard identity without treating
+            // the ambient RegExp constructor as a lexical binding.
+            Expr::LibCall {
+                r#fn: "regex.new".into(),
+                args: vec![
+                    Expr::StrLit {
+                        value: "(?:)".into(),
+                        r#type: Type::String,
+                        loc: self.loc(receiver_node),
+                    },
+                    Expr::StrLit {
+                        value: String::new(),
+                        r#type: Type::String,
+                        loc: self.loc(receiver_node),
+                    },
+                ],
+                r#type: Type::Regex,
+                loc: self.loc(receiver_node),
+            }
+        } else {
+            self.expression(receiver_node)?
+        };
+        if receiver.ty() != Type::Regex {
+            receiver = self.coerce(receiver, Type::Regex, receiver_node)?;
+        }
         if receiver.ty() != Type::Regex {
             return Err(self.refuse(
                 node,
@@ -262,6 +420,22 @@ impl Lowerer<'_> {
         }
         if method == "test" {
             return self.regex_test_value(node, receiver).map(Some);
+        }
+        if method == "constructor" {
+            return Ok(Some(Expr::Sequence {
+                stmts: vec![Stmt::Expression {
+                    expr: receiver,
+                    loc: self.loc(receiver_node),
+                }],
+                result: Box::new(Expr::LibCall {
+                    r#fn: "regex.constructorValue".into(),
+                    args: vec![],
+                    r#type: Type::Dyn,
+                    loc: self.loc(node),
+                }),
+                r#type: Type::Dyn,
+                loc: self.loc(node),
+            }));
         }
         let result = match method {
             "source" | "flags" => Type::String,
@@ -284,7 +458,11 @@ impl Lowerer<'_> {
         if member.name().text() != "lastIndex" {
             return Err(self.refuse(node, "only numeric RegExp.lastIndex writes are ported"));
         }
-        let receiver = self.expression(member.expression())?;
+        let receiver_node = member.expression();
+        let mut receiver = self.expression(receiver_node)?;
+        if receiver.ty() != Type::Regex {
+            receiver = self.coerce(receiver, Type::Regex, receiver_node)?;
+        }
         if receiver.ty() != Type::Regex {
             return Err(self.refuse(
                 node,

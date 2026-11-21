@@ -126,6 +126,7 @@ fn tcp_connect_refused_emits_error() {
     net_socket_on_error(
         &client,
         Rc::new(move |error: JsError| {
+            assert_eq!(error_code(&error).map(|code| code.to_string()).as_deref(), Some("ECONNREFUSED"));
             note(&error_log, &format!("error:{}", error_message(&error)));
         }),
         no_trace(),
@@ -143,12 +144,8 @@ fn tcp_connect_refused_emits_error() {
 
     let entries = entries(&log);
     assert_eq!(entries.len(), 1, "exactly one event fired: {entries:?}");
-    // Shape only, on purpose: Node reports `connect ECONNREFUSED <endpoint>`,
-    // while this runtime's errno table has no `ConnectionRefused` arm and
-    // falls back to `EIO`. Asserting the operation and the endpoint keeps the
-    // test meaningful without freezing that divergence into the suite.
     let event = &entries[0];
-    assert!(event.starts_with("error:connect "), "connect error: {event}");
+    assert!(event.starts_with("error:connect ECONNREFUSED "), "connect error: {event}");
     assert!(event.ends_with(&format!("{LOOPBACK}:{}", port as u16)), "endpoint: {event}");
 
     drop(client);

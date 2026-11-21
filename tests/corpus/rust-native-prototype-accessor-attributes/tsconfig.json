@@ -1,0 +1,1 @@
+{"compilerOptions":{"strict":true,"target":"ES2022","module":"NodeNext","moduleResolution":"NodeNext","lib":["ES2022"],"types":["node"],"skipLibCheck":true,"allowJs":true},"include":["*.ts","*.js","*.cjs"]}

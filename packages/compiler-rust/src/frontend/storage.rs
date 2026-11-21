@@ -2,6 +2,39 @@
 use super::*;
 
 impl Lowerer<'_> {
+    pub(super) fn contextual_empty_object_is_open(
+        &self,
+        declaration: Node,
+        storage: &Result<Type, String>,
+    ) -> bool {
+        if !parameter_abi::is_javascript(declaration)
+            || declaration.initializer().is_nil()
+            || declaration.initializer().kind() != SyntaxKind::ObjectLiteralExpression
+            || !declaration.initializer().properties().is_empty()
+        {
+            return false;
+        }
+        matches!(storage,
+            Ok(Type::Record { shape_id })
+                if self.records[*shape_id].index_value.is_some()
+                    || !self.records[*shape_id].fields.is_empty())
+    }
+
+    fn module_assignment_nodes(&mut self, node: Node, symbol: u32, out: &mut Vec<Node>) {
+        if node.kind() == SyntaxKind::BinaryExpression
+            && node.operator_token().kind() == SyntaxKind::EqualsToken
+        {
+            let left = primitives::primitive_source(node.left());
+            if left.kind() == SyntaxKind::Identifier && self.symbol(left) == symbol {
+                out.push(node.right());
+            }
+        }
+        node.for_each_child(&mut |child| {
+            self.module_assignment_nodes(child, symbol, out);
+            false
+        });
+    }
+
     fn module_export_symbol(&mut self, file: Node, name: &str) -> Option<u32> {
         if file.symbol().0 == 0 {
             return None;
@@ -91,6 +124,7 @@ impl Lowerer<'_> {
                     name: local.name.clone(),
                     r#type: local.r#type.clone(),
                     mutable: false,
+                    loc: self.loc(node),
                 });
                 self.module_bindings.insert(symbol, local.clone());
                 self.add_default_alias(symbol, symbol, node)?;
@@ -232,6 +266,7 @@ impl Lowerer<'_> {
     pub(super) fn inventory_storage(&mut self, files: &[Node]) {
         for file in files {
             self.file = source_file_info(*file).file_name.to_string();
+            let commonjs = self.commonjs_index(*file).is_some();
             for statement in file.statements() {
                 if statement.kind() != SyntaxKind::VariableStatement {
                     continue;
@@ -268,7 +303,39 @@ impl Lowerer<'_> {
                         }
                         // An untyped JavaScript initializer can provide a more
                         // precise native contract when lowered at its source site.
-                        let storage = if sequence {
+                        let symbol_initializer = (name == declaration.name()
+                            && !declaration.initializer().is_nil())
+                        .then(|| self.symbol_initializer_storage(declaration.initializer()))
+                        .flatten();
+                        let planned_initializer_storage = (name == declaration.name()
+                            && parameter_abi::is_javascript(declaration)
+                            && declaration.type_().is_nil()
+                            && !declaration.initializer().is_nil())
+                        .then(|| self.planned_argument_type(declaration.initializer()))
+                        .flatten();
+                        let mut storage = if self
+                            .commonjs
+                            .native_declarations
+                            .contains(&declarations::Key::of(declaration))
+                        {
+                            Ok(Type::Dyn)
+                        } else if name == declaration.name()
+                            && !declaration.initializer().is_nil()
+                            && (self.inferred_nonnull_array_element(declaration)
+                                || self.inferred_nonnull_array_removal(declaration)
+                                || self.native_dynamic_result_call(declaration.initializer())
+                                || self.owning_function_result_call(declaration.initializer())
+                                || self.json_stringify_result(declaration.initializer())
+                                || self
+                                    .native_weak_reference_constructor(declaration.initializer())
+                                || self
+                                    .native_computed_symbol_result_call(declaration.initializer())
+                                || self.timer_optional_method_value(declaration.initializer()))
+                        {
+                            Ok(Type::Dyn)
+                        } else if let Some(symbol) = symbol_initializer {
+                            Ok(symbol)
+                        } else if sequence {
                             let position = declaration
                                 .name()
                                 .elements()
@@ -283,8 +350,104 @@ impl Lowerer<'_> {
                         } else if dynamic_binding {
                             Ok(Type::Dyn)
                         } else {
-                            self.storage_type(name)
+                            let storage = self.storage_type(name);
+                            let storage = if name == declaration.name()
+                                && self.contextual_empty_object_is_open(declaration, &storage)
+                            {
+                                Ok(Type::Dyn)
+                            } else {
+                                storage
+                            };
+                            let storage = if list.flags().intersects(NodeFlags::CONST)
+                                && parameter_abi::is_javascript(declaration)
+                                && declaration.type_().is_nil()
+                                && !declaration.initializer().is_nil()
+                                && declaration.initializer().kind()
+                                    == SyntaxKind::ObjectLiteralExpression
+                            {
+                                match (&storage, self.ty(declaration.initializer())) {
+                                    (Ok(inferred), Ok(actual))
+                                        if self.call_record_storage(&actual, inferred) =>
+                                    {
+                                        // Module cells are inventoried before any
+                                        // initializer is lowered so functions can
+                                        // capture them. Keep the concrete owning
+                                        // JavaScript literal ABI here just as local
+                                        // declarations do during statement lowering;
+                                        // the checker's broader structural record is
+                                        // only a view (for example `{ props: any }`
+                                        // over a literal whose `props` is `{}`).
+                                        Ok(actual)
+                                    }
+                                    _ => storage,
+                                }
+                            } else {
+                                storage
+                            };
+                            let storage = if matches!(&storage, Ok(Type::Dyn) | Err(_))
+                                && let Some(planned) = planned_initializer_storage
+                            {
+                                Ok(planned)
+                            } else {
+                                storage
+                            };
+                            if commonjs && storage.is_err() && !declaration.initializer().is_nil() {
+                                let initializer = declaration.initializer();
+                                self.ty(initializer).or_else(|error| {
+                                    // Checked CommonJS frequently exposes a heterogeneous
+                                    // registry as an inferred array whose element union
+                                    // contains open objects (for example parser tag tables).
+                                    // The table itself still has a precise native container:
+                                    // retain each entry as an owning JavaScript value rather
+                                    // than rejecting the whole module during pre-inventory.
+                                    let fallback = match initializer.kind() {
+                                        SyntaxKind::ArrayLiteralExpression => Ok(Type::Array {
+                                            elem: Box::new(Type::Dyn),
+                                        }),
+                                        // Heterogeneous CommonJS registries are
+                                        // open owning objects. Their computed
+                                        // reads and reflection already use the
+                                        // dynamic object ABI.
+                                        SyntaxKind::ObjectLiteralExpression => Ok(Type::Dyn),
+                                        _ => Err(error),
+                                    };
+                                    fallback
+                                })
+                            } else {
+                                storage
+                            }
                         };
+                        if name == declaration.name()
+                            && storage.as_ref().is_ok_and(|ty| *ty != Type::Dyn)
+                        {
+                            let mut assignments = Vec::new();
+                            self.module_assignment_nodes(*file, symbol, &mut assignments);
+                            let mut arms = match storage.as_ref().unwrap().clone() {
+                                Type::Union { union_id } => self.unions[union_id].arms.clone(),
+                                ty => vec![ty],
+                            };
+                            for assignment in assignments {
+                                if let Ok(ty) = self.ty(assignment) {
+                                    match ty {
+                                        Type::Union { union_id } => {
+                                            arms.extend(self.unions[union_id].arms.clone())
+                                        }
+                                        ty => arms.push(ty),
+                                    }
+                                }
+                            }
+                            if let Some(widened) = self.intern_union(arms) {
+                                storage = Ok(widened);
+                            }
+                        }
+                        if name == declaration.name()
+                            && !declaration.initializer().is_nil()
+                            && (self
+                                .javascript_prototype_value_candidate(declaration.initializer())
+                                || self.dynamic_callable_initializer(declaration.initializer()))
+                        {
+                            storage = Ok(Type::Dyn);
+                        }
                         if let Ok(mut ty) = storage {
                             if dynamic_binding || sequence {
                                 self.var_types.insert(symbol, ty.clone());
@@ -337,6 +500,7 @@ impl Lowerer<'_> {
             name: binding.name.clone(),
             r#type: binding.r#type.clone(),
             mutable,
+            loc: self.loc(name),
         });
         self.module_bindings.insert(symbol, binding.clone());
         binding

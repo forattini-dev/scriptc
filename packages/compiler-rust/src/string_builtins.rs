@@ -52,6 +52,12 @@ pub const OPERATIONS: &[StringBuiltin] = &[
         result: Text,
     },
     StringBuiltin {
+        method: "substr",
+        runtime: "string_substr",
+        args: &[N(0.0), N(f64::INFINITY)],
+        result: Text,
+    },
+    StringBuiltin {
         method: "charAt",
         runtime: "string_char_at",
         args: &[N(0.0)],
@@ -64,9 +70,27 @@ pub const OPERATIONS: &[StringBuiltin] = &[
         result: F64,
     },
     StringBuiltin {
+        method: "codePointAt",
+        runtime: "string_code_point_at",
+        args: &[N(0.0)],
+        result: F64,
+    },
+    StringBuiltin {
         method: "indexOf",
         runtime: "string_index_of",
         args: &[S("undefined"), N(0.0)],
+        result: F64,
+    },
+    StringBuiltin {
+        method: "lastIndexOf",
+        runtime: "string_last_index_of",
+        args: &[S("undefined"), N(f64::INFINITY)],
+        result: F64,
+    },
+    StringBuiltin {
+        method: "localeCompare",
+        runtime: "string_locale_compare",
+        args: &[S("undefined")],
         result: F64,
     },
     StringBuiltin {
@@ -118,6 +142,18 @@ pub const OPERATIONS: &[StringBuiltin] = &[
         result: Text,
     },
     StringBuiltin {
+        method: "toLocaleLowerCase",
+        runtime: "string_to_lower_case",
+        args: &[],
+        result: Text,
+    },
+    StringBuiltin {
+        method: "toLocaleUpperCase",
+        runtime: "string_to_upper_case",
+        args: &[],
+        result: Text,
+    },
+    StringBuiltin {
         method: "isWellFormed",
         runtime: "string_is_well_formed",
         args: &[],
@@ -127,6 +163,12 @@ pub const OPERATIONS: &[StringBuiltin] = &[
         method: "toWellFormed",
         runtime: "string_to_well_formed",
         args: &[],
+        result: Text,
+    },
+    StringBuiltin {
+        method: "normalize",
+        runtime: "string_normalize",
+        args: &[S("NFC")],
         result: Text,
     },
     StringBuiltin {

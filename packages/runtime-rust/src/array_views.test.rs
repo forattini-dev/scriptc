@@ -6,6 +6,45 @@ fn mapped_number(value: f64) -> JsString {
 fn mapped_string(value: JsString) -> f64 { value.parse().unwrap() }
 
 #[test]
+fn array_iterator_or_observes_live_holes_undefined_and_completion() {
+    let source = array_new(vec![1.0, 2.0, 3.0]);
+    let iterator = array_iterator_new(&source, ArrayIteratorKind::Values);
+    assert!(matches!(array_iterator_next_or(&iterator, -1.0), Some(ArrayIteratorItem::Value(1.0))));
+    array_delete(&source, 1.0);
+    array_set_undefined(&source, 2.0);
+    array_push(&source, 4.0);
+    assert!(matches!(array_iterator_next_or(&iterator, -1.0), Some(ArrayIteratorItem::Value(-1.0))));
+    assert!(matches!(array_iterator_next_or(&iterator, -1.0), Some(ArrayIteratorItem::Value(-1.0))));
+    assert!(matches!(array_iterator_next_or(&iterator, -1.0), Some(ArrayIteratorItem::Value(4.0))));
+    assert!(array_iterator_next_or(&iterator, -1.0).is_none());
+    array_push(&source, 5.0);
+    assert!(array_iterator_next_or(&iterator, -1.0).is_none());
+    let entries = array_iterator_new(&source, ArrayIteratorKind::Entries);
+    assert!(matches!(array_iterator_next_or(&entries, -1.0), Some(ArrayIteratorItem::Entry(0.0, 1.0))));
+    assert!(matches!(array_iterator_next_or(&entries, -1.0), Some(ArrayIteratorItem::Entry(1.0, -1.0))));
+    let keys = array_iterator_new(&source, ArrayIteratorKind::Keys);
+    assert!(matches!(array_iterator_next_or(&keys, -1.0), Some(ArrayIteratorItem::Key(0.0))));
+    assert!(matches!(array_iterator_next_or(&keys, -1.0), Some(ArrayIteratorItem::Key(1.0))));
+    let generator: JsGenerator<f64, (), ()> = generator_from_array_or(source, -1.0);
+    assert!(matches!(generator_next(&generator, ()), GeneratorStep::Yielded(1.0)));
+    assert!(matches!(generator_next(&generator, ()), GeneratorStep::Yielded(-1.0)));
+    assert!(matches!(generator_next(&generator, ()), GeneratorStep::Yielded(-1.0)));
+}
+
+#[test]
+fn mapped_arrays_share_named_properties_with_their_source() {
+    let source = array_new(vec![1.0]);
+    let view = array_mapped(source.clone(), mapped_number, mapped_string);
+    let nested = array_mapped(view.clone(), |value| value, |value| value);
+    array_property_set(&source, string("first"), 7.0);
+    assert_eq!(array_property_get(&view, &string("first")), Some(string("7")));
+    array_property_set(&nested, string("second"), string("12"));
+    assert_eq!(array_property_get(&source, &string("second")), Some(12.0));
+    assert!(array_property_has(&view, &string("second")));
+    assert_eq!(array_property_keys(&nested), vec![string("first"), string("second")]);
+}
+
+#[test]
 fn mapped_arrays_share_identity_and_scalar_storage_without_eager_conversion() {
     ARRAY_VIEW_READS.with(|count| count.set(0));
     let source = array_new_with_raw(vec![1.0, 2.0], vec![10.0, 20.0]);
@@ -59,6 +98,33 @@ fn mapped_arrays_support_bulk_mutation_readers_and_iterators() {
     drop((source, view, removed, slice, iterator));
     finish();
     assert_eq!(live_heap_objects(), 0);
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SliceViewValue { Text(JsString), Absent }
+impl ArrayElement for SliceViewValue {}
+
+#[test]
+fn slicing_a_mapped_array_preserves_unrepresentable_values_and_holes() {
+    fn read(value: SliceViewValue) -> JsString {
+        match value {
+            SliceViewValue::Text(value) => value,
+            SliceViewValue::Absent => panic!("slice must not eagerly narrow a value"),
+        }
+    }
+    fn write(value: JsString) -> SliceViewValue { SliceViewValue::Text(value) }
+    let source = array_new(vec![SliceViewValue::Text(string("a")), SliceViewValue::Absent, SliceViewValue::Text(string("b"))]);
+    array_delete(&source, 0.0);
+    array_set_undefined(&source, 2.0);
+    let view = array_mapped(source.clone(), read, write);
+    let copy = array_slice(&view, 0.0, 3.0);
+    let raw = array_mapped_source::<SliceViewValue, JsString>(&copy).unwrap();
+    assert_eq!(array_state(&raw, 0.0), 0.0);
+    assert_eq!(array_state(&raw, 1.0), 1.0);
+    assert_eq!(array_get(&raw, 1.0), SliceViewValue::Absent);
+    assert_eq!(array_state(&raw, 2.0), 2.0);
+    array_set(&source, 1.0, SliceViewValue::Text(string("changed")));
+    assert_eq!(array_get(&raw, 1.0), SliceViewValue::Absent);
 }
 
 #[derive(Clone)]
@@ -168,4 +234,17 @@ fn sort_does_not_reextend_trailing_holes_after_comparator_shrinks_length() {
     drop((array, alias));
     finish();
     assert_eq!(live_heap_objects(), 0);
+}
+
+#[test]
+fn mapped_shift_optional_mutates_the_shared_sparse_owner() {
+    let source = array_new(vec![1.0, 2.0, 3.0]);
+    array_delete(&source, 0.0);
+    array_set_undefined(&source, 1.0);
+    let view = array_mapped(source.clone(), mapped_number, mapped_string);
+    assert_eq!(array_shift_optional(&view), None);
+    assert_eq!((array_state(&source, 0.0), array_state(&source, 1.0)), (2.0, 1.0));
+    assert_eq!(array_shift_optional(&view), None);
+    assert_eq!(array_shift_optional(&view).as_deref(), Some("3"));
+    assert_eq!(array_len(&source), 0.0);
 }

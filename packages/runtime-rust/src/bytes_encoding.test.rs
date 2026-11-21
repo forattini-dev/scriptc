@@ -15,7 +15,10 @@ fn bulk_set_copies_between_direct_and_backed_views_with_offsets() {
     assert_eq!(bytes_values(&output), [7, 10, 20, 30, 7, 7, 7]);
     bytes_set_from(&target, &backed_input, 5.0);
     assert_eq!(bytes_values(&target), [0, 0, 10, 20, 30, 10, 20, 30]);
-    assert_eq!(bytes_join(&target, &string(":")), string("0:0:10:20:30:10:20:30"));
+    assert_eq!(
+        bytes_join(&target, &string(":")),
+        string("0:0:10:20:30:10:20:30")
+    );
 }
 
 #[test]
@@ -43,7 +46,8 @@ fn bulk_set_checks_view_bounds_before_any_write_and_accepts_empty_copy() {
     for offset in [-1.0, f64::INFINITY, f64::NEG_INFINITY, 2.0, 4.0] {
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             bytes_set_from(&view, &source, offset);
-        })).expect_err("invalid offset must throw");
+        }))
+        .expect_err("invalid offset must throw");
         let caught = caught_from_panic(panic);
         assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
         assert_eq!(bytes_values(&view), [0, 0, 0]);

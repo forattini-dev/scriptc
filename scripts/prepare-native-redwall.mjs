@@ -10,16 +10,17 @@ const consumer = resolve(values.consumer);
 const output = resolve(values.out);
 const renderer = join(consumer, "src/redwall-render.ts");
 const themes = join(consumer, "src/themes.ts");
+const shims = join(consumer, "src/shims.d.ts");
 const art = join(consumer, "assets/wallpapers/obsidian.png");
 const font = join(consumer, "assets/fonts/redwall-firacode-subset.ttf");
-for (const file of [renderer, themes, art, font, join(consumer, "tsconfig.json"), join(consumer, "node_modules")]) {
+for (const file of [renderer, themes, shims, art, font, join(consumer, "tsconfig.json"), join(consumer, "node_modules")]) {
   if (!existsSync(file)) throw new Error(`missing consumer input: ${file}`);
 }
 mkdirSync(output, { recursive: true });
 const specifier = (file) => JSON.stringify("./" + relative(output, file).replaceAll("\\", "/"));
 const save = (name, source) => writeFileSync(join(output, name), source);
-save("tsconfig.json", JSON.stringify({ extends: join(consumer, "tsconfig.json"), include: ["main.ts"] }, null, 2) + "\n");
-if (!existsSync(join(output, "node_modules"))) symlinkSync(join(consumer, "node_modules"), join(output, "node_modules"), "dir");
+save("tsconfig.json", JSON.stringify({ extends: join(consumer, "tsconfig.json"), include: ["main.ts", shims] }, null, 2) + "\n");
+if (!existsSync(join(output, "node_modules"))) symlinkSync(join(consumer, "node_modules"), join(output, "node_modules"), process.platform === "win32" ? "junction" : "dir");
 save("main.ts", `import { readFileSync, writeFileSync } from "node:fs";
 import { renderRedwall, type RedwallState, type RedwallYear } from ${specifier(renderer)};
 import type { Theme } from ${specifier(themes)};

@@ -47,12 +47,8 @@ pub fn date_value_inspect(value: &JsDate) -> JsString {
         crate::date_to_iso(time)
     }
 }
-/// The existing Date surface intentionally excludes locale/string formatters.
-/// Keep this boundary explicit when an unknown now contains a Date object.
-pub fn date_value_to_string(_: &JsDate) -> JsString {
-    crate::throw_type_error(
-        "native Date string coercion is not supported yet; use toISOString()".to_owned(),
-    )
+pub fn date_value_to_string(value: &JsDate) -> JsString {
+    crate::date_to_local_string(date_value_time(value))
 }
 impl JsonValue for JsDate {
     fn write_json(&self, writer: &mut JsonWriter) {
@@ -85,5 +81,6 @@ mod tests {
         assert_ne!(date, date_value_copy(&date));
         assert_eq!(crate::json_stringify(&date).as_ref(), "null");
         assert_eq!(date_value_inspect(&date).as_ref(), "Invalid Date");
+        assert_eq!(date_value_to_string(&date).as_ref(), "Invalid Date");
     }
 }

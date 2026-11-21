@@ -1,5 +1,6 @@
 /* Focused LLVM expression emission extracted from emitter.ts. */
 import { InternalCompilerError } from "../../errors.js";
+import { LlvmUnsupportedError } from "./unsupported.js";
 import { isStableReceiverOperand, undefinedArmTag } from "../../ir/analysis.js";
 import { IrExpr, IrType, isRefCounted, MAY_THROW_STR_METHODS, typeEquals, typeKey } from "../../ir/ir.js";
 import { mangleResolveThunk } from "../mangle.js";
@@ -413,6 +414,8 @@ export function emitArrIntrinsic(host: LlvmEmitterContext, e: IrExpr & { kind: "
         B.line(`${t} = call ptr @scr_arr_slice(ptr ${r.name}, double ${start}, double ${end})`);
         return host.own({ name: t, type: e.type });
       }
+      case "fill":
+        throw new LlvmUnsupportedError("array.fill");
       case "toReversed": {
         host.declare(`declare ptr @scr_arr_to_reversed(ptr)`);
         const t = B.tmp();
@@ -763,6 +766,13 @@ export function emitMapLikeIntrinsic(host: LlvmEmitterContext,
       case "toArray": {
         if (receiverType.kind !== "set") throw new InternalCompilerError("unreachable");
         // Fresh +1 elem[] of the live entries in insertion order.
+        host.declare(`declare ptr @scr_set_to_arr_${kAcc}(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_set_to_arr_${kAcc}(ptr ${r.name})`);
+        return host.own({ name: t, type: e.type });
+      }
+      case "keysToArray": {
+        if (receiverType.kind !== "map") throw new InternalCompilerError("unreachable");
         host.declare(`declare ptr @scr_set_to_arr_${kAcc}(ptr)`);
         const t = B.tmp();
         B.line(`${t} = call ptr @scr_set_to_arr_${kAcc}(ptr ${r.name})`);

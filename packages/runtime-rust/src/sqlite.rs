@@ -16,6 +16,16 @@ use rusqlite::types::Value as SqliteNative;
 thread_local! {
     static SQLITE_CONNECTIONS: RefCell<HashMap<u32, rusqlite::Connection>> = RefCell::new(HashMap::new());
     static SQLITE_NEXT_ID: Cell<u32> = const { Cell::new(1) };
+    static SQLITE_STATEMENTS: RefCell<HashMap<u32, SqliteStatementHandle>> = RefCell::new(HashMap::new());
+    static SQLITE_NEXT_STATEMENT_ID: Cell<u32> = const { Cell::new(1) };
+}
+
+#[derive(Clone)]
+struct SqliteStatementHandle {
+    database: f64,
+    sql: String,
+    safe_integers: bool,
+    return_arrays: bool,
 }
 
 /// One SQLite value, engine-neutral: the island host converts to and
@@ -186,6 +196,11 @@ pub fn sqlite_close(id: f64) {
     {
         sqlite_throw(error);
     }
+    SQLITE_STATEMENTS.with(|statements| {
+        statements
+            .borrow_mut()
+            .retain(|_, statement| statement.database != id);
+    });
 }
 
 /// `db.exec(sql)` — every statement in the text, no bindings.
@@ -308,12 +323,87 @@ pub fn sqlite_params_count(id: f64, sql: &str) -> f64 {
     })
 }
 
+/// Owning numeric ABI used by the static `node:sqlite` frontend. The handle
+/// retains only the connection id and SQL text; rusqlite's cache owns the
+/// native prepared statement between calls, so no borrowed connection escapes.
+pub fn sqlite_statement_prepare(database: f64, sql: &str) -> f64 {
+    let _ = sqlite_columns(database, sql);
+    let id = SQLITE_NEXT_STATEMENT_ID.with(|next| {
+        let id = next.get();
+        next.set(id + 1);
+        id
+    });
+    SQLITE_STATEMENTS.with(|statements| {
+        statements.borrow_mut().insert(
+            id,
+            SqliteStatementHandle {
+                database,
+                sql: sql.to_owned(),
+                safe_integers: false,
+                return_arrays: false,
+            },
+        );
+    });
+    f64::from(id)
+}
+
+fn sqlite_statement_handle(id: f64) -> SqliteStatementHandle {
+    let key = if id.is_finite() && id >= 0.0 { id as u32 } else { 0 };
+    SQLITE_STATEMENTS.with(|statements| {
+        statements.borrow().get(&key).cloned().unwrap_or_else(|| {
+            sqlite_throw_named("SQLITE_MISUSE", "Cannot use an invalid statement".to_owned())
+        })
+    })
+}
+
+pub fn sqlite_statement_set_safe_integers(id: f64, enabled: bool) {
+    let key = id as u32;
+    SQLITE_STATEMENTS.with(|statements| {
+        let mut statements = statements.borrow_mut();
+        let statement = statements.get_mut(&key).unwrap_or_else(|| {
+            sqlite_throw_named("SQLITE_MISUSE", "Cannot use an invalid statement".to_owned())
+        });
+        statement.safe_integers = enabled;
+    });
+}
+
+pub fn sqlite_statement_set_return_arrays(id: f64, enabled: bool) {
+    let key = id as u32;
+    SQLITE_STATEMENTS.with(|statements| {
+        let mut statements = statements.borrow_mut();
+        let statement = statements.get_mut(&key).unwrap_or_else(|| {
+            sqlite_throw_named("SQLITE_MISUSE", "Cannot use an invalid statement".to_owned())
+        });
+        statement.return_arrays = enabled;
+    });
+}
+
+pub fn sqlite_statement_run(id: f64, params: &SqliteParams) -> (f64, i64) {
+    let statement = sqlite_statement_handle(id);
+    sqlite_run(statement.database, &statement.sql, params)
+}
+
+pub fn sqlite_statement_rows(
+    id: f64,
+    params: &SqliteParams,
+    limit: usize,
+) -> (Vec<String>, Vec<Vec<SqliteValue>>, bool, bool) {
+    let statement = sqlite_statement_handle(id);
+    let (columns, rows) = sqlite_rows(statement.database, &statement.sql, params, limit);
+    (columns, rows, statement.safe_integers, statement.return_arrays)
+}
+
 /// `db.serialize()` — the main database as an SQLite file image.
 pub fn sqlite_serialize(id: f64) -> Vec<u8> {
     sqlite_with_connection(id, |connection| match connection.serialize(rusqlite::MAIN_DB) {
         Ok(data) => data.to_vec(),
         Err(error) => sqlite_throw(error),
     })
+}
+
+/// Serialize a bare static-frontend connection handle into represented bytes.
+pub fn sqlite_id_serialize(id: f64) -> JsBytes<u8> {
+    bytes_from_vec(sqlite_serialize(id))
 }
 
 // ── Static bun:sqlite handles ────────────────────────────────────────────

@@ -146,6 +146,20 @@ impl Lowerer<'_> {
                 loc: helper.loc(),
             });
         }
+        body.push(Stmt::If {
+            cond: test("date"),
+            then: vec![Stmt::Return {
+                value: Some(Expr::LibCall {
+                    r#fn: "date.valueTime".into(),
+                    args: vec![helper.read(&value)],
+                    r#type: Type::F64,
+                    loc: helper.loc(),
+                }),
+                loc: helper.loc(),
+            }],
+            else_: None,
+            loc: helper.loc(),
+        });
         for (name, number) in [("null", 0.0), ("undefined", f64::NAN)] {
             body.push(Stmt::If {
                 cond: test(name),

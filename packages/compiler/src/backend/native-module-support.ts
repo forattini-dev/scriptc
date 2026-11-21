@@ -29,6 +29,23 @@ export function nativeModuleBackendDiagnostics(
   if (callableRecords.length > 0) return callableRecords;
   const records = new Map(mod.records?.map((shape) => [shape.id, shape]));
   const unions = new Map(mod.unions?.map((union) => [union.id, union]));
+  const containsPromise = (type: IrType | undefined, boxed = false, seen = new Set<string>()): boolean => {
+    if (!type) return false;
+    if (type.kind === "promise") return true;
+    if (type.kind === "func") return type.params.some(param => containsPromise(param, false, seen)) ||
+      !boxed && containsPromise(type.ret, false, seen);
+    if (type.kind === "array") return containsPromise(type.elem, boxed, seen);
+    if (type.kind === "record" || type.kind === "union") {
+      const key = `${type.kind}:${type.kind === "record" ? type.shapeId : type.unionId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return type.kind === "record"
+        ? (records.get(type.shapeId)?.fields.some(field => containsPromise(field.type, boxed, seen)) ?? false) ||
+          containsPromise(records.get(type.shapeId)?.indexValue, boxed, seen)
+        : unions.get(type.unionId)?.arms.some(arm => containsPromise(arm, boxed, seen)) ?? false;
+    }
+    return false;
+  };
   const containsDynamicBrand = (type: IrType | undefined, seen = new Set<string>()): boolean => {
     if (type === undefined) return false;
     if (type.kind === "regex" || type.kind === "url") return true;
@@ -60,7 +77,14 @@ export function nativeModuleBackendDiagnostics(
       for (const child of value) visit(child);
       return;
     }
-    const node = value as { kind?: unknown; fn?: unknown; fnLength?: unknown; test?: unknown; value?: { type?: IrType }; loc?: SrcLoc };
+    const node = value as { kind?: unknown; fn?: unknown; fnLength?: unknown; test?: unknown; type?: IrType; value?: { type?: IrType }; loc?: SrcLoc };
+    const boxed = node.kind === "dynFrom" ? node.value?.type : undefined;
+    if (node.kind === "dynCheck" && containsPromise(node.type) ||
+        boxed && ["array", "record", "union", "func"].includes(boxed.kind) && containsPromise(boxed, true)) {
+      feature = "checked-native Promise payload views";
+      loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
+      return;
+    }
     if (node.kind === "dynTest" && (node.test === "finite" || node.test === "nan" || node.test === "safeInteger")) {
       feature = "checked-dynamic Number predicates";
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };

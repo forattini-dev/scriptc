@@ -23,6 +23,12 @@ impl Module {
 fn statements(body: &[Stmt], visitor: &mut impl FnMut(&Expr)) {
     for statement in body {
         match statement {
+            Stmt::GeneratorForOf {
+                generator, body, ..
+            } => {
+                expression(generator, visitor);
+                statements(body, visitor);
+            }
             Stmt::Switch { disc, cases, .. } => {
                 expression(disc, visitor);
                 for case in cases {
@@ -98,10 +104,15 @@ fn statements(body: &[Stmt], visitor: &mut impl FnMut(&Expr)) {
         }
     }
 }
-fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
+pub(super) fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
     visitor(value);
     match value {
-        Expr::CaughtToDyn { value, .. }
+        Expr::Yield { value, .. }
+        | Expr::YieldStar {
+            generator: value, ..
+        }
+        | Expr::Await { value, .. }
+        | Expr::CaughtToDyn { value, .. }
         | Expr::CaughtNarrow { value, .. }
         | Expr::CaughtTest { value, .. }
         | Expr::DynFrom { value, .. }
@@ -113,12 +124,28 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
         | Expr::InstanceOf { value, .. }
         | Expr::UnionWrap { value, .. }
         | Expr::UnionNarrow { value, .. }
+        | Expr::UnionProject { value, .. }
         | Expr::UnionIsTag { value, .. }
         | Expr::FieldGet { obj: value, .. }
         | Expr::RecordGet { obj: value, .. }
         | Expr::Unary { operand: value, .. }
         | Expr::ToString { operand: value, .. } => expression(value, visitor),
+        Expr::GeneratorNext {
+            generator, value, ..
+        } => {
+            expression(generator, visitor);
+            expression(value, visitor);
+        }
+        Expr::GeneratorReturn {
+            generator, value, ..
+        } => {
+            expression(generator, visitor);
+            if let Some(value) = value {
+                expression(value, visitor);
+            }
+        }
         Expr::DynScalarEq { left, right, .. }
+        | Expr::DynLooseEq { left, right, .. }
         | Expr::Logical { left, right, .. }
         | Expr::StrEq { left, right, .. }
         | Expr::StrConcat { left, right, .. }
@@ -231,6 +258,16 @@ fn expression(value: &Expr, visitor: &mut impl FnMut(&Expr)) {
             expression(then, visitor);
             expression(else_, visitor);
         }
+        Expr::ClassCreate {
+            parent, captures, ..
+        } => {
+            if let Some(parent) = parent {
+                expression(parent, visitor);
+            }
+            for capture in captures {
+                expression(capture, visitor);
+            }
+        }
         Expr::ClassRef { .. }
         | Expr::RegexLit { .. }
         | Expr::Closure { .. }
@@ -247,7 +284,9 @@ impl Expr {
     pub fn call_receiver(&self) -> Option<&Expr> {
         match self {
             Self::DynCheck { value, .. }
+            | Self::DynFrom { value, .. }
             | Self::UnionNarrow { value, .. }
+            | Self::UnionProject { value, .. }
             | Self::Upcast { value, .. }
             | Self::Downcast { value, .. } => value.call_receiver(),
             Self::RecordGet { obj, field, .. } if field == "\0scriptc.call" => obj.call_receiver(),

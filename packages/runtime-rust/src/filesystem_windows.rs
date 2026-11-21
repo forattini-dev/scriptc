@@ -54,3 +54,24 @@ pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
     #[cfg(windows)]
     fs_windows_creation_permissions(&file, path, fs_creation_mode(mode));
 }
+
+#[cfg(not(unix))]
+pub fn fs_write_file_bytes_mode(path: &JsString, data: &JsBytes<u8>, mode: f64) {
+    use std::io::Write;
+    let mode = fs_creation_mode(mode);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    fs_set_creation_mode(&mut options, mode);
+    let mut file = options
+        .open(path.to_utf8_lossy())
+        .unwrap_or_else(|error| throw_fs_error("open", path, error));
+    let result = data.with(|data| {
+        let storage = data.storage.borrow();
+        file.write_all(&storage[data.offset..data.offset + data.length])
+    });
+    if let Err(error) = result {
+        throw_fs_error("write", path, error);
+    }
+    #[cfg(windows)]
+    fs_windows_creation_permissions(&file, path, mode);
+}

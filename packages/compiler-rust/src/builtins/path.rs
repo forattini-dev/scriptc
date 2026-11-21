@@ -1,4 +1,65 @@
 use super::*;
+
+pub(super) fn internal() -> Vec<Builtin> {
+    vec![
+        call!(
+            "path.selectedJoin",
+            [Bool, strings()],
+            String,
+            "path_selected_join"
+        ),
+        call!(
+            "path.selectedIsAbsolute",
+            [Bool, String],
+            Bool,
+            "path_selected_is_absolute"
+        ),
+        call!(
+            "path.selectedResolve",
+            [Bool, strings()],
+            String,
+            "path_selected_resolve"
+        ),
+        call!(
+            "path.selectedNormalize",
+            [Bool, String],
+            String,
+            "path_selected_normalize"
+        ),
+        call!(
+            "path.selectedDirname",
+            [Bool, String],
+            String,
+            "path_selected_dirname"
+        ),
+        call!(
+            "path.selectedBasename",
+            [Bool, String, String],
+            String,
+            "path_selected_basename"
+        ),
+        call!(
+            "path.selectedExtname",
+            [Bool, String],
+            String,
+            "path_selected_extname"
+        ),
+        call!(
+            "path.selectedRelative",
+            [Bool, String, String],
+            String,
+            "path_selected_relative"
+        ),
+        call!("path.selectedSep", [Bool], String, "path_selected_sep"),
+        call!(
+            "path.selectedDelimiter",
+            [Bool],
+            String,
+            "path_selected_delimiter"
+        ),
+    ]
+}
+
 pub(super) fn apis() -> Vec<Api> {
     let operations = vec![
         call!("path.join", [strings()], String, "path_join"),
@@ -43,7 +104,7 @@ pub(super) fn apis() -> Vec<Api> {
             "path_win32_relative"
         ),
     ];
-    operations.into_iter().map(|op| {
+    let mut entries = operations.into_iter().map(|op| {
         let (module, suffix) = if let Some(name) = op.ir.strip_prefix("path.win32") {
             ("path/win32", name)
         } else { ("path", op.ir.strip_prefix("path.").unwrap()) };
@@ -59,5 +120,45 @@ pub(super) fn apis() -> Vec<Api> {
         Api::native(module, name, lowering, vec![op],
             "Primitive string paths; variadic join/resolve and omitted basename suffix; non-string overloads refused",
             &["tests/corpus/rust-native-platform/paths.ts"])
-    }).collect()
+    }).collect::<Vec<_>>();
+    for (module, operation) in [
+        ("path", call!("path.posixSep", [], String, "path_posix_sep")),
+        (
+            "path/win32",
+            call!("path.win32Sep", [], String, "path_win32_sep"),
+        ),
+    ] {
+        let mut entry = Api::native(
+            module,
+            "sep",
+            Lowering::Property,
+            vec![operation],
+            "Import- or namespace-proven immutable path separator, readable in nested compiled closures",
+            &["tests/corpus/rust-native-platform/glob.ts"],
+        );
+        entry.access = Access::Property;
+        entries.push(entry);
+    }
+    for (module, operation) in [
+        (
+            "path",
+            call!("path.posixDelimiter", [], String, "path_posix_delimiter"),
+        ),
+        (
+            "path/win32",
+            call!("path.win32Delimiter", [], String, "path_win32_delimiter"),
+        ),
+    ] {
+        let mut entry = Api::native(
+            module,
+            "delimiter",
+            Lowering::Property,
+            vec![operation],
+            "Import- or namespace-proven immutable PATH-list delimiter, readable in nested compiled closures",
+            &["tests/corpus/5254-path-delimiter-capture.ts"],
+        );
+        entry.access = Access::Property;
+        entries.push(entry);
+    }
+    entries
 }

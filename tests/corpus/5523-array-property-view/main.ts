@@ -1,0 +1,11 @@
+const source: string[] = ["entry"];
+const view: unknown[] = source;
+(view as any).tag = "shared";
+(view as any)["01"] = "leading";
+console.log("source", (source as any).tag, Object.hasOwn(source, "tag"));
+console.log("view", (view as any).tag, Object.keys(view).join("|"));
+console.log("reflect", Reflect.ownKeys(source).join("|"));
+const descriptor = Object.getOwnPropertyDescriptor(source, "tag");
+console.log("descriptor", descriptor?.value, descriptor?.enumerable);
+(view as any).tag = "changed";
+console.log("changed", (source as any).tag);

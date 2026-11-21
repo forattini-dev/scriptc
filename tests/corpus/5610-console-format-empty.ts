@@ -1,0 +1,13 @@
+const empty: string = "";
+const substitution: string = "%s";
+const style: string = "%c";
+const percent: string = "%%";
+console.log(empty, empty);
+console.log(empty, "a");
+console.log(substitution, empty, "a");
+console.log(substitution, empty, empty);
+console.log(style, "color:red", "y");
+console.log(style, "color:red", empty);
+console.log(percent);
+console.log(percent, 2);
+console.error(empty, empty);

@@ -38,7 +38,7 @@ pub fn inspect(input: &Path, work: &Path, project: Option<&Path>) -> Result<Repo
     } = crate::project::load(input, work, project)?;
     let _checked = source_frontend::core::enter_program(Some(checked));
     program::bind_all();
-    pipeline::check_program()?;
+    pipeline::check_program(false)?;
     let execution = crate::project::execution_view(options);
     let _execution = source_frontend::core::enter_program(Some(execution));
     program::bind_all();
@@ -57,7 +57,7 @@ pub fn inspect(input: &Path, work: &Path, project: Option<&Path>) -> Result<Repo
         .find(|f| source_file_info(*f).file_name == entry)
         .ok_or("SCN0002: inspection entry not loaded")?;
     program::with_type_checker_for_file(file, move |checker| {
-        let plan = modules::ModulePlan::link(checker, file);
+        let plan = modules::ModulePlan::link(checker, file, false);
         let mut report = Report {
             schema_version: 1,
             entry,

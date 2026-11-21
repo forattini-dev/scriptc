@@ -3,6 +3,55 @@ use super::*;
 use source_frontend::prelude::get_source_file_of_node;
 
 impl Lowerer<'_> {
+    /// Recover the owner of a direct standard Set keys/values iterator call.
+    pub(super) fn set_iterator_source(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        if node.kind() != SyntaxKind::CallExpression
+            || !node.question_dot_token().is_nil()
+            || node.arguments().into_iter().next().is_some()
+        {
+            return Ok(None);
+        }
+        let member = node.expression();
+        if member.kind() != SyntaxKind::PropertyAccessExpression
+            || !member.question_dot_token().is_nil()
+            || !matches!(member.name().text(), "keys" | "values")
+        {
+            return Ok(None);
+        }
+        let method = member.name().text();
+        let symbol = self.symbol(member.name());
+        if !self.primitive_symbol(symbol, method, Some("Set"))
+            && !self.primitive_symbol(symbol, method, Some("ReadonlySet"))
+        {
+            return Ok(None);
+        }
+        let receiver = self.expression(member.expression())?;
+        if !matches!(receiver.ty(), Type::Set { .. }) {
+            return Ok(None);
+        }
+        Ok(Some(receiver))
+    }
+
+    /// Materialize a built-in Set iterator only when its consumer immediately
+    /// exhausts it. A snapshot preserves insertion order without pretending
+    /// that general escaping Set iterators have an Array ABI.
+    pub(super) fn immediate_set_iteration(&mut self, node: Node) -> Result<Option<Expr>, String> {
+        let Some(receiver) = self.set_iterator_source(node)? else {
+            return Ok(None);
+        };
+        let Type::Set { elem } = receiver.ty() else {
+            unreachable!("validated Set iterator")
+        };
+        let array = Type::Array { elem };
+        Ok(Some(Expr::SetIntrinsic {
+            method: "toArray".into(),
+            receiver: Box::new(receiver),
+            args: vec![],
+            r#type: array,
+            loc: self.loc(node),
+        }))
+    }
+
     /// An immediately consumed built-in iterator has no observable lifetime.
     /// Keep this separate from general Set iterators, which must remain live
     /// across mutations and cannot be implemented by taking a snapshot.
@@ -135,10 +184,22 @@ impl Lowerer<'_> {
         if args.len() != 1 {
             return None;
         }
-        let elem = self.type_id(args[0])?;
+        // Set storage is owning even when the semantic element has no typed
+        // payload (`undefined`, `null`, or `never`). Route those values through
+        // NativeValue instead of rejecting a valid Set such as Zod's
+        // `new Set([undefined])`.
+        let elem = self.aggregate_slot_type(args[0])?;
         // Portable Sets keep heterogeneous union values in the owning tagged
         // slot. Membership consumes values; no unchecked element is projected.
         let elem = if matches!(elem, Type::Bigint | Type::Union { .. }) {
+            Type::Dyn
+        } else if !elem.set_element()
+            && matches!(elem, Type::Object { .. } | Type::Array { .. } | Type::Bytes { .. })
+            && self.dynamic_erasure_reason(&elem).is_none()
+        {
+            // Object identities (class instances, arrays, byte views) keep
+            // their owning handle in a NativeValue slot; SameValueZero
+            // membership compares those handles, as JavaScript does.
             Type::Dyn
         } else {
             elem
@@ -190,37 +251,38 @@ impl Lowerer<'_> {
         }
         let seed = if let Some(arg) = arguments.first() {
             let value = if arg.kind() == SyntaxKind::ArrayLiteralExpression {
-                if **elem == Type::Dyn {
-                    let value = self.dynamic_literal(*arg)?;
-                    Expr::DynCheck {
-                        value: Box::new(value),
-                        r#type: Type::Array { elem: elem.clone() },
-                        loc: self.loc(*arg),
-                    }
-                } else {
-                    self.expected_expression(*arg, Type::Array { elem: elem.clone() })?
-                }
+                // A type assertion in a literal is not a runtime conversion.
+                // Build its actual values before consuming the iterable.
+                self.dynamic_literal(*arg)?
             } else {
-                let value = self.expression(*arg)?;
-                if matches!(**elem, Type::Dyn | Type::Func { .. })
-                    && !matches!(value, Expr::UnitLit { .. })
-                {
-                    return Err(self.refuse(
-                        *arg,
-                        "dynamic/function Set seeds require a fixed array literal",
-                    ));
+                let mut value = self.expression(*arg)?;
+                if value.ty() == Type::String && **elem == Type::String {
+                    value = Expr::LibCall {
+                        r#fn: "string.iterArray".into(),
+                        args: vec![value],
+                        r#type: Type::Array {
+                            elem: Box::new(Type::String),
+                        },
+                        loc: self.loc(*arg),
+                    };
+                }
+                // Dynamic arrays already own cloneable `NativeValue` slots and
+                // the backend canonicalizes each one through `native_map_key`.
+                // They therefore have the same safe seed path as primitive
+                // arrays. Bare function slots still need the literal helper's
+                // explicit callable ownership ABI.
+                if matches!(**elem, Type::Func { .. }) && !matches!(value, Expr::UnitLit { .. }) {
+                    return Err(
+                        self.refuse(*arg, "function Set seeds require a fixed array literal")
+                    );
                 }
                 value
             };
             if matches!(value, Expr::UnitLit { .. }) {
                 None
-            } else if value.ty() == (Type::Array { elem: elem.clone() }) {
-                Some(Box::new(value))
             } else {
-                return Err(self.refuse(
-                    *arg,
-                    "Set seed requires a native array; general iterables are not ported",
-                ));
+                self.materialize_erased_symbol_methods(&value.ty())?;
+                Some(Box::new(self.coerce(value, Type::Dyn, *arg)?))
             }
         } else {
             None
@@ -297,74 +359,55 @@ impl Lowerer<'_> {
         let Type::Set { elem } = receiver.ty() else {
             return Err(self.refuse(node, "Set receiver may be undefined"));
         };
-        if matches!(method, "has" | "delete")
-            && arguments.len() == 1
-            && matches!(*elem, Type::String | Type::F64)
-        {
+        if matches!(method, "add" | "has" | "delete") && arguments.len() == 1 {
+            // Set keys are not coerced to a TypeScript element annotation.
+            // The owning store retains actual JavaScript values and compares
+            // them with SameValueZero, including values entering through any.
             let key = self.condition_value(primitives::primitive_source(arguments[0]))?;
-            if key.ty() == *elem {
+            self.materialize_erased_symbol_methods(&key.ty())?;
+            let key = self.coerce(key, Type::Dyn, arguments[0])?;
+            let intrinsic = match method {
+                "add" => "addValue",
+                "has" => "hasValue",
+                "delete" => "deleteValue",
+                _ => unreachable!(),
+            };
+            if method != "add" || node.parent().kind() == SyntaxKind::ExpressionStatement {
                 return Ok(Expr::SetIntrinsic {
-                    method: method.into(),
+                    method: intrinsic.into(),
                     receiver: Box::new(receiver),
                     args: vec![key],
-                    r#type: Type::Bool,
+                    r#type: if method == "add" {
+                        Type::Void
+                    } else {
+                        Type::Bool
+                    },
                     loc: self.loc(node),
                 });
             }
-            // A query never converts its key to the stored element type.
-            // Capture both arguments first, then guard the typed Set ABI.
-            let key = self.coerce(key, Type::Dyn, arguments[0])?;
             let mut helper = helpers::Helper::new(
-                &format!("set_query_{method}"),
+                "set_add_value",
                 vec![receiver.ty(), Type::Dyn],
-                Type::Bool,
+                receiver.ty(),
                 self.loc(node),
             );
             let set = helper.param(0);
-            let query = helper.param(1);
-            helper.function.body.push(Stmt::If {
-                cond: Expr::DynTest {
-                    value: Box::new(helper.read(&query)),
-                    test: if *elem == Type::String {
-                        "string"
-                    } else {
-                        "number"
-                    }
-                    .into(),
-                    negated: false,
-                    r#type: Type::Bool,
+            helper.function.body.push(Stmt::Expression {
+                expr: Expr::SetIntrinsic {
+                    method: intrinsic.into(),
+                    receiver: Box::new(helper.read(&set)),
+                    args: vec![helper.read(&helper.param(1))],
+                    r#type: Type::Void,
                     loc: helper.loc(),
                 },
-                then: vec![Stmt::Return {
-                    value: Some(Expr::SetIntrinsic {
-                        method: method.into(),
-                        receiver: Box::new(helper.read(&set)),
-                        args: vec![Expr::DynCheck {
-                            value: Box::new(helper.read(&query)),
-                            r#type: *elem,
-                            loc: helper.loc(),
-                        }],
-                        r#type: Type::Bool,
-                        loc: helper.loc(),
-                    }),
-                    loc: helper.loc(),
-                }],
-                else_: None,
                 loc: helper.loc(),
             });
-            helper.function.body.push(Stmt::Return {
-                value: Some(Expr::BoolLit {
-                    value: false,
-                    r#type: Type::Bool,
-                    loc: helper.loc(),
-                }),
-                loc: helper.loc(),
-            });
-            let callee = self.install_helper(helper.function);
+            let callee = self.install_helper(helper.finish(&set));
+            let result = receiver.ty();
             return Ok(Expr::Call {
                 callee,
                 args: vec![receiver, key],
-                r#type: Type::Bool,
+                r#type: result,
                 loc: self.loc(node),
             });
         }
@@ -384,6 +427,19 @@ impl Lowerer<'_> {
             .map(|(n, t)| self.expected_expression(n, t))
             .collect::<Result<Vec<_>, _>>()?;
         if method == "add" {
+            if node.parent().kind() == SyntaxKind::ExpressionStatement {
+                // The source return value is the receiver, but a standalone
+                // call cannot observe it. Keep receiver-before-argument
+                // evaluation in the intrinsic and avoid synthesizing a helper
+                // that clones the Set into and back out of a function call.
+                return Ok(Expr::SetIntrinsic {
+                    method: method.into(),
+                    receiver: Box::new(receiver),
+                    args,
+                    r#type: Type::Void,
+                    loc: self.loc(node),
+                });
+            }
             // Shared IR add returns void; the source call returns its receiver.
             // Keep both receiver and argument evaluation outside the helper.
             let mut helper = helpers::Helper::new(

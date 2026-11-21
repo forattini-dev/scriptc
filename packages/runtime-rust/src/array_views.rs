@@ -5,18 +5,25 @@ trait ArrayView<T: ArrayElement>: Trace {
     fn source(&self) -> &dyn std::any::Any;
     fn identity(&self) -> usize;
     fn raw(&self) -> Option<JsArray<T>>;
+    fn is_template_frozen(&self) -> bool;
     fn regex_metadata(&self) -> Option<(f64, JsString)>;
     fn regex_groups(&self) -> Option<Vec<(JsString, usize)>>;
     fn len(&self) -> f64;
     fn state(&self, index: f64) -> f64;
     fn next_present(&self, start: f64) -> f64;
     fn own_index_keys(&self) -> Vec<JsString>;
+    fn property_get(&self, key: &JsString) -> Option<T>;
+    fn property_has(&self, key: &JsString) -> bool;
+    fn property_keys(&self) -> Vec<JsString>;
+    fn property_set(&self, key: JsString, value: T);
     fn get(&self, index: f64) -> T;
     fn set(&self, index: f64, value: T);
     fn set_undefined(&self, index: f64);
     fn delete(&self, index: f64);
     fn push(&self, value: T) -> f64;
     fn pop(&self) -> T;
+    fn shift_optional(&self) -> Option<T>;
+    fn slice(&self, start: f64, end: f64) -> JsArray<T>;
     fn splice(&self, start: f64, count: f64, items: Vec<T>) -> Vec<T>;
     fn reverse(&self);
     fn fill(&self, value: T, start: f64, end: f64);
@@ -39,18 +46,27 @@ impl<S: ArrayElement, T: ArrayElement> ArrayView<T> for MappedArray<S, T> {
     fn raw(&self) -> Option<JsArray<T>> {
         array_raw(&self.source).map(|source| array_mapped(source, self.read, self.write))
     }
+    fn is_template_frozen(&self) -> bool { array_is_template_frozen(&self.source) }
     fn regex_metadata(&self) -> Option<(f64, JsString)> { array_regex_metadata(&self.source) }
     fn regex_groups(&self) -> Option<Vec<(JsString, usize)>> { array_regex_groups(&self.source) }
     fn len(&self) -> f64 { array_len(&self.source) }
     fn state(&self, index: f64) -> f64 { array_state(&self.source, index) }
     fn next_present(&self, start: f64) -> f64 { array_next_present(&self.source, start) }
     fn own_index_keys(&self) -> Vec<JsString> { array_own_index_keys(&self.source) }
+    fn property_get(&self, key: &JsString) -> Option<T> { array_property_get(&self.source, key).map(self.read) }
+    fn property_has(&self, key: &JsString) -> bool { array_property_has(&self.source, key) }
+    fn property_keys(&self) -> Vec<JsString> { array_property_keys(&self.source) }
+    fn property_set(&self, key: JsString, value: T) { array_property_set(&self.source, key, (self.write)(value)); }
     fn get(&self, index: f64) -> T { (self.read)(array_get(&self.source, index)) }
     fn set(&self, index: f64, value: T) { array_set(&self.source, index, (self.write)(value)); }
     fn set_undefined(&self, index: f64) { array_set_undefined(&self.source, index); }
     fn delete(&self, index: f64) { array_delete(&self.source, index); }
     fn push(&self, value: T) -> f64 { array_push(&self.source, (self.write)(value)) }
     fn pop(&self) -> T { (self.read)(array_pop(&self.source)) }
+    fn shift_optional(&self) -> Option<T> { array_shift_optional(&self.source).map(self.read) }
+    fn slice(&self, start: f64, end: f64) -> JsArray<T> {
+        array_mapped(array_slice(&self.source, start, end), self.read, self.write)
+    }
     fn splice(&self, start: f64, count: f64, items: Vec<T>) -> Vec<T> {
         let items = items.into_iter().map(self.write).collect();
         let removed = array_splice_with_items(&self.source, start, count, items);

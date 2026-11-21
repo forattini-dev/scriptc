@@ -17,12 +17,8 @@ impl Lowerer<'_> {
         }
         if property.parent().kind() != SyntaxKind::ObjectLiteralExpression
             || !property.asterisk_token().is_nil()
-            || !property.type_parameters().is_empty()
         {
-            return Err(self.refuse(
-                property,
-                "generic and generator object methods are not ported",
-            ));
+            return Err(self.refuse(property, "generator object methods are not ported"));
         }
         fn uses_super(node: Node, root: bool) -> bool {
             if node.kind() == SyntaxKind::SuperKeyword {
